@@ -1,5 +1,49 @@
 #include "action_environment_scene.h"
 #include <string.h>
+#include <math.h>
+
+static bool CanopySolid(const ActionEnvironmentScene *s,float x,float y) {
+  uint8_t tile;
+  if(!s||x<0||y<0||!ActionBgMapView_LookupMetatile(&s->maps[0],(int)x,(int)y,&tile))return false;
+  const unsigned quadrant=(((unsigned)y&8)>>2)|(((unsigned)x&8)>>3);
+  return (s->collision[tile]&(1u<<quadrant))!=0;
+}
+static float CanopyHit(const ActionEnvironmentScene *s,float x,float y,float lean,float length) {
+  float t=0;
+  /* Traverse 8px collision cells. No whole-room bitmap or per-pixel raymarch,
+   * and a source above/outside the native map retains its authored position. */
+  while(t<length) {
+    const float px=x+lean*t,py=y+t;
+    if(CanopySolid(s,px,py))return t;
+    const float dy=(floorf(py/8)+1)*8-py;
+    float step=fmaxf(.01f,dy);
+    if(fabsf(lean)>.0001f) {
+      const float edge=(lean>0?floorf(px/8)+1:ceilf(px/8)-1)*8;
+      step=fminf(step,fmaxf(.01f,(edge-px)/lean));
+    }
+    t+=step+.001f;
+  }
+  return length;
+}
+void ActionEnvironmentScene_CaptureCanopy(const ActionEnvironmentScene *s,
+    const ActionEffectInstance *e,ActionEffectFloorField *out) {
+  if(!out)return;*out=(ActionEffectFloorField){0};
+  if(!e||e->geometry.kind!=kActionEffectGeometry_Rect||!isfinite(e->field_style.angle)||
+      fabsf(e->field_style.angle)>70)return;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float width=r->x1-r->x0,length=r->y1-r->y0;
+  if(!isfinite(width)||!isfinite(length)||!isfinite(e->world_x)||!isfinite(e->world_y)||
+      width<=0||width>16384||length<=0||length>16384)return;
+  const unsigned columns=(unsigned)fminf(kActionCanopyMaxSpans,ceilf(width/16));
+  const float top=e->world_y+r->y0,lean=tanf(e->field_style.angle*.01745329252f);
+  for(unsigned i=0;i<columns;++i) {
+    const float x0=e->world_x+r->x0+width*i/columns,x1=e->world_x+r->x0+width*(i+1)/columns;
+    float distance=length;
+    if(e->field_style.shadows&&s)for(unsigned j=0;j<3;++j)
+      distance=fminf(distance,CanopyHit(s,x0+(x1-x0)*(j==0?.02f:j==1?.5f:.98f),top,lean,length));
+    out->spans[out->count++]=(ActionEffectFloorSpan){x0,x1,top+distance,distance<length?1:0};
+  }
+}
 
 static unsigned Reverse(unsigned b) {
   b = ((b & 0x55) << 1) | ((b >> 1) & 0x55);

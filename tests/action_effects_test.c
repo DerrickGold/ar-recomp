@@ -3900,6 +3900,39 @@ static void TestGenericActorFacts(void) {
   const uint32_t replacement=frame.actors[1].generation;ram[0x19]=2;ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);CHECK(frame.actors[1].generation!=replacement);
 }
 
+static void TestActorMistWakes(void) {
+  ActionEffectActor old={.generation=1,.visible=1,.body_radius=8,.x=100,.y=120,.feet_y=144};
+  ActionEffectActor actor=old;
+  ActionEffectActor_UpdateWake(&actor,NULL,1);CHECK(actor.wake.strength==0);
+  actor.x+=3;ActionEffectActor_UpdateWake(&actor,&old,1);
+  CHECK(actor.wake.strength==1&&actor.wake.x==103&&actor.wake.y==144&&actor.wake.dx==3);
+  old=actor;ActionEffectActor_UpdateWake(&actor,&old,0);CHECK(!memcmp(&actor.wake,&old.wake,sizeof(actor.wake)));
+  for(unsigned i=0;i<89;++i){old=actor;ActionEffectActor_UpdateWake(&actor,&old,1);}
+  CHECK(actor.wake.strength==1&&actor.wake.age==89&&actor.wake.x==103);
+  old=actor;ActionEffectActor_UpdateWake(&actor,&old,1);CHECK(actor.wake.strength==0);
+  old=actor;actor.x+=128;ActionEffectActor_UpdateWake(&actor,&old,1);CHECK(actor.wake.strength==0);
+  old=actor;actor.x+=2;actor.generation++;ActionEffectActor_UpdateWake(&actor,&old,1);CHECK(actor.wake.strength==0);
+  old=actor;actor.x+=2;actor.body_radius=0;ActionEffectActor_UpdateWake(&actor,&old,1);CHECK(actor.wake.strength==0);
+  /* Exercise native body qualification, including projectile exclusion. */
+  static uint8_t ram[kActRaiserWramSize];static ActionEffectObserver observer;static ActionSceneEffectFrame frame;
+  memset(ram,0,sizeof(ram));ActionEffectObserver_Reset(&observer);ram[0x18]=5;ram[0x19]=1;
+  const unsigned body=0x12e0,shot=0x1320;
+  for(unsigned at=body;at<=shot;at+=0x40) {
+    Write16(ram,at+2,120);Write16(ram,at+4,96);Write16(ram,at+0x16,0x5000);ram[at+0x18]=0x7e;
+    Write16(ram,at+0x20,0x5220);Write16(ram,at+0x32,0xc123);
+    Write16(ram,at+0x0a,8);Write16(ram,at+0x0e,8);Write16(ram,at+0x0c,16);Write16(ram,at+0x10,16);
+  }
+  Write16(ram,body+0x2c,5);Write16(ram,shot+0x3a,body);
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  CHECK(frame.actor_count==2&&frame.actors[0].body_radius==8&&frame.actors[1].body_radius==0);
+  Write16(ram,body+2,123);Write16(ram,shot+2,123);
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  CHECK(frame.actors[0].wake.strength==1&&frame.actors[1].wake.strength==0);
+  Write16(ram,kActRaiserWram_Bg1CameraX,500);
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  CHECK(frame.actors[0].wake.x==123&&frame.actors[0].wake.age==1);
+}
+
 #include "action_effect_lifecycle_test.inc"
 
 int main(void) {
@@ -3909,6 +3942,7 @@ int main(void) {
   TestBloodpoolAct1BossFireballs();
   TestBloodpoolFireballDeathLifetime();
   TestGenericActorFacts();
+  TestActorMistWakes();
   TestBloodpoolEnvironmentCapture();
   TestCastleEnvironmentCapture();
   TestCastleGalleryAndWaterCapture();

@@ -2935,6 +2935,31 @@ assert.equal(gr('EffectEditor.mapEmitters(0).filter(e=>e.kind==="torch").length'
 assert.equal((gr('EffectEditor.text()').match(/^particles=12$/gm)||[]).length,2);
 console.log('Ground dust: visible path guides, tracing, resize/reset, copy/paste and free-cloud conversion passed');
 
+// Glow/dew presets are ordinary editor records, including copy and saved controls.
+const lifeUi=editor(fixture()),lr=lifeUi.run;
+lr(`SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
+ EffectEditor.loadDocument('[effects]\\nversion=1\\n');EffectEditor.placeEmitter('preset:wisps',160,128);
+ EffectEditor.selectEmitter(EffectEditor.mapEmitters(0)[0].id);`);
+assert.equal(lifeUi.elements.get('#emitterGlowStyle').value,'wisps');
+assert.equal(lifeUi.elements.get('#emitterTrail').disabled,false);
+assert.equal(lifeUi.elements.get('#emitterChorus').disabled,true);
+assert.doesNotMatch(lr('EffectEditor.text()'),/^pattern=/m);
+lr(`EffectEditor.copyEffects();EffectEditor.pasteEffects(320,128);`);
+assert.equal(lr('EffectEditor.mapEmitters(0).length'),2);
+assert.equal((lr('EffectEditor.text()').match(/^glow-style=wisps$/gm)||[]).length,2);
+lr(`EffectEditor.placeEmitter('preset:moss',192,200);EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(lifeUi.elements.get('#emitterGlowStyle').value,'moss');
+assert.equal(lifeUi.elements.get('#emitterTravelX').disabled,true);
+assert.equal(lifeUi.elements.get('#emitterTrail').disabled,true);
+lr(`EffectEditor.placeEmitter('preset:dew',224,144);EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(lifeUi.elements.get('#emitterActivity').disabled,false);
+assert.equal(lifeUi.elements.get('#emitterRipple').disabled,false);
+assert.equal(lifeUi.elements.get('#emitterLightResponse').disabled,false);
+assert.equal(lifeUi.elements.get('#emitterRipple').value,'0','placing dew never assumes there is water below');
+lr(`$('#emitterRipple').value='1';$('#emitterRipple').onchange({target:$('#emitterRipple')});`);
+assert.match(lr('EffectEditor.text()'),/^ripple=1$/m);
+console.log('Swamp life editor: glow styles, trails, moss movement lock, dew endpoints and copy/paste passed');
+
 const pathUi=editor(fixture()),pathRun=pathUi.run;
 pathRun(`SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
  EffectEditor.loadDocument('[effects]\\nversion=1\\n');EffectEditor.placeEmitter('particle-path',160,128);

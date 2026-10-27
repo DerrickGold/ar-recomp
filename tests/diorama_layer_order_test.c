@@ -16,6 +16,7 @@
 #include "diorama_layer_order.h"
 
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -2015,7 +2016,30 @@ static void TestDeathHeimIndependentScenes(void) {
   DioramaLayerOrder_ClearTable(&table);
 }
 
+static void TestSceneryGrade(void) {
+  DioramaRoomOverride room={.used=true,.map_group=5,.map_number=1};
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "scenery-grade = strength:0.48 saturation:1.25 shadows:34675e highlights:d9d38b",NULL));
+  CHECK(room.scenery_grade.set && room.scenery_grade.shadows==0x34675e);
+  const DioramaSceneryGrade before=room.scenery_grade;
+  CHECK(!DioramaLayerOrder_ParseLine(&room,
+      "scenery-grade = strength:nan saturation:1 shadows:ffffff highlights:ffffff",NULL));
+  CHECK(!memcmp(&before,&room.scenery_grade,sizeof(before)));
+  CHECK(!DioramaLayerOrder_ParseLine(&room,
+      "scenery-grade:jp = strength:1 saturation:1 shadows:ffffff highlights:ffffff",NULL));
+  char text[512];CHECK(DioramaLayerOrder_FormatRoom(&room,text,sizeof(text))<sizeof(text));
+  DioramaRoomOverride copy={.used=true,.map_group=5,.map_number=1};
+  for(char *line=strtok(text,"\n");line;line=strtok(NULL,"\n"))
+    if(*line!='[')CHECK(DioramaLayerOrder_ParseLine(&copy,line,NULL));
+  CHECK(copy.scenery_grade.shadows==before.shadows && copy.scenery_grade.highlights==before.highlights);
+  CHECK(fabsf(copy.scenery_grade.strength-before.strength)<.0001f);
+  CHECK(copy.scenery_grade.saturation==before.saturation);
+  CHECK(DioramaLayerOrder_RoomIsActive(&copy));
+  DioramaLayerOrder_ClearRoom(&room);DioramaLayerOrder_ClearRoom(&copy);
+}
+
 int main(void) {
+  TestSceneryGrade();
   TestDeathHeimIndependentScenes();
   TestBackgroundPolicyPersistence();
   TestBlankTilesAndFraming();

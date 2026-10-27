@@ -78,7 +78,7 @@ const EffectEditor=(()=>{
   const moteFields=[['emitterSizeMin','size-min','0.35'],['emitterSizeMax','size-max','0.75'],
     ['emitterTravelX','travel-x','0'],['emitterTravelY','travel-y',''],['emitterWander','wander','2'],
     ['emitterSpread','spread','1'],['emitterSeed','seed','']];
-  const particleNames=['particle-path','flame','motes','particle-area','water-surface','drips','waterfall-spray','cloud-bank','torch'];
+  const particleNames=['fireflies','particle-path','flame','motes','particle-area','water-surface','drips','waterfall-spray','cloud-bank','torch'];
   const lightDefaults=window.__ACTION_LIGHT_RESPONSE__;
   const lightNames=Object.keys(lightDefaults);
   // The distant castle sky is atmospheric scattering behind masonry. The
@@ -87,12 +87,41 @@ const EffectEditor=(()=>{
   const receiverNames=lightNames.filter(name=>name!=='castle-sky');
   const sourceDefault=(name,key,member=false)=>member?1:(lightDefaults[name]?.[key]??1);
   const dimNames=['exposure','cave-light','castle-light'];
-  const fieldNames=['particle-path','heat-haze','torch','halo','light-gradient','particle-area','light-fan','water-surface','drips','waterfall-spray','cloud-bank','wet-contour'];
-  const terrainNames=['ground-mist','wet-contour','exposure'];
+  const fieldNames=['fireflies','canopy-light','foliage-shadow','particle-path','heat-haze','torch','halo','light-gradient','particle-area','light-fan','water-surface','drips','waterfall-spray','cloud-bank','wet-contour'];
+  const terrainNames=['ground-mist','wet-contour','exposure','canopy-light'];
   const requiresTerrain=name=>name.startsWith('stage:')||terrainNames.includes(name)||name.endsWith('-field')&&name!=='moon-field';
-  const fieldFields=[['emitterPlacement','placement','foreground'],['emitterPattern','pattern','motes'],
-    ['emitterAngle','angle','0'],['emitterFan','fan','36'],['emitterStrands','strands','8'],
-    ['emitterSoftness','softness','0.35'],['emitterDrift','drift','0'],['emitterAmplitude','amplitude','2'],['emitterCarry','carry','0'],['emitterGust','gust','0'],['emitterTwinkle','twinkle','0'],['emitterActivity','activity','1'],['emitterShadows','shadows','0']];
+  const fieldFields=[['emitterGlowStyle','glow-style','insects'],['emitterChorus','chorus','0'],['emitterTrail','trail','0'],['emitterRipple','ripple','0'],['emitterPlacement','placement','foreground'],['emitterPattern','pattern','motes'],
+    ['emitterFoliageSeed','seed',''],['emitterRayThickness','thickness','1'],['emitterAngle','angle','0'],['emitterFan','fan','36'],['emitterStrands','strands','8'],
+    ['emitterSoftness','softness','0.35'],['emitterDrift','drift','0'],['emitterAmplitude','amplitude','2'],['emitterCarry','carry','0'],['emitterGust','gust','0'],['emitterTwinkle','twinkle','0'],['emitterActivity','activity','1'],['emitterShadows','shadows','0'],['emitterScatter','scatter','.12'],['emitterBounce','bounce','.4'],['emitterTextured','textured','0'],['emitterRolling','rolling','0'],['emitterWake','wake','0'],['emitterLightResponse','canopy-response','0']];
+  function supportsFieldControl(name,record,key) {
+    const area=name==='particle-area',cloud=name==='cloud-bank';
+    const freeTexturedCloud=cloud&&!record.points&&record.textured==='1';
+    switch(key) {
+      case 'glow-style': return name==='fireflies';
+      case 'chorus': return name==='fireflies'&&(record['glow-style']??'insects')==='insects';
+      case 'trail': return name==='fireflies'&&record['glow-style']==='wisps';
+      case 'ripple': return name==='drips';
+      case 'placement': return !['ground-mist','exposure','heat-haze'].includes(name);
+      case 'pattern': return area||name==='particle-path';
+      case 'seed': return ['foliage-shadow','canopy-light'].includes(name)||freeTexturedCloud;
+      case 'thickness': case 'fan': return name==='light-fan';
+      case 'angle': return ['light-fan','light-gradient','foliage-shadow','canopy-light'].includes(name);
+      case 'strands': return ['light-fan','cloud-bank','foliage-shadow'].includes(name);
+      case 'softness': return ['light-fan','cloud-bank','halo','light-gradient','foliage-shadow','canopy-light'].includes(name)&&!(cloud&&record.textured==='1');
+      case 'twinkle': return area||name==='particle-path'||cloud&&!!record.points;
+      case 'gust': return cloud||name==='particle-path';
+      case 'activity': return ['particle-path','drips'].includes(name);
+      case 'scatter': case 'bounce': return name==='canopy-light';
+      case 'canopy-response': return area||['particle-path','drips'].includes(name)||freeTexturedCloud;
+      case 'rolling': case 'wake': return freeTexturedCloud;
+      case 'textured': return (cloud||name==='foliage-shadow'||area&&record.pattern==='leaves')&&!record.points;
+      case 'shadows': return ['torch','light-fan','canopy-light'].includes(name)||name==='foliage-shadow'&&record.textured==='1';
+      case 'carry': return cloud&&!!record.points;
+      case 'drift': return ['water-surface','cloud-bank'].includes(name);
+      case 'amplitude': return ['water-surface','cloud-bank','heat-haze','foliage-shadow','canopy-light'].includes(name);
+      default: return true;
+    }
+  }
   const exposureFields=[['exposureBrightness','brightness'],...['left','top','right','bottom'].map(edge=>['exposureFade'+edge,'fade-'+edge])];
   const nativeFields=[['nativeOffsetX','offset-x',0],['nativeOffsetY','offset-y',0],
     ['nativeWidth','width-scale',1],['nativeLength','length-scale',1],['nativeAngle','angle',0]];
@@ -145,11 +174,11 @@ const EffectEditor=(()=>{
         key==='length-scale'&&!capability.length||key==='angle'&&!capability.angle;
     }
     $('#effectReset').textContent=source?.emitter?'Remove emitter':'Restore source defaults';
-    const name=source?.name,area=name==='particle-area',large=area||name==='exposure'||name==='light-gradient'||name==='heat-haze';
+    const name=source?.name,area=name==='particle-area',large=area||['exposure','light-gradient','heat-haze','cloud-bank','foliage-shadow','canopy-light'].includes(name);
     for(const key of ['x','y','width','height','particles','lifetime','mist-height'])
-      $('#emitter'+key).value=record[key]??({width:96,height:64,particles:['cloud-bank','torch'].includes(name)?0:24,lifetime:240,'mist-height':26}[key]??0);
+      $('#emitter'+key).value=record[key]??({width:['foliage-shadow','canopy-light'].includes(name)?512:96,height:name==='foliage-shadow'?384:name==='canopy-light'?256:64,particles:['cloud-bank','torch'].includes(name)?0:24,lifetime:name==='canopy-light'?1440:name==='foliage-shadow'?960:240,'mist-height':26}[key]??0);
     const attached=!!record['actor-target'];
-    $('#actorBindingControls').hidden=!source?.emitter||['ground-mist','exposure','wet-contour','water-surface','particle-area','heat-haze'].includes(name);
+    $('#actorBindingControls').hidden=!source?.emitter||['ground-mist','exposure','wet-contour','water-surface','particle-area','heat-haze','canopy-light'].includes(name);
     $('#actorBindingTarget').value=record['actor-target']??'';
     const family=$('#actorBindingFamily');family.replaceChildren();
     const custom=document.createElement('option');custom.value='';custom.textContent='Custom family ID';family.append(custom);
@@ -200,37 +229,42 @@ const EffectEditor=(()=>{
     $('#contourDraw').textContent=name==='cloud-bank'?'Trace ground path on map':name==='particle-path'?'Trace particle route on map':'Trace wet edge on map';
     $('#emitterparticles').disabled=!particleNames.includes(name)||(name==='cloud-bank'&&!record.points);
     $('#emitterparticles').min=['cloud-bank','torch'].includes(name)?0:1;
-    $('#emitterparticles').max=area?16:128;
+    $('#emitterparticles').max=area?16:name==='fireflies'?32:128;
     document.querySelector('label[for="emitterparticles"]').textContent=area?'Density / 256px cell':name==='torch'?'Motes in light pool':name==='cloud-bank'?'Lifted dust grains':'Particle count';
     for(const key of ['width','height']){$('#emitter'+key).max=large?16384:512;$('#emitter'+key).disabled=name==='torch';}
     $('#fieldControls').hidden=!fieldNames.includes(name);
     for(const [id,key,fallback] of fieldFields) {
-      const element=$('#'+id);element.value=record[key]??fallback;
-      element.disabled=key==='placement'?['ground-mist','exposure','heat-haze'].includes(name):key==='pattern'? !(area||name==='particle-path') : key==='angle'?!['light-fan','light-gradient'].includes(name):key==='fan'?name!=='light-fan':
-        key==='strands'?!['light-fan','cloud-bank'].includes(name):key==='softness'?!['light-fan','cloud-bank','halo','light-gradient'].includes(name):
-        key==='twinkle'?!(area||name==='particle-path'||name==='cloud-bank'&&record.points):
-        key==='gust'?!['cloud-bank','particle-path'].includes(name):key==='activity'?name!=='particle-path':key==='shadows'?name!=='torch':key==='carry'?name!=='cloud-bank'||!record.points:key==='drift'?!['water-surface','cloud-bank'].includes(name):key==='amplitude'?!['water-surface','cloud-bank','heat-haze'].includes(name):false;
+      const element=$('#'+id);element.value=record[key]??(key==='shadows'&&['light-fan','canopy-light'].includes(name)?'1':key==='placement'&&name==='canopy-light'?'playfield':key==='placement'&&name==='foliage-shadow'?'background':key==='strands'&&name==='foliage-shadow'?'4':key==='softness'&&name==='canopy-light'?'.65':key==='softness'&&name==='foliage-shadow'?'.7':fallback);
+      element.disabled=!supportsFieldControl(name,record,key);
+      if(['glow-style','chorus','trail','ripple'].includes(key))element.closest('.ctl').hidden=element.disabled;
     }
-    $('#emitterStrands').max=name==='cloud-bank'?24:32;
-    document.querySelector('label[for="emitterAmplitude"]').textContent=name==='cloud-bank'?'Vertical billow':name==='heat-haze'?'Heat displacement (pixels)':'Wave height';
-    $('#fieldHint').textContent=name==='heat-haze'?'BG2-only heat distortion. Width/height locate the heated air; amplitude sets displacement, lifetime the cycle. Supported by the shared diorama renderer, including skybox-only mode.':name==='particle-path'?'Ordered local X,Y points describe the particle route. Trace from source to destination; a smaller activity fraction leaves quiet gaps. Glints stay fixed on the route. Gust links sand to the room wind.':area?'One region covers the room. Density is particles per 256px world cell; only nearby cells are generated. Seeds stay fixed as you scroll.':
+    $('#emitterAngle').min=name==='canopy-light'?-70:-180;$('#emitterAngle').max=name==='canopy-light'?70:180;
+    document.querySelector('label[for="emitterFoliageSeed"]').textContent=name==='cloud-bank'?'Cloud pattern seed':'Canopy pattern seed';
+    $('#emitterStrands').max=name==='foliage-shadow'?8:['cloud-bank','canopy-light'].includes(name)?24:32;
+    document.querySelector('label[for="emitterStrands"]').textContent=name==='foliage-shadow'?'Vine clusters':name==='canopy-light'?'Light patches':'Rays / cloud lobes';
+    document.querySelector('label[for="emitterSoftness"]').textContent=name==='canopy-light'?'Light / shadow softness':name==='foliage-shadow'?'Leaf edge softness':'Soft backdrop';
+    document.querySelector('label[for="emitterAmplitude"]').textContent=['foliage-shadow','canopy-light'].includes(name)?'Canopy sway (pixels)':name==='cloud-bank'?'Vertical billow':name==='heat-haze'?'Heat displacement (pixels)':'Wave height';
+    document.querySelector('label[for="emitterShadows"]').textContent=['canopy-light','foliage-shadow'].includes(name)?'Solid terrain shadows':name==='light-fan'?'Scenery occlusion':'Moving torch shadows';
+    document.querySelector('label[for="emitterTextured"]').textContent=name==='foliage-shadow'?'Textured vine silhouettes':area?'Feathered leaf silhouettes':'Textured wisps';
+    $('#fieldHint').textContent=name==='fireflies'?'A bounded glow cluster. Insects wander with independent pulses; Chorus adds occasional staggered replies. Wisps drift with soft tails controlled by Trail. Moss makes fixed irregular patches and ignores movement controls. Particle count covers the whole region. Seed changes the layout; size sets the visible core or patch. Light receivers and illumination control nearby scenery/player/enemy glow separately. Position moss on roots or damp masonry, not in empty air.':name==='canopy-light'?'Broken canopy sunlight with straight transport. Width defines the top opening, height the vertical reach, and angle leans the light. Solid terrain shadows stop light at collision surfaces; surface spill adds a short warm return there. Air scattering controls visible haze independently of material illumination. Leaf gaps retain square world-space proportions as angle and height change. Softness blends field edges and terrain contacts; overlap the soft margins of neighbouring fields. Seed varies shadow clusters, orientation, size and sway phase; cycle and sway control their slow movement. Vary width, spacing and intensity between fields for sheltered areas and open glades. Receiver flags select scenery, player and enemies.':name==='foliage-shadow'?'Soft leafy silhouettes with hanging vines. Width/height cover the shadow area; clusters set density, intensity sets opacity, and softness feathers the leaves. Angle rotates the whole arrangement. Sway and cycle animate it around fixed roots. Seed changes the layout. Textured silhouettes use a shared atlas. With solid terrain shadows enabled on BG1, the stencil stops above collision surfaces. Start its area in open canopy and keep it out of enclosed rooms; decorative non-solid walls are not collision blockers. Background placement draws behind BG1, while playfield placement shows over the backdrop.':name==='heat-haze'?'BG2-only heat distortion. Width/height locate the heated air; amplitude sets displacement, lifetime the cycle. Supported by the shared diorama renderer, including skybox-only mode.':name==='particle-path'?'Ordered local X,Y points describe the particle route. Trace from source to destination; a smaller activity fraction leaves quiet gaps. Glints stay fixed on the route. Canopy response makes wet glints visible only in canopy light, respecting its terrain shadows. Gust links sand to the room wind.':area?'One region covers the room. Density is particles per 256px world cell; only nearby cells are generated. Seeds stay fixed as you scroll. Canopy response makes particles catch canopy light; use it for spores and glints.':
       name==='halo'?'Width and height define the outer ring. Softness widens its corona; the centre remains clear. End tint colors the outer edge.':
       name==='light-gradient'?'A room-sized color wash. 0° blends from top to bottom, 90° from left to right. Softness fades the outer edges. Choose BG2 for distant sky, or scenery/player/enemy light receivers.':
-      name==='light-fan'?'X/Y is the opening centre. Width spreads origins across the sill or arch; height is ray length. 0° points down. Rays are clipped, never bent at screen edges.':
+      name==='light-fan'?'X/Y is the opening centre. Width spreads origins across the sill or arch; height is ray length. 0° points down. Rays are clipped, never bent at screen edges. Scenery occlusion blocks light behind opaque BG1 pixels; turn it off when distant backdrop artwork is baked into that layer.':
       name==='water-surface'?'X/Y is the area centre; its top edge is the water surface. Ripples and glints share the wave clock. This adds surface geometry, not refraction.':
-      name==='drips'?'Drops fall from the top edge toward the bottom edge. Place this on a verified wet ceiling.':
+      name==='drips'?'Drops fall from the top edge toward the bottom edge. Place the top on a wet ceiling or vine tip. Reduce Active fraction for occasional dew. Water landing adds a tiny ripple at the bottom edge: enable only over exposed water, with no platform between source and landing. Canopy response lets drops catch sunlight. Drag the region corners to adjust source width and fall height.':
       name==='waterfall-spray'?'Spray rises from the bottom edge. Anchor this edge to the native waterfall splash.':
-      name==='cloud-bank'?'Trace a BG1 ground path. Carry is the downwind settling distance: 0 hugs slopes; larger values carry dust over crests. Drift sets wind direction/travel, billow sets lift, and lifetime sets the gust cycle. Optional grains lift from this path; size, wander, tint and seed vary them. Clearing points also clears carry and grains for a free cloud.':'';
+      name==='cloud-bank'?'For free clouds, enable Textured wisps. Rolling mist adds dense billows and thin curls; the main color tints crests and the end tint colors their shadowed body; billow, drift and cycle control their waves. Body wake stirs the fog near moving player/enemy feet and settles over 1.5 seconds. Canopy response catches the current canopy-light color and terrain shadows. These controls use BG1 placement. Drag the shared renderer stand-ins while animation plays to preview wakes. Trace a BG1 ground path. Carry is the downwind settling distance: 0 hugs slopes; larger values carry dust over crests. Drift sets wind direction/travel, billow sets lift, and lifetime sets the gust cycle. Optional grains lift from this path; size, wander, tint and seed vary them. Clearing points also clears carry and grains for a free cloud.':'';
     $('#emittermist-height').disabled=source?.name!=='ground-mist';
     $('#mistHint').hidden=!['ground-mist','free-mist'].includes(name);
     $('#moteControls').hidden=!particleNames.includes(name)||(name==='cloud-bank'&&!record.points);
-    $('#effectTintControls').hidden=(!particleNames.includes(name)&&!['halo','light-gradient'].includes(name))||(name==='cloud-bank'&&!record.points);
+    $('#effectTintControls').hidden=(!particleNames.includes(name)&&!['halo','light-gradient'].includes(name))||(name==='cloud-bank'&&!record.points&&!(Number(record.rolling)>0));
     for(const [id,key,fallback] of moteFields) {
       $('#'+id).value=record[key]??fallback;
-      $('#'+id).disabled=(['water-surface','drips','waterfall-spray'].includes(name)&&['travel-x','travel-y','wander','spread'].includes(key))||(['cloud-bank','particle-path'].includes(name)&&['travel-x','travel-y','spread'].includes(key));
+      $('#'+id).disabled=(name==='fireflies'&&record['glow-style']==='moss'&&['travel-x','travel-y','wander'].includes(key))||(['water-surface','drips','waterfall-spray'].includes(name)&&['travel-x','travel-y','wander','spread'].includes(key))||(['cloud-bank','particle-path'].includes(name)&&['travel-x','travel-y','spread'].includes(key));
     }
     $('#emitterAutoRise').disabled=!['flame','motes','particle-area','torch'].includes(name);
     $('#emitterColorEndEnabled').disabled=false;
+    document.querySelector('label[for="emitterColorEnd"]').textContent=name==='cloud-bank'&&Number(record.rolling)>0?'Shadowed body tint':'End tint';
     $('#emitterColorEndEnabled').checked=record['color-end']!==undefined;
     $('#emitterColorEnd').disabled=record['color-end']===undefined;
     $('#emitterColorEnd').value='#'+(record['color-end']??record.color??'ffffff');
@@ -334,10 +368,14 @@ const EffectEditor=(()=>{
     if(name==='heat-haze'&&bgIndex!==1){status('Place heat shimmer on the BG2 map. It only distorts background scenery.');return false;}
     const preset=name.startsWith('preset:')?name.slice(7):null;
     if(preset==='ground-dust'&&bgIndex!==0){status('Ground dust paths use BG1.');return false;}
-    if(preset)name=preset==='halo'?'halo':preset==='ground-dust'?'cloud-bank':'particle-area';
-    const presets={'ground-dust':{width:'320',height:'64',color:'e6c99a',intensity:'2.6',strands:'5',amplitude:'18',drift:'100',carry:'140',particles:'32','size-min':'.25','size-max':'.75',wander:'4',lifetime:'320',softness:'.9',placement:'foreground',points:'-160,24 -128,24 -96,24 -64,24 -32,24 0,24 32,24 64,24 96,24 128,24 160,24'},halo:{width:'160',height:'160',color:'efe4ff','color-end':'7256b8',intensity:'1.4',softness:'.55'},
+    if(preset)name=['wisps','moss'].includes(preset)?'fireflies':preset==='dew'?'drips':preset==='halo'?'halo':preset==='ground-dust'?'cloud-bank':'particle-area';
+    const presets={
+      wisps:{'glow-style':'wisps',trail:'.8',width:'160',height:'80',particles:'1',color:'a6efcf','color-end':'549f9b',intensity:'1.6',illumination:'.7','size-min':'1.5','size-max':'2.1',wander:'24','travel-x':'24','travel-y':'10',lifetime:'1100'},
+      moss:{'glow-style':'moss',width:'48',height:'8',particles:'2',color:'68b38a','color-end':'305d49',intensity:'.9',illumination:'.25','size-min':'.8','size-max':'1.2',wander:'0','travel-x':'0','travel-y':'0',lifetime:'1800',placement:'playfield'},
+      dew:{width:'4',height:'96',particles:'1',color:'c3dfc8','color-end':'8faba0',intensity:'2',activity:'.28',ripple:'0','size-min':'.45','size-max':'.65',lifetime:'420',placement:'foreground'},
+      'ground-dust':{width:'320',height:'64',color:'e6c99a',intensity:'2.6',strands:'5',amplitude:'18',drift:'100',carry:'140',particles:'32','size-min':'.25','size-max':'.75',wander:'4',lifetime:'320',softness:'.9',placement:'foreground',points:'-160,24 -128,24 -96,24 -64,24 -32,24 0,24 32,24 64,24 96,24 128,24 160,24'},halo:{width:'160',height:'160',color:'efe4ff','color-end':'7256b8',intensity:'1.4',softness:'.55'},
       dust:{color:'d5b990','travel-y':'-32',wander:'12','size-min':'.7','size-max':'1.8',lifetime:'480'},
-      leaves:{color:'739644','travel-y':'160',wander:'24','size-min':'1','size-max':'2.5',lifetime:'360'},
+      leaves:{textured:'1',color:'739644','travel-y':'160',wander:'24','size-min':'1','size-max':'2.5',lifetime:'360'},
       snow:{color:'d5e8ff','travel-x':'32','travel-y':'224',wander:'12',lifetime:'480'},
       sand:{color:'d9af72','travel-x':'224','travel-y':'24',wander:'4',lifetime:'240'},
       insects:{color:'ffd780','travel-y':'0',wander:'24',lifetime:'360'},
@@ -349,11 +387,14 @@ const EffectEditor=(()=>{
       color:name.endsWith('mist')||['drips','waterfall-spray','water-surface'].includes(name)?'91bedf':
         ['flame','motes','particle-area'].includes(name)?'ffe6bb':'dde6ff',
       ...(name==='particle-area'?{particles:'4',width:'512',height:'512','travel-y':'-96'}:name==='exposure'?{brightness:'.65',width:'512',height:'512','fade-left':'64','fade-top':'64','fade-right':'64','fade-bottom':'64'}:{}),
+      ...(name==='canopy-light'?{width:'512',height:'256',color:'ffedc7',intensity:'1',placement:'playfield',shadows:'1',softness:'.65',scatter:'.12',bounce:'.4',amplitude:'2',angle:'0',lifetime:'1440'}:{}),
+      ...(name==='foliage-shadow'?{width:'128',height:'256',color:'162c1c',intensity:'.5',placement:bgIndex===0?'playfield':'background',strands:'2',textured:'1',shadows:bgIndex===0?'1':'0',softness:'.7',amplitude:'2',angle:'0',lifetime:'960'}:{}),
+      ...(name==='fireflies'?{width:'192',height:'96',color:'e5f7a2','color-end':'86b66c',particles:'6','size-min':'.7','size-max':'1.2',wander:'18','travel-x':'12','travel-y':'0',lifetime:'720',placement:'foreground','light-scenery':'1','light-player':'1','light-enemies':'1',illumination:'1'}:{}),
       ...(name==='heat-haze'?{anchor:'bg2-point',placement:'background',width:'512',height:'256',amplitude:'1.5',lifetime:'720'}:{}),
       ...(name==='particle-path'?{points:'0,-24 0,24',pattern:'sand',particles:'24',wander:'2',activity:'.6',lifetime:'240',color:'e8c38a'}:{}),
       ...(name==='torch'?{width:'32',height:'32',color:'ffffff',placement:bgIndex===1?'background':'playfield'}:{}),
       ...(name==='flame'?{width:'64',height:'96',color:'ff6628','color-end':'ffe6a0',particles:'12',lifetime:'80','travel-y':'-64',wander:'5',spread:'.25','size-min':'.4','size-max':'1.2'}:{}),
-      ...(preset?{...(['halo','ground-dust'].includes(preset)?{}:{pattern:preset}),...presets[preset]}:{})});
+      ...(preset?{...(name==='particle-area'?{pattern:preset}:{}),...presets[preset]}:{})});
     return change(encode(next),'add emitter');
   }
   $('#emitterAdd').onclick=()=>{
@@ -395,6 +436,11 @@ const EffectEditor=(()=>{
       patch={anchor:`${Math.round(patch.x??anchor[0])} ${Math.round(patch.y??anchor[1])}`};
     }
     const next=new Map(records),record={...(source?.nativeExposure?source.record:{}),...next.get(id)};
+    if(id.includes(':cloud-bank:')) {
+      if(patch.points)patch={...patch,textured:null,rolling:null,wake:null,'canopy-response':null};
+      if(patch.textured!==undefined&&String(patch.textured)!=='1'||patch.rolling!==undefined&&!(Number(patch.rolling)>0))
+        patch={...patch,rolling:null,wake:null,'canopy-response':null};
+    }
     if(id.includes(':wet-contour:')&&!record.points&&(patch.width!==undefined||patch.height!==undefined))record.points='-32,0 32,0';
     if(['cloud-bank','particle-path','wet-contour'].some(kind=>id.includes(':'+kind+':'))&&record.points&&patch.points===undefined&&(patch.width!==undefined||patch.height!==undefined)) {
       const sx=Number(patch.width===null?96:patch.width??record.width??96)/Number(record.width??96),sy=Number(patch.height===null?64:patch.height??record.height??64)/Number(record.height??64);
@@ -494,8 +540,13 @@ const EffectEditor=(()=>{
   };
   $('#actorBindingStop').onclick=()=>{try{SharedRoomPreview.previewActorBinding(null,0,0,0);}catch(error){status(error.message);}};
   $('#emitterPoints').onchange=e=>editEmitter(selected,{points:e.target.value.trim()||null,
+    ...(e.target.value.trim()&&selected.includes(':cloud-bank:')?{textured:null,rolling:null,wake:null,'canopy-response':null}:{}),
     ...(!e.target.value.trim()&&selected.includes(':cloud-bank:')?{carry:null,particles:null,twinkle:null}:{})});
-  for(const [id,key] of fieldFields)$('#'+id).onchange=e=>editEmitter(selected,{[key]:e.target.value});
+  for(const [id,key] of fieldFields)$('#'+id).onchange=e=>editEmitter(selected,{[key]:e.target.value===''?null:e.target.value,
+    ...(key==='textured'&&e.target.value!=='1'?(selected.includes(':foliage-shadow:')?{shadows:null}:selected.includes(':cloud-bank:')?{rolling:null,wake:null,'canopy-response':null}:{}):{}),
+    ...(key==='pattern'&&e.target.value!=='leaves'?{textured:null}:{}),
+    ...(key==='rolling'&&Number(e.target.value)===0?{wake:null,'canopy-response':null}:{}),
+    ...(selected.includes(':cloud-bank:')&&['wake','canopy-response'].includes(key)&&Number(e.target.value)>0&&!(Number(records.get(selected)?.rolling)>0)?{rolling:'.8'}:{})});
   for(const [id,key] of moteFields)$('#'+id).onchange=e=>
     editEmitter(selected,{[key]:e.target.value===''?null:e.target.value});
   $('#emitterAutoRise').onclick=()=>editEmitter(selected,{'travel-y':null});
@@ -1382,8 +1433,8 @@ const EffectEditor=(()=>{
     }
     return native.concat([...records,...sources.filter(s=>s.nativeExposure).map(s=>[s.id,s.record])].filter(([id,r])=>id.startsWith(emitterPrefix())&&
       Number((r.anchor??'bg1')!=='bg1')===layer).map(([id,r])=>({id,layer,
-      label:id.includes(':exposure:')?'Light box':undefined,brightness:Number(r.brightness??(1-Number(r.intensity??.35))),fade:['left','top','right','bottom'].map(edge=>Number(r['fade-'+edge]??0)),kind:id.split(':')[4],angle:Number(r.angle??0),fan:Number(r.fan??36),strands:Number(r.strands??8),amplitude:Number(r.amplitude??2),carry:Number(r.carry??0),drift:Number(r.drift??0),rotatable:['light-fan','light-gradient'].includes(id.split(':')[4]),attached:!!r['actor-target'],actorX:r['actor-target']?actor.x:0,actorY:r['actor-target']?actor.y:0,movable:true,resizeWidth:id.split(':')[4]!=='torch',resizeHeight:id.split(':')[4]!=='torch',x:Number(r.x??0)+(r['actor-target']?actor.x:0),y:Number(r.y??0)+(r['actor-target']?actor.y:0),points:r.points??(id.split(':')[4]==='wet-contour'?'-32,0 32,0':id.split(':')[4]==='particle-path'?'0,-24 0,24':''),width:Number(r.width??96),
-      height:Number(r.height??64),enabled:r.enabled!=='0'})));
+      label:id.includes(':exposure:')?'Light box':undefined,brightness:Number(r.brightness??(1-Number(r.intensity??.35))),fade:['left','top','right','bottom'].map(edge=>Number(r['fade-'+edge]??0)),kind:id.split(':')[4],angle:Number(r.angle??0),fan:Number(r.fan??36),strands:Number(r.strands??8),amplitude:Number(r.amplitude??2),carry:Number(r.carry??0),drift:Number(r.drift??0),rotatable:['light-fan','light-gradient','foliage-shadow','canopy-light'].includes(id.split(':')[4]),attached:!!r['actor-target'],actorX:r['actor-target']?actor.x:0,actorY:r['actor-target']?actor.y:0,movable:true,resizeWidth:id.split(':')[4]!=='torch',resizeHeight:id.split(':')[4]!=='torch',x:Number(r.x??0)+(r['actor-target']?actor.x:0),y:Number(r.y??0)+(r['actor-target']?actor.y:0),points:r.points??(id.split(':')[4]==='wet-contour'?'-32,0 32,0':id.split(':')[4]==='particle-path'?'0,-24 0,24':''),width:Number(r.width??(['foliage-shadow','canopy-light'].includes(id.split(':')[4])?512:96)),
+      height:Number(r.height??(id.split(':')[4]==='canopy-light'?256:id.split(':')[4]==='foliage-shadow'?384:64)),enabled:r.enabled!=='0'})));
   }
   function selectEmitter(id,additive=false,guideIndex) {
     if(!sources.some(s=>s.id===id)&&(!records.has(id)||!id.startsWith(emitterPrefix())))return false;
@@ -1596,9 +1647,10 @@ const EffectEditor=(()=>{
         const index=s.member-(s.name==='cave-water'&&!pool?counts[0]:0);
         const key=pool?'pool':s.name==='cave-water'||s.name==='cave-mist'?'fall':'wet';
         const v=water[`${key}-${index}`]?.split(/\s+/).map(Number);if(!v)return s;
-        const x=pool?(v[0]+v[1])*.5:v[0],y=pool?v[2]:v[1];
+        const sheen=s.name==='cave-sheen';
+        const x=pool?(v[0]+v[1])*.5:v[0],y=pool||sheen?v[2]:v[1];
         return {...s,baseX:x,baseY:y,baseWidth:pool?v[1]-v[0]:key==='fall'?Number(water['spray-shape'].split(/\s+/)[0])*2:32,
-          baseHeight:key==='wet'?v[2]-v[1]:s.baseHeight,x,y};
+          baseHeight:sheen?Math.max(4,water['sheen-shape'].split(/\s+/).map(Number).slice(3,5).reduce((a,b)=>a+b,0)):key==='wet'?v[2]-v[1]:s.baseHeight,x,y};
       });
     }
     const prefix=['emitter',room.group.toString(16).padStart(2,'0'),room.map.toString(16).padStart(2,'0'),terrainProfile].join(':')+':';
@@ -1676,6 +1728,7 @@ const EffectEditor=(()=>{
     const x=Math.round(left+(width-4)/2),y=Math.round(top+(height-4)/2),next=new Map(records),id=target||newEmitterId('wet-contour');
     next.set(id,{...(target?records.get(id):{color:'91bedf',placement:'playfield'}),x:String(x),y:String(y),width:String(width),height:String(height),
       ...(cloud?{anchor:'bg1'}:{}),points:points.map(p=>`${Math.round(p.x-x)},${Math.round(p.y-y)}`).join(' ')});
+    if(cloud)for(const key of ['textured','rolling','wake','canopy-response'])delete next.get(id)[key];
     return change(encode(next),cloud?'trace ground dust path':'trace wet contour');
   }
   $('#contourDraw').onclick=()=>{

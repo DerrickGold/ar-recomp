@@ -186,6 +186,7 @@ static ArRenderTexture s_diorama_priority_texture;
 static int s_diorama_priority_w, s_diorama_priority_h;
 static DioramaScratchPool s_diorama_dof_source;
 static DioramaScratchPool s_diorama_lightmap;
+static ArRenderTexture s_diorama_unlit_map;
 static DioramaScratchPool s_diorama_actor_lightmaps[2];
 static bool s_diorama_dof_source_unavailable;
 static ArRenderTexture s_diorama_stack_group_texture;
@@ -199,6 +200,7 @@ static ArRenderTexture s_diorama_skybox_prefilter_source;
 static uint64_t s_diorama_skybox_prefilter_revision;
 static float s_diorama_skybox_prefilter_radius;
 static ArRenderColorF s_diorama_skybox_prefilter_tint;
+static DioramaSceneryGrade s_diorama_skybox_prefilter_grade;
 static bool s_diorama_skybox_prefilter_rom_source;
 
 static void ResetDioramaScratchPool(ArRenderDevice *device, DioramaScratchPool *pool) {
@@ -234,6 +236,21 @@ static ArRenderTexture EnsureDioramaScratchTarget(
   target->width = width;
   target->height = height;
   return target->texture;
+}
+
+static ArRenderTexture UnlitSceneryMap(ArRenderDevice *device) {
+  if (!ArRenderTexture_IsValid(s_diorama_unlit_map)) {
+    const ArRenderTextureDesc desc={1,1,kArRenderPixelFormat_Argb8888,
+        kArRenderTextureUsage_Static,kArRenderFilter_Nearest,kArRenderBlendMode_Alpha};
+    const uint32_t black=0xff000000u;
+    const ArRenderRectI pixel={0,0,1,1};
+    if (!ArRenderDevice_CreateTexture(device,&desc,&s_diorama_unlit_map) ||
+        !ArRenderDevice_UpdateTexture(device,s_diorama_unlit_map,&pixel,&black,sizeof(black))) {
+      ArRenderDevice_DestroyTexture(device,s_diorama_unlit_map);
+      s_diorama_unlit_map=ArRenderTexture_Invalid();
+    }
+  }
+  return s_diorama_unlit_map;
 }
 
 static void ResetDioramaSupersample(ArRenderDevice *device) {
@@ -1279,7 +1296,7 @@ static ArRenderTexture BuildDioramaSkyboxPrefilter(
     int output_width, int output_height,
     ArRenderColorF tint, float blur_radius, bool rom_source,
     uint64_t source_revision, bool source_dynamic,
-    PresentationOutcome *outcome) {
+    const DioramaSceneryGrade *grade, PresentationOutcome *outcome) {
   if (outcome) *outcome = kPresentationOutcome_Complete;
   if (!ArRenderDevice_IsReady(device) ||
       !ArRenderTexture_IsValid(source) ||
@@ -1299,6 +1316,10 @@ static ArRenderTexture BuildDioramaSkyboxPrefilter(
       source_revision == s_diorama_skybox_prefilter_revision &&
       blur_radius == s_diorama_skybox_prefilter_radius &&
       rom_source == s_diorama_skybox_prefilter_rom_source &&
+      grade->strength == s_diorama_skybox_prefilter_grade.strength &&
+      grade->saturation == s_diorama_skybox_prefilter_grade.saturation &&
+      grade->shadows == s_diorama_skybox_prefilter_grade.shadows &&
+      grade->highlights == s_diorama_skybox_prefilter_grade.highlights &&
       DioramaSkyboxPrefilterColorEquals(
           tint, s_diorama_skybox_prefilter_tint))
     return target;
@@ -1327,7 +1348,13 @@ static ArRenderTexture BuildDioramaSkyboxPrefilter(
       .texel_height = 1.0f / (float)source_height,
       .radius = blur_radius,
     };
-    shader_bound = DioramaEffectBackend_BindBlur(device, &params);
+    if (grade->strength > 0) {
+      const DioramaSceneryLightEffectParams material={.illumination=UnlitSceneryMap(device),
+          .texel_width=params.texel_width,.texel_height=params.texel_height,
+          .blur_radius=blur_radius,.mode=blur_radius>0?1:0,.shade={1,1,1,1},.grade=*grade};
+      shader_bound=ArRenderTexture_IsValid(material.illumination) &&
+          DioramaEffectBackend_BindSceneryLight(device,&material);
+    } else shader_bound = DioramaEffectBackend_BindBlur(device, &params);
     prefiltered = shader_bound;
     if (!shader_bound)
       shader_restored = DioramaEffectBackend_Unbind(device);
@@ -1372,6 +1399,7 @@ static ArRenderTexture BuildDioramaSkyboxPrefilter(
   s_diorama_skybox_prefilter_revision = source_revision;
   s_diorama_skybox_prefilter_radius = blur_radius;
   s_diorama_skybox_prefilter_tint = tint;
+  s_diorama_skybox_prefilter_grade = *grade;
   s_diorama_skybox_prefilter_rom_source = rom_source;
   return target;
 }
@@ -1408,7 +1436,8 @@ static PresentationOutcome DrawDioramaSkybox(
     int motion_source, bool follow_camera,
     int authentic_y0, float camera_delta, float pixel_aspect,
     float face_bottom_y, float foreground_top_y,
-    DioramaSkyboxProjection *projection, const DioramaRenderOptions *options, const DioramaHeat *heat) {
+    DioramaSkyboxProjection *projection, const DioramaRenderOptions *options, const DioramaHeat *heat,
+    const DioramaSceneryGrade *grade) {
   if (!ArRenderTexture_IsValid(skybox_texture) || snes_height <= 0)
     return kPresentationOutcome_CoreFailure;
   PresentationOutcome outcome = kPresentationOutcome_Complete;
@@ -1452,12 +1481,12 @@ static PresentationOutcome DrawDioramaSkybox(
       ? kDioramaRomBackdropPixels : SR_PPU_SURFACE_MAX_WIDTH;
   const int source_height = rom_source
       ? kDioramaRomBackdropPixels : SR_PPU_SURFACE_MAX_HEIGHT;
-  if (blur_requested && options->skybox_prefilter) {
+  if ((blur_requested && options->skybox_prefilter) || grade->strength > 0) {
     PresentationOutcome prefilter_outcome;
     const ArRenderTexture prefiltered = BuildDioramaSkyboxPrefilter(
         device, skybox_texture, source_width, source_height,
-        out_w, out_h, tint, blur_radius, rom_source,
-        source_revision, source_dynamic, &prefilter_outcome);
+        out_w, out_h, tint, blur_requested ? blur_radius : 0, rom_source,
+        source_revision, source_dynamic, grade, &prefilter_outcome);
     outcome = PresentationOutcome_Combine(outcome, prefilter_outcome);
     if (!PresentationOutcome_IsUsable(prefilter_outcome))
       return prefilter_outcome;
@@ -2080,6 +2109,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
     bool both = geometry->options->skybox == kDioramaSky_Both;
     ArRenderTexture skybox_texture = textures[SR_PPU_OVERLAY_BG2];
     bool rom_skybox = false;
+    DioramaSceneryGrade skybox_grade={0};
     uint64_t skybox_revision = capture->bg2_revision;
     bool skybox_dynamic = capture->bg2_dynamic;
     int skybox_apron = capture->obj_apron;
@@ -2151,10 +2181,11 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
       uint8_t source_group = 0, source_map = 0, source_bg = 0;
       bool transparent_fill_configured = false;
       uint32_t transparent_fill_argb = 0;
+      const bool decoded=DioramaLayerOrder_DecodeActionBgSource(skybox_source, &source_group,
+          &source_map, &source_bg);
       if (capture->bg_transparent_fill_configured &&
           capture->bg_transparent_fill_argb &&
-          DioramaLayerOrder_DecodeActionBgSource(skybox_source, &source_group,
-                                                 &source_map, &source_bg) &&
+          decoded &&
           (source_bg == 1 || source_bg == 2)) {
         transparent_fill_configured =
             capture->bg_transparent_fill_configured[source_bg - 1];
@@ -2174,6 +2205,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
       if (ArRenderTexture_IsValid(named_handle)) {
         skybox_texture = named_handle;
         rom_skybox = true;
+        if(decoded && source_bg==1)skybox_grade=scene->scenery_grade;
         skybox_dynamic = false;
         skybox_revision = ((uint64_t)(uint32_t)skybox_source << 33) ^
                           ((uint64_t)transparent_fill_configured << 32) ^
@@ -2218,7 +2250,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
           face_skybox ? capture->authentic_y0 + kDeathHeimFaceRows : 0,
           face_skybox ? DeathHeimCloudTop(capture, geometry, resolved, resolved_count) : NAN,
           projection && (face_skybox || !projection->bg2_plane.valid)
-              ? &projection->bg2_skybox : NULL, &skybox_options, &scene->background_heat);
+              ? &projection->bg2_skybox : NULL, &skybox_options, &scene->background_heat, &skybox_grade);
       outcome = PresentationOutcome_Combine(outcome, skybox);
       if (!PresentationOutcome_IsUsable(skybox)) {
         return kPresentationOutcome_CoreFailure;
@@ -3474,6 +3506,7 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       .dimming_ramp = scene->bg1_dimming_ramp,
       .exposure = scenery ? scene->scenery_exposure : NULL,
       .lighting = {.illumination = scenery ? scene->scenery_lightmap : actor ? scene->actor_lightmaps[0] : ArRenderTexture_Invalid(),
+          .grade = scenery ? scene->scenery_grade : (DioramaSceneryGrade){0},
           .attributes = actor ? textures[kDioramaPlane_ObjAttributes0+priority] : ArRenderTexture_Invalid(),
           .enemy_illumination = scene->actor_lightmaps[1],
           .shade = {1 + (description->shade.r - 1) * shade_mix,
@@ -3617,6 +3650,13 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
     if (!drawn || !restored) goto failed;
     illuminated.scenery_lightmap = lightmap;
   }
+  /* Palette-only rooms need no full-screen light-map pass. A retained black
+   * texel lets the same material shade their existing geometry in one draw. */
+  if (!ArRenderTexture_IsValid(illuminated.scenery_lightmap) && scene->scenery_grade.strength > 0 &&
+      ArRenderCapabilities_Has(ArRenderDevice_Capabilities(device),kArRenderCapability_CustomShaders)) {
+    illuminated.scenery_lightmap=UnlitSceneryMap(device);
+    if (!ArRenderTexture_IsValid(illuminated.scenery_lightmap)) goto failed;
+  }
   memset(illuminated.actor_lightmaps,0,sizeof(illuminated.actor_lightmaps));
   bool actor_attributes=false;
   for(unsigned p=0;p<4;++p)actor_attributes |= capture->pixels[kDioramaPlane_ObjAttributes0+p]!=NULL;
@@ -3708,6 +3748,8 @@ failed:
 void Diorama_ResetCompositorResources(ArRenderDevice *device) {
   /* Materials borrow the map's native handle, so release their states first. */
   DioramaEffectBackend_Reset(device);
+  ArRenderDevice_DestroyTexture(device,s_diorama_unlit_map);
+  s_diorama_unlit_map=ArRenderTexture_Invalid();
   ResetDioramaScratchPool(device, &s_diorama_lightmap);
   for(unsigned role=0;role<2;++role)ResetDioramaScratchPool(device, &s_diorama_actor_lightmaps[role]);
   ResetDioramaSupersample(device);

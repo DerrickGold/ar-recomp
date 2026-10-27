@@ -6,6 +6,7 @@
 #include "room_preview_native.h"
 #include "receiver_preview.h"
 #include "action/action_effect_source.h"
+#include "action/action_effect_mask_texture.h"
 #include "diorama/diorama_snapshot.h"
 #include "diorama/diorama_astral_rift.h"
 #include "diorama/diorama_rom_backdrop.h"
@@ -135,6 +136,8 @@ int RoomPreview_ReceiverStyle(unsigned flipped,unsigned rim) {
 int RoomPreview_SetReceivers(int mask,int player_x,int player_y,int enemy_x,int enemy_y) {
   if(mask<0||mask>3||player_x<-2048||player_x>16384||player_y<-2048||player_y>16384||
       enemy_x<-2048||enemy_x>16384||enemy_y<-2048||enemy_y>16384)return 0;
+  if(s_receivers.mask!=(unsigned)mask||s_receivers.x[0]!=player_x||s_receivers.feet_y[0]!=player_y||
+      s_receivers.x[1]!=enemy_x||s_receivers.feet_y[1]!=enemy_y)s_cached=false;
   s_receivers.mask=(unsigned)mask;
   s_receivers.x[0]=player_x;s_receivers.feet_y[0]=player_y;
   s_receivers.x[1]=enemy_x;s_receivers.feet_y[1]=enemy_y;return 1;
@@ -171,6 +174,7 @@ typedef struct RoomEffectPass {
   ActionEffectProjectionContext projection;
   bool valid;
 } RoomEffectPass;
+static ArRenderTexture s_effect_masks;
 static bool DrawEffectLayer(RoomEffectPass *pass, uint8_t layer,
     ArRenderBlendMode blend, bool lighting, bool particles) {
   if (s_source_draw) {
@@ -194,9 +198,11 @@ static bool DrawEffectLayer(RoomEffectPass *pass, uint8_t layer,
       s_effect_batch.vertices[i].color.b/=kActionReceiverMaxIllumination;
     }
   s_effect_vertices += s_effect_batch.vertex_count;
+  const bool textured=ActionEffectMasks_UsesTexture(s_effect_batch.vertices,s_effect_batch.vertex_count);
+  if(textured&&!ActionEffectMasks_EnsureTexture(DioramaPreview_Device(),&s_effect_masks))return false;
   const ArRenderDrawState state = {.flags = kArRenderDrawState_Blend, .blend = blend};
   return ArRenderDevice_DrawGeometryWithState(DioramaPreview_Device(),
-      ArRenderTexture_Invalid(), s_effect_batch.vertices, s_effect_batch.vertex_count,
+      textured?s_effect_masks:ArRenderTexture_Invalid(), s_effect_batch.vertices, s_effect_batch.vertex_count,
       s_effect_batch.indices, s_effect_batch.index_count, &state);
 }
 static void DrawPlaneEffects(void *userdata, int plane, const DioramaProjection *projection) {
@@ -297,6 +303,7 @@ int RoomPreview_CameraX(void) { return s_cached ? s_x : 0; }
 unsigned RoomPreview_Uploads(void) { return s_uploads; }
 void RoomPreview_Reset(void) {
   ArRenderDevice *device = DioramaPreview_Device();
+  ArRenderDevice_DestroyTexture(device,s_effect_masks);s_effect_masks=ArRenderTexture_Invalid();
   DioramaAstralRift_Reset(device);
   Diorama_ResetCompositorResources(device);
   for (unsigned i = 0; i < kDioramaPlane_Count; ++i) {
@@ -397,10 +404,15 @@ unsigned RoomPreview_SourceValue(unsigned index, unsigned field) {
  * own their member bases; sparse transforms remain relative to those bases. */
 static unsigned MemberCount(unsigned kind) {
   if(kind==kActionEffect_CastleLight)return (unsigned)EditorRoomScene_CastleField(s_room)->SourceCount[0];
+  if(ActionEffectMembers_WaterLimit(kind))
+    return ActionEffectMembers_WaterCount(kind,EditorRoomScene_WaterField(s_room));
   const ActionEnvironmentScene *scene=EditorRoomScene_Environment(s_room);
   return ActionEffectMembers_Count(kind,scene->group,scene->room);
 }
 static bool MemberSource(unsigned kind,unsigned id,ActionNativeMemberSource *out,bool *angled) {
+  if(ActionEffectMembers_WaterLimit(kind)) {
+    *angled=false;return ActionEffectMembers_WaterSource(kind,id,EditorRoomScene_WaterField(s_room),out);
+  }
   if(kind==kActionEffect_CastleLight) {
     const ActionCastleField *f=EditorRoomScene_CastleField(s_room);
     if(!id||id>(unsigned)f->SourceCount[0])return false;
@@ -685,6 +697,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       camera.bg_apron_mask != s_camera.bg_apron_mask ||
       camera.travel.minimum != s_camera.travel.minimum || camera.travel.maximum != s_camera.travel.maximum) {
     s_cached = false;
+    EditorRoomScene_AdvanceReceivers(s_room,s_receivers.mask,s_receivers.x,s_receivers.feet_y,frame);
     if (!EditorRoomScene_Render(s_room, x, y, frame, extra, vertical, &camera) || !Upload()) return 0;
     s_x = x; s_y = y; s_frame = frame; s_extra = extra; s_vertical = vertical; s_cached = true;
     s_camera = camera;
@@ -730,6 +743,8 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       .width=SR_PPU_SURFACE_MAX_WIDTH,.height=SR_PPU_SURFACE_MAX_HEIGHT};
   ActionExposure_Prepare(&exposure,s_effects_enabled?effects.frame:NULL);
   scene.scenery_exposure=exposure.count?&exposure.field:NULL;
+  scene.scenery_grade=s_effects_enabled ? DioramaLayerOrder_SceneryGrade(options.layers,
+      scene.map_group,scene.map_number,scene.layer_section) : (DioramaSceneryGrade){0};
   scene.background_heat=ActionHeat_Prepare(s_effects_enabled?effects.frame:NULL,
       environment->camera_x[1]-extra-capture.obj_apron,environment->camera_y[1]-capture.authentic_y0,
       SR_PPU_SURFACE_MAX_WIDTH,SR_PPU_SURFACE_MAX_HEIGHT);

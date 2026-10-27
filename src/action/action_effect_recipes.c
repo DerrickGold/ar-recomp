@@ -14,7 +14,7 @@ static const struct { unsigned kind; const char *name; } kSources[] = {
 #define SOURCE(kind, name) {kActionEffect_##kind, name}
   SOURCE(AitosLavaPit,"lava-pit-field"),SOURCE(AitosLavaReservoir,"lava-lake-field"),SOURCE(AitosWaterSplash,"splash-field"),SOURCE(AitosWaterfall,"waterfall-field"),SOURCE(AitosWaterfallMist,"waterfall-mist-field"),
   SOURCE(EnemyFireball,"fireball-field"), SOURCE(FillmoreStatueOrb,"orb-field"), SOURCE(MarahnaFireball,"jungle-fire-field"), SOURCE(AitosLavaFireball,"lava-fire-field"), SOURCE(LightningTrap,"trap-field"), SOURCE(BloodpoolBossLightning,"bolt-field"), SOURCE(CentaurLightning,"centaur-field"), SOURCE(WallTorch,"glow-field"), SOURCE(CastleLight,"castle-field"), SOURCE(BloodpoolWater,"marsh-field"), SOURCE(BloodpoolMoonlight,"moon-field"), SOURCE(TempleDust,"atmosphere-field"), SOURCE(CaveWater,"water-field"), SOURCE(ForestCanopyLight,"ray-field"), SOURCE(AuthoredLight,"soft-light"), SOURCE(AuthoredMotes,"motes"), SOURCE(AuthoredMist,"free-mist"),
-  SOURCE(AuthoredParticlePath,"particle-path"), SOURCE(AuthoredHeat,"heat-haze"), SOURCE(AuthoredFloorMist,"ground-mist"), SOURCE(AuthoredParticleArea,"particle-area"),
+  SOURCE(AuthoredFireflies,"fireflies"), SOURCE(AuthoredCanopy,"canopy-light"), SOURCE(AuthoredFoliage,"foliage-shadow"), SOURCE(AuthoredParticlePath,"particle-path"), SOURCE(AuthoredHeat,"heat-haze"), SOURCE(AuthoredFloorMist,"ground-mist"), SOURCE(AuthoredParticleArea,"particle-area"),
   SOURCE(AuthoredFan,"light-fan"), SOURCE(AuthoredWater,"water-surface"),
   SOURCE(AuthoredDrips,"drips"), SOURCE(AuthoredSpray,"waterfall-spray"), SOURCE(AuthoredCloud,"cloud-bank"), SOURCE(AuthoredExposure,"exposure"), SOURCE(AuthoredContour,"wet-contour"), SOURCE(AuthoredTorch,"torch"), SOURCE(AuthoredFlame,"flame"), SOURCE(AuthoredHalo,"halo"), SOURCE(AuthoredGradient,"light-gradient"),
   SOURCE(EnemyFireball,"enemy-fireball"), SOURCE(LightningTrap,"lightning-trap"),
@@ -56,7 +56,7 @@ bool ActionEffectRecipes_ReachSupported(unsigned kind) { return kind == kActionE
 bool ActionEffectRecipes_IsEmitter(unsigned kind) {
   return kind == kActionEffect_AuthoredLight || kind == kActionEffect_AuthoredMotes ||
       kind == kActionEffect_AuthoredMist || kind == kActionEffect_AuthoredFloorMist ||
-      (kind >= kActionEffect_AuthoredParticleArea && kind <= kActionEffect_AuthoredHeat);
+      (kind >= kActionEffect_AuthoredParticleArea && kind <= kActionEffect_AuthoredFireflies);
 }
 bool ActionEffectRecipes_ReplacesRayField(const ActionEffectRecipes *table,
     unsigned group,unsigned room,unsigned terrain) {
@@ -151,16 +151,31 @@ const char *ActionEffectRecipes_PatternName(unsigned pattern) {
   return pattern < kActionParticle_Count ? kPatterns[pattern] : NULL;
 }
 bool ActionEffectRecipes_ParticleSupported(unsigned kind) {
-  return kind==kActionEffect_AuthoredParticlePath || kind==kActionEffect_AuthoredFlame || kind==kActionEffect_AuthoredMotes || kind==kActionEffect_AuthoredParticleArea ||
+  return kind==kActionEffect_AuthoredFireflies || kind==kActionEffect_AuthoredParticlePath || kind==kActionEffect_AuthoredFlame || kind==kActionEffect_AuthoredMotes || kind==kActionEffect_AuthoredParticleArea ||
       kind==kActionEffect_AuthoredWater || kind==kActionEffect_AuthoredDrips || kind==kActionEffect_AuthoredSpray ||
       kind==kActionEffect_AuthoredCloud || kind==kActionEffect_AuthoredTorch;
 }
 static bool ParticleTravelSupported(unsigned kind) {
-  return kind==kActionEffect_AuthoredFlame || kind==kActionEffect_AuthoredMotes ||
+  return kind==kActionEffect_AuthoredFireflies || kind==kActionEffect_AuthoredFlame || kind==kActionEffect_AuthoredMotes ||
       kind==kActionEffect_AuthoredParticleArea || kind==kActionEffect_AuthoredTorch;
 }
 static bool LightSupported(unsigned kind) {
   return ActionLightKind_Supported(kind);
+}
+static void RecipePlacement(const ActionEffectRecipe *r,ActionEffectInstance *e) {
+  e->render_layer=r->kind==kActionEffect_AuthoredFloorMist?kActionEffectRenderLayer_Bg1Mist:kActionEffectRenderLayer_WorldOverlay;
+    if (r->kind!=kActionEffect_AuthoredFloorMist && r->kind!=kActionEffect_AuthoredExposure) {
+      const bool alpha=r->kind==kActionEffect_AuthoredFoliage || r->kind==kActionEffect_AuthoredMist || r->kind==kActionEffect_AuthoredCloud || r->kind==kActionEffect_AuthoredSpray ||
+          ((r->kind==kActionEffect_AuthoredParticleArea||r->kind==kActionEffect_AuthoredParticlePath) && r->field_style.pattern>=kActionParticle_Dust &&
+           r->field_style.pattern<=kActionParticle_Scarabs);
+      e->render_layer=r->field_style.placement==0 ? kActionEffectRenderLayer_Bg2Alpha :
+          r->field_style.placement==1 ? (alpha?kActionEffectRenderLayer_Bg1Mist:kActionEffectRenderLayer_Bg1Plane) :
+          (alpha?kActionEffectRenderLayer_WorldDust:kActionEffectRenderLayer_WorldOverlay);
+    }
+    if(r->kind==kActionEffect_AuthoredExposure) {
+      e->render_layer=ActionExposure_Brightness(e)>1?kActionEffectRenderLayer_Bg1Light:kActionEffectRenderLayer_Bg1Mist;
+      e->tuning.dim_receivers_set=1;
+    }
 }
 static unsigned RecipeCost(const ActionEffectRecipe *r) {
   if (!r->emitter || !r->enabled) return 0;
@@ -172,16 +187,32 @@ static unsigned RecipeCost(const ActionEffectRecipe *r) {
     case kActionEffect_AuthoredHalo: return 4*32*2*7; /* clipped ring strips */
     case kActionEffect_AuthoredGradient: return 4*4*2*7; /* clipped 5x5 grid */
     case kActionEffect_AuthoredHeat: return 0; /* UV warp on existing background draws. */
+    /* Six vine segments (two triangles) and six leaves (six triangles).
+     * A clipped triangle has at most seven vertices. */
+    case kActionEffect_AuthoredFoliage: return r->field_style.textured ?
+        14*r->field_style.strands*(r->field_style.shadows?(unsigned)fminf(kActionCanopyMaxSpans,ceilf(r->width/16)):1) : 336*r->field_style.strands;
+    case kActionEffect_AuthoredFireflies:
+      return (16+(r->field_style.glow_style==kActionGlow_Wisps&&r->field_style.trail>0?42:0))*r->particles;
     case kActionEffect_AuthoredParticlePath: return 4*r->particles;
-    case kActionEffect_AuthoredMotes: case kActionEffect_AuthoredDrips: case kActionEffect_AuthoredSpray: return 4*r->particles;
-    case kActionEffect_AuthoredParticleArea: return 4*kActionParticleMaxCells*r->particles;
+    case kActionEffect_AuthoredDrips: return (r->field_style.ripple?8:4)*r->particles;
+    case kActionEffect_AuthoredMotes: case kActionEffect_AuthoredSpray: return 4*r->particles;
+    case kActionEffect_AuthoredParticleArea:
+      /* Inclusive birth cells can straddle both edges. Small saved regions
+       * need not reserve all 64 cells of the maximum visible generation view. */
+      return (r->field_style.textured?14:4)*(unsigned)fminf(kActionParticleMaxCells,
+          (ceilf(r->width/kActionParticleCellSize)+1)*(ceilf(r->height/kActionParticleCellSize)+1))*r->particles;
     /* Eight clipped triangles per strand and 48 for the soft backdrop. */
-    case kActionEffect_AuthoredFan: return 56*r->field_style.strands+336;
+    case kActionEffect_AuthoredFan: return 56*r->field_style.strands+(r->field_style.softness>0?336:0);
+    /* Two general light quads (14 clipped vertices each), plus an
+     * axis-aligned surface spill (8). */
+    case kActionEffect_AuthoredCanopy: return 36*(unsigned)fminf(kActionCanopyMaxSpans,ceilf(r->width/16));
     case kActionEffect_AuthoredWater: return 112+4*r->particles;
     /* Ground paths have at least nine columns: three bands, two triangles,
      * at most seven clipped vertices per triangle. */
     case kActionEffect_AuthoredCloud: return r->field_style.point_count ?
-        42*((r->field_style.point_count<9?9:r->field_style.point_count)-1)+4*r->particles : 37*r->field_style.strands;
+        42*((r->field_style.point_count<9?9:r->field_style.point_count)-1)+4*r->particles :
+        r->field_style.rolling>0 ? 16*r->field_style.strands+(r->field_style.wake>0?16:0) :
+        (r->field_style.textured?8:37)*r->field_style.strands;
     case kActionEffect_AuthoredExposure: return 0; /* union is budgeted once per room below */
     case kActionEffect_AuthoredContour: return 14*(r->field_style.point_count-1);
     default: return 8*37;
@@ -315,7 +346,8 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
             (SurfaceName(name)&&(next->surface_field_count==kActionSurfaceFieldMaxDefinitions||source!=0)))) ||
           (strcmp(mode,"field") && (!strcmp(name,"ray-field")||!strcmp(name,"water-field")||!strcmp(name,"atmosphere-field")||!strcmp(name,"moon-field")||!strcmp(name,"marsh-field")||!strcmp(name,"castle-field")||!strcmp(name,"glow-field")||ArcName(name)||ProjectileName(name)||SurfaceName(name))) ||
           (!strcmp(mode, "member") &&
-           (!source || source > ActionEffectMembers_Count(Kind(name), group, room))) ||
+           (!source || (source > ActionEffectMembers_Count(Kind(name), group, room) &&
+                        source > ActionEffectMembers_WaterLimit(Kind(name))))) ||
           ((!strcmp(mode, "emitter")) != ActionEffectRecipes_IsEmitter(Kind(name)))) {
         ok = false; break;
       }
@@ -356,10 +388,26 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
                                           .length_scale = 1,
                                           .intensity = 1,
                                           .color = 0xffffff};
-      record.field_style=(ActionEffectFieldStyle){.fan=36,.softness=.35f,.amplitude=2,.strands=8,.placement=2,.activity=1};
+      record.field_style=(ActionEffectFieldStyle){.fan=36,.thickness=1,.softness=.35f,.amplitude=2,.strands=8,.placement=2,.activity=1};
+      if (record.kind==kActionEffect_AuthoredFan) record.field_style.shadows=1;
       if (record.kind==kActionEffect_AuthoredParticleArea) record.particles=4;
+      if (record.kind==kActionEffect_AuthoredFireflies) {
+        record.particles=6;record.width=192;record.height=96;record.lifetime=720;
+        record.tuning.color=0xe5f7a2;record.tuning.light_receivers=7;record.tuning.light_receivers_set=1;
+      }
       if (record.kind==kActionEffect_AuthoredCloud || record.kind==kActionEffect_AuthoredTorch) record.particles=0;
       if(record.kind==kActionEffect_AuthoredHeat) { record.anchor=kActionEffectAnchor_Bg2Point;record.field_style.placement=0; }
+      if(record.kind==kActionEffect_AuthoredFoliage) {
+        record.particles=0;record.field_style.strands=4;record.field_style.placement=0;
+        record.field_style.softness=.7f;record.tuning.color=0x162c1c;record.tuning.intensity=.5f;
+        record.width=512;record.height=384;record.lifetime=960;
+      }
+      if(record.kind==kActionEffect_AuthoredCanopy) {
+        record.particles=0;record.field_style.placement=1;
+        record.tuning.color=0xffedc7;
+        record.width=512;record.height=256;record.lifetime=1440;
+        record.field_style.shadows=1;record.field_style.scatter=.12f;record.field_style.bounce=.4f;record.field_style.softness=.65f;
+      }
       if(record.kind==kActionEffect_AuthoredParticlePath) {
         record.field_style.point_count=2;record.field_style.points[0].y=-24;record.field_style.points[1].y=24;
       }
@@ -368,7 +416,7 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
         record.field_style.placement=1;
       }
       if (record.kind==kActionEffect_AuthoredExposure) record.tuning.intensity=.35f;
-      else if (!record.member) {
+      else if (!record.member && record.kind!=kActionEffect_AuthoredFoliage) {
         record.tuning.intensity=ActionLightKind_DefaultIntensity(record.kind);
         record.tuning.reach=ActionLightKind_DefaultReach(record.kind);
       }
@@ -477,10 +525,10 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
       float value_number = 0;
       if (!strcmp(key,"x")) { bit = 16; ok = Number(value,-2048,16384,&current->x) && current->x == floorf(current->x); }
       else if (!strcmp(key,"y")) { bit = 32; ok = Number(value,-2048,16384,&current->y) && current->y == floorf(current->y); }
-      else if (!strcmp(key,"width")) { bit = 64; ok = Number(value,4,(current->kind==kActionEffect_AuthoredParticleArea||current->kind==kActionEffect_AuthoredExposure||current->kind==kActionEffect_AuthoredGradient||current->kind==kActionEffect_AuthoredHeat)?16384:512,&current->width); }
-      else if (!strcmp(key,"height")) { bit = 128; ok = Number(value,4,(current->kind==kActionEffect_AuthoredParticleArea||current->kind==kActionEffect_AuthoredExposure||current->kind==kActionEffect_AuthoredGradient||current->kind==kActionEffect_AuthoredHeat)?16384:512,&current->height); }
+      else if (!strcmp(key,"width")) { bit = 64; ok = Number(value,4,(current->kind==kActionEffect_AuthoredParticleArea||current->kind==kActionEffect_AuthoredExposure||current->kind==kActionEffect_AuthoredGradient||current->kind==kActionEffect_AuthoredHeat||current->kind==kActionEffect_AuthoredCloud||current->kind==kActionEffect_AuthoredFoliage||current->kind==kActionEffect_AuthoredCanopy)?16384:512,&current->width); }
+      else if (!strcmp(key,"height")) { bit = 128; ok = Number(value,4,(current->kind==kActionEffect_AuthoredParticleArea||current->kind==kActionEffect_AuthoredExposure||current->kind==kActionEffect_AuthoredGradient||current->kind==kActionEffect_AuthoredHeat||current->kind==kActionEffect_AuthoredCloud||current->kind==kActionEffect_AuthoredFoliage||current->kind==kActionEffect_AuthoredCanopy)?16384:512,&current->height); }
       else if (!strcmp(key,"particles") && ActionEffectRecipes_ParticleSupported(current->kind)) {
-        bit = 256; ok = Number(value,(current->kind==kActionEffect_AuthoredCloud||current->kind==kActionEffect_AuthoredTorch)?0:1,current->kind==kActionEffect_AuthoredParticleArea?16:128,&value_number) && value_number == floorf(value_number);
+        bit = 256; ok = Number(value,(current->kind==kActionEffect_AuthoredCloud||current->kind==kActionEffect_AuthoredTorch)?0:1,current->kind==kActionEffect_AuthoredParticleArea?16:current->kind==kActionEffect_AuthoredFireflies?32:128,&value_number) && value_number == floorf(value_number);
         current->particles = (uint16_t)value_number;
       } else if (!strcmp(key,"mist-height") && current->kind == kActionEffect_AuthoredFloorMist) {
         bit = 1024; ok = Number(value,4,64,&current->mist_height);
@@ -508,29 +556,56 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
       } else if (!strcmp(key,"pattern") && (current->kind==kActionEffect_AuthoredParticleArea||current->kind==kActionEffect_AuthoredParticlePath)) {
         bit=UINT64_C(1)<<20;ok=false;
         for(unsigned i=0;i<kActionParticle_Count;++i)if(!strcmp(value,kPatterns[i])){current->field_style.pattern=i;ok=true;}
-      } else if (!strcmp(key,"angle") && (current->kind==kActionEffect_AuthoredFan||current->kind==kActionEffect_AuthoredGradient)) {
-        bit=UINT64_C(1)<<21;ok=Number(value,-180,180,&current->field_style.angle);
+      } else if (!strcmp(key,"angle") && (current->kind==kActionEffect_AuthoredFan||current->kind==kActionEffect_AuthoredGradient||current->kind==kActionEffect_AuthoredFoliage||current->kind==kActionEffect_AuthoredCanopy)) {
+        const float limit=current->kind==kActionEffect_AuthoredCanopy?70:180;
+        bit=UINT64_C(1)<<21;ok=Number(value,-limit,limit,&current->field_style.angle);
       } else if (!strcmp(key,"fan") && current->kind==kActionEffect_AuthoredFan) {
         bit=UINT64_C(1)<<22;ok=Number(value,0,120,&current->field_style.fan);
-      } else if (!strcmp(key,"softness") && (current->kind==kActionEffect_AuthoredFan || current->kind==kActionEffect_AuthoredCloud || current->kind==kActionEffect_AuthoredHalo || current->kind==kActionEffect_AuthoredGradient)) {
+      } else if (!strcmp(key,"thickness") && current->kind==kActionEffect_AuthoredFan) {
+        bit=UINT64_C(1)<<51;ok=Number(value,.05f,1,&current->field_style.thickness);
+      } else if (!strcmp(key,"softness") && (current->kind==kActionEffect_AuthoredFan || current->kind==kActionEffect_AuthoredCloud || current->kind==kActionEffect_AuthoredHalo || current->kind==kActionEffect_AuthoredGradient || current->kind==kActionEffect_AuthoredFoliage || current->kind==kActionEffect_AuthoredCanopy)) {
         bit=UINT64_C(1)<<23;ok=Number(value,0,1,&current->field_style.softness);
-      } else if (!strcmp(key,"strands") && (current->kind==kActionEffect_AuthoredFan || current->kind==kActionEffect_AuthoredCloud)) {
-        bit=UINT64_C(1)<<24;ok=Number(value,1,current->kind==kActionEffect_AuthoredCloud?24:32,&value_number)&&value_number==floorf(value_number);
+      } else if (!strcmp(key,"strands") && (current->kind==kActionEffect_AuthoredFan || current->kind==kActionEffect_AuthoredCloud || current->kind==kActionEffect_AuthoredFoliage)) {
+        bit=UINT64_C(1)<<24;ok=Number(value,1,current->kind==kActionEffect_AuthoredFoliage?8:(current->kind==kActionEffect_AuthoredCloud||current->kind==kActionEffect_AuthoredCanopy)?24:32,&value_number)&&value_number==floorf(value_number);
         current->field_style.strands=(uint8_t)value_number;
       } else if (!strcmp(key,"drift") && (current->kind==kActionEffect_AuthoredWater || current->kind==kActionEffect_AuthoredCloud)) {
         bit=UINT64_C(1)<<25;ok=Number(value,-128,128,&current->field_style.drift);
-      } else if (!strcmp(key,"amplitude") && (current->kind==kActionEffect_AuthoredWater || current->kind==kActionEffect_AuthoredCloud || current->kind==kActionEffect_AuthoredHeat)) {
+      } else if (!strcmp(key,"amplitude") && (current->kind==kActionEffect_AuthoredWater || current->kind==kActionEffect_AuthoredCloud || current->kind==kActionEffect_AuthoredHeat || current->kind==kActionEffect_AuthoredFoliage||current->kind==kActionEffect_AuthoredCanopy)) {
         bit=UINT64_C(1)<<26;ok=Number(value,0,32,&current->field_style.amplitude);
       } else if (!strcmp(key,"gust") && (current->kind==kActionEffect_AuthoredCloud||current->kind==kActionEffect_AuthoredParticlePath)) {
         bit=UINT64_C(1)<<46;ok=Number(value,0,1,&current->field_style.gust);
-      } else if (!strcmp(key,"activity") && current->kind==kActionEffect_AuthoredParticlePath) {
+      } else if (!strcmp(key,"activity") && (current->kind==kActionEffect_AuthoredParticlePath||current->kind==kActionEffect_AuthoredDrips)) {
         bit=UINT64_C(1)<<47;ok=Number(value,.05f,1,&current->field_style.activity);
       } else if (!strcmp(key,"twinkle") && (current->kind==kActionEffect_AuthoredCloud||current->kind==kActionEffect_AuthoredParticlePath||current->kind==kActionEffect_AuthoredParticleArea)) {
         bit=UINT64_C(1)<<49;ok=Number(value,0,1,&current->field_style.twinkle);
-      } else if (!strcmp(key,"shadows") && current->kind==kActionEffect_AuthoredTorch) {
+      } else if (!strcmp(key,"shadows") && (current->kind==kActionEffect_AuthoredTorch || current->kind==kActionEffect_AuthoredFan || current->kind==kActionEffect_AuthoredCanopy || current->kind==kActionEffect_AuthoredFoliage)) {
         bit=UINT64_C(1)<<48;ok=!strcmp(value,"0")||!strcmp(value,"1");current->field_style.shadows=!strcmp(value,"1");
+      } else if (!strcmp(key,"scatter") && current->kind==kActionEffect_AuthoredCanopy) {
+        bit=UINT64_C(1)<<52;ok=Number(value,0,1,&current->field_style.scatter);
+      } else if (!strcmp(key,"bounce") && current->kind==kActionEffect_AuthoredCanopy) {
+        bit=UINT64_C(1)<<53;ok=Number(value,0,1,&current->field_style.bounce);
+      } else if (!strcmp(key,"textured") && (current->kind==kActionEffect_AuthoredCloud||current->kind==kActionEffect_AuthoredFoliage||current->kind==kActionEffect_AuthoredParticleArea)) {
+        bit=UINT64_C(1)<<54;ok=!strcmp(value,"0")||!strcmp(value,"1");current->field_style.textured=!strcmp(value,"1");
+      } else if (!strcmp(key,"rolling") && current->kind==kActionEffect_AuthoredCloud) {
+        bit=UINT64_C(1)<<55;ok=Number(value,0,1,&current->field_style.rolling);
+      } else if (!strcmp(key,"wake") && current->kind==kActionEffect_AuthoredCloud) {
+        bit=UINT64_C(1)<<56;ok=Number(value,0,1,&current->field_style.wake);
+      } else if (!strcmp(key,"canopy-response") && (current->kind==kActionEffect_AuthoredCloud||current->kind==kActionEffect_AuthoredParticlePath||current->kind==kActionEffect_AuthoredParticleArea||current->kind==kActionEffect_AuthoredDrips)) {
+        bit=UINT64_C(1)<<57;ok=Number(value,0,1,&current->field_style.canopy_response);
+      } else if (!strcmp(key,"glow-style") && current->kind==kActionEffect_AuthoredFireflies) {
+        bit=UINT64_C(1)<<58;
+        const char *styles[]={"insects","wisps","moss"};ok=false;
+        for(unsigned i=0;i<kActionGlow_Count;++i)if(!strcmp(value,styles[i])) {current->field_style.glow_style=(uint8_t)i;ok=true;break;}
+      } else if (!strcmp(key,"chorus") && current->kind==kActionEffect_AuthoredFireflies) {
+        bit=UINT64_C(1)<<59;ok=Number(value,0,1,&current->field_style.chorus);
+      } else if (!strcmp(key,"trail") && current->kind==kActionEffect_AuthoredFireflies) {
+        bit=UINT64_C(1)<<60;ok=Number(value,0,1,&current->field_style.trail);
+      } else if (!strcmp(key,"ripple") && current->kind==kActionEffect_AuthoredDrips) {
+        bit=UINT64_C(1)<<61;ok=!strcmp(value,"0")||!strcmp(value,"1");current->field_style.ripple=!strcmp(value,"1");
       } else if (!strcmp(key,"carry") && current->kind==kActionEffect_AuthoredCloud) {
         bit=UINT64_C(1)<<45;ok=Number(value,0,512,&current->field_style.carry);
+      } else if (!strcmp(key,"seed") && (current->kind==kActionEffect_AuthoredFoliage||current->kind==kActionEffect_AuthoredCanopy)) {
+        bit=131072;ok=UnsignedNumber(value,&current->particle_style.seed);
       } else if (!strcmp(key,"color-end") && (current->kind==kActionEffect_AuthoredGradient||current->kind==kActionEffect_AuthoredHalo)) {
         bit=262144;ok=Color(value,&current->particle_style.color_end);current->color_end_set=1;
       } else if (ActionEffectRecipes_ParticleSupported(current->kind)) {
@@ -573,7 +648,7 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
     r->shape.enabled = r->enabled;
     if(!ActionEffectActorSelector_Valid(&r->actor) || (r->actor.target&&
         (r->anchor!=kActionEffectAnchor_Bg1 || r->field_style.placement!=2 ||
-         r->kind==kActionEffect_AuthoredFloorMist || r->kind==kActionEffect_AuthoredExposure ||
+         r->kind==kActionEffect_AuthoredCanopy || r->kind==kActionEffect_AuthoredFloorMist || r->kind==kActionEffect_AuthoredExposure ||
          r->kind==kActionEffect_AuthoredContour || r->kind==kActionEffect_AuthoredWater ||
          r->kind==kActionEffect_AuthoredParticleArea || r->kind==kActionEffect_AuthoredHeat))) {ok=false;break;}
     r->shape.intensity = r->tuning.intensity;
@@ -584,7 +659,7 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
     /* Collision-supported mist, exposure regions and traced playfield edges
      * require the terrain coordinate system. Reject incompatible bindings. */
     if(r->anchor!=kActionEffectAnchor_Bg1 &&
-        (r->kind==kActionEffect_AuthoredFloorMist || r->kind==kActionEffect_AuthoredExposure ||
+        (r->kind==kActionEffect_AuthoredCanopy || r->kind==kActionEffect_AuthoredFloorMist || r->kind==kActionEffect_AuthoredExposure ||
          r->kind==kActionEffect_AuthoredContour)){ok=false;break;}
     if(r->kind==kActionEffect_AuthoredHeat && (r->anchor!=kActionEffectAnchor_Bg2Point||r->field_style.placement!=0)){ok=false;break;}
     if(r->kind==kActionEffect_AuthoredContour || r->kind==kActionEffect_AuthoredCloud || r->kind==kActionEffect_AuthoredParticlePath)for(unsigned j=0;j<r->field_style.point_count;++j) {
@@ -601,16 +676,41 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
     if(!ok)break;
     if ((r->kind==kActionEffect_AuthoredGradient||r->kind==kActionEffect_AuthoredHalo)&&!r->color_end_set)
       r->particle_style.color_end=r->tuning.color;
+    if(r->kind==kActionEffect_AuthoredFoliage && r->field_style.shadows &&
+        (!r->field_style.textured||r->anchor||r->actor.target)) {ok=false;break;}
+    if(r->field_style.canopy_response>0 && r->anchor) {ok=false;break;}
+    if(r->kind==kActionEffect_AuthoredParticleArea&&r->field_style.textured&&r->field_style.pattern!=kActionParticle_Leaves){ok=false;break;}
     if (!ActionEffectRecipes_ParticleSupported(r->kind)) continue;
+    if(r->kind==kActionEffect_AuthoredCloud && r->field_style.textured && r->field_style.point_count) {ok=false;break;}
+    if(r->kind==kActionEffect_AuthoredCloud) {
+      const ActionEffectFieldStyle *s=&r->field_style;
+      if((s->rolling>0||s->wake>0||s->canopy_response>0) &&
+          (!s->textured||s->point_count||r->anchor||r->actor.target||s->rolling<=0)) {ok=false;break;}
+    }
     if(r->kind==kActionEffect_AuthoredCloud && !r->field_style.point_count && (r->particles||r->field_style.carry>0||r->field_style.twinkle>0)) {ok=false;break;}
-    if (!r->travel_y_set) r->particle_style.travel_y=r->kind==kActionEffect_AuthoredTorch||r->kind==kActionEffect_AuthoredCloud?0:r->kind==kActionEffect_AuthoredParticleArea?-96:-r->height;
+    if (!r->travel_y_set) r->particle_style.travel_y=r->kind==kActionEffect_AuthoredTorch||r->kind==kActionEffect_AuthoredCloud?0:r->kind==kActionEffect_AuthoredParticleArea?-96:r->kind==kActionEffect_AuthoredFireflies?0:-r->height;
     if (!r->color_end_set) r->particle_style.color_end=r->tuning.color;
     ok=ActionAuthoredParticles_Valid(&r->particle_style);
+  }
+  /* Resolve water members after complete fields validate, independent of INI
+   * ordering. A copied field owns its source count in the destination room. */
+  for (unsigned i=0; ok && i<next->count; ++i) {
+    const ActionEffectRecipe *r=&next->records[i];
+    if (!r->member) continue;
+    unsigned count=ActionEffectMembers_Count(r->kind,r->group,r->room);
+    if (ActionEffectMembers_WaterLimit(r->kind))
+      for (unsigned j=0;j<next->count;++j) {
+        const ActionEffectRecipe *field=&next->records[j];
+        if (field->water_field && field->group==r->group && field->room==r->room && field->terrain==r->terrain)
+          count=ActionEffectMembers_WaterCount(r->kind,&next->water_fields[field->water_field-1]);
+      }
+    if (r->source>count) ok=false;
   }
   /* Bound authored cost independently of native decoration/actor storage.
    * Conservative whole-room limits eliminate camera-dependent eviction. */
   for (unsigned i = 0; ok && i < next->count; ++i) {
     unsigned instances = 0, vertices = 0, members = 0, heat = 0;
+    unsigned pass_vertices[kActionEffectRenderLayer_Count]={0};
     const ActionEffectRecipe *r = &next->records[i];
     /* Tessellate each room's exposure union once, not once per source. */
     bool checked=false;
@@ -629,8 +729,23 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
       if (!other->enabled) continue;
       if(other->kind==kActionEffect_AuthoredHeat)++heat;
       const unsigned copies=other->actor.target?other->actor.limit:1;
-      instances+=copies; vertices+=copies*RecipeCost(other);
+      instances+=copies;
+      ActionEffectInstance placed={.kind=other->kind,.tuning=other->tuning,.field_style=other->field_style};
+      RecipePlacement(other,&placed);
+      const unsigned source=placed.render_layer;
+      const unsigned cost=copies*RecipeCost(other);
+      /* Glow cores/tails are visible particles, not material-light geometry.
+       * Receiver passes emit only one clipped spill quad per glow point. */
+      const unsigned light_cost=other->kind==kActionEffect_AuthoredFireflies?copies*8*other->particles:cost;
+      for(unsigned pass=0;pass<kActionEffectRenderLayer_Count;++pass)
+        if(pass==source||(LightSupported(other->kind)&&(pass==kActionEffectRenderLayer_Bg1Plane||
+            pass==kActionEffectRenderLayer_Bg1Light||pass==kActionEffectRenderLayer_Bg1HighPlane)))pass_vertices[pass]+=pass==source?cost:light_cost;
     }
+    /* Every draw/receiver batch has its own 4096-vertex allocation. Reserve
+     * the entire room in each applicable pass, including material re-routing;
+     * never rely on camera culling to make an overfull pass fit. */
+    for(unsigned pass=0;pass<kActionEffectRenderLayer_Count;++pass)
+      if(pass_vertices[pass]>vertices)vertices=pass_vertices[pass];
     const char *limit_name=NULL;unsigned used=0,limit=0;
     if(members>kActionNativeMemberMax){limit_name="native overrides";used=members;limit=kActionNativeMemberMax;}
     else if(instances>kActionAuthoredMaxInstances){limit_name="active effects";used=instances;limit=kActionAuthoredMaxInstances;}
@@ -820,7 +935,7 @@ void ActionEffectRecipes_Apply(const ActionEffectRecipes *table, unsigned group,
     for (unsigned i = 0; i < table->count; ++i)
       directional |= table->records[i].emitter &&
                      (table->records[i].kind == kActionEffect_AuthoredFan ||
-                      (table->records[i].kind==kActionEffect_AuthoredTorch&&table->records[i].field_style.shadows)) &&
+                      table->records[i].kind==kActionEffect_AuthoredTorch) && table->records[i].field_style.shadows &&
                      table->records[i].group == group && table->records[i].room == room &&
                      table->records[i].terrain == terrain && table->records[i].enabled;
     if (directional) {
@@ -864,18 +979,7 @@ void ActionEffectRecipes_Apply(const ActionEffectRecipes *table, unsigned group,
       .particle_style = r->particle_style, .field_style=r->field_style,
       .geometry = {.kind = kActionEffectGeometry_Rect,
         .data.rect = {-r->width/2,-r->height/2,r->width/2,r->height/2}}};
-    if (r->kind!=kActionEffect_AuthoredFloorMist && r->kind!=kActionEffect_AuthoredExposure) {
-      const bool alpha=r->kind==kActionEffect_AuthoredMist || r->kind==kActionEffect_AuthoredCloud || r->kind==kActionEffect_AuthoredSpray ||
-          ((r->kind==kActionEffect_AuthoredParticleArea||r->kind==kActionEffect_AuthoredParticlePath) && r->field_style.pattern>=kActionParticle_Dust &&
-           r->field_style.pattern<=kActionParticle_Scarabs);
-      e->render_layer=r->field_style.placement==0 ? kActionEffectRenderLayer_Bg2Alpha :
-          r->field_style.placement==1 ? (alpha?kActionEffectRenderLayer_Bg1Mist:kActionEffectRenderLayer_Bg1Plane) :
-          (alpha?kActionEffectRenderLayer_WorldDust:kActionEffectRenderLayer_WorldOverlay);
-    }
-    if(r->kind==kActionEffect_AuthoredExposure) {
-      e->render_layer=ActionExposure_Brightness(e)>1?kActionEffectRenderLayer_Bg1Light:kActionEffectRenderLayer_Bg1Mist;
-      e->tuning.dim_receivers_set=1;
-    }
+    RecipePlacement(r,e);
     if (r->kind == kActionEffect_AuthoredFloorMist) {
       const ActionEffectLocalRect area={r->x-r->width/2,r->y-r->height/2,r->x+r->width/2,r->y+r->height/2};
       ActionEffectFloorField *floor=&frame->authored_floor[frame->authored_count-1];
@@ -891,6 +995,11 @@ void ActionEffectRecipes_Apply(const ActionEffectRecipes *table, unsigned group,
       e->age_ticks=actor->age;e->pulse_ticks=actor->age;e->phase_ticks=actor->phase_ticks;
       e->velocity_x=actor->vx;e->velocity_y=actor->vy;e->record_address=actor->address;
       e->projection_plane=kActionEffectProjectionPlane_Obj;e->obj_priority=actor->priority;
+    }
+    if(r->kind==kActionEffect_AuthoredCanopy || (r->kind==kActionEffect_AuthoredFoliage&&r->field_style.shadows)) {
+      ActionEffectInstance capture=*e;
+      if(r->kind==kActionEffect_AuthoredFoliage)capture.field_style.angle=0;
+      ActionEnvironmentScene_CaptureCanopy(scene,&capture,&frame->authored_floor[frame->authored_count-1]);
     }
     }
   }

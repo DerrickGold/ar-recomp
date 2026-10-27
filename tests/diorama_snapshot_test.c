@@ -90,6 +90,12 @@ int main(void) {
     memcpy(packet+offsets[i],previous,4);
     Checksum(size);
   }
+  snapshot.scene.scenery_grade=(DioramaSceneryGrade){.set=true,.strength=.5f,.saturation=1.25f,
+      .shadows=0x34675e,.highlights=0xd9d38b};
+  assert(DioramaSnapshot_Encode(&snapshot,images,packet,sizeof(packet),&size));
+  assert(DioramaSnapshot_Decode(packet,size,&decoded));
+  assert(decoded.scene.scenery_grade.strength==.5f && decoded.scene.scenery_grade.saturation==1.25f);
+  assert(decoded.scene.scenery_grade.shadows==0x34675e && decoded.scene.scenery_grade.highlights==0xd9d38b);
   snapshot.layers[0].source=1;
   memset(packet,0x5a,32);
   assert(!DioramaSnapshot_Encode(&snapshot,images,packet,sizeof(packet),&size) && !size);

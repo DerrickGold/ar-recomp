@@ -41,6 +41,8 @@ static SceneClipVertex SceneClipIntersection(
       .position = {a.vertex.position.x + (b.vertex.position.x - a.vertex.position.x) * t,
                    a.vertex.position.y + (b.vertex.position.y - a.vertex.position.y) * t},
       .color = MixColor(a.vertex.color, b.vertex.color, t),
+      .tex_coord = {a.vertex.tex_coord.x+(b.vertex.tex_coord.x-a.vertex.tex_coord.x)*t,
+                    a.vertex.tex_coord.y+(b.vertex.tex_coord.y-a.vertex.tex_coord.y)*t},
     },
     .source_index = t == 0 ? a.source_index : (t == 1 ? b.source_index : -1),
   };
@@ -130,6 +132,17 @@ bool AppendSceneClippedTriangle(
     writer->indices[writer->index_count++] = indices[i + 1];
   }
   return true;
+}
+
+/* Keep the same diagonal on CPU and GPU. Re-triangulating the clipped quad
+ * changes interpolated texture coordinates when the scene is tilted. */
+bool AppendSceneClippedQuad(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *mesh,const ArRenderVertex2D source[4],
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+  int mapped[4]={-1,-1,-1,-1};
+  const int triangles[2][3]={{0,1,2},{0,2,3}};
+  return AppendSceneClippedTriangle(writer,mesh,source,mapped,triangles[0],clip,project,context)&&
+      AppendSceneClippedTriangle(writer,mesh,source,mapped,triangles[1],clip,project,context);
 }
 
 bool AppendSceneSoftPatch(ActionEffectGeometryWriter *writer,
@@ -252,6 +265,7 @@ bool ActionEffectSource_Triangle(ActionEffectSourceBatch *b, const ActionEffectI
   for (unsigned i = 0; i < 3; ++i) {
     const ArRenderVertex2D *a = &v[triangle[i]];
     p->points[i][0] = a->position.x; p->points[i][1] = a->position.y;
+    p->points[i][2] = a->tex_coord.x; p->points[i][3] = a->tex_coord.y;
     memcpy(p->colors[i], &a->color, sizeof(a->color));
     if (b->lit_triangles) {
       p->points[i][2] = b->light_sample ? b->light_sample : a->tex_coord.x;

@@ -16,6 +16,7 @@
 static bool HasLightVolume(unsigned kind) {
   switch (kind) {
     case kActionEffect_AuthoredFan:
+    case kActionEffect_AuthoredCanopy:
     case kActionEffect_ForestCanopyLight:
     case kActionEffect_TowerWindowLight:
     case kActionEffect_BloodpoolMoonlight:
@@ -2105,16 +2106,24 @@ bool ActionSceneDecorationRender_Build(
       batch->indices,kActionSceneEffectRenderMaxIndices);
   if (project_point == ActionEffectSource_ProjectPoint) writer.source = project_userdata;
   writer.vertex_count=batch->vertex_count;writer.index_count=batch->index_count;
+  writer.frame=frame;
   const int base_vertices=writer.vertex_count, base_indices=writer.index_count;
   ActionSceneryShadow shadow = {0};
   bool shadow_prepared = false;
   for (unsigned i=0;i<frame->authored_count;++i) {
     const ActionEffectInstance *e=&frame->authored[i];
+    const ActionEffectProjectionContext *projection=writer.source?&writer.source->context:
+        project_point==ActionEffectProjection_ProjectPoint?project_userdata:NULL;
+    writer.atmosphere_unlit=projection&&projection->atmosphere_unlit;
+    writer.light_receiver=frame->light_receiver?frame->light_receiver:
+        projection&&projection->light_receiver?projection->light_receiver:
+        (projection&&projection->scenery_lighting_only)||project_point==ActionEffectReceivers_ProjectPoint||!HasLightVolume(e->kind)
+            ?kActionReceiver_Scenery:0;
     const bool light=lighting_enabled&&IncludeSurfaceLighting(e,render_layer,project_point,project_userdata,frame);
     const bool particles=particles_enabled&&e->render_layer==render_layer;
     if(!(e->flags&kActionEffectFlag_Visible)||(!light&&!particles))continue;
     const int first_vertex=writer.vertex_count;
-    if (!writer.source && (e->kind == kActionEffect_AuthoredFan || (e->kind==kActionEffect_AuthoredTorch&&e->field_style.shadows)) && light && !shadow_prepared) {
+    if (!writer.source && (e->kind == kActionEffect_AuthoredFan || e->kind==kActionEffect_AuthoredTorch) && e->field_style.shadows && light && !shadow_prepared) {
       if (!ActionSceneryShadow_Prepare(&shadow, &batch->shadow, &frame->scenery,
                                        project_point, clip_bounds, project_userdata))
         return false;

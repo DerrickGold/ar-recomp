@@ -55,6 +55,8 @@ typedef struct ActionEffectGeometryWriter {
   const ActionSceneryShadow *shadow;
   ActionEffectSourceBatch *source;
   unsigned light_receiver; /* Zero for visible atmospheric volume. */
+  const ActionSceneEffectFrame *frame; /* Captured bodies and canopy transport for rolling mist. */
+  bool atmosphere_unlit;
 } ActionEffectGeometryWriter;
 bool ActionSceneryShadow_Prepare(ActionSceneryShadow *shadow, ActionSceneryShadowCache *cache,
                                  const ActionMoonlightOcclusion *occlusion,
@@ -112,7 +114,8 @@ bool SceneActorHeading(const ActionEffectInstance *effect,
                               float *x, float *y);
 bool AppendExposureGroup(ActionEffectGeometryWriter *writer,const ActionEffectInstance *const *boxes,unsigned count,
     ActionEffectProjectPointFn project,ActionEffectClipBoundsFn clip_fn,void *context);
-bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,bool lighting,bool particles,
+float ActionCanopy_Sample(const ActionEffectInstance *,const ActionEffectFloorField *,float x,float y);
+bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,const ActionEffectFloorField *floor,bool lighting,bool particles,
     ActionEffectProjectPointFn project,ActionEffectClipBoundsFn clip,void *context);
 bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
     const ActionEffectInstance *effect, const ActionEffectFloorField *floor, bool lighting, bool particles,
@@ -143,6 +146,11 @@ bool AppendBillboard(ActionEffectGeometryWriter *, const ActionEffectInstance *,
     float, float, float, float, float, float, unsigned, const float (*)[4], const ArRenderColorF *,
     ActionEffectProjectPointFn, void *);
 void TintEffectMember(ActionEffectGeometryWriter *, const ActionNativeMember *, int, int, bool);
+/* Preserve the same triangle diagonal on CPU and GPU, including non-affine
+ * opacity on tapered canopy contacts. A general clipped pair uses at most 14 vertices. */
+bool AppendSceneClippedQuad(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *mesh,const ArRenderVertex2D source[4],
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context);
 bool AppendSceneClippedTriangle(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *mesh,
     const ArRenderVertex2D *source, int *mapped, const int *triangle,

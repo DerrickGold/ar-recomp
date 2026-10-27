@@ -1,4 +1,5 @@
 #include "action_effect_source_sdl.h"
+#include "action/action_effect_masks.h"
 #include "gpu_prototype_policy.h"
 #include "render_sdl_internal.h"
 #include "gpu_shader_blob.h"
@@ -38,6 +39,8 @@ enum {
   kUploadBytes = kPrimitiveBytes + kOccluderBytes +
       kActionSourceMaxLightJobs * (sizeof(ActionEffectSourceLightData) + kOccluderBytes)
 };
+_Static_assert(kUploadBytes >= kActionMaskAtlasWidth*kActionMaskAtlasHeight*sizeof(uint32_t),
+               "effect upload buffer holds the startup mask atlas");
 
 static void DestroyPacket(SDL_GPUDevice *device, ArGpuEffectPacket *packet) {
   SDL_ReleaseGPUBuffer(device, packet->primitives);
@@ -139,6 +142,7 @@ void ArGpuEffectSource_Destroy(ArGpuEffectSource *p) {
   SDL_ReleaseGPUBuffer(p->device, p->coverage);
   SDL_ReleaseGPUBuffer(p->device, p->sky_vertices);
   SDL_ReleaseGPUTransferBuffer(p->device, p->upload);
+  SDL_ReleaseGPUTexture(p->device, p->masks);
   SDL_ReleaseGPUSampler(p->device, p->sampler);
   SDL_ReleaseGPUSampler(p->device, p->nearest_sampler);
   SDL_ReleaseGPUSampler(p->device, p->wrap_sampler);
@@ -196,7 +200,7 @@ bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
   p->moon = GpuShaderBlob_CreateCompute(gpu, &moon, "effect moon", 0, 3, 3, 0, 1, 64, 1);
   SDL_GPUShader *vs = GpuShaderBlob_CreateWithStorage(gpu, &drawvs, "effect projection",
                                                       SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 1);
-  SDL_GPUShader *fs = GpuShaderBlob_CreateFragment(gpu, &drawfs, "effect color", 0, 0);
+  SDL_GPUShader *fs = GpuShaderBlob_CreateFragment(gpu, &drawfs, "effect color", 1, 0);
   SDL_GPUShader *sv = GpuShaderBlob_CreateWithStorage(gpu, &skyvs, "resident skybox",
                                                       SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 1);
   SDL_GPUShader *sf = GpuShaderBlob_CreateFragment(gpu, &skyfs, "resident skybox blur", 1, 1);
@@ -251,6 +255,27 @@ bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
   p->wrap_nearest_sampler = SDL_CreateGPUSampler(gpu, &sampler);
   sampler.min_filter = sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
   p->wrap_sampler = SDL_CreateGPUSampler(gpu, &sampler);
+  const SDL_GPUTextureCreateInfo texture={.type=SDL_GPU_TEXTURETYPE_2D,
+      .format=SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,.usage=SDL_GPU_TEXTUREUSAGE_SAMPLER,
+      .width=kActionMaskAtlasWidth,.height=kActionMaskAtlasHeight,.layer_count_or_depth=1,.num_levels=1};
+  p->masks=SDL_CreateGPUTexture(gpu,&texture);
+  if(ok&&p->masks&&p->upload) {
+    uint32_t *pixels=SDL_MapGPUTransferBuffer(gpu,p->upload,false);
+    if(!pixels)ok=false;
+    else {
+      ActionEffectMasks_Build(pixels); /* Write-only even on DX12 upload heaps. */
+      SDL_UnmapGPUTransferBuffer(gpu,p->upload);
+      SDL_GPUCommandBuffer *cmd=SDL_AcquireGPUCommandBuffer(gpu);
+      SDL_GPUCopyPass *copy=cmd?SDL_BeginGPUCopyPass(cmd):NULL;
+      if(!copy){if(cmd)SDL_CancelGPUCommandBuffer(cmd);ok=false;}
+      else {
+        const SDL_GPUTextureTransferInfo from={.transfer_buffer=p->upload,.pixels_per_row=kActionMaskAtlasWidth,.rows_per_layer=kActionMaskAtlasHeight};
+        const SDL_GPUTextureRegion to={.texture=p->masks,.w=kActionMaskAtlasWidth,.h=kActionMaskAtlasHeight,.d=1};
+        SDL_UploadToGPUTexture(copy,&from,&to,false);
+        SDL_EndGPUCopyPass(copy);ok=SDL_SubmitGPUCommandBuffer(cmd);
+      }
+    }
+  } else ok=false;
   if (ok && p->wrap_sampler && p->wrap_nearest_sampler && p->coverage && p->vertices && p->sky_vertices &&
       p->upload && p->sampler && p->nearest_sampler && p->moon_work &&
       p->moon_mask && p->moon_light)
@@ -556,6 +581,8 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
   SDL_GPURenderPass *draw = SDL_BeginGPURenderPass(cmd, &color, 1, NULL);
   if (!draw) goto failed;
   SDL_BindGPUGraphicsPipeline(draw, p->draw[format][b]);
+  const SDL_GPUTextureSamplerBinding mask_sampler={.texture=p->masks,.sampler=p->sampler};
+  SDL_BindGPUFragmentSamplers(draw,0,&mask_sampler,1);
   SDL_BindGPUVertexStorageBuffers(draw, 0, &p->vertices, 1);
   const float size[4] = {width, height, 0, 0};
   SDL_PushGPUVertexUniformData(cmd, 0, size, sizeof(size));

@@ -13,6 +13,7 @@ src/action/action_effect_receivers.c
 src/action/action_effect_preview.c
 src/action/action_ray_field_render.c
 src/action/action_environment_geometry.c
+src/action/action_effect_masks.c
 src/action/action_cave_effect_render.c
 src/action/action_bloodpool_effect_render.c
 src/action/action_bloodpool_detail_render.c

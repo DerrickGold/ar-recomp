@@ -2299,6 +2299,7 @@ if(BUILD_TESTING)
         src/action/action_bg_world.c
         src/action/action_ray_field_render.c
         src/action/action_environment_geometry.c
+        src/action/action_effect_masks.c
         src/action/action_scene_lightning_render.c
         src/action/action_effect_projection.c
         src/diorama/diorama_projection.c

@@ -3,6 +3,7 @@
 #include "action/action_effect_projection.h"
 #include "action/action_effect_render.h"
 #include "action/action_effect_source.h"
+#include "action/action_authored_particles.h"
 #include "actraiser_game.h"
 #include "app/session_fatal.h"
 #include "diorama/diorama.h"
@@ -1269,6 +1270,32 @@ static void AuthoredOnlyComposition(void) {
   PresentActionEffects_Reset(&device);
 }
 
+static void TexturedCloudResources(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b,&device);
+  LavaFrame();
+  frame.action_effect_lighting=frame.action_effect_particles=false;
+  frame.action_scene_effects=(ActionSceneEffectFrame){.authored_count=1};
+  frame.action_scene_effects.authored[0]=(ActionEffectInstance){
+    .world_x=128,.world_y=112,.kind=kActionEffect_AuthoredCloud,
+    .flags=kActionEffectFlag_Visible,.render_layer=kActionEffectRenderLayer_WorldDust,
+    .projection_plane=kActionEffectProjectionPlane_Bg1,
+    .tuning={.intensity=1,.color=0xadc4bd,.active=1},.particle_lifetime=240,
+    .particle_style=ActionAuthoredParticles_Default(64,93),
+    .field_style={.placement=2,.strands=2,.textured=1,.amplitude=2,.drift=8},
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-128,-32,128,32}},
+  };
+  PresentActionEffects_Draw(&device,&frame,viewport,NULL);
+  assert(b.geometries==1&&b.draws[0]=='H'&&b.created==1&&b.updated==1);
+  assert(b.textures[1].usage==kArRenderTextureUsage_Static);
+  frame.action_scene_effects.authored[0].pulse_ticks=60;
+  PresentActionEffects_Draw(&device,&frame,viewport,NULL);
+  assert(b.geometries==2&&b.draws[1]=='H'&&b.created==1&&b.updated==1);
+  PresentActionEffects_Reset(&device);
+  assert(b.destroyed==1);
+}
+
 static uint32_t source_hash;
 static unsigned source_count, source_submissions;
 static uint64_t source_revision;
@@ -1507,6 +1534,7 @@ int main(void) {
   for(unsigned i=0;i<sizeof(particle_slots)/sizeof(particle_slots[0]);++i)
     SourceParticleViewLifetime(particle_slots[i]);
   AuthoredOnlyComposition();
+  TexturedCloudResources();
   TestEffectMasterBrightness();
   SkyboxWaterfallComposition();
   TestCastleDimming();

@@ -10,7 +10,24 @@ layout(set = 3, binding = 0) uniform Context {
     vec4 priority_info; // capture size XY, high band, additive
     vec4 light_info; // output pixel to illumination UV: scale XY, offset ZW
     vec4 shade; // authored depth tint RGB, material mode
+    vec4 grade; // strength, saturation, reserved
+    vec4 grade_shadows;
+    vec4 grade_highlights;
 };
+
+vec3 grade_art(vec3 color) {
+    if (grade.x <= 0.0) return color;
+    const vec3 weights = vec3(.2126, .7152, .0722);
+    float luminance = dot(color, weights);
+    vec3 saturated = mix(vec3(luminance), color, grade.y);
+    vec3 tone = mix(grade_shadows.rgb, grade_highlights.rgb,
+        smoothstep(.06, .60, luminance));
+    // Split tone changes hue, not the room's exposure. Black stays black;
+    // light is still applied to the original material after this operation.
+    float tone_luma = dot(tone, weights);
+    tone = tone_luma > .001 ? tone / tone_luma : vec3(1);
+    return mix(color, clamp(saturated * tone, vec3(0), vec3(1)), grade.x);
+}
 
 // Keep the same premultiplied filtering and complementary priority coverage
 // as the ordinary DOF/priority materials. Illumination never changes alpha.
@@ -56,5 +73,5 @@ void main() {
     // Match kActionReceiverMaxIllumination: both art and objects receive up to 4x light.
     vec3 incoming = texture(u_illumination, gl_FragCoord.xy * light_info.xy + light_info.zw).rgb * 4.0;
     vec3 illumination = clamp(v_color.rgb + incoming * shade.rgb, vec3(0), 4.0 * shade.rgb);
-    o_color = vec4(art.rgb * illumination, art.a * v_color.a);
+    o_color = vec4(grade_art(art.rgb) * illumination, art.a * v_color.a);
 }

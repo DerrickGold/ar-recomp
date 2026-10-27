@@ -789,6 +789,23 @@ int main(void) {
     if (gpu_motion) CHECK(DioramaFrameGeneration_GpuPlaneMask() == expected);
   }
 
+  /* The presenter can replace backgrounds while the PPU still captures them.
+   * Old GPU textures remain valid, but hidden layers must not get analyzed or
+   * resurrect a motion pair. Turning them back on requires two fresh captures. */
+  for (unsigned pass = 0; pass < 4; ++pass) {
+    const uint8_t *endpoint=(const uint8_t *)(pass==3?current_pixels:previous_pixels);
+    planes[test_plane]=gpu_owned?NULL:endpoint;
+    DioramaFrameGeneration_FinishCapture();
+    CHECK(SDL_UpdateTexture(current,&source_rect,endpoint+kApron*sizeof(uint32_t),
+        kSurfaceWidth*sizeof(uint32_t)));
+    slot.timestamp_ns+=16666667;
+    DioramaFrameGeneration_CaptureWithSkybox(&render_device,&slot,sources,planes,
+        plane_pitches,pass<2?0:1u<<test_plane,1u<<test_plane,
+        ArRenderTexture_Invalid(),false);
+    CHECK(DioramaFrameGeneration_Prepare(&render_device,&slot,.5f,raw,
+        1u<<test_plane,resolved)==(pass==3?1u<<test_plane:0));
+  }
+
   /* A room transition must discard the old pair even when the new source
    * reports no changed planes. Reusing GPU allocations must not reuse motion. */
   DioramaFrameGeneration_InvalidateHistory();
@@ -851,7 +868,7 @@ int main(void) {
     CHECK(SDL_UpdateTexture(current, &sky_rect, sky_pixels, kDisplayWidth * 4));
     slot.timestamp_ns += 16666667;
     DioramaFrameGeneration_CaptureWithSkybox(
-        &render_device, &slot, sources, planes, plane_pitches, 0, sky_raw, true);
+        &render_device, &slot, sources, planes, plane_pitches, 0, 0, sky_raw, true);
   }
   ArRenderTexture sky_resolved;
   CHECK(DioramaFrameGeneration_PrepareWithSkybox(
@@ -875,7 +892,7 @@ int main(void) {
     CHECK(SDL_UpdateTexture(current, &sky_rect, sky_pixels, kDisplayWidth * 4));
     slot.timestamp_ns += 16666667;
     DioramaFrameGeneration_CaptureWithSkybox(
-        &render_device, &slot, sources, planes, plane_pitches, 0, sky_raw, true);
+        &render_device, &slot, sources, planes, plane_pitches, 0, 0, sky_raw, true);
     CHECK(DioramaFrameGeneration_PrepareWithSkybox(
         &render_device, &slot, 0.5f, raw, 0, resolved, sky_raw, &sky_resolved) == 0);
     CHECK(ArRenderTexture_Equals(sky_resolved, sky_raw));
@@ -898,7 +915,7 @@ int main(void) {
       for (unsigned endpoint = 0; endpoint < 2; ++endpoint) {
         slot.timestamp_ns += 16666667;
         DioramaFrameGeneration_CaptureWithSkybox(
-            &render_device, &slot, sources, planes, plane_pitches, 0, sky_raw, true);
+            &render_device, &slot, sources, planes, plane_pitches, 0, 0, sky_raw, true);
         DioramaFrameGeneration_FinishCapture();
         CHECK(DioramaFrameGeneration_SourceProjectionActive() == (mode != 0));
         DioramaFrameGeneration_PrepareWithSkybox(
@@ -919,7 +936,7 @@ int main(void) {
     for(unsigned attempt=0;attempt<3;++attempt) {
       slot.timestamp_ns+=16666667;
       DioramaFrameGeneration_CaptureWithSkybox(
-          &render_device,&slot,sources,planes,plane_pitches,0,sky_raw,true);
+          &render_device,&slot,sources,planes,plane_pitches,0,0,sky_raw,true);
       CHECK(DioramaFrameGeneration_SourceProjectionActive()==(attempt!=1));
       CHECK(DioramaFrameGeneration_SourceProjectionFallback()==(attempt==1));
       CHECK(DioramaFrameGeneration_PrepareWithSkybox(
@@ -947,7 +964,7 @@ int main(void) {
   for (unsigned reset = 0; reset < 3; ++reset) {
     slot.timestamp_ns += 16666667;
     DioramaFrameGeneration_CaptureWithSkybox(
-        &render_device, &slot, sources, planes, plane_pitches, 0, sky_raw, true);
+        &render_device, &slot, sources, planes, plane_pitches, 0, 0, sky_raw, true);
     DioramaFrameGeneration_InvalidateHistory();
     CHECK(DioramaFrameGeneration_PrepareWithSkybox(
         &render_device, &slot, .5f, raw, 0, resolved, sky_raw, &sky_resolved) == 0);

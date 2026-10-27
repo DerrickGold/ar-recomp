@@ -1,4 +1,5 @@
 #include "diorama_layer_order.h"
+#include <math.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -491,6 +492,7 @@ int DioramaLayerOrder_VirtualBand(const DioramaRoomOverride *room, int bg,
 
 bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   if (!room || !room->used) return false;
+  if (room->scenery_grade.set) return true;
   for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++)
     if (room->framing[profile].set) return true;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
@@ -576,6 +578,17 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
   return DioramaLayerOrder_ResolveSection(
       table, map_group, map_number, kDioramaLayerSection_Room,
       defaults, default_count, out, capacity);
+}
+
+DioramaSceneryGrade DioramaLayerOrder_SceneryGrade(const DioramaLayerOrderTable *table,
+    uint8_t group, uint8_t number, uint8_t section) {
+  DioramaSceneryGrade grade = {0};
+  const DioramaRoomOverride *base = section == kDioramaLayerSection_DeathHeimCompletion ? NULL :
+      DioramaLayerOrder_Find(table, group, number);
+  const DioramaRoomOverride *detail = DioramaLayerOrder_FindSection(table, group, number, section);
+  if (base && base->scenery_grade.set) grade = base->scenery_grade;
+  if (detail && detail->scenery_grade.set) grade = detail->scenery_grade;
+  return grade;
 }
 
 bool DioramaLayerOrder_ResolveTransparentFill(
@@ -1329,6 +1342,22 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
     if (out_error) *out_error = "bad terrain suffix (us, jp, eu or ge)";
     return false;
   }
+  if (!strcmp(token, "scenery-grade")) {
+    DioramaSceneryGrade grade = {.set=true};
+    unsigned shadow, highlight;
+    char tail;
+    if (scoped || sscanf(equals+1, " strength:%f saturation:%f shadows:%6x highlights:%6x %c",
+        &grade.strength, &grade.saturation, &shadow, &highlight, &tail) != 4 ||
+        !isfinite(grade.strength) || grade.strength < 0 || grade.strength > 1 ||
+        !isfinite(grade.saturation) || grade.saturation < 0 || grade.saturation > 2 ||
+        shadow > 0xffffff || highlight > 0xffffff) {
+      if (out_error) *out_error = "expected scenery-grade = strength:0..1 saturation:0..2 shadows:RRGGBB highlights:RRGGBB";
+      return false;
+    }
+    grade.shadows=shadow;grade.highlights=highlight;
+    room->scenery_grade=grade;
+    return true;
+  }
   if (!strcmp(token, "framing")) {
     int x, y;
     char tail;
@@ -1625,6 +1654,11 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
            section);
   else
     APPEND("[layers:%02X:%02X]\n", room->map_group, room->map_number);
+  if (room->scenery_grade.set) {
+    const DioramaSceneryGrade *g=&room->scenery_grade;
+    APPEND("scenery-grade = strength:%.6g saturation:%.6g shadows:%06x highlights:%06x\n",
+        g->strength,g->saturation,(unsigned)g->shadows,(unsigned)g->highlights);
+  }
   unsigned written_framing = 0;
   for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++) {
     if (!room->framing[profile].set || (written_framing & (1u << profile))) continue;

@@ -253,6 +253,14 @@ typedef struct DioramaStampLayerOverride {
   DioramaMapBounds occupied_bounds;
 } DioramaStampLayerOverride;
 
+/* BG1 material palette, before exposure and incoming light. Zero strength is
+ * identity. Packed colours are RGB; neutral shadow/highlight are white. */
+typedef struct DioramaSceneryGrade {
+  float strength, saturation;
+  uint32_t shadows, highlights;
+  bool set;
+} DioramaSceneryGrade;
+
 typedef struct DioramaRoomOverride {
   bool used;
   uint8_t map_group;   /* $18 */
@@ -263,6 +271,7 @@ typedef struct DioramaRoomOverride {
   DioramaPixelLayerOverride pixel_layers[2];
   DioramaStampLayerOverride stamp_layers[2];
   DioramaBgPolicyOverride bg_policy[2];
+  DioramaSceneryGrade scenery_grade;
   struct {
     bool set;
     int16_t x, y; /* view offset in native pixels, relative to native scroll */
@@ -295,6 +304,9 @@ typedef struct DioramaLayerOrderTable {
   DioramaRoomOverride rooms[kDioramaRoomOverrideMax];
   int count;
 } DioramaLayerOrderTable;
+
+DioramaSceneryGrade DioramaLayerOrder_SceneryGrade(const DioramaLayerOrderTable *table,
+    uint8_t group, uint8_t room, uint8_t section);
 
 void DioramaLayerOrder_ClearTable(DioramaLayerOrderTable *table);
 

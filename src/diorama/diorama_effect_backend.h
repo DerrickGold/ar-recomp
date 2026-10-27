@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "render/render_device.h"
+#include "diorama_layer_order.h"
 
 /* Optional compositor polish supplied by the active platform backend. The
  * game owns effect policy and semantic parameters; the backend owns shader
@@ -66,6 +67,7 @@ typedef struct DioramaSceneryLightEffectParams {
   float texel_width, texel_height, blur_radius, lower_content_v_max;
   DioramaPrioritySurfaceEffectParams priority;
   ArRenderColorF shade;
+  DioramaSceneryGrade grade;
   ArRenderRectF light_uv; /* Region of the full-output map; zero means all. */
   unsigned mode; /* 0: ordinary texture, 1: DOF, 2: priority pair */
 } DioramaSceneryLightEffectParams;

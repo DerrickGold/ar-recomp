@@ -12,6 +12,7 @@ typedef struct EffectBatch {
   int vertex_count, index_count;
   int vertex_capacity, index_capacity;
   bool overflow;
+  ArRenderTexture texture; /* Optional shared mask atlas; zero is untextured. */
 } EffectBatch;
 
 bool EffectRenderer_Available(void);

@@ -24,6 +24,7 @@ typedef struct ArGpuEffectSource {
   SDL_GPUComputePipeline *project, *shadow, *moon;
   SDL_GPUGraphicsPipeline *draw[2][3], *skybox[2][2];
   SDL_GPUBuffer *vertices, *coverage, *sky_vertices;
+  SDL_GPUTexture *masks;
   SDL_GPUBuffer *moon_work, *moon_mask, *moon_light;
   SDL_GPUTransferBuffer *upload;
   ArGpuEffectPacket packets[kActionSourcePacketSlots], transient;

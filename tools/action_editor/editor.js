@@ -198,6 +198,7 @@ function draw() {
   requestAnimationFrame(() => { framePending = false; drawNow(); });
 }
 function drawNow() {
+  PaletteEditor.refresh();
   BackgroundPolicyEditor.refresh();
   refreshEditorFeedback();
   if (mode === '2d') draw2d();

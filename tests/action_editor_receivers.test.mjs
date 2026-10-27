@@ -399,8 +399,13 @@ for (const view of [[800,600,1,0,0,0,0],[960,540,1,0,0,1,0],[960,600,1.4,.3,-.2,
   const floor=draws.find(d=>d.indices.length===48*10*6);
   assert(floor,'floor is projected with the scene');
   const floorArt=textures.get(floor.id);
-  const alphaRow=fraction=>Array.from(floorArt.pixels.subarray(
-    Math.floor(floorArt.h*fraction)*floorArt.w,(Math.floor(floorArt.h*fraction)+1)*floorArt.w),p=>p>>>24);
+  assert.equal(floorArt.h,396,'only the sampled floor rows occupy GPU storage');
+  const alphaRow=fraction=>{
+    const row=Math.floor(941*fraction)-(941-floorArt.h);
+    return Array.from(floorArt.pixels.subarray(row*floorArt.w,(row+1)*floorArt.w),p=>p>>>24);
+  };
+  const firstSample=floor.v[7]*floorArt.h-.5;
+  assert(firstSample>=0&&firstSample<1,'linear filtering retains both first-row texels');
   assert(alphaRow(.68).reduce((a,b)=>a+b,0)/floorArt.w>240,'walking ledge stays opaque');
   assert(alphaRow(.78).filter(a=>a<128).length>floorArt.w/4,
     'dark underside cavities reveal the moving space beneath the rock');
@@ -437,6 +442,115 @@ for (const view of [[800,600,1,0,0,0,0],[960,540,1,0,0,1,0],[960,600,1.4,.3,-.2,
   assert.deepEqual(draws,native,'disabling the rift restores identical native geometry and player');
 }
 console.log('Astral Rift: native fallback, player, aspect/orbit, and allocation/upload reuse passed.');
+// Palette-only scenery uses a retained black texel, not another full-screen
+// illumination pass. The same grade travels through the real WASM ABI.
+const gradeRoom=data.rooms.find(r=>r.group===5&&r.map===1);
+assert.equal(send(encode(data,blobs,gradeRoom),api.RoomPreview_Load),1);
+configure(noEffects);api.RoomPreview_EnableEffects(1);
+assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);
+camera=[128,128];
+assert.equal(send(Buffer.from('[layers:05:01]\nscenery-grade = strength:0.48 saturation:1.25 shadows:34675e highlights:d9d38b\n'),api.RoomPreview_Configure),1);
+render([960,540,1,0,0,0,0]);
+const gradeDraws=draws.filter(d=>d.effect===4);
+assert(gradeDraws.length>0,'palette-only scenery binds the material shader');
+for(const draw of gradeDraws) {
+ assert.equal(draw.params.length,29);assert(Math.abs(draw.params[16]-.48)<.0001);
+ assert.equal(draw.params[17],1.25);
+ assert(Math.abs(draw.params[20]-0x34/255)<.0001);
+ const map=textures.get(draw.params[28]);assert(map&&map.w===1&&map.h===1,'palette-only map is one black texel');
+ assert.equal(map.pixels[0],0xff000000);
+}
+const gradeAllocations=creates,gradeDrawCount=draws.length;
+render([960,540,1,0,0,0,0]);
+assert.equal(creates,gradeAllocations);assert.equal(uploads.length,0);assert.equal(draws.length,gradeDrawCount);
+api.RoomPreview_EnableEffects(0);render([960,540,1,0,0,0,0]);
+assert(!draws.some(d=>d.effect===4),'environment toggle restores ungraded materials');
+console.log('Scenery palette: shader uniforms, single-texel reuse, no extra light-map draw, and disable passed.');
+// The real player/enemy stand-ins feed the same bounded body-wake observer.
+api.RoomPreview_EnableEffects(1);
+configure('[effects]\nversion=1\n[emitter:05:01:0:cloud-bank:1]\nx=128\ny=224\nwidth=512\nheight=128\ntextured=1\nrolling=.8\nwake=.8\nstrands=3\ncolor=b9b0aa\ncolor-end=aaa4af\n');
+camera=[0,96];
+const mistCount=()=>draws.filter(d=>d.effect===-1&&textures.get(d.id)?.w===1024&&
+  textures.get(d.id)?.h===512&&textures.get(d.id)?.pixels[0]===0xffffffff).reduce((n,d)=>n+d.v.length/8,0);
+assert.equal(api.RoomPreview_SetReceivers(3,100,240,180,240),1);render(undefined,2000);
+const mistBase=mistCount();assert(mistBase>0,'rolling density masks submitted in the shared renderer');
+assert.equal(api.RoomPreview_SetReceivers(3,103,240,177,240),1);render(undefined,2001);
+assert.equal(mistCount(),mistBase+8,'moving player and enemy each add a bounded wake');
+render(undefined,2001);assert.equal(mistCount(),mistBase+8,'paused frame retains its wakes');
+render(undefined,2100);const settledMist=mistCount();
+assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);render(undefined,2100);
+assert.equal(mistCount(),settledMist,'timeline discontinuity matches fog with no body wakes');
+assert.equal(api.RoomPreview_SetReceivers(3,105,100,175,100),1);render(undefined,2101);
+assert.equal(api.RoomPreview_SetReceivers(3,108,100,172,100),1);render(undefined,2102);
+const highMist=mistCount();
+assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);render(undefined,2102);
+assert.equal(mistCount(),highMist,'bodies above the fog do not stir it');
+console.log('Rolling mist preview: player/enemy movement, pause, scrubbing and vertical exclusion passed.');
+// The shipped native definitions must fit the real WASM budget too. Moving
+// through every Marahna room exercises all glow variants and sparse dew cycles.
+const shippedEffects=fs.readFileSync('action-effects.ini','utf8');
+for(const id of [1,2,3]) for(const terrain of [0,1,2]) {
+  const originalRoom=data.rooms.find(r=>r.group===5&&r.map===id);
+  const terrainRoom={...originalRoom,terrainProfile:terrain,bg:[originalRoom.terrainVariants.find(v=>v.profile===terrain).bg1,originalRoom.bg[1]]};
+  assert.equal(send(encode(data,blobs,terrainRoom),api.RoomPreview_Load),1);
+  configure(shippedEffects);api.RoomPreview_EnableEffects(1);
+  const cells=api.RoomPreview_CollisionGrid(),columns=api.RoomPreview_Width()/16;
+  const collision=new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),cells).slice();
+  for(const block of shippedEffects.split(/(?=^\[)/m).filter(b=>b.startsWith(`[emitter:05:0${id}:${terrain}:drips:`))) {
+    const values=Object.fromEntries([...block.matchAll(/^([a-z-]+)=([^\n]*)$/gm)].map(m=>[m[1],m[2]]));
+    const x=Number(values.x),y=Number(values.y),h=Number(values.height),w=Number(values.width);
+    for(let py=Math.ceil((y-h/2)/16)*16;py<y+h/2;py+=16)for(const px of [x-w/2,x+w/2])
+      assert.equal(collision[(py/16|0)*columns+(px/16|0)]&15,0,'authored dew never falls through a platform');
+    if(values.ripple==='1')assert.equal(collision[((y+h/2)/16|0)*columns+(x/16|0)]&15,0,'ripples only on open water');
+  }
+  camera=[0,id===3?0:224];render(undefined,1200);
+  const created=creates;
+  for(const clock of [1201,1500,1900,1200]) {render(undefined,clock);assert.equal(creates,created,'glow/dew animation reuses textures');}
+  camera=[128,id===3?0:224];render(undefined,1200);
+  assert(draws.some(d=>textures.get(d.id)?.w===1024&&textures.get(d.id)?.h===512));
+}
+assert.equal(send(encode(data,blobs,data.rooms.find(r=>r.group===5&&r.map===1)),api.RoomPreview_Load),1);
+console.log('Marahna swamp life: shipped room budgets, shared render, timeline scrubbing and texture reuse passed.');
+// Moving Fillmore's wet-surface field into another room must also move its
+// editable catalogue, including contacts added/removed after the first scan.
+const wetField=fs.readFileSync('assets/effects/cave-water-field.ini','utf8')
+  .replace('[field:01:02:0:', '[field:05:01:0:')
+  .replace('counts=3 4 8 4','counts=0 0 2 0')
+  .replace('components=15','components=8')
+  .replace('dimensions=2048 1280 2048 1280','dimensions=0 0 0 0')
+  .replace(/^wet-1=.*$/m,'wet-1=278 100 416 0 0 0')
+  .replace(/^wet-2=.*$/m,'wet-2=354 200 416 0 0 0');
+const kindName=kind=>{
+  const p=api.RoomPreview_KindName(kind),bytes=new Uint8Array(api.memory.buffer);
+  let end=p;while(bytes[end])end++;
+  return new TextDecoder().decode(bytes.subarray(p,end));
+};
+const sheenIndex=()=>Array.from({length:api.RoomPreview_CatalogueCount()},(_,i)=>i)
+  .find(i=>kindName(api.RoomPreview_CatalogueValue(i,1))==='cave-sheen');
+configure(wetField);
+let wetIndex=sheenIndex();
+assert.notEqual(wetIndex,undefined,'copied water field adds its family to the destination catalogue');
+assert.equal(api.RoomPreview_CatalogueValue(wetIndex,7),2);
+assert.equal(api.RoomPreview_CatalogueMemberValue(wetIndex,1,1),354);
+assert.equal(api.RoomPreview_CatalogueMemberValue(wetIndex,1,2),416,'sheen belongs to the landing, not the ceiling');
+assert.equal(api.RoomPreview_CatalogueMemberValue(wetIndex,1,3),32);
+assert.equal(api.RoomPreview_CatalogueMemberValue(wetIndex,1,4),5,'surface depth sets the resize handle');
+const wetMember='[member:05:01:0:cave-sheen:00000002]\noffset-x=7\n';
+configure(wetField+'\n'+wetMember);
+configure(noEffects+wetMember+wetField.slice(wetField.indexOf('[field:')));
+assert.equal(send(Buffer.from(wetField+'\n'+wetMember.replace('00000002','00000003')),
+  api.RoomPreview_ConfigureEffects),0,'member beyond the copied field count is rejected');
+assert.equal(api.RoomPreview_CatalogueValue(sheenIndex(),7),2,'invalid edit preserves the active field');
+assert.equal(send(Buffer.from(noEffects+wetMember),api.RoomPreview_ConfigureEffects),0,
+  'copied members require their destination field');
+configure(wetField.replace('counts=0 0 2 0','counts=0 0 1 0'));
+assert.equal(api.RoomPreview_CatalogueValue(sheenIndex(),7),1,'contact deletion refreshes the catalogue');
+configure(noEffects);
+assert.equal(sheenIndex(),undefined,'removing the copied field removes its catalogue entries');
+assert.equal(send(encode(data,blobs,data.rooms.find(r=>r.group===1&&r.map===2)),api.RoomPreview_Load),1);
+configure(wetField.replace('[field:05:01:0:','[field:01:02:0:').replace('counts=0 0 2 0','counts=0 0 0 0'));
+assert.equal(api.RoomPreview_CatalogueValue(sheenIndex(),7),0,'zero contacts never fall back to bundled contacts');
+console.log('Wet-surface fields: portable catalogue, landing handles, member saves, deletion and atomic validation passed.');
 assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);api.RoomPreview_Reset();
 assert.equal(textures.size,0,'room reset releases all preview textures');
 console.log('Shared player preview: native art, receiver masks, dimming/torch/rim, picking, mirroring and upload reuse passed.');

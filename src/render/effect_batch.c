@@ -4,8 +4,7 @@
 #include <stdio.h>
 
 /* Host effects use the renderer abstraction's standard additive/alpha blend
- * modes and untextured geometry, not a backend shader. Those are portable
- * API paths,
+ * modes and optional immutable texture masks. Those are portable API paths,
  * but not a promise of pixel-identical rasterization across Metal, Vulkan,
  * Direct3D and software. Capability is verified at the point of use: a backend
  * may legally substitute the closest blend mode, so a successful set is
@@ -62,7 +61,7 @@ bool EffectRenderer_Submit(ArRenderDevice *device, const EffectBatch *batch,
     .blend = blend,
   };
   if (ArRenderDevice_DrawGeometryWithState(
-          device, ArRenderTexture_Invalid(), batch->vertices,
+          device, batch->texture, batch->vertices,
           batch->vertex_count, batch->indices, batch->index_count, &state))
     return true;
   DisableEffectGeometry(device, "geometry submit");

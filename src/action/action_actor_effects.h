@@ -4,14 +4,25 @@
 #include <stdbool.h>
 /* Presentation facts, captured once on the game thread. Selectors use retained
  * family identity and optional animation filters, never mutable pool slots. */
-enum {kActionEffectActorMax=80,kActionActorBindingMaxInstances=16};
+enum {kActionEffectActorMax=80,kActionActorBindingMaxInstances=16,kActionActorWakeTicks=90};
+/* One short, world-space air disturbance per body. No gameplay allocation or
+ * renderer history: captured frames own this cosmetic state. */
+typedef struct ActionActorWake {
+  float x, y, dx, strength;
+  uint8_t age;
+} ActionActorWake;
 typedef struct ActionEffectActor {
   uint32_t generation;
   uint16_t source, parent_source, animation, state, visual, handler, resume;
   uint16_t age, phase_ticks, address;
   int16_t x,y,vx,vy;
   uint8_t bank, priority, visible, flip, player;
+  int16_t feet_y;
+  uint8_t body_radius;
+  ActionActorWake wake;
 } ActionEffectActor;
+void ActionEffectActor_UpdateWake(ActionEffectActor *,const ActionEffectActor *previous,
+                                  unsigned elapsed_ticks);
 typedef struct ActionEffectActorTrack {
   ActionEffectActor actor;
   /* Provenance is sampled once per actor generation, never refreshed from a

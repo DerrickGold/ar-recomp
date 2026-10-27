@@ -143,6 +143,13 @@ int main(int argc,char **argv) {
       const unsigned image_count = sizeof(images)/sizeof(images[0]);
       ++s_capture;
       const int x=(int)((w>256?w-256:0)*pose/2), y=(int)((h>224?h-224:0)*(2-pose)/2);
+      if (player && getenv("AR_ORACLE_MIST_WAKE")) {
+        RoomPreview_SetSourceProjection(NULL,NULL);
+        if (!RoomPreview_SetReceivers(3,x+101,y+196,x+179,y+196) ||
+            !RoomPreview_Render(x,y,99+pose*43,120,64,720,448,1,pose==1?.13f:0,pose==1?-.11f:0,sky,0)) {
+          fprintf(stderr,"wake seed failed\n");++failures;continue;
+        }
+      }
       if (player && !RoomPreview_SetReceivers(3,x+104,y+196,x+176,y+196)) {
         fprintf(stderr,"receiver setup failed\n");++failures;continue;
       }

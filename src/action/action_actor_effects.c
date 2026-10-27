@@ -2,6 +2,28 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
+#include <stdlib.h>
+
+void ActionEffectActor_UpdateWake(ActionEffectActor *actor,const ActionEffectActor *old,unsigned ticks) {
+  actor->wake=(ActionActorWake){0};
+  if(!old||!actor->visible||!old->visible||!actor->body_radius||!old->body_radius||
+      actor->generation!=old->generation||ticks>4)return;
+  const float dx=actor->x-old->x,dy=actor->y-old->y;
+  /* Ignore warps and changes of pose extent. Screen scroll is absent here. */
+  if(fabsf(dx)>16*ticks||fabsf(dy)>24*ticks||
+      abs((actor->feet_y-old->feet_y)-(actor->y-old->y))>2)return;
+  actor->wake=old->wake;
+  if(!ticks)return;
+  const unsigned age=actor->wake.age+ticks;
+  actor->wake.age=(uint8_t)(age<kActionActorWakeTicks?age:kActionActorWakeTicks);
+  if(age>=kActionActorWakeTicks)actor->wake.strength=0;
+  const float speed=hypotf(dx,dy)/ticks;
+  if(speed<.25f)return;
+  const float strength=fminf(1,speed/3);
+  actor->wake=(ActionActorWake){.x=actor->x,.y=actor->feet_y,
+    .dx=dx/ticks,.strength=strength,.age=0};
+}
 static bool Hex(const char *text,uint16_t *value) {
   unsigned v;int n=0;
   if(strlen(text)>4||sscanf(text,"%x%n",&v,&n)!=1||text[n]||v>65535)return false;

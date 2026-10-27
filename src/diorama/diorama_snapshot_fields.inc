@@ -96,3 +96,10 @@ for (unsigned i = 0; i < wire_plane_count; i++) {
   I(0, 2, s->layers[i].stack_direction)
   B(s->layers[i].stack_solid)
 }
+
+/* Appended in reserved header space: old snapshots have zero strength. */
+F(0, 1, s->scene.scenery_grade.strength)
+F(0, 2, s->scene.scenery_grade.saturation)
+U(0, 0xffffff, s->scene.scenery_grade.shadows)
+U(0, 0xffffff, s->scene.scenery_grade.highlights)
+B(s->scene.scenery_grade.set)

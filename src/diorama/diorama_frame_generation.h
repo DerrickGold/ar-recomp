@@ -32,13 +32,15 @@ void DioramaFrameGeneration_Capture(
     uint32_t changed_plane_mask);
 
 /* The independent finite-world skybox uses the same endpoint/motion pipeline
- * but is not a gameplay plane or part of its priority mask. */
+ * but is not a gameplay plane or part of its priority mask. source_plane_mask
+ * contains only synchronized, presentable layers. Hidden/replaced or failed
+ * uploads must not retain/analyze endpoints from their old GPU textures. */
 void DioramaFrameGeneration_CaptureWithSkybox(
     ArRenderDevice *device, const FrameSlot *slot,
     const ArRenderTexture source_textures[kDioramaPlane_Count],
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
-    uint32_t changed_plane_mask, ArRenderTexture skybox_texture,
+    uint32_t source_plane_mask, uint32_t changed_plane_mask, ArRenderTexture skybox_texture,
     bool skybox_changed);
 
 /* Join optional native preparation before changing/destroying any captured

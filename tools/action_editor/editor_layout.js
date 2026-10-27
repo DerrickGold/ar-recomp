@@ -89,7 +89,7 @@ const EditorLayout=(()=>{
   dialog.addEventListener('close',()=>{if(!dialog.open)restoreSection();});
   // Let tools return to the canvas, or open their dedicated inspector, with one
   // click. Ordinary setting edits keep the dialog open.
-  const leaveSettings=new Set(['pixelPick','framingAdjust','coverageFit','bgPolicyPreview',
+  const leaveSettings=new Set(['pixelPick','framingAdjust','coverageFit','bgPolicyPreview','palettePreview',
     'previewProbesHere','previewEventHere','effectInspectorOpen','emitterAdd','emitterMapEdit',
     'emitterMapPlace','particleAreaDraw','lightBoxDraw','floorMistDraw','floorMistErase','export',
     'effectDocumentOpen','bClass','bCell','bRect','bSelect','bPan','bSelectRect','stampTool']);

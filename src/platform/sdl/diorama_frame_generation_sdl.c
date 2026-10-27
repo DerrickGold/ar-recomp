@@ -1100,7 +1100,7 @@ void DioramaFrameGeneration_CaptureWithSkybox(
     const ArRenderTexture layer_textures[kDioramaPlane_Count],
     const uint8_t *const layer_pixels[kDioramaPlane_Count],
     const size_t layer_pitches[kDioramaPlane_Count],
-    uint32_t changed_plane_mask, ArRenderTexture skybox_texture,
+    uint32_t source_plane_mask, uint32_t changed_plane_mask, ArRenderTexture skybox_texture,
     bool skybox_changed) {
   DioramaFrameGeneration_FinishCapture();
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
@@ -1144,7 +1144,7 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   const int height = slot->snes_height +
       slot->ws_extra_top + slot->ws_extra_bottom;
   const uint32_t plane_mask = (slot->diorama_plane_request_mask &
-      slot->diorama_plane_content_mask) |
+      slot->diorama_plane_content_mask & source_plane_mask) |
       (have_skybox ? 1u << kDioramaFrameGenerationSkybox : 0u);
   DioramaFrameGenerationKey current = {
     .timestamp_ns = slot->timestamp_ns,
@@ -1595,7 +1595,7 @@ void DioramaFrameGeneration_Capture(
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitches[kDioramaPlane_Count], uint32_t changed) {
   DioramaFrameGeneration_CaptureWithSkybox(
-      device, slot, textures, pixels, pitches, changed,
+      device, slot, textures, pixels, pitches, UINT32_MAX, changed,
       ArRenderTexture_Invalid(), false);
 }
 

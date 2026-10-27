@@ -38,6 +38,20 @@
     "reason": "Lift received daylight or ambient illumination while retaining the visible ray volume and room exposure."
   },
   {
+    "kind": "canopy-light",
+    "symbol": "AuthoredCanopy",
+    "illumination": 3,
+    "receivers": 7,
+    "reason": "Leaf-filtered canopy patches illuminate the original scenery and actor colours through the shared receiver path."
+  },
+  {
+    "kind": "fireflies",
+    "symbol": "AuthoredFireflies",
+    "illumination": 1,
+    "receivers": 7,
+    "reason": "Small moving pools share the firefly positions and pulse; independent receiver flags keep the glow optional."
+  },
+  {
     "kind": "wall-torch",
     "symbol": "WallTorch",
     "illumination": 1,

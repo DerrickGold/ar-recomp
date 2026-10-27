@@ -2063,6 +2063,15 @@ static void CaptureAuthoringActor(ActionEffectObserver *observer,ActionSceneEffe
   actor.generation=same?old->generation:AllocateSequence(&observer->next_actor_generation);
   actor.age=same?AddSaturated16(old->age,ticks):0;
   actor.phase_ticks=same&&old->state==actor.state?AddSaturated16(old->phase_ticks,ticks):0;
+  const unsigned width=object->left_extent+object->right_extent;
+  const unsigned height=object->top_extent+object->bottom_extent;
+  if(actor.visible && !(object->flags&kActRaiserObjectFlag_OutsideActivation) && object->bottom_extent<=64 &&
+      width>=8&&width<=128&&height>=16&&height<=192 &&
+      (actor.player||(!parent&&Read16(ram,size,address+kActRaiserActionObject_HitPoints)))) {
+    actor.feet_y=(int16_t)(actor.y+object->bottom_extent);
+    actor.body_radius=(uint8_t)(width/2>32?32:width/2);
+  }
+  ActionEffectActor_UpdateWake(&actor,same?old:NULL,ticks);
   *track = (ActionEffectActorTrack){.actor = actor, .parent_address = parent, .active = 1};
   if(dst->actor_count<kActionEffectActorMax)dst->actors[dst->actor_count++]=actor;
 }

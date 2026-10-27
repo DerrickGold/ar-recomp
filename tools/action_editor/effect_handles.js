@@ -19,6 +19,7 @@ const EmitterMapTools=(()=>{
   $('#emitterMapPlace').onclick=()=>activate(true);
   $('#effectGuides').onchange=()=>draw();
   function corners(e) {
+    if(e.kind==='canopy-light')return EffectGeometry.outline(e).map((p,i)=>({...p,sx:i===0||i===3?-1:1,sy:i<2?-1:1,canopy:true}));
     if(e.kind==='light-fan')return [...[-1,1].map(sx=>({...EffectGeometry.rayPoint(e,0,sx),sx,sy:0,ray:true})),{...EffectGeometry.rayPoint(e,1),sx:0,sy:1,ray:true}];
     if(EffectGeometry.isRay(e))return [-1,1].map(sx=>({...EffectGeometry.rayPoint(e,1,sx),sx,sy:1,ray:true}));
     const axes=e.resizeWidth&&e.resizeHeight?[[-1,-1],[1,-1],[-1,1],[1,1]]:
@@ -68,7 +69,7 @@ const EmitterMapTools=(()=>{
     if(gesture.scope!==sceneKey(room)||gesture.layer!==bgIndex){cancel();return;}
     const p=point(ev),e=gesture.initial;
     if(gesture.corner?.rotate) {
-      const angle=EffectGeometry.angleAt(e,p),limit=e.native?30:180;
+      const angle=EffectGeometry.angleAt(e,p),limit=e.native?30:e.kind==='canopy-light'?70:180;
       gesture.draft={...e,angle:Math.max(-limit,Math.min(limit,Math.round(angle/(ev.altKey?15:1))*(ev.altKey?15:1)))};
     } else if(gesture.corner?.ray&&e.kind==='light-fan') {
       const o=EffectGeometry.origin(e),a=EffectGeometry.direction(e);
@@ -82,11 +83,20 @@ const EmitterMapTools=(()=>{
       const centre=EffectGeometry.rayPoint({...e,height},1),factor=e.guide?.[3]||1;
       const width=Math.max(4,Math.min(limit,snapped(2*Math.abs(p.x-centre.x)/factor,ev)));
       gesture.draft={...e,width,height};
+    } else if(gesture.corner?.canopy) {
+      const c=gesture.corner,lean=Math.tan((e.angle||0)*Math.PI/180);
+      // Hold the opposite visible corner fixed, including its horizontal lean.
+      const fixed={x:e.x-c.sx*e.width/2+(c.sy<0?lean*e.height:0),y:e.y-c.sy*e.height/2};
+      const height=Math.max(4,Math.min(16384,snapped(c.sy*(p.y-fixed.y),ev)));
+      const fixedX=fixed.x-(c.sy<0?lean*height:0);
+      const movingX=snapped(p.x,ev)-(c.sy>0?lean*height:0);
+      const width=Math.max(4,Math.min(16384,Math.round(c.sx*(movingX-fixedX))));
+      gesture.draft={...e,width,height,x:bounded(fixedX+c.sx*width/2),y:bounded(fixed.y+c.sy*height/2)};
     } else if(gesture.corner) {
       p.x=snapped(p.x,ev);p.y=snapped(p.y,ev);
       const c=gesture.corner,anchorY=e.anchorY??.5;
       const fixed={x:e.x-c.sx*e.width/2,y:e.y+((1-c.sy)/2-anchorY)*e.height};
-      const limit=e.native?32768:['particle-area','exposure','light-gradient','heat-haze'].includes(e.kind)?16384:512;
+      const limit=e.native?32768:['particle-area','exposure','light-gradient','heat-haze','cloud-bank','foliage-shadow','canopy-light'].includes(e.kind)?16384:512;
       let width=e.resizeWidth?Math.max(e.minWidth??4,Math.min(e.maxWidth||limit,2*Math.round(Math.abs(p.x-fixed.x)/2))):e.width;
       let height=e.resizeHeight?Math.max(4,Math.min(e.maxHeight||limit,2*Math.round(Math.abs(p.y-fixed.y)/2))):e.height;
       if(e.native) {

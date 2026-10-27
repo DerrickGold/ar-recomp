@@ -391,6 +391,7 @@ typedef struct DioramaScene {
   /* Optional synchronous source-UV brightness modifier for BG1 low/high/far.
    * Borrowed only during Composite, like plane_effect; not snapshot state. */
   const struct SceneryShadingField *scenery_exposure;
+  DioramaSceneryGrade scenery_grade;
   /* Draw only incident BG1 light, at half strength, into the compositor's
    * current target. Prepared once per presentation after projection; never
    * read back. On success, attached effects omit that surface contribution. */

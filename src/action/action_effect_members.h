@@ -6,6 +6,12 @@
 typedef struct ActionNativeMemberSource {
   float x, y, width, height;
 } ActionNativeMemberSource;
+/* Complete water definitions may be authored in any room. */
+struct ActionWaterField;
+unsigned ActionEffectMembers_WaterLimit(unsigned kind);
+unsigned ActionEffectMembers_WaterCount(unsigned kind, const struct ActionWaterField *field);
+bool ActionEffectMembers_WaterSource(unsigned kind, unsigned id,
+                                    const struct ActionWaterField *field, ActionNativeMemberSource *out);
 /* ID is catalogue ordinal + 1; the catalogue is append-only. Witness masks
  * are checked independently: moving light never moves or invents source art. */
 unsigned ActionEffectMembers_Count(unsigned kind, unsigned group, unsigned room);

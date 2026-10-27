@@ -288,15 +288,20 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     return;
   }
   bool skybox_changed = false;
-  uint32_t upload_mask = slot->diorama_plane_request_mask &
-                         slot->diorama_plane_content_mask;
+  /* Keep the PPU capture intact for native color math and fallback. Only
+   * discard presentation work once the replacement has all its resources. */
+  const uint32_t replaced_planes = DioramaAstralRift_ReplacedPlanes(device,
+      slot->death_heim_final_battle, slot->diorama_map_group,
+      slot->diorama_map_number, slot->diorama_layer_section);
+  const uint32_t upload_mask = slot->diorama_plane_request_mask &
+                         slot->diorama_plane_content_mask & ~replaced_planes;
   memcpy(s_resolved_textures, s_plane_textures, sizeof(s_resolved_textures));
   uint32_t gpu_changed = 0;
   const DioramaPerformanceScope gpu_capture_scope =
       DioramaPerformance_Begin(kDioramaPerformance_Upload);
   ArRenderTexture gpu_skybox = ArRenderTexture_Invalid();
-  const uint32_t gpu_mask = DioramaBgGpu_Resolve(device, slot->background_packet,
-      upload_mask, s_resolved_textures, &gpu_skybox, &gpu_changed);
+  const uint32_t gpu_mask = replaced_planes ? 0 : DioramaBgGpu_Resolve(device,
+      slot->background_packet, upload_mask, s_resolved_textures, &gpu_skybox, &gpu_changed);
   if (ArRenderTexture_IsValid(gpu_skybox)) {
     skybox_changed = (gpu_changed & (1u << kDioramaPlane_Count)) != 0;
     if (skybox_changed) ++s_diorama_skybox_view.revision;
@@ -307,8 +312,9 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   DioramaPerformance_End(gpu_capture_scope);
   for (unsigned plane = 0; plane < kDioramaPlane_Count; ++plane)
     if (!(gpu_mask & (1u << plane))) s_resolved_textures[plane] = s_plane_textures[plane];
-  SrPpuSurfaceView skybox_storage = slot->diorama_skybox_surface;
-  const bool owned_skybox =
+  SrPpuSurfaceView skybox_storage = replaced_planes
+      ? (SrPpuSurfaceView){0} : slot->diorama_skybox_surface;
+  const bool owned_skybox = !replaced_planes &&
       slot->background_packet && (slot->background_packet->owned_sources & 4u);
   const bool skybox_diagnostic = getenv("AR_DIORAMA_SNAPSHOT") || getenv("AR_PLANESTAT");
   if (owned_skybox && (!ArRenderTexture_IsValid(gpu_skybox) || skybox_diagnostic)) {
@@ -430,7 +436,8 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
       DioramaPerformance_Begin(kDioramaPerformance_FrameAnalysis);
   DioramaFrameGeneration_CaptureWithSkybox(
       device, slot, s_resolved_textures, pixels, pitch_bytes,
-      upload.changed_plane_mask, s_diorama_skybox_view.texture, skybox_changed);
+      s_diorama_uploaded_plane_mask, upload.changed_plane_mask,
+      s_diorama_skybox_view.texture, skybox_changed);
   DioramaPerformance_End(frame_analysis);
 }
 
@@ -782,6 +789,9 @@ retry_projection:;
       .bg1_dimming = PresentActionEffects_Bg1Dimming(slot),
       .bg1_dimming_ramp = dimming_ramp,
       .scenery_exposure = exposure.count?&exposure.field:NULL,
+      .scenery_grade = slot->action_environmental_effects ?
+          DioramaLayerOrder_SceneryGrade(render.layers,slot->diorama_map_group,
+              slot->diorama_map_number,slot->diorama_layer_section) : (DioramaSceneryGrade){0},
       .scenery_light = slot->action_environmental_effects &&
           ActionEffectReceivers_HasSurfaceLights(&slot->action_scene_effects)
           ? PresentActionEffects_DrawSceneryLight : NULL,

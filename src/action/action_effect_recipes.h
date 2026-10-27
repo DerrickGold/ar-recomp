@@ -5,7 +5,9 @@
 
 /* Sparse source overrides. IDs are room + terrain + kind + stable source
  * generation, never an array index or a transient actor address. */
-enum { kActionEffectRecipeMax = 256, kActionEffectRecipeMaxBytes = 131072 };
+/* Catalogue capacity is independent of the unchanged per-room instance and
+ * geometry budgets. Regional copies of authored scenes share this table. */
+enum { kActionEffectRecipeMax = 512, kActionEffectRecipeMaxBytes = 131072 };
 /* Draw placement is independent of the source coordinate system. */
 typedef enum ActionEffectAnchor {
   kActionEffectAnchor_Bg1, kActionEffectAnchor_Bg2Point, kActionEffectAnchor_Bg2Raster,

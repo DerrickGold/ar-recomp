@@ -566,7 +566,7 @@ Actor/projectile accents retain their existing settings and native bindings.
 Overrides are terrain-specific even where scenery edits share
 equivalent US/EU layouts.
 
-Each room/terrain permits 96 enabled emitters and at most 4096 added vertices;
+Each room/terrain permits 96 enabled emitters and at most 4096 added vertices per render batch;
 the file holds at most 256 records/128 KiB. Conservative costs are 97 vertices
 per light, four per mote and 296 per free-mist volume. Ground mist reserves
 `(ceil(width / 16) + 1) × 45` vertices for the worst support fragmentation,
@@ -738,6 +738,124 @@ map and use the same modal/drag/copy controls as newly placed effects. Act 2
 default in every terrain profile, as do the temple and Pharaoh presets. Act 1
 keeps its scenery-only lighting. Receiver controls remain independently editable.
 The stage presets also provide desert, temple and Pharaoh compositions.
+
+Marahna Act 1 (`05/01`–`05/03`) ships ordinary editable emitters for all
+three terrain profiles: cool ambient light, warm broken canopy light, light
+boxes, textured swamp mist, firefly clusters, drifting leaves/spores, wet glints
+and small bioluminescent moss points. Dimming and canopy illumination include
+scenery, the player and enemies; their receiver controls remain independent.
+Room 1 alternates wider warm glades with smaller, sheltered openings. Room 2
+has cooler, more enclosed patches around its ruins; the boss room uses one broad
+warm clearing. The fields vary in spacing, size, strength, tint and sway period,
+using the same editable controls and emitter count as the earlier uniform layout.
+Leaves and spores concentrate around the walking/jumping corridor, with wider
+firefly clusters near the foliage and vine tips reaching into the normal view.
+Their bounds remain fixed in BG1 world space; climbing reveals the quieter upper
+canopy rather than moving emitters with the camera. Particle-region density is
+per 256×256 world cell, so a room-sized field with density 1 is intentionally sparse.
+
+**Settings → Scenery palette** adjusts the BG1 source artwork before dimming
+and illumination. Strength blends the grade, saturation enriches or mutes the
+existing colours, and shadow/highlight tones add cool/warm colour separation.
+Actors, HUD and particles retain their own palettes. BG1-derived skyboxes use
+the same grade in their cached source filter. This room-wide setting is saved
+in `diorama-layers.ini` by Save project or Export level INI:
+
+```ini
+scenery-grade = strength:0.48 saturation:1.25 shadows:34675e highlights:d9d38b
+```
+
+It applies in the native/shared 3D renderer with Environmental effects enabled.
+Apply palette validates the draft; reset and undo/redo work like other scenery
+edits. Shift-click restores a value's neutral default. Grading is fused into
+the existing scenery material, before exposure and incoming light. A room with
+only a palette grade uses a retained black texel instead of a full light map.
+
+The **Canopy light** emitter (`canopy-light`) uses a seeded leaf-gap mask.
+Width sets the opening at the top of the field, height its vertical reach, and
+angle leans the rays (±70°). Its map outline shows that same slant. BG1 collision
+surfaces stop the light; decorative background pixels do not. **Solid terrain
+shadows** toggles this, **Surface spill** controls the short warm return at a
+hit, and **Air scattering** adjusts visible haze separately from illumination.
+**Light / shadow softness** blends the field's sides and terrain contacts;
+overlap neighbouring fields across those soft margins to avoid unlit seams.
+Leaf gaps use equal world-pixel scales on both axes, independent of ray slant
+or collision clipping. The full seed selects a mask, square rotation/reflection,
+sample region and size, so seeds eight apart no longer repeat the same pattern.
+Broad shaded crowns break up the fine gaps. These patterns reuse the fixed mask
+atlas and existing draw batch; the shared mapping also lights sprites and mist.
+Sway and cycle animate them around fixed world positions. Shadow capture is
+bounded and independent of the camera. This is an artistic approximation of
+surface bounce, rather than a full indirect-light simulation. Painted scenery
+that has no collision does not become a blocker.
+
+Free **Cloud banks** can enable **Textured wisps** for layered density and small
+clear gaps. They use the same fixed atlas as canopy light, with no per-frame
+texture generation or GPU readback. Place several low, overlapping banks with
+slightly different tints, drift and lifetimes for rolling mist. Textured wisps
+are separate from traced ground dust; clear the contour to use them.
+
+The `foliage-shadow` emitter adds hanging vines and feathered leaf silhouettes.
+**Textured vine silhouettes** selects the shared atlas, reducing per-stem geometry.
+On BG1, **Solid terrain shadows** clips these stencils above collision surfaces,
+using the full field rather than the visible camera window. Start the area above
+open canopy: non-solid decorative masonry does not block this collision mask.
+Marahna's shipped fields occupy open foliage pockets, with roofs clipping their
+lower ends. Background placement draws behind BG1; playfield placement shows
+silhouettes over the native backdrop.
+
+**Fireflies / bioluminescent points** (`fireflies`) is a bounded region with 1–32
+insects total. Each has a feathered bright core, a soft halo, an independent slow
+pulse and wandering motion. Size controls the core/halo; tint and end tint color
+the brighter/dimmer phases. Lifetime controls motion/pulse speed, travel adds a
+slow excursion, and wander adds smaller loops. **Firefly replies** (`chorus`, 0–1)
+blends occasional staggered responses into the independent pulses. **Glow style**
+selects insects, will-o’-wisps, or luminous moss. Wisps have slower breathing light;
+**Wisp tail** (`trail`, 0–1) adds three soft masks along their recent path. Moss
+uses four irregular porous masks, stays fixed, and ignores travel/wander. Its
+seed, count, size, region and tint remain editable. Light receivers select scenery,
+player and enemies; illumination sets their faint local spill. Rolling mist catches
+nearby firefly light through its existing canopy-response control. No particle
+simulation, per-insect draw, dynamic texture upload or additional light pass is used.
+The Add effect modal includes **Will-o’-wisps**, **Luminous moss patches** and
+**Occasional vine dew** presets; all remain ordinary copyable emitter records.
+Marahna uses one or two jade wisps per room, near the walking route, with warmer
+golden fireflies and small moss patches on selected roots and damp stones.
+
+**Occasional vine dew** uses `drips` with `activity` below 1, leaving quiet gaps
+between falls. The top edge is the source and the bottom edge is the landing;
+keep the source width narrow for a vine tip. **Water landing** (`ripple=1`)
+adds a small expanding ring at that bottom edge after impact. This is explicit,
+not automatic water detection: enable it only above verified open water and
+keep the fall clear of platforms. The preset starts with ripples disabled.
+BG1 **Canopy response** lets dew catch the same light as nearby scenery.
+The drop and ripple share one deterministic clock; panning or reverse scrubbing
+does not restart either. Moss and ripple masks use the atlas's remaining cells,
+without enlarging it. The editor and native game use the same kernels and budgets.
+
+**Particle region → Leaves → Feathered leaf silhouettes** uses a rotating leaf
+mask rather than a hard diamond. Particle regions and paths expose **Canopy
+response** (BG1 only): 0 keeps their normal appearance; 1 makes glints/spores catch
+the current canopy light and disappear in its shadows.
+
+Marahna's damp temple ledges reuse Fillmore Act 2's `water-field` wet-sheen
+component. A continuous shallow patch sits inside the measured stone contour,
+with a thin animated reflection along its lip. Its green-blue body and pale
+sage highlights suit the jungle lighting. These are surface patches rather than
+floating glint particles; the distant foliage and open boss clearing receive no
+wet highlights. Each patch has an editable marker at its landing surface.
+The additions use saved emitters and complete fields with editable bounds,
+colors and animation controls; Save project includes them in `action-effects.ini`.
+
+Light fans expose **Scenery occlusion**, enabled by default for existing fans;
+this uses visible BG1 opacity rather than collision. Cloud banks and canopy
+fields support room-sized areas up to 16384 pixels. The catalogue holds 512
+recipes; per-room limits remain 96 instances and 4096 authored vertices in any
+single render batch. Validation reserves each entire field in its draw pass and
+all possible material-light passes, including actor copies. Independent alpha
+foliage and additive lighting no longer consume each other's batch allowance;
+camera culling is never used to admit an over-budget pass. The shared immutable
+1024×512 atlas is built/uploaded at renderer startup and uses existing shaders.
 
 **Rolling ground dust** is a cloud bank with an optional `points` contour.
 Trace the ground in its effect modal, or edit up to 16 local X,Y pairs in
@@ -1446,7 +1564,9 @@ wet contacts and rock contours use BG1. The field includes exact material IDs,
 water colors, glows and layered splash-mist parameters. The bounds and witnesses
 are explicit; a missing wet material disables that contact rather than attaching
 water to decorative rock. Existing native member controls remain relative to
-these configured bases.
+these configured bases. Complete water fields can be placed in other rooms;
+their member markers follow the configured source counts. Wet-sheen handles
+sit at the landing surface, while drip handles remain at the ceiling source.
 
 **Linked water, wet rock and splash field** in the placement palette starts a
 single pool at the clicked location, converted into BG2 coordinates. Configure
@@ -1534,3 +1654,14 @@ Exposure INI records use `brightness=0.55` and `fade-left`, `fade-top`,
 `fade-right`, `fade-bottom`. Old `intensity`-based exposure records retain their
 hard-edged dimming when the new keys are absent; an explicit brightness takes
 precedence over intensity.
+
+Rolling floor mist uses `cloud-bank` with `textured=1` and `rolling` (0–1).
+The main color tints its thin crests; `color-end` tints the denser shadowed body.
+`amplitude`, `drift`, `lifetime` and `strands` control billow, travel, cycle and bank count.
+`wake` (0–1) adds short trailing wisps from moving player/enemy bodies within the area;
+`canopy-response` (0–1) catches authored canopy sunlight using its existing mask and terrain stops.
+These optional controls use BG1 world coordinates, without an actor attachment or traced dust path.
+Move the player/enemy stand-ins while the shared preview plays to check wakes. Pausing holds them;
+warping, changing rooms and seeking time clear their history. Native projectile children do not stir fog.
+The renderer reuses the shared mask atlas and alpha batch (two quads per bank, at most two wake quads
+per area); there is no fluid solver, per-frame texture generation or additional full-screen pass.

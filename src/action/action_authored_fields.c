@@ -3,6 +3,8 @@
 #include "action_effect_render_internal.h"
 #include "action_authored_particles.h"
 #include "action_exposure.h"
+#include "action_effect_masks.h"
+#include "action_light_kinds.h"
 
 typedef struct ExposureWriter {
   ActionEffectGeometryWriter *writer;
@@ -70,6 +72,30 @@ static void Twinkle(float strength, uint32_t seed, float age, float envelope, Ar
   color->b+=(1-color->b)*reflection;
   color->a+=fmaxf(0,envelope-color->a)*reflection;
 }
+/* Small reflective particles sample the same captured light transport as
+ * terrain and mist. Dark pockets cannot sparkle merely because they are in
+ * the viewport. This is opt-in for particle regions/paths. */
+static void ParticleCanopyTint(const ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    float x,float y,ArRenderColorF *tint) {
+  if(!w->frame||w->atmosphere_unlit||e->field_style.canopy_response<=0)return;
+  const ActionSceneEffectFrame *f=w->frame;float strength=0;ArRenderColorF incoming={0};
+  for(unsigned i=0;i<f->authored_count&&i<kActionAuthoredMaxInstances;++i) {
+    const ActionEffectInstance *light=&f->authored[i];
+    if(light->kind!=kActionEffect_AuthoredCanopy||!(light->flags&kActionEffectFlag_Visible)||
+        (light->flags&kActionEffectFlag_LightingOff))continue;
+    const float amount=ActionCanopy_Sample(light,&f->authored_floor[i],e->world_x+x,e->world_y+y);
+    const ArRenderColorF color=FieldColor(light->tuning.color);
+    strength+=amount;incoming.r+=color.r*amount;incoming.g+=color.g*amount;incoming.b+=color.b*amount;
+  }
+  const float response=e->field_style.canopy_response;
+  tint->a*=1-response+response*fminf(1,strength*3);
+  if(strength>0) {
+    tint->r*=1-response+response*incoming.r/strength;
+    tint->g*=1-response+response*incoming.g/strength;
+    tint->b*=1-response+response*incoming.b/strength;
+  }
+}
+
 /* Ordered paths support crest streamers, surface slides, falling grit and
  * sparse stationary glints. All sources and trajectories are editable; no
  * collision queries, actors or persistent particle simulations are needed. */
@@ -106,10 +132,13 @@ static bool ParticlePath(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     float fade=fmaxf(0,sinf(age*3.1415927f));if(glint)fade=fade*fade*fade*fade;
     color.a=fminf(1,e->tuning.intensity*.65f*fade*wind);
     Twinkle(s->twinkle,clock.seed,age,fade*wind*fminf(1,e->tuning.intensity),&color);
+    ParticleCanopyTint(w,e,x,y,&color);
     if(!AppendSceneParticle(w,e,x,y,x-dx/length,y-dy/length,size*.65f,size*(glint?1.6f:1),color,project,context))return false;
   }
   return true;
 }
+static bool LeafParticle(ActionEffectGeometryWriter *,const ActionEffectInstance *,const ActionEffectLocalRect *,
+    float,float,float,float,float,float,ArRenderColorF,ActionEffectProjectPointFn,void *);
 static bool FieldParticle(ActionEffectGeometryWriter *w, const ActionEffectInstance *e,
     const ActionEffectInstance *clock_source, unsigned index, uint32_t seed, float birth_x, float birth_y, const ActionEffectLocalRect *clip,
     ActionEffectProjectPointFn project, void *context) {
@@ -134,7 +163,10 @@ static bool FieldParticle(ActionEffectGeometryWriter *w, const ActionEffectInsta
     case kActionParticle_Glints: x=birth_x;y=birth_y;dx=0;dy=1;reach=size*1.6f;break;
     default: break;
   }
-  if (x+reach<clip->x0 || x-reach>clip->x1 || y+reach<clip->y0 || y-reach>clip->y1) return true;
+  const bool leaf=e->field_style.textured&&e->field_style.pattern==kActionParticle_Leaves;
+  const float ex=leaf?fabsf(dx)*reach+fabsf(dy)*width:fmaxf(width,reach);
+  const float ey=leaf?fabsf(dy)*reach+fabsf(dx)*width:fmaxf(width,reach);
+  if (x+ex<clip->x0 || x-ex>clip->x1 || y+ey<clip->y0 || y-ey>clip->y1) return true;
   ArRenderColorF color=MixColor(FieldColor(e->tuning.color),FieldColor(s->color_end),t);
   const float fade=fmaxf(0,sinf(t*3.1415927f));
   color.a=fminf(1,e->tuning.intensity*.7f*fade);
@@ -143,6 +175,9 @@ static bool FieldParticle(ActionEffectGeometryWriter *w, const ActionEffectInsta
   }
   if(e->field_style.pattern==kActionParticle_Insects)color.a*=.5f+.5f*sinf(t*25+phase)*sinf(t*25+phase);
   Twinkle(e->field_style.twinkle,clock.seed,t,fade*fminf(1,e->tuning.intensity),&color);
+  ParticleCanopyTint(w,e,x,y,&color);
+  if(e->field_style.textured&&e->field_style.pattern==kActionParticle_Leaves)
+    return LeafParticle(w,e,clip,x,y,dx,dy,width,reach,color,project,context);
   return AppendSceneParticle(w,e,x,y,x-dx*.003f,y-dy*.003f,width,reach,color,project,context);
 }
 static bool ParticleArea(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
@@ -232,6 +267,7 @@ static bool LightFan(ActionEffectGeometryWriter *w,const ActionEffectInstance *e
   const float width=r->x1-r->x0,length=r->y1-r->y0;
   if(s->strands<1 || s->strands>32 || !isfinite(s->angle)||fabsf(s->angle)>180 ||
       !isfinite(s->fan)||s->fan<0||s->fan>120||!isfinite(s->softness)||s->softness<0||s->softness>1)return false;
+  if(!isfinite(s->thickness)||s->thickness<0||s->thickness>1)return false;
   ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
   const ArRenderColorF tint=FieldColor(e->tuning.color);
   for(unsigned i=0;i<s->strands;++i) {
@@ -239,8 +275,10 @@ static bool LightFan(ActionEffectGeometryWriter *w,const ActionEffectInstance *e
     const uint32_t seed=e->generation^i*0x9e3779b9u;
     const float angle=(s->angle+(u-.5f)*s->fan)*.0174532925f;
     const float dx=sinf(angle),dy=cosf(angle),rx=cosf(angle),ry=-sinf(angle);
-    const float origin=(u-.5f)*width, reach=length*(.8f+.2f*HashUnit(seed));
-    const float radius=fmaxf(.4f,width/s->strands*(.2f+.2f*HashUnit(seed^71)));
+    const bool fine=s->thickness>0&&s->thickness<1;
+    const float origin=(u-.5f)*width+(fine?(HashUnit(seed^119)-.5f)*width/s->strands*.8f:0);
+    const float reach=length*(fine?.55f+.45f*HashUnit(seed):.8f+.2f*HashUnit(seed));
+    const float radius=fmaxf(fine?.1f:.4f,width/s->strands*(.2f+.2f*HashUnit(seed^71))*(s->thickness>0?s->thickness:1));
     ArRenderVertex2D vertices[9];int mapped[9];
     for(unsigned row=0;row<3;++row)for(unsigned col=0;col<3;++col) {
       const unsigned n=row*3+col;const float t=row*.5f,side=(float)col-1;
@@ -288,22 +326,51 @@ static bool WaterField(ActionEffectGeometryWriter *w,const ActionEffectInstance 
   }
   return true;
 }
+static bool MaskPatch(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,unsigned cell,float x,float y,float rx,float ry,
+    ArRenderColorF color,ActionEffectProjectPointFn project,void *context);
 static bool FallingWater(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
     const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
   const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const ActionEffectFieldStyle *s=&e->field_style;
+  if(!isfinite(s->activity)||s->activity<.05f||s->activity>1||s->ripple>1||
+      !isfinite(s->canopy_response)||s->canopy_response<0||s->canopy_response>1)return false;
   ActionEffectInstance source=*e;source.pulse_generation=e->particle_style.seed;
   for(unsigned i=0;i<e->particle_count;++i) {
     const SceneParticleClock clock=SceneParticleClockAt(&source,e->pulse_ticks,i,(SceneParticleLifetime){e->particle_lifetime,0,0});
-    const float t=clock.t,birth=r->x0+(r->x1-r->x0)*HashUnit(clock.seed),height=r->y1-r->y0;
+    float t=clock.t;
+    if(e->kind==kActionEffect_AuthoredDrips) {
+      t/=s->activity;
+      if(t>=1)continue;
+    }
+    const float birth=r->x0+(r->x1-r->x0)*HashUnit(clock.seed),height=r->y1-r->y0;
+    if(e->kind==kActionEffect_AuthoredDrips) {
+      /* Waiting time belongs to the source clock, not the viewport. A ripple
+       * is opt-in: its authored bottom edge must be an exposed water surface. */
+      if(s->ripple) {
+        if(t>=.7f) {
+          const float age=(t-.7f)/.3f;
+          ArRenderColorF c=FieldColor(e->particle_style.color_end);
+          c.a=fminf(1,e->tuning.intensity*.65f)*(1-age)*(1-age);
+          ParticleCanopyTint(w,e,birth,r->y1,&c);
+          if(!MaskPatch(w,e,clip,kActionMaskRipple,birth,r->y1,2+8*age,.35f+1.3f*age,c,project,context))return false;
+          continue;
+        }
+        t/=.7f;
+      }
+    }
+    const float size=e->particle_style.size_min+(e->particle_style.size_max-e->particle_style.size_min)*HashUnit(clock.seed^27);
     float x=birth,y=r->y0+height*t*t,dy=1,reach=2;
     if(e->kind==kActionEffect_AuthoredSpray) {
       x+=(HashUnit(clock.seed^71)-.5f)*height*t;
       y=r->y1-height*3*t*(1-t);dy=t-.5f;reach=1;
     }
-    if(x<clip->x0||x>clip->x1||y<clip->y0||y>clip->y1)continue;
+    /* Keep the visible tip/edge when its center has left the viewport. The
+     * projected particle is clipped by the renderer, not at its source point. */
+    if(x+size<clip->x0||x-size>clip->x1||y+size*reach<clip->y0||y-size*reach>clip->y1)continue;
     ArRenderColorF c=MixColor(FieldColor(e->tuning.color),FieldColor(e->particle_style.color_end),t);
     c.a=fminf(1,e->tuning.intensity*.65f*sinf(t*3.1415927f));
-    const float size=e->particle_style.size_min+(e->particle_style.size_max-e->particle_style.size_min)*HashUnit(clock.seed^27);
+    if(e->kind==kActionEffect_AuthoredDrips)ParticleCanopyTint(w,e,x,y,&c);
     if(!AppendSceneParticle(w,e,x,y,x,y-dy,size,size*reach,c,project,context))return false;
   }
   return true;
@@ -447,11 +514,536 @@ static bool GroundCloud(ActionEffectGeometryWriter *w, const ActionEffectInstanc
   }
   return GroundGrains(w,e,clip,project,context);
 }
-bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,bool lighting,bool particles,
+/* A soft stencil of hanging vines and broad leaves. Positions and wind phase
+ * depend only on the saved definition and clock, never on the visible window.
+ * This is ordinary alpha geometry behind the playfield, not a light receiver
+ * or an additional full-screen shadow pass. Six segments/leaves per stem keep
+ * the worst-case clipped cost exactly bounded by the recipe validator. */
+static bool FoliageShadow(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+  const ActionEffectFieldStyle *s=&e->field_style;
+  if(s->strands<1||s->strands>8||!isfinite(s->angle)||fabsf(s->angle)>180||
+      !isfinite(s->softness)||s->softness<0||s->softness>1)return false;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float width=r->x1-r->x0,height=r->y1-r->y0;
+  const float angle=s->angle*.01745329252f,cs=cosf(angle),sn=sinf(angle);
+  const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
+  const float spacing=width/s->strands;
+  const float leaf_size=fminf(spacing*.32f,height*.12f);
+  const float max_bow=fminf(spacing*.10f,height*.08f);
+  const float inset=fminf(width*.48f,leaf_size+max_bow+s->amplitude+2);
+  ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
+  for(unsigned stem=0;stem<s->strands;++stem) {
+    const uint32_t seed=e->particle_style.seed^(stem+1)*0x9e3779b9u;
+    const float x=r->x0+inset+(width-2*inset)*(stem+.25f+.5f*HashUnit(seed))/s->strands;
+    const float length=height*(.56f+.37f*HashUnit(seed^17));
+    const float bow=max_bow*(HashUnit(seed^43)*2-1);
+    const float sway=sinf(phase+HashUnit(seed^91)*6.2831853f)*s->amplitude;
+    ArRenderColorF tint=FieldColor(e->tuning.color);
+    const float opacity=fminf(1,e->tuning.intensity)*(.65f+.35f*HashUnit(seed^57));
+    ArRenderPointF previous={x,r->y0};
+    for(unsigned segment=0;segment<6;++segment) {
+      const float t=(segment+1)/6.f;
+      const ArRenderPointF tip={x+sinf(t*3.14159265f)*bow+sway*t*t,r->y0+length*t};
+      const float half=fminf(1.8f,height*.006f)*(1-.65f*t);
+      ArRenderVertex2D vine[4]={
+        {.position={previous.x-half,previous.y},.color=tint},
+        {.position={previous.x+half,previous.y},.color=tint},
+        {.position={tip.x+half,tip.y},.color=tint},
+        {.position={tip.x-half,tip.y},.color=tint}};
+      for(unsigned j=0;j<4;++j) {
+        const ArRenderPointF p=vine[j].position;
+        vine[j].position=(ArRenderPointF){cs*p.x+sn*p.y,-sn*p.x+cs*p.y};
+        vine[j].color.a=opacity*.55f;
+      }
+      int mapped[4]={-1,-1,-1,-1};const int triangles[]={0,1,2,0,2,3};
+      for(unsigned j=0;j<6;j+=3)
+        if(!AppendSceneClippedTriangle(w,&mesh,vine,mapped,triangles+j,clip,project,context))return false;
+
+      const uint32_t leaf_seed=seed^(segment+1)*71u;
+      const float side=(segment&1)?1.f:-1.f;
+      const float reach=leaf_size*(.65f+.35f*HashUnit(leaf_seed));
+      const float droop=reach*(.12f+.30f*HashUnit(leaf_seed^5));
+      /* Pointed leaves with a broad shoulder; feather the outline while the
+       * central vein remains legible on the flat olive background. */
+      const float shape[7][2]={{.43f,0},{0,0},{.28f,-.30f},{.68f,-.22f},{1,0},{.62f,.27f},{.24f,.25f}};
+      ArRenderVertex2D leaf[7];int leaf_mapped[7];
+      for(unsigned j=0;j<7;++j) {
+        const float u=shape[j][0],v=shape[j][1];
+        const float px=tip.x+side*u*reach,py=tip.y+u*droop+v*reach;
+        leaf[j]=(ArRenderVertex2D){.position={cs*px+sn*py,-sn*px+cs*py},.color=tint};
+        leaf[j].color.a=opacity*(1-.4f*t)*(j?(1-s->softness)*.65f:1);
+        leaf_mapped[j]=-1;
+      }
+      for(int j=1;j<=6;++j) {
+        const int triangle[]={0,j,j==6?1:j+1};
+        if(!AppendSceneClippedTriangle(w,&mesh,leaf,leaf_mapped,triangle,clip,project,context))return false;
+      }
+      previous=tip;
+    }
+  }
+  return true;
+}
+
+/* Atlas coordinates survive clipping and resident projection. One mask atlas
+ * batches with ordinary white geometry; only these triangles sample detail. */
+static bool MaskQuad(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,const ArRenderPointF p[4],const ArRenderPointF uv[4],
+    ArRenderColorF color,const float opacity[4],ActionEffectProjectPointFn project,void *context) {
+  ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
+  ArRenderVertex2D vertices[4];
+  for(unsigned i=0;i<4;++i) {
+    vertices[i]=(ArRenderVertex2D){.position=p[i],.color=color,.tex_coord=uv[i]};
+    if(opacity)vertices[i].color.a*=opacity[i];
+  }
+  return AppendSceneClippedQuad(w,&mesh,vertices,clip,project,context);
+}
+static bool MaskPatch(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,unsigned cell,float x,float y,float rx,float ry,
+    ArRenderColorF color,ActionEffectProjectPointFn project,void *context) {
+  const ArRenderPointF p[4]={{x-rx,y-ry},{x+rx,y-ry},{x+rx,y+ry},{x-rx,y+ry}};
+  const ArRenderPointF uv[4]={ActionEffectMasks_Uv(cell,0,0),ActionEffectMasks_Uv(cell,1,0),
+      ActionEffectMasks_Uv(cell,1,1),ActionEffectMasks_Uv(cell,0,1)};
+  return MaskQuad(w,e,clip,p,uv,color,NULL,project,context);
+}
+static bool LeafParticle(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,const ActionEffectLocalRect *clip,
+    float x,float y,float dx,float dy,float width,float reach,ArRenderColorF color,ActionEffectProjectPointFn project,void *context) {
+  const ArRenderPointF p[4]={{x-dx*reach+dy*width,y-dy*reach-dx*width},
+      {x+dx*reach+dy*width,y+dy*reach-dx*width},{x+dx*reach-dy*width,y+dy*reach+dx*width},
+      {x-dx*reach-dy*width,y-dy*reach+dx*width}};
+  const ArRenderPointF uv[4]={ActionEffectMasks_Uv(kActionMaskLeaf,0,0),ActionEffectMasks_Uv(kActionMaskLeaf,1,0),
+      ActionEffectMasks_Uv(kActionMaskLeaf,1,1),ActionEffectMasks_Uv(kActionMaskLeaf,0,1)};
+  return MaskQuad(w,e,clip,p,uv,color,NULL,project,context);
+}
+
+typedef struct GlowPoint { float x,y,size,glow; ArRenderColorF color; } GlowPoint;
+typedef struct GlowOrbit {
+  uint32_t seed;
+  float phase,x,y,wander,travel_x,travel_y;
+  bool fixed;
+} GlowOrbit;
+static GlowOrbit GlowOrbitFor(const ActionEffectInstance *e,unsigned index) {
+  const ActionEffectParticleStyle *s=&e->particle_style;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const uint32_t seed=DeterministicHash_Mix32(s->seed^(index+1)*0x9e3779b9u);
+  const bool fixed=e->field_style.glow_style==kActionGlow_Moss;
+  const float wander=fixed?0:s->wander,travel_x=fixed?0:s->travel_x,travel_y=fixed?0:s->travel_y;
+  const float inset=fminf(.45f,(wander+fmaxf(fabsf(travel_x),fabsf(travel_y))*.5f)/fmaxf(4,fminf(r->x1-r->x0,r->y1-r->y0)));
+  const float bx=(HashUnit(seed^17)-.5f)*s->spread*(1-2*inset);
+  const float by=(HashUnit(seed^31)-.5f)*(1-2*inset);
+  return (GlowOrbit){.seed=seed,.phase=HashUnit(seed)*6.2831853f,
+      .x=(r->x0+r->x1)*.5f+(r->x1-r->x0)*bx,.y=(r->y0+r->y1)*.5f+(r->y1-r->y0)*by,
+      .wander=wander,.travel_x=travel_x,.travel_y=travel_y,.fixed=fixed};
+}
+static ArRenderPointF GlowPositionAt(const GlowOrbit *orbit,float clock) {
+  if(orbit->fixed)return (ArRenderPointF){orbit->x,orbit->y};
+  const float motion=clock*6.2831853f;
+  return (ArRenderPointF){
+      orbit->x+sinf(motion*.71f+orbit->phase)*orbit->wander+sinf(motion*.23f+orbit->phase)*orbit->travel_x*.5f,
+      orbit->y+cosf(motion*.53f+orbit->phase)*orbit->wander*.55f+sinf(motion*.19f+orbit->phase)*orbit->travel_y*.5f};
+}
+static GlowPoint GlowPointAtTime(const ActionEffectInstance *e,const GlowOrbit *orbit,float clock) {
+  const ActionEffectParticleStyle *s=&e->particle_style;
+  const uint32_t seed=orbit->seed;
+  const float phase=orbit->phase;
+  /* Two incommensurate pulse rates prevent a cluster blinking in unison.
+   * Stable roots and continuous clocks survive camera movement and scrubbing. */
+  float pulse;
+  if(e->field_style.glow_style!=kActionGlow_Insects) {
+    pulse=.55f+.30f*sinf(clock*2.7f+phase)+.15f*sinf(clock*4.1f+phase*2);
+  } else {
+    pulse=fmaxf(0,sinf(clock*(8+4*HashUnit(seed^71))+phase));pulse*=pulse;
+    pulse*=.45f+.55f*(.5f+.5f*sinf(clock*3.7f+phase*2));
+  }
+  if(e->field_style.glow_style==kActionGlow_Insects&&e->field_style.chorus>0) {
+    /* Seeded invitations, short staggered answers, then independent pulses.
+     * The envelope is zero at event boundaries, including reverse scrubbing. */
+    const float event_clock=clock*.9f+HashUnit(s->seed^317);
+    const int event=(int)floorf(event_clock);
+    const uint32_t invitation=DeterministicHash_Mix32(s->seed^(uint32_t)event*0x85ebca6bu);
+    const float age=event_clock-event;
+    if(HashUnit(invitation)>.22f) {
+      const float delay=.10f+.23f*HashUnit(seed^invitation);
+      const float answer_age=(age-delay)/.15f;
+      const float answer=answer_age>0&&answer_age<1?sinf(answer_age*3.1415927f):0;
+      const float window=sinf(age*3.1415927f)*sinf(age*3.1415927f);
+      pulse=fminf(1,pulse*(1-.65f*e->field_style.chorus*window)+e->field_style.chorus*answer*answer);
+    }
+  }
+  const float glow=.10f+.90f*pulse;
+  const ArRenderPointF position=GlowPositionAt(orbit,clock);
+  return (GlowPoint){
+    .x=position.x,.y=position.y,
+    .size=s->size_min+(s->size_max-s->size_min)*HashUnit(seed^43),.glow=glow,
+    .color=MixColor(FieldColor(s->color_end),FieldColor(e->tuning.color),.45f+.55f*glow)};
+}
+static GlowPoint GlowPointAt(const ActionEffectInstance *e,unsigned index) {
+  const GlowOrbit orbit=GlowOrbitFor(e,index);
+  return GlowPointAtTime(e,&orbit,e->pulse_ticks/(float)e->particle_lifetime);
+}
+static bool Fireflies(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,bool lighting,bool particles,ActionEffectProjectPointFn project,void *context) {
+  const ActionEffectFieldStyle *s=&e->field_style;
+  if(e->particle_count>32||s->glow_style>=kActionGlow_Count||
+      !isfinite(s->chorus)||s->chorus<0||s->chorus>1||!isfinite(s->trail)||s->trail<0||s->trail>1)return false;
+  for(unsigned i=0;i<e->particle_count;++i) {
+    const GlowOrbit orbit=GlowOrbitFor(e,i);
+    const float clock=e->pulse_ticks/(float)e->particle_lifetime;
+    const GlowPoint p=GlowPointAtTime(e,&orbit,clock);
+    ArRenderColorF color=p.color;
+    if(lighting) {
+      const float radius=8+p.size*12;
+      color.a=fminf(1,e->tuning.intensity*p.glow*.13f);
+      if(!MaskPatch(w,e,clip,kActionMaskGlow,p.x,p.y,radius,radius,color,project,context))return false;
+    }
+    if(particles) {
+      if(s->glow_style==kActionGlow_Wisps&&s->trail>0) {
+        ArRenderPointF path[4]={{p.x,p.y}};
+        /* Historical tail samples only need position; their light/color is
+         * the current head's. Reuse the orbit without recalculating pulses. */
+        for(unsigned j=1;j<4;++j)
+          path[j]=GlowPositionAt(&orbit,clock-.18f*j*s->trail);
+        for(unsigned j=3;j>0;--j) {
+          const float dx=path[j-1].x-path[j].x,dy=path[j-1].y-path[j].y,length=hypotf(dx,dy);
+          const float tx=length>.001f?dx/length:1,ty=length>.001f?dy/length:0;
+          const float reach=length*.65f+p.size,width=p.size*(1.7f-.3f*j);
+          const float x=(path[j-1].x+path[j].x)*.5f,y=(path[j-1].y+path[j].y)*.5f;
+          const ArRenderPointF corners[4]={{x-tx*reach-ty*width,y-ty*reach+tx*width},
+              {x+tx*reach-ty*width,y+ty*reach+tx*width},{x+tx*reach+ty*width,y+ty*reach-tx*width},
+              {x-tx*reach+ty*width,y-ty*reach-tx*width}};
+          const unsigned cell=kActionMaskFogFirst+(e->particle_style.seed+i+j)%kActionMaskFogCount;
+          const ArRenderPointF uv[4]={ActionEffectMasks_Uv(cell,0,0),ActionEffectMasks_Uv(cell,1,0),
+              ActionEffectMasks_Uv(cell,1,1),ActionEffectMasks_Uv(cell,0,1)};
+          ArRenderColorF c=p.color;c.a=fminf(1,e->tuning.intensity*(.38f-.07f*j)*s->trail);
+          if(!MaskQuad(w,e,clip,corners,uv,c,NULL,project,context))return false;
+        }
+      }
+      if(s->glow_style==kActionGlow_Moss) {
+        color.a=fminf(1,e->tuning.intensity*(.35f+.65f*p.glow));
+        if(!MaskPatch(w,e,clip,kActionMaskMossFirst+(e->particle_style.seed+i)%kActionMaskMossCount,
+            p.x,p.y,p.size*9,p.size*4,color,project,context))return false;
+        continue;
+      }
+      /* A bright core and a feathered halo share one quad. Transparent edges
+       * avoid hard diamond flicker under subpixel camera/rotation movement. */
+      color=MixColor(color,(ArRenderColorF){1,1,.82f,1},.2f);
+      color.a=fminf(1,e->tuning.intensity*(.10f+.90f*p.glow));
+      if(!MaskPatch(w,e,clip,kActionMaskFirefly,p.x,p.y,p.size*6,p.size*6,color,project,context))return false;
+    }
+  }
+  return true;
+}
+static bool TexturedFoliage(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectFloorField *floor,const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+  const ActionEffectFieldStyle *s=&e->field_style;
+  if(!s->strands||s->strands>8||!isfinite(s->softness)||s->softness<0||s->softness>1||(s->shadows&&(!floor||floor->count>kActionCanopyMaxSpans)))return false;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float width=r->x1-r->x0,height=r->y1-r->y0,spacing=width/s->strands;
+  const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
+  const float angle=s->angle*.01745329252f,cs=cosf(angle),sn=sinf(angle);
+  for(unsigned i=0;i<s->strands;++i) {
+    const uint32_t seed=DeterministicHash_Mix32(e->particle_style.seed^(i+1)*71u);
+    const float rx=fminf(spacing*.48f,height*.20f),length=height*(.67f+.31f*HashUnit(seed^3));
+    const float x=r->x0+spacing*(i+.5f),sway=sinf(phase+HashUnit(seed^17)*6.2831853f)*s->amplitude;
+    ArRenderPointF p[4]={{x-rx,r->y0},{x+rx,r->y0},{x+rx+sway,r->y0+length},{x-rx+sway,r->y0+length}};
+    const unsigned cell=kActionMaskVineFirst+seed%kActionMaskVineCount;
+    ArRenderPointF uv[4]={ActionEffectMasks_Uv(cell,0,0),ActionEffectMasks_Uv(cell,1,0),
+        ActionEffectMasks_Uv(cell,1,1),ActionEffectMasks_Uv(cell,0,1)};
+    for(unsigned j=0;j<4;++j){const ArRenderPointF q=p[j];p[j]=(ArRenderPointF){cs*q.x+sn*q.y,-sn*q.x+cs*q.y};}
+    ArRenderColorF color=FieldColor(e->tuning.color);
+    color.a=fminf(1,e->tuning.intensity)*(.75f+.25f*HashUnit(seed^91))*(1-s->softness*.3f);
+    if(!s->shadows) {if(!MaskQuad(w,e,clip,p,uv,color,NULL,project,context))return false;continue;}
+    /* The complete world-anchored collision field clips the stencil before
+     * projection. Roofing stays clear regardless of viewport or sway phase. */
+    for(unsigned j=0;j<floor->count;++j) {
+      const ActionEffectFloorSpan *span=&floor->spans[j];
+      const ActionEffectLocalRect safe={fmaxf(clip->x0,span->x0-e->world_x),clip->y0,
+          fminf(clip->x1,span->x1-e->world_x),fminf(clip->y1,span->y-e->world_y)};
+      if(safe.x1>safe.x0&&safe.y1>safe.y0&&!MaskQuad(w,e,&safe,p,uv,color,NULL,project,context))return false;
+    }
+  }
+  return true;
+}
+
+/* Shared geometry for visible shafts and light scattered by mist. Sampling
+ * the same tapered strips prevents a fog crest shining below a blocked ray. */
+static bool CanopyStrip(const ActionEffectInstance *e,const ActionEffectFloorField *hits,
+    unsigned i,float lean,ArRenderPointF p[6],float opacity[2]) {
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const ActionEffectFloorSpan *hit=&hits->spans[i];
+  const float x0=hit->x0-e->world_x,x1=hit->x1-e->world_x;
+  const float reach=hit->y-e->world_y-r->y0;
+  if(reach<=0)return false;
+  const float left=i?fminf(reach,hits->spans[i-1].y-e->world_y-r->y0):reach;
+  const float right=i+1<hits->count?fminf(reach,hits->spans[i+1].y-e->world_y-r->y0):reach;
+  const float margin=(r->x1-r->x0)*(.12f+.24f*e->field_style.softness);
+  opacity[0]=SceneSoftFalloff(fmaxf(0,1-fminf(x0-r->x0,r->x1-x0)/margin));
+  opacity[1]=SceneSoftFalloff(fmaxf(0,1-fminf(x1-r->x0,r->x1-x1)/margin));
+  const float feather=24+120*e->field_style.softness;
+  const float a=fmaxf(0,left-fminf(feather,left*.65f));
+  const float b=fmaxf(0,right-fminf(feather,right*.65f));
+  p[0]=(ArRenderPointF){x0,r->y0};p[1]=(ArRenderPointF){x1,r->y0};
+  p[2]=(ArRenderPointF){x1+lean*b,r->y0+b};p[3]=(ArRenderPointF){x0+lean*a,r->y0+a};
+  p[4]=(ArRenderPointF){x1+lean*right,r->y0+right};p[5]=(ArRenderPointF){x0+lean*left,r->y0+left};
+  return true;
+}
+static float TriangleOpacity(ArRenderPointF point,const ArRenderPointF p[3],const float alpha[3]) {
+  const float ax=p[1].x-p[0].x,ay=p[1].y-p[0].y,bx=p[2].x-p[0].x,by=p[2].y-p[0].y;
+  const float det=ax*by-ay*bx;
+  if(fabsf(det)<.0001f)return 0;
+  const float x=point.x-p[0].x,y=point.y-p[0].y;
+  const float u=(x*by-y*bx)/det,v=(ax*y-ay*x)/det;
+  return u>=0&&v>=0&&u+v<=1 ? alpha[0]*(1-u-v)+alpha[1]*u+alpha[2]*v : 0;
+}
+typedef struct CanopyMask {
+  unsigned cell,orientation;
+  float left,top,inverse_size,crop,offset_u,offset_v;
+} CanopyMask;
+static CanopyMask CanopyMaskFor(const ActionEffectInstance *e,float lean) {
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const ActionEffectFieldStyle *s=&e->field_style;
+  const float width=r->x1-r->x0,length=r->y1-r->y0;
+  const uint32_t seed=DeterministicHash_Mix32(e->particle_style.seed^0x568bc12du);
+  const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
+  const float sway=s->amplitude*(.8f*sinf(phase+HashUnit(seed^17)*6.2831853f)+
+      .2f*sinf(phase*2+HashUnit(seed^71)*6.2831853f));
+  const float crop=.70f+.27f*HashUnit(seed^127);
+  return (CanopyMask){
+    .cell=kActionMaskCanopyFirst+seed%kActionMaskCanopyCount,.orientation=(seed>>3)&7,
+    .left=r->x0+fminf(0,lean*length)-s->amplitude-sway,.top=r->y0,
+    .inverse_size=1/fmaxf(length,width+fabsf(lean*length)+2*s->amplitude),
+    .crop=crop,.offset_u=(1-crop)*HashUnit(seed^31),.offset_v=(1-crop)*HashUnit(seed^97)};
+}
+static ArRenderPointF CanopyMaskUv(const CanopyMask *mask,float x,float y) {
+  float u=(x-mask->left)*mask->inverse_size,v=(y-mask->top)*mask->inverse_size;
+  /* Square rotations/reflections and a contained square crop give the full
+   * seed a distinct pattern without stretching leaves or crossing atlas cells.
+   * Only the shadow stencil turns; light transport keeps its authored angle. */
+  if(mask->orientation&1){const float swap=u;u=v;v=swap;}
+  if(mask->orientation&2)u=1-u;
+  if(mask->orientation&4)v=1-v;
+  return ActionEffectMasks_Uv(mask->cell,mask->offset_u+mask->crop*u,mask->offset_v+mask->crop*v);
+}
+float ActionCanopy_Sample(const ActionEffectInstance *e,const ActionEffectFloorField *hits,float world_x,float world_y) {
+  if(!e||!hits||hits->count>kActionAuthoredFloorMaxSpans||!e->particle_lifetime)return 0;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const ActionEffectFieldStyle *s=&e->field_style;
+  const float width=r->x1-r->x0,length=r->y1-r->y0,lean=tanf(s->angle*.01745329252f);
+  if(width<=0||length<=0)return 0;
+  const ArRenderPointF point={world_x-e->world_x,world_y-e->world_y};
+  const float source_x=world_x-lean*(point.y-r->y0);
+  for(unsigned i=0;i<hits->count;++i) {
+    if(source_x<hits->spans[i].x0||source_x>hits->spans[i].x1)continue;
+    ArRenderPointF p[6];float edge[2];
+    if(!CanopyStrip(e,hits,i,lean,p,edge))continue;
+    const float alpha[6]={edge[0],edge[1],edge[1],edge[0],0,0};
+    const unsigned triangles[4][3]={{0,1,2},{0,2,3},{3,2,4},{3,4,5}};
+    float opacity=0;
+    for(unsigned t=0;t<4;++t) {
+      const unsigned *v=triangles[t];
+      const ArRenderPointF tri[3]={p[v[0]],p[v[1]],p[v[2]]};
+      const float a[3]={alpha[v[0]],alpha[v[1]],alpha[v[2]]};
+      opacity=fmaxf(opacity,TriangleOpacity(point,tri,a));
+    }
+    if(opacity<=0)continue;
+    const CanopyMask mask=CanopyMaskFor(e,lean);
+    const ArRenderPointF uv=CanopyMaskUv(&mask,point.x,point.y);
+    const float illumination=e->tuning.illumination_set?e->tuning.illumination:ActionLightKind_Illumination(e->kind);
+    return opacity*ActionEffectMasks_Sample(uv.x,uv.y)*fminf(1,e->tuning.intensity*.42f)*illumination;
+  }
+  return 0;
+}
+/* One coherent, world-anchored leaf-gap field. Straight parallel transport is
+ * clipped at captured collision hits; nearby surfaces get a short warm return.
+ * The material and airborne light use the very same mask/occlusion geometry. */
+static bool CanopyLight(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectFloorField *hits,const ActionEffectLocalRect *clip,
+    ActionEffectProjectPointFn project,void *context) {
+  const ActionEffectFieldStyle *s=&e->field_style;
+  if(!hits||hits->count>kActionAuthoredFloorMaxSpans||!isfinite(s->angle)||fabsf(s->angle)>70||
+      !isfinite(s->softness)||s->softness<0||s->softness>1||!isfinite(s->scatter)||s->scatter<0||s->scatter>1||!isfinite(s->bounce)||s->bounce<0||s->bounce>1)return false;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float width=r->x1-r->x0,length=r->y1-r->y0,lean=tanf(s->angle*.01745329252f);
+  if(!isfinite(width)||!isfinite(length)||width<=0||length<=0||!e->particle_lifetime)return false;
+  /* Sample a square in world space, not a stretched/sheared emitter UV box.
+   * The same seeded mapping serves scenery, actors and mist light sampling. */
+  const CanopyMask mask=CanopyMaskFor(e,lean);
+  ArRenderColorF tint=FieldColor(e->tuning.color);
+  tint.a=fminf(1,e->tuning.intensity*.42f)*(w->light_receiver?1:s->scatter);
+  for(unsigned i=0;i<hits->count;++i) {
+    const ActionEffectFloorSpan *hit=&hits->spans[i];
+    const float x0=hit->x0-e->world_x,x1=hit->x1-e->world_x;
+    const float bottom=hit->y-e->world_y,reach=bottom-r->y0;
+    if(reach<=0)continue;
+    ArRenderPointF p[6];float edges[2];
+    if(!CanopyStrip(e,hits,i,lean,p,edges))continue;
+    const float edge0=edges[0],edge1=edges[1];
+    ArRenderPointF uv[4];
+    for(unsigned j=0;j<4;++j)uv[j]=CanopyMaskUv(&mask,p[j].x,p[j].y);
+    const float opacity[4]={edge0,edge1,edge1,edge0};
+    if(!MaskQuad(w,e,clip,p,uv,tint,opacity,project,context))return false;
+    {
+      const ArRenderPointF edge[4]={p[3],p[2],p[4],p[5]};
+      ArRenderPointF edge_uv[4];
+      for(unsigned j=0;j<4;++j)edge_uv[j]=CanopyMaskUv(&mask,edge[j].x,edge[j].y);
+      const float fade[4]={edge0,edge1,0,0};
+      if(!MaskQuad(w,e,clip,edge,edge_uv,tint,fade,project,context))return false;
+    }
+    if(hit->height>0&&s->bounce>0&&w->light_receiver) {
+      const ArRenderPointF sample=CanopyMaskUv(&mask,(x0+x1)*.5f+lean*reach,bottom);
+      ArRenderColorF bounce=tint;
+      bounce.a*=s->bounce*(edge0+edge1)*.5f*ActionEffectMasks_Sample(sample.x,sample.y);
+      if(bounce.a>0&&!MaskPatch(w,e,clip,kActionMaskFogFirst+i%kActionMaskFogCount,
+          (x0+x1)*.5f+lean*reach,bottom-3,(x1-x0)*.5f,14,bounce,project,context))return false;
+    }
+  }
+  return true;
+}
+
+/* Two masks per validated cloud lobe, plus one player and one enemy wake.
+ * This scratch list is local to a bank; no frame cache or invalidation state. */
+enum { kRollingMistMaxStrands=24, kRollingMistMaxPatches=kRollingMistMaxStrands*2+2 };
+typedef struct MistPatch {
+  float x,y,rx,ry,crest;
+  unsigned cell;
+  ArRenderColorF tint;
+} MistPatch;
+static void AddMistPatch(MistPatch *patches,unsigned *count,const ActionEffectLocalRect *clip,MistPatch patch) {
+  if(patch.x+patch.rx<clip->x0||patch.x-patch.rx>clip->x1||
+      patch.y+patch.ry<clip->y0||patch.y-patch.ry>clip->y1)return;
+  patches[(*count)++]=patch;
+}
+static unsigned LightingWorldPlane(unsigned plane) {
+  /* Actor-bound lights move in foreground world coordinates too. Priority
+   * changes compositing order, whereas BG2 has a different scrolling origin. */
+  if(plane==kActionEffectProjectionPlane_Obj||plane==kActionEffectProjectionPlane_Bg1High)
+    return kActionEffectProjectionPlane_Bg1;
+  if(plane==kActionEffectProjectionPlane_Bg2High)return kActionEffectProjectionPlane_Bg2;
+  return plane;
+}
+/* Evaluate each nearby glow once for all visible curls, rather than repeating
+ * its seeded orbit/pulse for every curl. Canopy transport is already captured;
+ * neither path needs a light-map pass, image readback or collision query. */
+static void TintMistPatches(const ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    MistPatch *patches,unsigned count) {
+  for(unsigned i=0;i<count;++i) {
+    const float alpha=patches[i].tint.a;
+    patches[i].tint=MixColor(FieldColor(e->particle_style.color_end),FieldColor(e->tuning.color),.35f+.65f*patches[i].crest);
+    patches[i].tint.a=alpha;
+  }
+  if(!count||!w->frame||w->atmosphere_unlit||e->field_style.canopy_response<=0)return;
+  const ActionSceneEffectFrame *f=w->frame;
+  if(f->authored_count>kActionAuthoredMaxInstances)return;
+  ArRenderColorF incoming[kRollingMistMaxPatches]={0};
+  for(unsigned i=0;i<f->authored_count;++i) {
+    const ActionEffectInstance *light=&f->authored[i];
+    if(!(light->flags&kActionEffectFlag_Visible)||(light->flags&kActionEffectFlag_LightingOff)||
+        LightingWorldPlane(light->projection_plane)!=LightingWorldPlane(e->projection_plane))continue;
+    if(light->kind==kActionEffect_AuthoredFireflies) {
+      const ActionEffectLocalRect *r=&light->geometry.data.rect;
+      const ActionEffectParticleStyle *style=&light->particle_style;
+      const float movement=light->field_style.glow_style==kActionGlow_Moss?0:
+          style->wander+fmaxf(fabsf(style->travel_x),fabsf(style->travel_y))*.5f;
+      const float pad=movement+16+style->size_max*18;
+      struct { unsigned patch; float x,y; } samples[kRollingMistMaxPatches];
+      unsigned sample_count=0;
+      for(unsigned k=0;k<count;++k) {
+        const float x=e->world_x+patches[k].x-light->world_x,y=e->world_y+patches[k].y-light->world_y;
+        if(x<r->x0-pad||x>r->x1+pad||y<r->y0-pad||y>r->y1+pad)continue;
+        samples[sample_count].patch=k;samples[sample_count].x=x;samples[sample_count++].y=y;
+      }
+      if(!sample_count||!light->particle_lifetime)continue;
+      for(unsigned j=0;j<light->particle_count&&j<32;++j) {
+        const GlowPoint p=GlowPointAt(light,j);
+        for(unsigned k=0;k<sample_count;++k) {
+          const float distance=hypotf(samples[k].x-p.x,samples[k].y-p.y)/(16+p.size*18);
+          const float amount=SceneSoftFalloff(distance)*p.glow*light->tuning.intensity*.22f;
+          ArRenderColorF *color=&incoming[samples[k].patch];
+          color->r+=p.color.r*amount;color->g+=p.color.g*amount;color->b+=p.color.b*amount;
+        }
+      }
+    } else if(light->kind==kActionEffect_AuthoredCanopy) {
+      const ArRenderColorF color=FieldColor(light->tuning.color);
+      for(unsigned k=0;k<count;++k) {
+        const float amount=ActionCanopy_Sample(light,&f->authored_floor[i],e->world_x+patches[k].x,e->world_y+patches[k].y);
+        incoming[k].r+=color.r*amount;incoming[k].g+=color.g*amount;incoming[k].b+=color.b*amount;
+      }
+    }
+  }
+  const float ambient=1-.35f*e->field_style.canopy_response;
+  for(unsigned k=0;k<count;++k) {
+    const float strength=e->field_style.canopy_response*(.55f+.65f*patches[k].crest);
+    ArRenderColorF *tint=&patches[k].tint;
+    tint->r=fminf(1,tint->r*ambient+incoming[k].r*strength);
+    tint->g=fminf(1,tint->g*ambient+incoming[k].g*strength);
+    tint->b=fminf(1,tint->b*ambient+incoming[k].b*strength);
+  }
+}
+static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+  const ActionEffectFieldStyle *s=&e->field_style;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float width=r->x1-r->x0,height=r->y1-r->y0,spacing=width/s->strands;
+  const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
+  MistPatch patches[kRollingMistMaxPatches];unsigned count=0;
+  for(unsigned i=0;i<s->strands;++i) {
+    const uint32_t seed=e->particle_style.seed^(i+1)*0x9e3779b9u;
+    const float cycle=phase+HashUnit(seed)*6.2831853f;
+    const float rx=fminf(width*.45f,spacing*(.72f+.18f*HashUnit(seed^11)));
+    const float drift=fminf(fabsf(s->drift),fmaxf(0,(width-2*rx)*.15f))*(s->drift<0?-1:1);
+    const float inset=rx+fabsf(drift);
+    const float x=r->x0+inset+(width-2*inset)*(i+.35f+.3f*HashUnit(seed^43))/s->strands+sinf(cycle)*drift;
+    const float y=r->y0+height*(.55f+.14f*HashUnit(seed^91))+sinf(cycle*2)*s->amplitude;
+    const float roll=s->rolling*sinf(cycle);
+    const float ry=height*(.30f+.08f*HashUnit(seed^3));
+    for(unsigned tier=0;tier<2;++tier) {
+      /* Two differently moving masks form a dense body and a thinner curl.
+       * The curl rises, stretches and settles; it is never a scaled smoke puff. */
+      const float px=x+(tier?rx*(.22f*roll+.14f*cosf(cycle*2)):0);
+      const float py=y-(tier?ry*(.70f+.40f*roll):0);
+      AddMistPatch(patches,&count,clip,(MistPatch){.x=px,.y=py,
+          .rx=rx*(tier?1.15f+.16f*roll:1),.ry=ry*(tier?.42f+.12f*roll:1),.crest=tier,
+          .cell=kActionMaskFogFirst+(seed+tier*3)%kActionMaskFogCount,
+          .tint={.a=fminf(.85f,e->tuning.intensity*(tier?.52f:.74f))}});
+    }
+  }
+  /* A fixed allowance per bank; prefer the player and then the strongest
+   * nearby body. This never consumes native actor/sprite slots. */
+  const ActionEffectActor *actors[2]={0};float weights[2]={0};
+  const unsigned actor_count=w->frame&&s->wake>0&&w->frame->actor_count<=kActionEffectActorMax?w->frame->actor_count:0;
+  for(unsigned i=0;i<actor_count;++i) {
+    const ActionEffectActor *actor=&w->frame->actors[i];const ActionActorWake *wake=&actor->wake;
+    if(!actor->body_radius||!actor->visible||wake->strength<=0||wake->age>=kActionActorWakeTicks)continue;
+    const float x=wake->x-e->world_x,y=wake->y-e->world_y;
+    const float edge=fminf(fminf(x-r->x0,r->x1-x),fminf(y-r->y0,r->y1-y));
+    if(edge<=0)continue;
+    const float weight=wake->strength*(1-wake->age/(float)kActionActorWakeTicks)*fminf(1,edge/24);
+    const unsigned slot=actor->player?0:1;
+    if(weight>weights[slot]){actors[slot]=actor;weights[slot]=weight;}
+  }
+  for(unsigned i=0;i<2;++i)if(actors[i]) {
+    const ActionEffectActor *actor=actors[i];const ActionActorWake *wake=&actor->wake;
+    const float age=wake->age/(float)kActionActorWakeTicks,side=wake->dx<0?-1.f:1.f;
+    const float x=wake->x-e->world_x-side*(12+age*20)+s->drift*age*.2f;
+    const float y=wake->y-e->world_y-4-age*12;
+    AddMistPatch(patches,&count,clip,(MistPatch){.x=x,.y=y,
+        .rx=actor->body_radius+24+age*24,.ry=8+age*10,.crest=1,
+        .cell=kActionMaskFogFirst+actor->generation%kActionMaskFogCount,
+        .tint={.a=fminf(.65f,e->tuning.intensity*s->wake*weights[i]*.7f)}});
+  }
+  TintMistPatches(w,e,patches,count);
+  for(unsigned i=0;i<count;++i) {
+    const MistPatch *p=&patches[i];
+    if(!MaskPatch(w,e,clip,p->cell,p->x,p->y,p->rx,p->ry,p->tint,project,context))return false;
+  }
+  return true;
+}
+
+bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,const ActionEffectFloorField *floor,bool lighting,bool particles,
     ActionEffectProjectPointFn project,ActionEffectClipBoundsFn clip_fn,void *context) {
   ActionEffectInstance motion=*e;const ActionEffectLocalRect *r=&e->geometry.data.rect;
   const ActionEffectFieldStyle *s=&e->field_style;
-  if((e->kind==kActionEffect_AuthoredParticlePath || e->kind==kActionEffect_AuthoredParticleArea || e->kind==kActionEffect_AuthoredWater ||
+  if((e->kind==kActionEffect_AuthoredFireflies || e->kind==kActionEffect_AuthoredParticlePath || e->kind==kActionEffect_AuthoredParticleArea || e->kind==kActionEffect_AuthoredWater ||
       e->kind==kActionEffect_AuthoredDrips || e->kind==kActionEffect_AuthoredSpray ||
       e->kind==kActionEffect_AuthoredCloud) && !ActionAuthoredParticles_Valid(&e->particle_style))return false;
   if(s->placement>2 || !isfinite(s->amplitude)||s->amplitude<0||s->amplitude>32 ||
@@ -462,11 +1054,28 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     const float pad=e->particle_style.wander+e->particle_style.size_max*2;
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-pad,r->x1+pad,r->y1+pad};
   }
-  if(e->kind==kActionEffect_AuthoredParticleArea) {
+  if(e->kind==kActionEffect_AuthoredCanopy) {
+    const float lean=tanf(s->angle*.01745329252f)*(r->y1-r->y0);
+    motion.geometry.data.rect=(ActionEffectLocalRect){r->x0+fminf(0,lean),r->y0-16,r->x1+fmaxf(0,lean),r->y1+16};
+  } else if(e->kind==kActionEffect_AuthoredFoliage) {
+    if(!isfinite(s->angle)||fabsf(s->angle)>180)return false;
+    const float angle=s->angle*.01745329252f;
+    const float pad=(r->y1-r->y0)*.25f+s->amplitude;
+    const float x=(r->x1-r->x0)*.5f+pad,y=(r->y1-r->y0)*.5f+pad;
+    const float ex=fabsf(cosf(angle))*x+fabsf(sinf(angle))*y;
+    const float ey=fabsf(sinf(angle))*x+fabsf(cosf(angle))*y;
+    motion.geometry.data.rect=(ActionEffectLocalRect){-ex,-ey,ex,ey};
+  } else if(e->kind==kActionEffect_AuthoredFireflies) {
+    const float pad=e->particle_style.wander+fmaxf(fabsf(e->particle_style.travel_x),fabsf(e->particle_style.travel_y))*.5f+8+e->particle_style.size_max*12;
+    motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-pad,r->x1+pad,r->y1+pad};
+  } else if(e->kind==kActionEffect_AuthoredParticleArea) {
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-600,r->y0-600,r->x1+600,r->y1+600};
   } else if(e->kind==kActionEffect_AuthoredWater) {
     const float pad=e->particle_style.size_max*3;
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-s->amplitude-pad,r->x1+pad,fmaxf(r->y1,r->y0+s->amplitude)+pad};
+  } else if(e->kind==kActionEffect_AuthoredDrips) {
+    const float pad=fmaxf(s->ripple?10:0,e->particle_style.size_max*2);
+    motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-pad,r->x1+pad,r->y1+pad};
   } else if(e->kind==kActionEffect_AuthoredCloud) {
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-fabsf(s->drift),r->y0-s->amplitude,r->x1+fabsf(s->drift),r->y1+s->amplitude};
     if(s->point_count) motion.geometry.data.rect.y0=r->y0-(8+2*s->amplitude)*1.5f-e->particle_style.wander-e->particle_style.size_max*2;
@@ -476,10 +1085,13 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
   }
   ActionEffectLocalRect visible=motion.geometry.data.rect;
   /* Free puffs test their animated footprint in AppendBillboard. */
-  if(!(e->kind==kActionEffect_AuthoredCloud&&!s->point_count &&
+  if(!((e->kind==kActionEffect_AuthoredCloud&&!s->point_count&&!s->textured) &&
       (w->source || project==ActionEffectProjection_ProjectPoint)) &&
       clip_fn&&!clip_fn(context,&motion,&visible))return true;
   switch(e->kind) {
+    case kActionEffect_AuthoredCanopy: return !lighting || CanopyLight(w,e,floor,&visible,project,context);
+    case kActionEffect_AuthoredFoliage: return !particles || (s->textured?TexturedFoliage(w,e,floor,&visible,project,context):FoliageShadow(w,e,&visible,project,context));
+    case kActionEffect_AuthoredFireflies: return Fireflies(w,e,&visible,lighting,particles,project,context);
     case kActionEffect_AuthoredExposure: {
       if(!lighting&&!particles)return true;
       if(!(e->tuning.dim_receivers&kActionReceiver_Scenery))return true;
@@ -498,7 +1110,7 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       /* Fan vertices grow from the editor's anchor (local 0,0), not the
        * top of its symmetric bounds. A ceiling behind the source must not
        * shadow light already entering the chamber. */
-      ActionSceneryShadow_Apply(w, first, e, 0, 0, false, 1, project, context);
+      if(s->shadows)ActionSceneryShadow_Apply(w, first, e, 0, 0, false, 1, project, context);
       return true;
     }
     case kActionEffect_AuthoredWater: return !particles || WaterField(w,e,&visible,project,context);
@@ -506,16 +1118,32 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       return !particles || FallingWater(w,e,&visible,project,context);
     case kActionEffect_AuthoredCloud: {
       if(!particles)return true;
-      if(s->strands<1||s->strands>24||!isfinite(s->softness)||s->softness<0||s->softness>1)return false;
+      if(s->strands<1||s->strands>kRollingMistMaxStrands||!isfinite(s->softness)||s->softness<0||s->softness>1)return false;
       if(!isfinite(s->carry)||s->carry<0||s->carry>512||(!s->point_count&&(s->carry>0||e->particle_count)))return false;
+      if(!isfinite(s->rolling)||s->rolling<0||s->rolling>1||!isfinite(s->wake)||s->wake<0||s->wake>1||
+          !isfinite(s->canopy_response)||s->canopy_response<0||s->canopy_response>1)return false;
+      if((s->rolling>0||s->wake>0||s->canopy_response>0)&&(!s->textured||s->point_count))return false;
       if(s->point_count)return GroundCloud(w,e,&visible,project,context);
+      if(s->rolling>0)return RollingMist(w,e,&visible,project,context);
       const float width=r->x1-r->x0,height=r->y1-r->y0;
       const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
       for(unsigned i=0;i<s->strands;++i) {
-        const uint32_t seed=e->generation^i*0x9e3779b9u;
+        const uint32_t seed=(s->textured?e->particle_style.seed:e->generation)^i*0x9e3779b9u;
         const float x=r->x0+width*(.2f+.6f*HashUnit(seed))+sinf(phase+HashUnit(seed^7)*6)*s->drift;
         const float y=r->y0+height*(.25f+.5f*HashUnit(seed^91))+cosf(phase+HashUnit(seed^23)*6)*s->amplitude;
-        if(!AppendSceneSoftCloud(w,e,x,y,width*(.10f+.08f*HashUnit(seed^11)),height*.25f,
+        if(s->textured) {
+          /* Keep the whole feathered mask inside the authored field. Cutting
+           * a drifting puff at that rectangle leaves a horizontal/vertical
+           * seam in hanging haze, even at very low opacity. */
+          const float rx=width*(.20f+.12f*HashUnit(seed^11)),ry=height*(.24f+.10f*HashUnit(seed^3));
+          const float space_x=width*.5f-rx,space_y=height*.5f-ry;
+          const float drift=fminf(fabsf(s->drift),space_x*.7f)*(s->drift<0?-1:1);
+          const float billow=fminf(s->amplitude,space_y*.7f);
+          const float px=(r->x0+r->x1)*.5f+(space_x-fabsf(drift))*(2*HashUnit(seed)-1)+sinf(phase+HashUnit(seed^7)*6)*drift;
+          const float py=(r->y0+r->y1)*.5f+(space_y-billow)*(2*HashUnit(seed^91)-1)+cosf(phase+HashUnit(seed^23)*6)*billow;
+          ArRenderColorF tint=FieldColor(e->tuning.color);tint.a=fminf(1,e->tuning.intensity*.7f);
+          if(!MaskPatch(w,e,&visible,kActionMaskFogFirst+(seed%kActionMaskFogCount),px,py,rx,ry,tint,project,context))return false;
+        } else if(!AppendSceneSoftCloud(w,e,x,y,width*(.10f+.08f*HashUnit(seed^11)),height*.25f,
             FieldColor(e->tuning.color),fminf(1,e->tuning.intensity*(.06f+.12f*s->softness)),seed,project,context))return false;
       }
       return true;

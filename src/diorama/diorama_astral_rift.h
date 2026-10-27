@@ -24,6 +24,12 @@ typedef struct DioramaAstralRiftFrame {
 bool DioramaAstralRift_Prepare(ArRenderDevice *device);
 void DioramaAstralRift_Reset(ArRenderDevice *device);
 
+/* Presentation may omit these native planes (and the native skybox) only
+ * after all replacement art is ready. Zero preserves native fallback. This
+ * does not change the PPU capture, native color math, or object planes. */
+uint32_t DioramaAstralRift_ReplacedPlanes(ArRenderDevice *device, bool enabled,
+    unsigned map_group, unsigned map_number, unsigned layer_section);
+
 /* On success, overrides only this draw's copied options and installs the
  * background callback. Ineligible scenes/resource failures stay authentic.
  * Call only from a Diorama presentation path, never flat mode. */

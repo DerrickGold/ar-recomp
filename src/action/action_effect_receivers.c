@@ -1,4 +1,5 @@
 #include "action_effect_receivers.h"
+#include "action_effect_masks.h"
 #include "action_environment_exposure.h"
 #include "action_exposure.h"
 #include "action_light_kinds.h"
@@ -236,7 +237,10 @@ static void Sample(const ActionSceneEffectRenderBatch *batch,float x,float y,flo
     if(fabsf(w0)<=epsilon)w0=0;if(fabsf(w1)<=epsilon)w1=0;if(fabsf(w2)<=epsilon)w2=0;
     if(w0<0||w1<0||w2<0 || (w0==0&&!TopLeft(b->position,c->position)) ||
         (w1==0&&!TopLeft(c->position,a->position)) || (w2==0&&!TopLeft(a->position,b->position)))continue;
-    const float t=w0/area,u=w1/area,v=w2/area,alpha=a->color.a*t+b->color.a*u+c->color.a*v;
+    const float t=w0/area,u=w1/area,v=w2/area;
+    const float alpha=(a->color.a*t+b->color.a*u+c->color.a*v)*ActionEffectMasks_Sample(
+        a->tex_coord.x*t+b->tex_coord.x*u+c->tex_coord.x*v,
+        a->tex_coord.y*t+b->tex_coord.y*u+c->tex_coord.y*v);
     light[0]+=(a->color.r*t+b->color.r*u+c->color.r*v)*alpha;
     light[1]+=(a->color.g*t+b->color.g*u+c->color.g*v)*alpha;
     light[2]+=(a->color.b*t+b->color.b*u+c->color.b*v)*alpha;

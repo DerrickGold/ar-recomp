@@ -29,6 +29,15 @@ const EffectGeometry=(()=>{
       const carried=p=>e.carry>0&&e.drift?Math.min(p.y,...path.filter(q=>(p.x-q.x)*Math.sign(e.drift)>0).map(q=>q.y+lift*((p.x-q.x)/e.carry)**2)):p.y;
       return [...path,...path.slice().reverse().map(p=>({x:p.x,y:carried(p)-lift*1.5}))];
     }
+    if(e.kind==='canopy-light') {
+      const lean=Math.tan((e.angle||0)*rad)*e.height;
+      return [{x:e.x-e.width/2,y:e.y-e.height/2},{x:e.x+e.width/2,y:e.y-e.height/2},
+        {x:e.x+e.width/2+lean,y:e.y+e.height/2},{x:e.x-e.width/2+lean,y:e.y+e.height/2}];
+    }
+    if(e.kind==='foliage-shadow') {
+      const a=(e.angle||0)*rad,c=Math.cos(a),s=Math.sin(a);
+      return [[-1,-1],[1,-1],[1,1],[-1,1]].map(([x,y])=>({x:e.x+c*x*e.width/2+s*y*e.height/2,y:e.y-s*x*e.width/2+c*y*e.height/2}));
+    }
     if(isRay(e))return [rayPoint(e,0,-1),rayPoint(e,0,1),rayPoint(e,1,1),rayPoint(e,1,-1)];
     if(['soft-light','halo','free-mist','waterfall-spray','cloud-bank','torch','wall-torch'].includes(e.kind))
       return Array.from({length:24},(_,i)=>({x:e.x+Math.cos(i*Math.PI/12)*e.width/2,y:e.y+Math.sin(i*Math.PI/12)*e.height/2}));

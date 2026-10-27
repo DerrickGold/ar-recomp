@@ -2,6 +2,7 @@
  * margin scanout run through the native PPU, never a browser approximation. */
 #include "room_scene.h"
 #include "action/action_bg_world.h"
+#include "action/action_effect_members.h"
 #include "actraiser/actraiser_room_profiles.h"
 #include "actraiser_game.h"
 #include "diorama/diorama_capture_blend.h"
@@ -40,6 +41,8 @@ struct EditorRoomScene {
   int16_t actor_preview_x,actor_preview_y;
   uint16_t actor_preview_start;
   bool actor_preview_enabled;
+  ActionEffectActor receiver_actors[2];
+  uint16_t receiver_clock;
   ActionEffectPreviewEvent event;
   SrSceneSurfaces surfaces;
   SrSceneRowPolicy policies[2][224];
@@ -170,24 +173,27 @@ static bool RegionSource(unsigned kind) {
   return kind==kActionEffect_TempleGroundMist || kind==kActionEffect_TempleDust ||
       kind==kActionEffect_CaveAmbientLight || kind==kActionEffect_TempleGrit ||
       kind==kActionEffect_TowerWindowLight || kind==kActionEffect_CastleLight ||
-      kind==kActionEffect_CastleMist || kind==kActionEffect_CastleSky || kind==kActionEffect_CastleWater;
+      kind==kActionEffect_CastleMist || kind==kActionEffect_CastleSky || kind==kActionEffect_CastleWater ||
+      ActionEffectMembers_WaterLimit(kind)!=0;
 }
 static void RefreshRegionSources(EditorRoomScene *r) {
   const unsigned group=r->assets.scene.group, room=r->assets.scene.map;
   const ActionAtmosphereField *atmosphere=group==1?ActionAtmosphereField_Bundled(room):NULL;
   const ActionCastleField *castle=group==2?ActionCastleField_Bundled(room):NULL;
-  uint32_t atmosphere_id=0xc2000000u|(room<<8),castle_id=0xca000000u|room;
+  const ActionWaterField *water=group==1&&room==2?ActionWaterField_Bundled():NULL;
+  uint32_t atmosphere_id=0xc2000000u|(room<<8),castle_id=0xca000000u|room,water_id=0xc2000200u;
   for(unsigned i=0;i<r->recipes.count;++i) {
     const ActionEffectRecipe *e=&r->recipes.records[i];
     if(e->group!=group||e->room!=room||e->terrain!=r->assets.terrain_profile)continue;
     if(e->atmosphere_field){atmosphere=&r->recipes.atmosphere_fields[e->atmosphere_field-1];atmosphere_id=e->source;}
     if(e->castle_field){castle=&r->recipes.castle_fields[e->castle_field-1];castle_id=e->source;}
+    if(e->water_field){water=&r->recipes.water_fields[e->water_field-1];water_id=e->source;}
   }
   unsigned count=0;
   for(unsigned i=0;i<r->default_source_count;++i)
     if(!RegionSource(r->default_sources[i].effect.kind))r->default_sources[count++]=r->default_sources[i];
   r->default_source_count=count;
-  if(!atmosphere&&!castle)return;
+  if(!atmosphere&&!castle&&!water)return;
   ActionRoomSceneFrameRequest request=r->assets.frame;
   request.camera_x=request.camera_y=request.game_frame=0;
   ActionRoomSceneFrameState frame;
@@ -197,9 +203,13 @@ static void RefreshRegionSources(EditorRoomScene *r) {
   ActionSceneEffectFrame sample={0};
   if(atmosphere)ActionAtmosphereField_Capture(&scene,&sample,atmosphere,atmosphere_id);
   if(castle)ActionCastleField_Capture(&scene,&sample,castle,castle_id);
-  for(unsigned i=0;i<sample.decoration_count&&r->default_source_count<1024;++i)
+  if(water)ActionWaterField_Capture(&scene,&sample,water,water_id);
+  for(unsigned i=0;i<sample.decoration_count&&r->default_source_count<1024;++i) {
+    const bool bg2=sample.decorations[i].projection_plane==kActionEffectProjectionPlane_Bg2High;
     r->default_sources[r->default_source_count++]=(EditorRoomEffectSource){
-        .effect=sample.decorations[i],.map_scale_x=1,.map_scale_y=1};
+        .effect=sample.decorations[i],.map_scale_x=bg2?EditorRoomScene_WaterFieldMapScale(r,0):1,
+        .map_scale_y=bg2?EditorRoomScene_WaterFieldMapScale(r,1):1};
+  }
 }
 
 unsigned EditorRoomScene_DefaultSourceCount(EditorRoomScene *r) {
@@ -635,6 +645,17 @@ bool EditorRoomScene_PreviewBinding(EditorRoomScene *r,bool enabled,uint32_t sou
   r->actor_preview_enabled=enabled;r->actor_preview_source=source;
   r->actor_preview_x=x;r->actor_preview_y=y;r->actor_preview_start=start;return true;
 }
+void EditorRoomScene_AdvanceReceivers(EditorRoomScene *r,unsigned mask,const int x[2],const int feet_y[2],uint32_t clock) {
+  if(!r)return;
+  const unsigned ticks=(uint16_t)(clock-r->receiver_clock);
+  for(unsigned i=0;i<2;++i) {
+    ActionEffectActor actor={.generation=i+1,.x=x[i],.y=feet_y[i]-24,.feet_y=feet_y[i],
+      .body_radius=8,.visible=(mask>>i)&1,.player=i==0,.priority=2};
+    ActionEffectActor_UpdateWake(&actor,r->receiver_actors[i].visible?&r->receiver_actors[i]:NULL,ticks);
+    r->receiver_actors[i]=actor;
+  }
+  r->receiver_clock=(uint16_t)clock;
+}
 static void CaptureBindingPreview(EditorRoomScene *r) {
   if(!r->actor_preview_enabled)return;
   for(unsigned i=0;i<r->recipes.count;++i){const ActionEffectRecipe *e=&r->recipes.records[i];
@@ -837,6 +858,8 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
     b->fill_mode = (uint8_t)fill; r->fill_configured[bg] = b->fill_configured;
   }
   CaptureBindingPreview(r);
+  for(unsigned i=0;i<2;++i)if(r->receiver_actors[i].visible&&r->effects.actor_count<kActionEffectActorMax)
+    r->effects.actors[r->effects.actor_count++]=r->receiver_actors[i];
   r->environment.scenery_cache = &r->scenery_cache;
   ActionEffectRecipes_Apply(&r->recipes, s->group, s->map, r->assets.terrain_profile,
                             r->environment.clock, &r->environment, &r->effects);

@@ -60,6 +60,7 @@ const ActionSceneEffectFrame *EditorRoomScene_Effects(const EditorRoomScene *roo
 const ActionEnvironmentScene *EditorRoomScene_Environment(const EditorRoomScene *room);
 const ActionAtmosphereField *EditorRoomScene_AtmosphereField(const EditorRoomScene *room);
 bool EditorRoomScene_PreviewBinding(EditorRoomScene *,bool enabled,uint32_t source,int x,int y,unsigned start);
+void EditorRoomScene_AdvanceReceivers(EditorRoomScene *,unsigned mask,const int x[2],const int feet_y[2],uint32_t frame);
 const ActionSurfaceField *EditorRoomScene_SurfaceField(const EditorRoomScene *,unsigned index);
 const ActionProjectileField *EditorRoomScene_ProjectileField(const EditorRoomScene *,unsigned index);
 const ActionArcField *EditorRoomScene_ArcField(const EditorRoomScene *,unsigned index);

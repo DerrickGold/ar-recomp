@@ -171,10 +171,14 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *d, const DioramaScene
         (float)p->attributes.value,(float)p->illumination.value,(float)p->enemy_illumination.value};
     return WebEffect(5,a,19)!=0;
   }
-  const float a[17]={p->texel_width,p->texel_height,p->blur_radius,p->lower_content_v_max,
+  const float a[29]={p->texel_width,p->texel_height,p->blur_radius,p->lower_content_v_max,
       p->priority.width,p->priority.height,p->priority.high_band,p->priority.additive,
-      uv.w/w,uv.h/h,uv.x,1-uv.y-uv.h,p->shade.r,p->shade.g,p->shade.b,p->mode,(float)p->illumination.value};
-  return WebEffect(4,a,17) != 0;
+      uv.w/w,uv.h/h,uv.x,1-uv.y-uv.h,p->shade.r,p->shade.g,p->shade.b,p->mode,
+      p->grade.strength,p->grade.saturation,0,0,
+      ((p->grade.shadows>>16)&255)/255.f,((p->grade.shadows>>8)&255)/255.f,(p->grade.shadows&255)/255.f,0,
+      ((p->grade.highlights>>16)&255)/255.f,((p->grade.highlights>>8)&255)/255.f,(p->grade.highlights&255)/255.f,0,
+      (float)p->illumination.value};
+  return WebEffect(4,a,29) != 0;
 }
 bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *d) { (void)d; return WebAvailable(4) != 0; }
 bool DioramaEffectBackend_Unbind(ArRenderDevice *d) { (void)d; return WebEffect(-1,NULL,0) != 0; }

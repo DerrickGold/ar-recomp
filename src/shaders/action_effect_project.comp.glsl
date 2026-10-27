@@ -14,7 +14,7 @@ layout(std430,set=1,binding=0) writeonly buffer Vertices { vec4 values[]; } vert
 #include "action_effect_context.glsl"
 
 #include "action_effect_projection.glsl"
-struct ClipVertex { vec2 point; vec4 color; };
+struct ClipVertex { vec2 point; vec4 color; vec2 uv; };
 float distance_to(vec2 p,vec4 b,int edge) {
     if(edge==0)return p.x-b.x;
     if(edge==1)return b.z-p.x;
@@ -27,7 +27,7 @@ ClipVertex intersection(ClipVertex a,ClipVertex b,vec4 bounds,int edge) {
     }
     float da=distance_to(a.point,bounds,edge),db=distance_to(b.point,bounds,edge);
     float t=da/(da-db);
-    ClipVertex r=ClipVertex(a.point+(b.point-a.point)*t,a.color+(b.color-a.color)*t);
+    ClipVertex r=ClipVertex(a.point+(b.point-a.point)*t,a.color+(b.color-a.color)*t,a.uv+(b.uv-a.uv)*t);
     if(edge==0)r.point.x=bounds.x;
     if(edge==1)r.point.x=bounds.z;
     if(edge==2)r.point.y=bounds.y;
@@ -54,6 +54,10 @@ float shadow_visibility(vec2 light,vec2 point,float strength) {
 }
 void emit_vertex(uint at,vec2 point,vec4 color) {
     vertices.values[at*2]=vec4(point,0,0);
+    vertices.values[at*2+1]=color;
+}
+void emit_mask_vertex(uint at,vec2 point,vec4 color,vec2 uv) {
+    vertices.values[at*2]=vec4(point,uv);
     vertices.values[at*2+1]=color;
 }
 bool local_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
@@ -100,7 +104,7 @@ void main() {
     if((p.meta.x==0u || p.meta.x==8u)) {
         ClipVertex a[8],b[8];int n=3;
         for(int j=0;j<3;j++) {
-            a[j]=ClipVertex(p.points[j].xy,p.colors[j]);
+            a[j]=ClipVertex(p.points[j].xy,p.colors[j],p.meta.x==0u?p.points[j].zw:vec2(0));
             if(p.meta.x==8u) {
                 float light=p.points[j].z>0?lighting.values[uint(p.points[j].z)-1]:0;
                 a[j].color.a=min(p.extra.x,p.points[j].w+p.colors[j].a*light);
@@ -131,9 +135,9 @@ void main() {
             }
         }
         for(int j=1;j<n-1;j++) {
-            emit_vertex(base+uint((j-1)*3),screen[0],a[0].color);
-            emit_vertex(base+uint((j-1)*3+1),screen[j],a[j].color);
-            emit_vertex(base+uint((j-1)*3+2),screen[j+1],a[j+1].color);
+            emit_mask_vertex(base+uint((j-1)*3),screen[0],a[0].color,a[0].uv);
+            emit_mask_vertex(base+uint((j-1)*3+1),screen[j],a[j].color,a[j].uv);
+            emit_mask_vertex(base+uint((j-1)*3+2),screen[j+1],a[j+1].color,a[j+1].uv);
         }
     } else if(p.meta.x==1u || p.meta.x==6u) {
         vec2 local[4]=vec2[4](p.points[0].xy,p.points[0].xy+vec2(1,0),p.points[0].xy+vec2(0,1),p.points[1].xy);

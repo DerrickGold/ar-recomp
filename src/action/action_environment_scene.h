@@ -77,6 +77,10 @@ bool ActionEnvironmentScene_OpacityRow(const ActionEnvironmentScene *scene, unsi
                                        int y, uint8_t *bits);
 bool ActionEnvironmentScene_CaptureScenery(const ActionEnvironmentScene *scene,
                                            ActionMoonlightOcclusion *out);
+/* World-space directional canopy trace. Spans hold source X edges, first-hit
+ * world Y and a collision flag in height. Independent of viewport/camera. */
+void ActionEnvironmentScene_CaptureCanopy(const ActionEnvironmentScene *,
+    const ActionEffectInstance *,ActionEffectFloorField *);
 void ActionEnvironmentScene_Capture(const ActionEnvironmentScene *scene,
     ActionSceneEffectFrame *frame);
 void ActionRayField_Capture(const ActionEnvironmentScene *scene,

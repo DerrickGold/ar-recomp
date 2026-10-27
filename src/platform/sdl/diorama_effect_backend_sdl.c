@@ -259,11 +259,11 @@ static SDL_GPUTexture *LightTexture(ArRenderTexture handle) {
 }
 
 static bool WarmLightShader(ArRenderDevice *device, SDL_GPURenderState *state,
-    const float uniforms[16], bool *warmed) {
+    const float *uniforms, size_t size, bool *warmed) {
   /* Texture bindings do not change the cached fragment shader/pipelines.
    * Warm once per material/device, not on every new map or priority band. */
   if (!*warmed)
-    *warmed = GpuRenderPreparation_Warm(device, state, uniforms, 16*sizeof(float), true);
+    *warmed = GpuRenderPreparation_Warm(device, state, uniforms, size, true);
   return *warmed;
 }
 
@@ -295,7 +295,7 @@ static bool BindActorLight(ArRenderDevice *device, const DioramaSceneryLightEffe
     SDL_GPURenderState *state = SDL_CreateGPURenderState(s_effects.renderer, &info);
     if (!state) return false;
     const float warm[16] = {1,1,0,0,1,1,0,0,0,0,1,1,0,0,0,0};
-    if (!WarmLightShader(device, state, warm, &s_effects.actors_warmed)) {
+    if (!WarmLightShader(device, state, warm, sizeof(warm), &s_effects.actors_warmed)) {
       SDL_DestroyGPURenderState(state);
       return false;
     }
@@ -338,8 +338,8 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *device,
     };
     SDL_GPURenderState *state = SDL_CreateGPURenderState(s_effects.renderer, &info);
     if (!state) return false;
-    const float warm[16] = {1,1,0,0, 1,1,0,0, 1,1,0,0, 1,1,1,0};
-    if (!WarmLightShader(device, state, warm, &s_effects.scenery_warmed)) {
+    const float warm[28] = {1,1,0,0, 1,1,0,0, 1,1,0,0, 1,1,1,0};
+    if (!WarmLightShader(device, state, warm, sizeof(warm), &s_effects.scenery_warmed)) {
       SDL_DestroyGPURenderState(state);
       return false;
     }
@@ -350,12 +350,17 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *device,
   /* RGBA8 stores quarter-strength incoming light (the receiver range is 0..4).
    * This texture stays resident; SDL binds it after the ordinary art sampler. */
   const ArRenderRectF uv = params->light_uv.w > 0 ? params->light_uv : (ArRenderRectF){0,0,1,1};
-  const float uniforms[16] = {
+  const float uniforms[28] = {
     params->texel_width, params->texel_height, params->blur_radius, params->lower_content_v_max,
     params->priority.width, params->priority.height,
     params->priority.high_band, params->priority.additive,
     uv.w / width, uv.h / height, uv.x, uv.y,
     params->shade.r, params->shade.g, params->shade.b, params->mode,
+    params->grade.strength, params->grade.saturation, 0, 0,
+    ((params->grade.shadows>>16)&255)/255.f, ((params->grade.shadows>>8)&255)/255.f,
+    (params->grade.shadows&255)/255.f, 0,
+    ((params->grade.highlights>>16)&255)/255.f, ((params->grade.highlights>>8)&255)/255.f,
+    (params->grade.highlights&255)/255.f, 0,
   };
   return SDL_SetGPURenderStateFragmentUniforms(s_effects.scenery, 0, uniforms, sizeof(uniforms)) &&
       SDL_SetGPURenderState(s_effects.renderer, s_effects.scenery);

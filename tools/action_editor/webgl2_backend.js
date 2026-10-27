@@ -23,7 +23,7 @@ class ActionWebGL2Backend {
     this.uniformBuffer = gl.createBuffer();
     this.vertexCapacity = 0;
     this.indexCapacity = 0;
-    this.uniforms = new Float32Array(16);
+    this.uniforms = new Float32Array(28);
     this.vertexArray = gl.createVertexArray();
     gl.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -33,7 +33,7 @@ class ActionWebGL2Backend {
     }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
     gl.bindBuffer(gl.UNIFORM_BUFFER, this.uniformBuffer);
-    gl.bufferData(gl.UNIFORM_BUFFER, 64, gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.UNIFORM_BUFFER, 112, gl.DYNAMIC_DRAW);
     gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.uniformBuffer);
     this.samplers = [];
     for (let linear = 0; linear < 2; linear++) {
@@ -300,8 +300,8 @@ void main() {
     if (kind >= 0) {
       this.uniforms.fill(0);
       const values = new Float32Array(this.memory.buffer, pointer, count);
-      this.uniforms.set(values.subarray(0,16));
-      if (kind === 4) this.illuminationId = values[16];
+      this.uniforms.set(values.subarray(0,kind === 4 ? 28 : 16));
+      if (kind === 4) this.illuminationId = values[28];
       if (kind === 5) this.actorTextureIds = Array.from(values.subarray(16,19));
       const gl = this.gl;
       gl.bindBuffer(gl.UNIFORM_BUFFER, this.uniformBuffer);

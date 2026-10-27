@@ -11,6 +11,7 @@ enum { kGlowSize = 64, kMeshVertices = 8192, kMeshIndices = 24576,
        kStars = 180, kClouds = 6, kRuins = 3, kEvents = 3, kFragments = 32 };
 static const float kTau = 6.28318530718f;
 static const float kArtAspect = 1672.0f / 941.0f;
+static const float kFloorTopV = .58f;
 static const float kSkyDistance = 3.25f, kSkyTanHalfFov = .41421356237f;
 static const unsigned kEventClouds[kEvents] = {0, 2, 3};
 
@@ -35,6 +36,7 @@ typedef struct RiftActivity {
 static struct {
   const void *owner;
   ArRenderTexture nebula, clouds, ruins, floor, floor_emission, glow;
+  int floor_art_height, floor_crop_top;
   bool attempted;
   ArRenderVertex2D vertices[kMeshVertices];
   int32_t indices[kMeshIndices];
@@ -86,18 +88,23 @@ static bool LoadArt(ArRenderDevice *device, const unsigned char *encoded,
   int width, height, channels;
   stbi_uc *rgba = stbi_load_from_memory(encoded, length, &width, &height, &channels, 4);
   if (!rgba) return false;
+  /* The floor mesh only visits the bottom of its artwork. Retain the texel
+   * below the first linear-filter sample as well as every row after it. Keep
+   * the decoded source coordinates for the matte and animated emission. */
+  const int crop_top = emission ? (int)floorf(kFloorTopV*height-.5f) : 0;
+  const int upload_height = height-crop_top;
   /* Numeric ARGB, independent of host byte order. The backend owns byte layout. */
-  uint32_t *pixels = (uint32_t *)rgba;
-  for (int i = 0; i < width*height; ++i) {
-    const unsigned char *p = rgba+i*4;
+  uint32_t *pixels = (uint32_t *)rgba+crop_top*width;
+  for (int i = 0; i < width*upload_height; ++i) {
+    const unsigned char *p = (const unsigned char *)pixels+i*4;
     pixels[i] = ((uint32_t)p[3]<<24)|((uint32_t)p[0]<<16)|((uint32_t)p[1]<<8)|p[2];
   }
   if (emission) {
     /* The floor's dark cavities contain baked space. Reveal the live clouds
      * there, but retain the solid walking lip and luminous stone ridges.
      * This material matte is prepared once, never from a rendered frame. */
-    for (int y=0;y<height;++y) {
-      const float reveal=Smooth(((float)y/height-.705f)/.055f);
+    for (int y=0;y<upload_height;++y) {
+      const float reveal=Smooth(((float)(y+crop_top)/height-.705f)/.055f);
       for (int x=0;x<width;++x) {
         const int i=y*width+x;
         const uint32_t p=pixels[i];
@@ -108,18 +115,22 @@ static bool LoadArt(ArRenderDevice *device, const unsigned char *encoded,
       }
     }
   }
-  bool ok = Upload(device, width, height, pixels, blend, texture);
+  bool ok = Upload(device, width, upload_height, pixels, blend, texture);
   if (ok && emission) {
     /* Extract the authored luminous mineral veins once, while the decoded
      * pixels are already on the CPU. This is never a framebuffer readback. */
-    for (int i=0;i<width*height;++i) {
+    for (int i=0;i<width*upload_height;++i) {
       const uint32_t p=pixels[i];
       const unsigned r=(p>>16)&255,g=(p>>8)&255,b=p&255;
       const float hot=Smooth((fmaxf(r,fmaxf(g,b))-112)/118);
       pixels[i]=(p&UINT32_C(0xff000000))|((unsigned)(r*hot)<<16)|
           ((unsigned)(g*hot)<<8)|(unsigned)(b*hot);
     }
-    ok=Upload(device,width,height,pixels,kArRenderBlendMode_Add,emission);
+    ok=Upload(device,width,upload_height,pixels,kArRenderBlendMode_Add,emission);
+    if (ok) {
+      s_rift.floor_art_height=height;
+      s_rift.floor_crop_top=crop_top;
+    }
   }
   stbi_image_free(rgba);
   return ok;
@@ -638,14 +649,16 @@ static bool Floor(ArRenderDevice *device, const DioramaAstralRiftFrame *frame,
   const float span = 768;
   if (!GridFits(columns,rows)) return false;
   for (int row=0;row<=rows;++row) for (int x=0;x<=columns;++x) {
-    const float u=(float)x/columns,t=.58f+.42f*row/rows;
+    const float u=(float)x/columns,t=kFloorTopV+.42f*row/rows;
     ArRenderPointF p;
     if (!FloorPoint(frame,(u-.5f)*span,(t-.675f)*span/kArtAspect,&p)) {
       BeginMesh();return true;
     }
     s_rift.vertices[s_rift.vertex_count++]=(ArRenderVertex2D){
         {p.x,p.y},
-        {brightness*.78f,brightness*.78f,brightness*.84f,1},{u,t}};
+        {brightness*.78f,brightness*.78f,brightness*.84f,1},
+        {u,(t*s_rift.floor_art_height-s_rift.floor_crop_top)/
+            (s_rift.floor_art_height-s_rift.floor_crop_top)}};
   }
   GridIndices(0,columns,rows);
   if (!Submit(device,s_rift.floor,kArRenderBlendMode_Alpha)) return false;
@@ -667,7 +680,7 @@ static bool Floor(ArRenderDevice *device, const DioramaAstralRiftFrame *frame,
   }
   for (int i=0;i<s_rift.vertex_count;++i) {
     ArRenderVertex2D *v=&s_rift.vertices[i];
-    const float u=v->tex_coord.x,t=v->tex_coord.y;
+    const float u=v->tex_coord.x,t=kFloorTopV+.42f*(i/(columns+1))/rows;
     const float wave=.5f+.5f*sinf(u*29+t*13-Phase(activity->tick,113));
     const float crossing=.5f+.5f*sinf(u*47-t*19+Phase(activity->tick,71));
     const float crest=wave*wave*wave;
@@ -724,15 +737,24 @@ static PresentationOutcome Draw(void *userdata, ArRenderRectI viewport) {
       ? kPresentationOutcome_Complete : kPresentationOutcome_CoreFailure;
 }
 
+uint32_t DioramaAstralRift_ReplacedPlanes(ArRenderDevice *device, bool enabled,
+    unsigned map_group, unsigned map_number, unsigned layer_section) {
+  if (!enabled || map_group!=7 || map_number!=8 ||
+      layer_section!=kDioramaLayerSection_Room ||
+      !DioramaAstralRift_Prepare(device)) return 0;
+  return (1u<<kDioramaPlane_Backdrop)|(1u<<SR_PPU_OVERLAY_BG1)|
+      (1u<<kDioramaPlane_Bg1Hi)|(1u<<kDioramaPlane_Bg1Far)|(1u<<SR_PPU_OVERLAY_BG2)|
+      (1u<<kDioramaPlane_Bg2Hi)|(1u<<kDioramaPlane_Bg2Far);
+}
+
 bool DioramaAstralRift_Attach(bool enabled, DioramaScene *scene,
     DioramaRenderOptions *options, DioramaAstralRiftFrame *frame) {
-  if (!enabled || !scene || !options || !frame || scene->backdrop ||
-      scene->map_group!=7 || scene->map_number!=8 || scene->layer_section ||
-      !isfinite(frame->yaw) || !isfinite(frame->pitch) ||
-      !DioramaAstralRift_Prepare(frame->device)) return false;
-  options->visible_planes &= ~((1u<<kDioramaPlane_Backdrop)|(1u<<SR_PPU_OVERLAY_BG1)|
-      (1u<<kDioramaPlane_Bg1Hi)|(1u<<kDioramaPlane_Bg1Far)|(1u<<SR_PPU_OVERLAY_BG2)|
-      (1u<<kDioramaPlane_Bg2Hi)|(1u<<kDioramaPlane_Bg2Far));
+  if (!scene || !options || !frame || scene->backdrop ||
+      !isfinite(frame->yaw) || !isfinite(frame->pitch)) return false;
+  const uint32_t replaced = DioramaAstralRift_ReplacedPlanes(frame->device,
+      enabled, scene->map_group, scene->map_number, scene->layer_section);
+  if (!replaced) return false;
+  options->visible_planes &= ~replaced;
   options->skybox = kDioramaSky_Off;
   options->shoebox = false;
   scene->effect_obj_priority_mask |= 1u<<2; /* Also project without a preview actor. */

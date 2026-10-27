@@ -14,6 +14,7 @@
 #include "action/action_effect_projection.h"
 #include "action/action_effect_render.h"
 #include "action/action_effect_source.h"
+#include "action/action_effect_mask_texture.h"
 #include "action/action_effect_receivers.h"
 #include "actraiser/actraiser_room_profiles.h"
 #include "app/session_fatal.h"
@@ -25,6 +26,8 @@
 #include "render/presentation_layout.h"
 
 static ArRenderTexture s_action_bg1_mask_texture;
+static ArRenderTexture s_action_effect_masks;
+static EffectBatch SceneBatchView(ArRenderDevice *device,ActionSceneEffectRenderBatch *geometry);
 static ArRenderTexture s_action_bg2_mask_texture;
 static ArRenderTexture s_action_plane_effect_target;
 static int s_action_plane_effect_w, s_action_plane_effect_h;
@@ -471,13 +474,14 @@ void PresentActionHeat_End(
 /* ── Action-stage presentation effects ────────────────────────────────── */
 
 static void SubmitSurfaceLight(ArRenderDevice *device, const EffectBatch *batch) {
+  if (batch->overflow) return;
   const ArRenderDrawState state = {
     .flags = kArRenderDrawState_Blend,
     .blend = kArRenderBlendMode_Light,
   };
   /* Custom blending is optional (notably on software renderers). A rejection
    * must not trip the shared capability latch for ordinary spell/actor effects. */
-  if (ArRenderDevice_DrawGeometryWithState(device, ArRenderTexture_Invalid(),
+  if (ArRenderDevice_DrawGeometryWithState(device, batch->texture,
           batch->vertices, batch->vertex_count, batch->indices, batch->index_count, &state))
     return;
   s_action_surface_light_supported = false;
@@ -502,7 +506,7 @@ typedef struct ActionSourcePacketCache {
   ActionEffectSourceLightJob *lights;
   unsigned count, capacity, light_count, light_capacity;
   uint64_t revision;
-  bool valid, failed, requested, lighting, particles, scenery_exposure_in_mesh, scenery_lighting_in_material;
+  bool valid, failed, requested, lighting, particles, scenery_exposure_in_mesh, scenery_lighting_in_material, atmosphere_unlit;
   unsigned particle_count;
   uint8_t particle_indices[kActionAuthoredMaxInstances];
   ActionEffectLocalRect particle_bounds[kActionAuthoredMaxInstances];
@@ -594,6 +598,7 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
       UpdateSourceParticleBounds(cache, &slot->action_scene_effects, projection))
     cache->valid = false;
   if (!cache->valid || cache->lighting != lighting || cache->particles != particles ||
+      cache->atmosphere_unlit != projection->atmosphere_unlit ||
       cache->scenery_exposure_in_mesh != projection->scenery_exposure_in_mesh ||
       cache->scenery_lighting_in_material != projection->scenery_lighting_in_material) {
     ActionEffectSourceBatch source = {.context = *projection,
@@ -613,6 +618,7 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
     cache->failed = !built || !RetainSourcePacket(cache, &source);
     cache->scenery_exposure_in_mesh=projection->scenery_exposure_in_mesh;
     cache->scenery_lighting_in_material=projection->scenery_lighting_in_material;
+    cache->atmosphere_unlit=projection->atmosphere_unlit;
     cache->lighting = lighting;
     cache->particles = particles;
     cache->valid = true;
@@ -685,6 +691,7 @@ void PresentActionEffects_DrawWithSource(
     .visible_top = slot->visible_top,
     .capture_height = FrameSlot_CaptureHeight(slot),
     .diorama_projection = diorama_projection,
+    .atmosphere_unlit = !slot->action_effect_lighting,
     .viewport = {viewport.x, viewport.y, viewport.w, viewport.h},
   };
   ActionEffectRenderBatch *geometry = &s_action_effect_render_scratch.spell;
@@ -749,8 +756,7 @@ void PresentActionEffects_DrawWithSource(
           kActionEffectRenderLayer_WorldSmoke, false, true,
           ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
           &projection, scene_geometry) && scene_geometry->index_count) {
-      scene_batch.vertex_count = scene_geometry->vertex_count;
-      scene_batch.index_count = scene_geometry->index_count;
+      scene_batch = SceneBatchView(device,scene_geometry);
       FadeEffectVertices(slot, scene_geometry->vertices, scene_geometry->vertex_count);
       decoration_submitted |= EffectRenderer_Submit(device, &scene_batch, kArRenderBlendMode_Alpha);
     }
@@ -772,8 +778,7 @@ void PresentActionEffects_DrawWithSource(
           true, true,
           ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds, &projection,
           scene_geometry) && scene_geometry->index_count) {
-    scene_batch.vertex_count = scene_geometry->vertex_count;
-    scene_batch.index_count = scene_geometry->index_count;
+    scene_batch = SceneBatchView(device,scene_geometry);
     FadeEffectVertices(slot, scene_geometry->vertices, scene_geometry->vertex_count);
     decoration_submitted = EffectRenderer_Submit(
         device, &scene_batch, kArRenderBlendMode_Add);
@@ -786,8 +791,7 @@ void PresentActionEffects_DrawWithSource(
           &slot->action_scene_effects, kActionEffectRenderLayer_WorldDust, false, true,
           ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds, &projection,
           scene_geometry) && scene_geometry->index_count) {
-    scene_batch.vertex_count = scene_geometry->vertex_count;
-    scene_batch.index_count = scene_geometry->index_count;
+    scene_batch = SceneBatchView(device,scene_geometry);
     FadeEffectVertices(slot, scene_geometry->vertices, scene_geometry->vertex_count);
     decoration_submitted |= EffectRenderer_Submit(
         device, &scene_batch, kArRenderBlendMode_Alpha);
@@ -799,8 +803,7 @@ void PresentActionEffects_DrawWithSource(
           true, false, ActionEffectProjection_ProjectPoint,
           ActionEffectProjection_ClipBounds, &projection, scene_geometry) &&
       scene_geometry->index_count) {
-    scene_batch.vertex_count = scene_geometry->vertex_count;
-    scene_batch.index_count = scene_geometry->index_count;
+    scene_batch = SceneBatchView(device,scene_geometry);
     FadeEffectVertices(slot, scene_geometry->vertices, scene_geometry->vertex_count);
     SubmitSurfaceLight(device, &scene_batch);
   }
@@ -846,6 +849,7 @@ static ActionEffectProjectionContext DecorationProjection(
     .snes_height = FrameSlot_VisibleHeight(slot), .visible_top = slot->visible_top,
     .capture_height = FrameSlot_CaptureHeight(slot), .diorama_projection = diorama,
     .scenery_exposure_in_mesh = diorama != NULL,
+    .atmosphere_unlit = !slot->action_effect_lighting,
     /* Flat geometry is target-local; its submission restores viewport offset. */
     .viewport = {diorama ? viewport.x : 0, diorama ? viewport.y : 0,
                  viewport.w, viewport.h},
@@ -882,12 +886,15 @@ void PresentActionEffects_PrepareSourcePackets(const FrameSlot *slot) {
   }
 }
 
-static EffectBatch SceneBatchView(ActionSceneEffectRenderBatch *geometry) {
+static EffectBatch SceneBatchView(ArRenderDevice *device,ActionSceneEffectRenderBatch *geometry) {
+  const bool textured=ActionEffectMasks_UsesTexture(geometry->vertices,geometry->vertex_count);
+  const bool ready=!textured||ActionEffectMasks_EnsureTexture(device,&s_action_effect_masks);
   return (EffectBatch){
     .vertices = geometry->vertices, .indices = geometry->indices,
     .vertex_count = geometry->vertex_count, .index_count = geometry->index_count,
     .vertex_capacity = kActionSceneEffectRenderMaxVertices,
     .index_capacity = kActionSceneEffectRenderMaxIndices,
+    .texture=textured?s_action_effect_masks:ArRenderTexture_Invalid(),.overflow=!ready,
   };
 }
 
@@ -929,7 +936,7 @@ static bool DrawMaterialLight(PresentActionPlaneEffectContext *context,
         geometry->vertices[v].color.g /= kActionReceiverMaxIllumination;
         geometry->vertices[v].color.b /= kActionReceiverMaxIllumination;
       }
-      EffectBatch batch = SceneBatchView(geometry);
+      EffectBatch batch = SceneBatchView(context->device,geometry);
       if (!EffectRenderer_Submit(context->device, &batch, kArRenderBlendMode_Add)) return false;
     }
   }
@@ -981,7 +988,7 @@ void PresentActionEffects_DrawDioramaPlane(
     }
     if (!geometry->index_count) continue;
     FadeEffectVertices(slot, geometry->vertices, geometry->vertex_count);
-    EffectBatch batch = SceneBatchView(geometry);
+    EffectBatch batch = SceneBatchView(context->device,geometry);
     if (EffectRenderer_Submit(context->device, &batch, pass->blend) &&
         !announced[pass->layer]) {
       announced[pass->layer] = true;
@@ -1073,7 +1080,8 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
       !geometry->index_count)
     return true;
   FadeEffectVertices(slot, geometry->vertices, geometry->vertex_count);
-  if (mask_has_alpha) {
+  const bool textured=ActionEffectMasks_UsesTexture(geometry->vertices,geometry->vertex_count);
+  if (mask_has_alpha && !textured) {
     if (!DrawAlphaMaskedGeometry(device, slot, viewport, mask_texture, pass->blend, geometry))
       DisableActionPlaneEffect(device, "masked geometry submit");
     return true;
@@ -1097,11 +1105,11 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
       device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
   if (!target_ready)
     DisableActionPlaneEffect(device, "effect-target clear");
-  EffectBatch batch = SceneBatchView(geometry);
+  EffectBatch batch = SceneBatchView(device,geometry);
   bool submitted = false;
   bool masked = false;
   if (target_ready)
-    submitted = EffectRenderer_Submit(device, &batch, kArRenderBlendMode_Add);
+    submitted = EffectRenderer_Submit(device, &batch, textured&&alpha ? kArRenderBlendMode_Alpha : kArRenderBlendMode_Add);
   if (submitted && s_action_plane_blend_supported) {
     const ArRenderRectF src = {
       (float)slot->visible_x0, 0.0f,
@@ -1113,10 +1121,17 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
         FrameSlot_CaptureHeight(slot), slot->ws_extra_top);
     const ArRenderDrawState mask_state = {
       .flags = kArRenderDrawState_Blend,
-      .blend = kArRenderBlendMode_Multiply,
+      .blend = mask_has_alpha ? kArRenderBlendMode_Modulate : kArRenderBlendMode_Multiply,
     };
     masked = ArRenderDevice_DrawTextureWithState(
         device, mask_texture, &src, &dst, &mask_state);
+    /* Textured flat effects need both their density and the winner mask.
+     * Multiply premultiplied RGB, and alpha too for fog. Diorama keeps its
+     * single batched atlas draw and relies on ordinary plane occlusion. */
+    if(masked && textured && alpha) {
+      const ArRenderDrawState alpha_mask={.flags=kArRenderDrawState_Blend,.blend=kArRenderBlendMode_DestinationAlphaMask};
+      masked=ArRenderDevice_DrawTextureWithState(device,mask_texture,&src,&dst,&alpha_mask);
+    }
     if (!masked) DisableActionPlaneEffect(device, "winner-mask draw");
   }
   if (!ArRenderDevice_EndTarget(device, &target_state)) {
@@ -1129,8 +1144,10 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
       (float)viewport.x, (float)viewport.y,
       (float)viewport.w, (float)viewport.h,
     };
-    composited = ArRenderDevice_DrawTexture(
-        device, target, NULL, &dst);
+    const ArRenderDrawState composite={.flags=kArRenderDrawState_Blend,
+      .blend=alpha?kArRenderBlendMode_AlphaPremultiplied:kArRenderBlendMode_AddPremultiplied};
+    composited = textured ? ArRenderDevice_DrawTextureWithState(device, target, NULL, &dst,&composite) :
+        ArRenderDevice_DrawTexture(device, target, NULL, &dst);
     if (!composited) DisableActionPlaneEffect(device, "masked-target composite");
   }
   static bool announced[kActionEffectRenderLayer_Count];
@@ -1186,6 +1203,8 @@ bool PresentActionEffects_DrawFlatPlanes(
 }
 
 void PresentActionEffects_Reset(ArRenderDevice *device) {
+  ArRenderDevice_DestroyTexture(device,s_action_effect_masks);
+  s_action_effect_masks=ArRenderTexture_Invalid();
   PresentActionEffects_InvalidateSourcePackets();
   for (unsigned i = 0; i < sizeof(s_source_packets) / sizeof(s_source_packets[0]); ++i) {
     free(s_source_packets[i].primitives);

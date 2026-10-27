@@ -98,6 +98,9 @@ typedef enum ActionEffectKind {
   kActionEffect_AuthoredTorch,
   kActionEffect_AuthoredParticlePath,
   kActionEffect_AuthoredHeat,
+  kActionEffect_AuthoredFoliage,
+  kActionEffect_AuthoredCanopy,
+  kActionEffect_AuthoredFireflies,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -279,7 +282,7 @@ enum {
   kActionSceneDecorationMaxInstances = 27,
   /* Room-wide authored sources need editing headroom beyond the shipped
    * compositions. Geometry stays independently bounded below, so additional
-   * small sources do not enlarge the per-room render budget. */
+   * small sources do not enlarge the per-batch render budget. */
   kActionAuthoredMaxInstances = 96,
   kActionAuthoredMaxVertices = 4096,
   kActionAuthoredMaxIndices = 24576,
@@ -341,12 +344,21 @@ typedef enum ActionParticlePattern {
   kActionParticle_Scarabs, kActionParticle_Sparks, kActionParticle_Glints, kActionParticle_Count,
 } ActionParticlePattern;
 enum { kActionParticleCellSize=256, kActionParticleMaxCells=64, kActionContourMaxPoints=16 };
+typedef enum ActionGlowStyle {
+  kActionGlow_Insects, kActionGlow_Wisps, kActionGlow_Moss, kActionGlow_Count,
+} ActionGlowStyle;
 typedef struct ActionEffectFieldStyle {
   float angle, fan, softness, drift, amplitude;
+  float thickness; /* Fan strand width multiplier; zero retains legacy width. */
+  float scatter, bounce; /* Canopy air scattering and short surface return. */
+  uint8_t textured; /* Cloud bank uses the shared wispy density mask. */
+  float rolling, wake, canopy_response; /* Textured floor mist: billows, body wakes, canopy scattering. */
   float carry; /* Ground dust: downwind distance over which lifted dust settles. */
   float gust, activity; /* Shared wind envelope; active fraction of a particle cycle. */
   float twinkle; /* Brief highlights on existing grains; does not change their motion. */
-  uint8_t shadows; /* Placed torch spill uses the scenery shadow mask. */
+  float chorus, trail; /* Glow clusters: loose answering pulses, short wisp trails. */
+  uint8_t glow_style, ripple; /* Explicit water landing at the bottom of a drip region. */
+  uint8_t shadows; /* Placed torch/fan spill uses the scenery shadow mask. */
   uint8_t strands, pattern, placement, point_count;
   struct {float x,y;} points[kActionContourMaxPoints];
   /* Exposure boxes keep legacy intensity-based dimming when unset. */
@@ -469,7 +481,8 @@ typedef struct ActionBloodpoolDetails {
 
 /* At most 33 columns for an unaligned 512px-wide painted area. Owned values,
  * never pointers into mutable editor documents or live gameplay memory. */
-enum { kActionAuthoredFloorMaxSpans = 33, kActionAuthoredFloorVerticesPerSpan = 45 };
+enum { kActionAuthoredFloorMaxSpans = 33, kActionAuthoredFloorVerticesPerSpan = 45,
+       kActionCanopyMaxSpans = 24 };
 typedef struct ActionEffectFloorSpan { float x0, x1, y, height; } ActionEffectFloorSpan;
 typedef struct ActionEffectFloorField {
   unsigned count;

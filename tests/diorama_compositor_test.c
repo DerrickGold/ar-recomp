@@ -437,6 +437,9 @@ static unsigned AstralFixture(unsigned scenario) {
   Scene3D_BuildViewProjection(&camera,r.width,r.height,projection.matrix);
   frame.projection=&projection;frame.floor_capture_x=256;
   frame.floor_capture_y=kDioramaAstralFloorWorldY+64;
+  assert(!DioramaAstralRift_ReplacedPlanes(&device,false,7,8,kDioramaLayerSection_Room));
+  assert(!DioramaAstralRift_ReplacedPlanes(&device,true,7,7,kDioramaLayerSection_Room));
+  assert(!DioramaAstralRift_ReplacedPlanes(&device,true,7,8,kDioramaLayerSection_DeathHeimCompletion));
   assert(!DioramaAstralRift_Attach(false,&scene,&options,&frame));
   scene.map_number=7;
   assert(!DioramaAstralRift_Attach(true,&scene,&options,&frame));
@@ -453,6 +456,7 @@ static unsigned AstralFixture(unsigned scenario) {
       r.fail_upload_at=scenario==9?failure:0;
       assert(!DioramaAstralRift_Attach(true,&scene,&options,&frame));
       assert(!scene.backdrop && !r.live && !memcmp(&options,&original,sizeof(options)));
+      assert(!DioramaAstralRift_ReplacedPlanes(&device,true,7,8,kDioramaLayerSection_Room));
       const unsigned creates=r.creates, uploads=r.uploads;
       assert(!DioramaAstralRift_Attach(true,&scene,&options,&frame));
       assert(r.creates==creates && r.uploads==uploads); /* Retry only after reset. */
@@ -466,6 +470,10 @@ static unsigned AstralFixture(unsigned scenario) {
     return s_count;
   }
   assert(DioramaAstralRift_Attach(true,&scene,&options,&frame));
+  const uint32_t replaced=DioramaAstralRift_ReplacedPlanes(&device,true,7,8,kDioramaLayerSection_Room);
+  assert(replaced && options.visible_planes==(original.visible_planes&~replaced));
+  assert(!DioramaAstralRift_ReplacedPlanes(&device,false,7,8,kDioramaLayerSection_Room));
+  assert(DioramaAstralRift_ReplacedPlanes(&device,true,7,8,kDioramaLayerSection_Room)==replaced);
   assert(options.skybox==kDioramaSky_Off && !options.shoebox);
   assert(!(options.visible_planes & (1u<<SR_PPU_OVERLAY_BG1)));
   assert(!(options.visible_planes & (1u<<SR_PPU_OVERLAY_BG2)));
@@ -473,6 +481,10 @@ static unsigned AstralFixture(unsigned scenario) {
   for (unsigned priority=0;priority<4;++priority)
     assert(options.visible_planes & (1u<<DioramaPlaneForObjectPriority(priority)));
   assert(r.creates==6 && r.live==6);
+  size_t texture_bytes=0;
+  for (unsigned i=1;i<=r.next;++i)
+    texture_bytes+=(size_t)r.textures[i].width*r.textures[i].height*4;
+  assert(texture_bytes<24u*1024u*1024u); /* Original artwork occupied 30 MiB. */
   const unsigned first=s_count;
   unsigned length=0;
   for (int draw=0;draw<2;++draw) {

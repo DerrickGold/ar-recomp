@@ -54,7 +54,8 @@ const context=vm.createContext({document:documentHost,window:{innerWidth:960,inn
   closeTileMenu(){}});
 vm.runInContext(fs.readFileSync(new URL('../tools/action_editor/editor_layout.js',import.meta.url),'utf8'),context);
 const run=code=>vm.runInContext(code,context);
-assert.equal(sections.length,15);
+assert.equal(sections.length,16);
+assert(sections.some(section=>section.dataset.settings==='palette'));
 assert.equal(element('#settingsNav').children.length,sections.length);
 assert.equal(element('#settingsMenu').children.length,sections.length);
 const originalOrder=[...sidebar.children];

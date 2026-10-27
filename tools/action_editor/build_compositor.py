@@ -19,7 +19,7 @@ UNIFORMS = (
     [('float', name) for name in ('texel_w', 'texel_h', 'blur_radius', 'u_min',
                                   'u_max', 'v_min', 'v_max', 'edge_feather', 'lower_content_v_max')],
     [('vec2', 'size'), ('float', 'high_band'), ('float', 'additive')],
-    [('vec4', name) for name in ('filter_info', 'priority_info', 'light_info', 'shade')],
+    [('vec4', name) for name in ('filter_info', 'priority_info', 'light_info', 'shade', 'grade', 'grade_shadows', 'grade_highlights')],
     [('vec4', name) for name in ('filter_info', 'light_info', 'attribute_info', 'bounds')],
 )
 
