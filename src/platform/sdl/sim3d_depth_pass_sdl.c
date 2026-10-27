@@ -597,6 +597,7 @@ static SDL_GPUSampler *SamplerForLayer(Sim3DDepthPassLayer layer) {
   return layer == kSim3DDepthPass_ShadowReceiver ||
       layer == kSim3DDepthPass_Cloud || layer == kSim3DDepthPass_CloudShadow ||
       layer == kSim3DDepthPass_VolumeCloud ||
+      layer == kSim3DDepthPass_ImportedGround ||
       layer == kSim3DDepthPass_Ground || layer == kSim3DDepthPass_GroundBlur
       ? g_depth_pass.linear_sampler : g_depth_pass.nearest_sampler;
 }

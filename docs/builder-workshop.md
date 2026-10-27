@@ -99,28 +99,16 @@ results, reference text, font order, coverage results and unsaved credit notices
 
 ## Import game content
 
-Open **Sights & sounds → Game imports**, choose a content set, and select the
-required ROM. Each importer validates its supported release before saving
-anything. Imports are stored with your local game and travel with packaged
-builds and installation transfers.
+Optional content is not required to build or play ActRaiser. When supported
+content is available, **Sights & sounds → Game imports** lets you inspect or
+reimport it from its source ROM. Each importer validates its supported release
+before saving anything. Imports are stored with your local game and travel
+with packaged builds and installation transfers.
 
-The first content set is **ActRaiser 2 / Master character**. It accepts the
-unmodified USA ROM, with or without a 512-byte copier header, and extracts the
-Master's graphics, palette, animations and movement data. The source ROM is
-not copied into the installation, and your ActRaiser 1 build ROM stays in place.
+Uninstalled prototypes are hidden from this menu. If no content is listed,
+the **Game imports** category is hidden as well.
 
-Build or restart the game after importing. Open **System → Game → ActRaiser 2
-Master** to switch between the original Master and the AR2 Master during an
-act. The setting defaults to off and becomes available when the extracted
-assets load successfully. Switching keeps your position, health and level
-progress; AR2 adds its glide, dive, shield and sword moves using AR1 damage.
-Native hurt, magic, death and arrival sequences retain control while the
-selected character supplies the appearance. Missing or damaged assets use the
-original Master; reimport the ROM to repair them.
-
-Only this character content set is currently supported; importing an AR2 ROM
-does not add AR2 levels or the full game. The catalog is designed to accept
-additional content sets. Developers register each importer in
+The catalog is designed to accept additional content sets. Developers register each importer in
 `installer/internal/gameimports`, with its own validation, extraction,
 installation and status functions and translated instructions. The shared
 Workshop upload route and UI discover the catalog. Imported content belongs

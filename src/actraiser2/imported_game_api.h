@@ -5,20 +5,26 @@
  * on one owner thread. No SDL objects or runner globals cross this boundary. */
 #include "diorama/diorama.h"
 
-#define AR_IMPORTED_GAME_ABI 4u
+#define AR_IMPORTED_GAME_ABI 6u
 #ifdef _WIN32
 #define AR_IMPORTED_GAME_EXPORT __declspec(dllexport)
 #else
 #define AR_IMPORTED_GAME_EXPORT __attribute__((visibility("default")))
 #endif
 enum { AR2_CAPTURE_PITCH = 640, AR2_CAPTURE_HEIGHT = 352 };
+typedef struct ArImportedGameView {
+  int extra_columns, extra_rows;
+  bool diorama;
+} ArImportedGameView;
 typedef struct Ar2VideoFrame {
   const uint32_t *main;
   const uint32_t *planes[kDioramaPlane_Count];
   const uint32_t *hud;
   const uint32_t *screen_objects;
   int width, height, render_extra, display_extra;
+  int extra_top, extra_bottom, display_height;
   int camera_x, camera_y, world_width, world_height;
+  int view_offset_x; /* Visible camera relative to the captured camera, in native pixels. */
   int bg2_camera_x, bg2_camera_y, bg2_world_height;
   bool level;
 } Ar2VideoFrame;
@@ -41,12 +47,15 @@ enum {
 typedef struct ArImportedGameApi {
   uint32_t version, size;
   bool (*open)(const uint8_t *rom, size_t size, uint8_t stage);
-  bool (*step)(uint32_t input, int extra_columns, bool diorama, ArImportedGameFrame *out);
+  bool (*step)(uint32_t input, ArImportedGameView view, ArImportedGameFrame *out);
   void (*close)(void);
   const char *(*error)(void);
   /* Synchronous diagnostic files in the shared snapshot format. No runner
    * pointers cross the boundary; valid even after a failed native step. */
   bool (*snapshot)(const char *prefix);
+  /* Recapture the last completed frame with new geometry. Does not tick the
+   * game or produce PCM. Invalidates the preceding borrowed video surfaces. */
+  bool (*refresh)(ArImportedGameView view, ArImportedGameFrame *out);
 } ArImportedGameApi;
 
 typedef const ArImportedGameApi *(*ArImportedGameGetApi)(uint32_t version);

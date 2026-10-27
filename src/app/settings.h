@@ -243,6 +243,8 @@ typedef enum SettingAction {
   kSettingAction_NewRandomizedGame,
   kSettingAction_SaveExportCampaign,
   kSettingAction_SaveApplyRestart,
+  kSettingAction_RetryImportedLevel,
+  kSettingAction_ReturnImportedWorld,
   kSettingAction_Count,
 } SettingAction;
 
@@ -304,6 +306,8 @@ struct SettingDesc {
   /* Runtime edits may be locked by their feature owner independently of menu
    * availability. NULL permits edits; boot-time loading bypasses this gate. */
   bool (*can_change)(void);
+  /* Optional content/session actions disappear instead of offering a disabled row. */
+  bool hide_when_unavailable;
 };
 
 typedef enum {
@@ -856,6 +860,7 @@ int Settings_AudioFrequencyHz(void);
  * decoded and uploaded. The host publishes that resource state after load. */
 void Settings_SetHdReplacementsAvailable(bool available);
 void Settings_SetAr2MasterAvailable(bool available);
+void Settings_SetImportedLevelActive(bool active);
 
 /* Backing pixels per window point for the window's current display
  * (SDL_GetWindowPixelDensity), pushed from host_display.c. */

@@ -177,6 +177,8 @@ remove actors bearing flag `$0002` through `COP $A2`. Industen's enemy reset
 task at `$82:D6A6` restores its spawn coordinates, waits, and only rearms
 when the spawn becomes offscreen again. Enlarging just the PPU canvas misses
 these lifecycle rules; disabling cleanup entirely would change them too.
+The removal call at `$80:9843` saves the draw-list cursor with `PHY`; its
+`$80:9845` continuation must execute `PLY` before visiting the next actor.
 
 Individual sprite pieces have another horizontal test at `$80:9F72`;
 queued effect sprites use `$80:9FDB`. Both accept a biased X coordinate
@@ -187,22 +189,27 @@ right-margin position. The prototype supplies this as renderer metadata,
 preserving native OAM packing and its 128-slot capacity.
 
 At a finite horizontal level edge, the presentation capture moves inward so
-its full width is backed by decoded tiles. The BG1/BG2 virtual providers and
-signed OBJ metadata receive the same pixel offset; native `$0538/$0540` camera
-values stay unchanged. Visibility uses that shifted window too, including
-Diorama's capture apron. This exposes Benefic's `$82:F590` actor and its
-`$F5D3..F69B` task continuations earlier. Their COP branches and stored callbacks
-are explicit generation roots, rather than skipped handlers.
+its full width is backed by decoded tiles. BG1 and signed OBJ metadata receive
+the same pixel offset. BG2 uses the displayed foreground's shift scaled by
+its native `$05A2` parallax ratio, with separate compensation for the capture
+apron. Native `$0538/$0540` camera values stay unchanged. The draw list uses
+that shifted window too, including
+Diorama's capture apron and extra vertical rows. After each actor's draw-list
+decision, the adapter restores `+$04 & $8000` from the original 256-by-224
+bounds before native iteration advances at `$80:976E`. Thus rendering an
+actor in the extra view does not make it gameplay-visible. Native blinking
+still bypasses that bounds test; actors removed by the pass are not rewritten.
+The expanded cull still controls render lifetime for actors bearing `$0002`.
 
-Widened visibility must not start combat during the entrance. `$095B` only
-covers the orb phase: it clears at `$82:946A`, before the Master finishes its
-stone animation. `$0951` becomes nonzero at `$82:8073`, when the player starts
-processing controls; the native scene loader and death path clear it again.
-While it is zero, an actor revealed outside the original horizontal viewport
-stays in `COP $1E`'s existing wait at `$80:87E5`. The native retry timer, task
-continuation and out-of-world bypass remain intact. The expanded draw list
-still includes the actor. Normal activation resumes once controls are enabled,
-without a fixed delay, damage immunity, or changes to original-width behavior.
+`COP $1E` and other consumers of the offscreen flag retain the original
+activation and rearm behavior throughout play, including the orb and stone
+entrance. `$095B` only covers the orb phase; `$0951` enables the player
+controller after the stone phase. Neither flag is needed for an extra-view
+activation exception: the unchanged native wait handler uses native visibility
+before and after control is enabled. Its retry timer, task continuation and
+out-of-world bypass remain intact. Benefic's `$82:F590` actor can be drawn
+at the entrance, but wakes only when native gameplay visibility allows it.
+Its COP branches and stored callbacks remain explicit generation roots.
 
 ## Progression and retry state
 

@@ -3,6 +3,7 @@ package builder
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"mime/multipart"
 	"net/http/httptest"
 	"os"
@@ -44,6 +45,14 @@ func TestGameImportsHTTP(t *testing.T) {
 		app.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		if w.Code != code {
 			t.Fatal(path, w.Code)
+		}
+		if code == 200 {
+			var catalog struct {
+				Imports []json.RawMessage `json:"imports"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &catalog); err != nil || len(catalog.Imports) != 0 {
+				t.Fatal("fresh installation advertises prototype imports", w.Body.String(), err)
+			}
 		}
 	}
 	for _, data := range [][]byte{[]byte("wrong ROM"), make([]byte, ar2master.ROMBytes+513)} {

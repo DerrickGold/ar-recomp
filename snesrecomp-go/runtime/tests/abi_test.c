@@ -382,6 +382,16 @@ static const RtlGameAudioApi s_mix_test_audio_api = {
     .mix_output = mix_test_audio,
 };
 
+static bool test_handshaked_port(uint8_t port, uint8_t value) {
+    return port == 0u && value == 0x22u;
+}
+
+static const RtlGameAudioApi s_handshake_test_audio_api = {
+    .struct_size = RTL_GAME_AUDIO_API_V5_SIZE,
+    .capabilities = RTL_GAME_AUDIO_CAP_PRESENTATION,
+    .apu_port_write_is_handshaked = test_handshaked_port,
+};
+
 static int check(int condition, const char *message) {
     if (condition) return 0;
     fprintf(stderr, "runtime ABI failed: %s\n", message);
@@ -2058,6 +2068,39 @@ int main(void) {
             snes->apu->portQueue[2].target_sample == APU_PORT_MIN_DWELL &&
             snes->apu->portClockNs == 0u,
         "CPU-to-APU port scheduling depends on non-emulated time");
+    {
+        const RtlGameAudioApi *saved_audio = g_rtl_game_audio;
+        RtlGameAudioApi old_extent = s_handshake_test_audio_api;
+        old_extent.struct_size = RTL_GAME_AUDIO_API_V4_SIZE;
+        g_rtl_game_audio = &old_extent;
+        apu_reset(snes->apu);
+        RtlApuWrite(0x2140u, 0x11u);
+        RtlApuWrite(0x2140u, 0x22u);
+        failed |= check(snes->apu->portQueue[1].target_sample == APU_PORT_MIN_DWELL,
+                        "older audio table read the handshake-policy tail");
+
+        g_rtl_game_audio = &s_handshake_test_audio_api;
+        apu_reset(snes->apu);
+        RtlApuWrite(0x2140u, 0x11u);
+        RtlApuWrite(0x2140u, 0x22u);
+        RtlApuWrite(0x2140u, 0x33u);
+        failed |= check(snes->apu->portQTail - snes->apu->portQHead == 3u &&
+                            snes->apu->portQueue[1].val == 0x22u &&
+                            snes->apu->portQueue[1].target_sample == 0u &&
+                            snes->apu->portQueue[2].target_sample == APU_PORT_MIN_DWELL,
+                        "handshaked write did not retain normal command pacing afterward");
+
+        apu_reset(snes->apu);
+        RtlApuWrite(0x2140u, 0x11u);
+        RtlApuWrite(0x2140u, 0x33u);
+        RtlApuWrite(0x2140u, 0x22u);
+        failed |= check(snes->apu->portQueue[1].val == 0x33u &&
+                            snes->apu->portQueue[1].target_sample == APU_PORT_MIN_DWELL &&
+                            snes->apu->portQueue[2].val == 0x22u &&
+                            snes->apu->portQueue[2].target_sample == APU_PORT_MIN_DWELL,
+                        "handshaked write overtook an already scheduled command");
+        g_rtl_game_audio = saved_audio;
+    }
     RtlApuProfileReset();
     g_snes = NULL;
 

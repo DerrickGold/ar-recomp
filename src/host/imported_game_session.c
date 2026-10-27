@@ -5,7 +5,7 @@
 
 static SDL_SharedObject *s_module;
 static const ArImportedGameApi *s_api;
-enum Command { kCommand_Step, kCommand_Snapshot };
+enum Command { kCommand_Step, kCommand_Snapshot, kCommand_Refresh };
 static struct {
   SDL_Thread *thread;
   SDL_Semaphore *request, *complete;
@@ -13,8 +13,8 @@ static struct {
   const uint8_t *rom;
   size_t rom_size;
   uint8_t stage;
-  int extra;
-  bool diorama, result;
+  ArImportedGameView view;
+  bool result;
   uint32_t input;
   unsigned startup_ticks;
   enum Command command;
@@ -31,7 +31,7 @@ static bool OpenModule(void) {
       (ArImportedGameGetApi)SDL_LoadFunction(object, "ArImportedGame_GetApi");
   const ArImportedGameApi *api = get ? get(AR_IMPORTED_GAME_ABI) : NULL;
   if (!api || api->size != sizeof(*api) || api->version != AR_IMPORTED_GAME_ABI ||
-      !api->open || !api->step || !api->close || !api->error || !api->snapshot) {
+      !api->open || !api->step || !api->close || !api->error || !api->snapshot || !api->refresh) {
     SDL_UnloadObject(object);
     SDL_SetError("Incompatible imported-game module; rebuild the game");
     return false;
@@ -56,7 +56,7 @@ static int Run(void *unused) {
   else {
     while (!SDL_GetAtomicInt(&s_session.cancel) && s_session.startup_ticks < 900) {
       ++s_session.startup_ticks;
-      if (!s_api->step(0, s_session.extra, s_session.diorama, &s_session.frame)) {
+      if (!s_api->step(0, s_session.view, &s_session.frame)) {
         Failure(s_api->error());
         break;
       }
@@ -82,8 +82,9 @@ static int Run(void *unused) {
     if (s_session.command == kCommand_Snapshot) {
       s_session.result = s_api && s_api->snapshot(s_session.snapshot_prefix);
     } else {
-      s_session.result = s_api && s_api->step(s_session.input, s_session.extra,
-          s_session.diorama, &s_session.frame);
+      s_session.result = s_api && (s_session.command == kCommand_Refresh
+          ? s_api->refresh(s_session.view, &s_session.frame)
+          : s_api->step(s_session.input, s_session.view, &s_session.frame));
       if (!s_session.result) Failure(s_api ? s_api->error() : "Imported runtime unavailable");
     }
     SDL_SignalSemaphore(s_session.complete);
@@ -93,7 +94,7 @@ static int Run(void *unused) {
 }
 
 bool ImportedGameSession_Start(const uint8_t *rom, size_t size, uint8_t stage,
-                                int extra, bool diorama) {
+                                ArImportedGameView view) {
   if (s_session.thread) return false;
   memset(&s_session, 0, sizeof(s_session));
 #ifdef _WIN32
@@ -112,8 +113,7 @@ bool ImportedGameSession_Start(const uint8_t *rom, size_t size, uint8_t stage,
   s_session.rom = rom;
   s_session.rom_size = size;
   s_session.stage = stage;
-  s_session.extra = extra;
-  s_session.diorama = diorama;
+  s_session.view = view;
   s_session.request = SDL_CreateSemaphore(0);
   s_session.complete = SDL_CreateSemaphore(0);
   if (s_session.request && s_session.complete)
@@ -133,16 +133,24 @@ ImportedGameState ImportedGameSession_Poll(ArImportedGameFrame *frame, unsigned 
   return state;
 }
 
-bool ImportedGameSession_Step(uint32_t input, int extra, bool diorama, ArImportedGameFrame *frame) {
+static bool FrameCommand(enum Command command, uint32_t input, ArImportedGameView view,
+                         ArImportedGameFrame *frame) {
   if (!s_session.thread || SDL_GetAtomicInt(&s_session.state) != kImportedGame_Ready) return false;
   s_session.input = input;
-  s_session.extra = extra;
-  s_session.diorama = diorama;
-  s_session.command = kCommand_Step;
+  s_session.view = view;
+  s_session.command = command;
   SDL_SignalSemaphore(s_session.request);
   SDL_WaitSemaphore(s_session.complete);
   if (s_session.result) *frame = s_session.frame;
   return s_session.result;
+}
+
+bool ImportedGameSession_Step(uint32_t input, ArImportedGameView view, ArImportedGameFrame *frame) {
+  return FrameCommand(kCommand_Step, input, view, frame);
+}
+
+bool ImportedGameSession_Refresh(ArImportedGameView view, ArImportedGameFrame *frame) {
+  return FrameCommand(kCommand_Refresh, 0, view, frame);
 }
 
 bool ImportedGameSession_Snapshot(const char *prefix) {

@@ -49,6 +49,49 @@ uint64_t g_main_cpu_cycles_estimate;
 uint64_t g_apu_pace_cycles_estimate;
 uint64_t g_apu_last_sync_cycles;
 
+struct RtlVideoCheckpoint {
+    Snes snes;
+    Ppu ppu;
+    Dma dma;
+    uint8_t ram[kSnesWramSize];
+    uint64_t main_cycles, apu_pace_cycles, apu_sync_cycles;
+    bool valid;
+};
+
+RtlVideoCheckpoint *RtlVideoCheckpoint_Create(void) {
+    return calloc(1, sizeof(RtlVideoCheckpoint));
+}
+
+void RtlVideoCheckpoint_Destroy(RtlVideoCheckpoint *checkpoint) { free(checkpoint); }
+
+bool RtlVideoCheckpoint_Capture(RtlVideoCheckpoint *checkpoint) {
+    if (!checkpoint || !g_snes) return false;
+    checkpoint->snes = *g_snes;
+    checkpoint->ppu = *g_snes->ppu;
+    checkpoint->dma = *g_snes->dma;
+    memcpy(checkpoint->ram, g_snes->ram, sizeof(checkpoint->ram));
+    checkpoint->main_cycles = g_main_cpu_cycles_estimate;
+    checkpoint->apu_pace_cycles = g_apu_pace_cycles_estimate;
+    checkpoint->apu_sync_cycles = g_apu_last_sync_cycles;
+    checkpoint->valid = true;
+    return true;
+}
+
+bool RtlVideoCheckpoint_Restore(const RtlVideoCheckpoint *checkpoint) {
+    if (!checkpoint || !checkpoint->valid || !g_snes ||
+        checkpoint->snes.abiLifetimeGeneration != g_snes->abiLifetimeGeneration ||
+        checkpoint->snes.abiResetGeneration != g_snes->abiResetGeneration ||
+        checkpoint->snes.abiLoadGeneration != g_snes->abiLoadGeneration) return false;
+    *g_snes = checkpoint->snes;
+    *g_snes->ppu = checkpoint->ppu;
+    *g_snes->dma = checkpoint->dma;
+    memcpy(g_snes->ram, checkpoint->ram, sizeof(checkpoint->ram));
+    g_main_cpu_cycles_estimate = checkpoint->main_cycles;
+    g_apu_pace_cycles_estimate = checkpoint->apu_pace_cycles;
+    g_apu_last_sync_cycles = checkpoint->apu_sync_cycles;
+    return true;
+}
+
 static _Atomic int s_apu_profile_enabled = -1;
 static _Atomic uint64_t s_apuprof_lockwait_ns;
 static _Atomic uint64_t s_apuprof_port_sync_ns;
@@ -720,6 +763,10 @@ void RtlApuWrite(uint16 address, uint8 value) {
     if (g_rtl_game_audio != NULL &&
         g_rtl_game_audio->apu_port_pace != NULL)
         g_rtl_game_audio->apu_port_pace((uint8)port, value);
+    const bool handshaked = g_rtl_game_audio != NULL &&
+        g_rtl_game_audio->struct_size >= RTL_GAME_AUDIO_API_V5_SIZE &&
+        g_rtl_game_audio->apu_port_write_is_handshaked != NULL &&
+        g_rtl_game_audio->apu_port_write_is_handshaked((uint8)port, value);
     RtlApuLock();
     rtl_accumulate_apu_catchup();
     snes_catchupApu(g_snes);
@@ -757,7 +804,7 @@ void RtlApuWrite(uint16 address, uint8 value) {
     apu = g_snes->apu;
     produced = apu->sampleClock;
     target = apu->portClock > produced ? apu->portClock : produced;
-    if (apu->portLastValid[port] && value != apu->portLastVal[port]) {
+    if (!handshaked && apu->portLastValid[port] && value != apu->portLastVal[port]) {
         uint64_t floor = apu->portLastTarget[port] + APU_PORT_MIN_DWELL;
         uint64_t ceiling = produced +
             8u * RTL_APU_TICK_MAX_FRAMES;

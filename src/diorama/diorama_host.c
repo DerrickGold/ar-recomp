@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
-#include "actraiser/enhancements/actraiser_camera_internal.h"
+#include "actraiser/actraiser_action_camera.h"
 #include "actraiser/actraiser_rtl.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game_runtime.h"

@@ -207,6 +207,11 @@ typedef void RtlGameAudioExtensionSaveFunc(RtlAudioSaveContext *context);
 typedef void RtlGameAudioExtensionUploadFunc(
     RtlAudioExtensionContext *context, uint32_t source24);
 typedef void RtlGameApuPortWriteFunc(uint8_t port, uint8_t value);
+/** True only for native transfers that wait for the SPC to acknowledge each
+ * data/counter pair before advancing. These need no added command-spacing delay.
+ * Called on the game thread before taking the APU lock; do not execute or
+ * mutate the runner here. Pending writes retain their order and deadlines. */
+typedef bool RtlGameApuPortHandshakeFunc(uint8_t port, uint8_t value);
 typedef void RtlGameSpcUploadCompletedFunc(uint32_t source24);
 typedef void RtlGameAudioMixFunc(int16_t *stereo_buffer, int frames);
 
@@ -244,6 +249,7 @@ typedef struct RtlGameAudioApi {
     RtlGameAudioMixFunc *mix_output;
     RtlGameSpcUploadPrepareRawFunc *spc_upload_prepare_raw;
     RtlGameAudioExtensionSpcOpcodeFilterFunc *extension_spc_opcode_filter;
+    RtlGameApuPortHandshakeFunc *apu_port_write_is_handshaked;
 } RtlGameAudioApi;
 
 #define RTL_GAME_AUDIO_API_V2_SIZE                                      \
@@ -255,6 +261,9 @@ typedef struct RtlGameAudioApi {
 #define RTL_GAME_AUDIO_API_V4_SIZE                                      \
     ((uint32_t)(offsetof(RtlGameAudioApi, extension_spc_opcode_filter) + \
                 sizeof(((RtlGameAudioApi *)0)->extension_spc_opcode_filter)))
+#define RTL_GAME_AUDIO_API_V5_SIZE                                      \
+    ((uint32_t)(offsetof(RtlGameAudioApi, apu_port_write_is_handshaked) + \
+                sizeof(((RtlGameAudioApi *)0)->apu_port_write_is_handshaked)))
 
 /** One immutable module is registered before runner creation and remains alive
  * until it is replaced while no runner exists. Optional table pointers must

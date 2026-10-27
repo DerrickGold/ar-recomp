@@ -571,6 +571,8 @@ if(BUILD_TESTING)
 
     # Quality and generator-contract checks must never disappear silently.
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME actraiser_ar2_tools
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/ar2_tools_test.py)
     if(Python3_Interpreter_FOUND)
         add_test(NAME ar_text_template_contract
             COMMAND ${Python3_EXECUTABLE}

@@ -9,7 +9,7 @@ import (
 
 func (app *application) serveGameImports(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		writeJSON(w, http.StatusOK, map[string]any{"imports": gameimports.List(app.options.ProjectRoot)})
+		writeJSON(w, http.StatusOK, map[string]any{"imports": gameimports.WorkshopList(app.options.ProjectRoot)})
 		return
 	}
 	if r.Method != http.MethodPost {

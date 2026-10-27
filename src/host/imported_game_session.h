@@ -9,9 +9,10 @@ typedef enum ImportedGameState {
   kImportedGame_Loading, kImportedGame_Ready, kImportedGame_Failed
 } ImportedGameState;
 bool ImportedGameSession_Start(const uint8_t *rom, size_t size, uint8_t stage,
-                                int extra, bool diorama);
+                                ArImportedGameView view);
 ImportedGameState ImportedGameSession_Poll(ArImportedGameFrame *frame, unsigned *startup_ticks);
-bool ImportedGameSession_Step(uint32_t input, int extra, bool diorama, ArImportedGameFrame *frame);
+bool ImportedGameSession_Step(uint32_t input, ArImportedGameView view, ArImportedGameFrame *frame);
+bool ImportedGameSession_Refresh(ArImportedGameView view, ArImportedGameFrame *frame);
 bool ImportedGameSession_Snapshot(const char *prefix);
 const char *ImportedGameSession_Error(void);
 void ImportedGameSession_Cancel(void);

@@ -7,6 +7,7 @@
 #include "actraiser2/ar2_content.h"
 #include "actraiser2/ar2_presentation.h"
 #include "actraiser_game.h"
+#include "actraiser/actraiser_world_travel.h"
 #include "app/input_map.h"
 #include "app/session_fatal.h"
 #include "app/settings.h"
@@ -41,19 +42,19 @@ typedef struct ImportedVisit {
   InputMapActionFn action_handler;
   SDL_AudioStream *audio;
   ArImportedGameFrame frame;
+  ArImportedGameView captured_view;
   unsigned startup_ticks, visit_frame, replay_frame, replay_value;
   uint32_t replay_input;
   char replay_command[32];
   FILE *replay, *trace;
   int replay_fields;
   uint64_t deadline, last_ns, descent_begin_ns;
-  unsigned descent_updates;
+  unsigned descent_updates, world_ticks;
   double descent_max_gap_ms;
   double phase_ticks;
 } ImportedVisit;
 static ImportedVisit s_visit;
 
-static void LevelInput(const SDL_Event *event, bool *leave, bool *retry);
 static void FinishVisit(void);
 
 static bool OnWorldMap(void) {
@@ -79,6 +80,7 @@ bool ImportedWorldTravel_HandleEvent(const SDL_Event *event) {
       return false;
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:
+    case SDL_EVENT_TEXT_INPUT:
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:
@@ -88,7 +90,7 @@ bool ImportedWorldTravel_HandleEvent(const SDL_Event *event) {
     case SDL_EVENT_MOUSE_BUTTON_UP:
     case SDL_EVENT_MOUSE_MOTION:
     case SDL_EVENT_MOUSE_WHEEL:
-      LevelInput(event, &s_visit.leave, &s_visit.retry);
+      (void)HostInput_HandleImportedEvent(event);
       return true;
     default: return false;
     }
@@ -149,57 +151,24 @@ static void LevelAction(InputAction action) {
   }
 }
 
-static int DisplayExtra(void) {
+static ArImportedGameView CaptureView(void) {
   int width = 256, height = 224;
   ArRenderDevice_GetOutputSize(&g_render_device, &width, &height);
   const bool automatic = g_settings.extended_aspect == kScreenAspect_Auto;
-  if (!automatic && (g_settings.display_mode == kDisplayMode_43 || !g_settings.ws_action)) return 0;
-  return ArPresentationLayout_ResolveHorizontalMargin(256, 224,
-      automatic ? width : Settings_ExtendedAspectX(),
-      automatic ? height : Settings_ExtendedAspectY(),
-      g_settings.pixel_aspect == kPixelAspect_Crt43, 128);
-}
-
-static void LevelInput(const SDL_Event *event, bool *leave, bool *retry) {
-  if (SettingsOverlay_IsOpen()) {
-    (void)HostInput_HandleEvent(event);
-    return;
+  ArImportedGameView view = {.diorama = g_settings.diorama_mode};
+  const bool crt = g_settings.pixel_aspect == kPixelAspect_Crt43;
+  if (automatic) {
+    ArPresentationCanvas canvas = {0};
+    ArPresentationLayout_ResolveCanvas(width, height, crt,
+        (ArPresentationCanvasLimits){256, 224, 128, 64}, &canvas);
+    view.extra_columns = canvas.extra_columns;
+    view.extra_rows = canvas.extra_rows;
+  } else if (g_settings.display_mode != kDisplayMode_43 && g_settings.ws_action) {
+    view.extra_columns = ArPresentationLayout_ResolveHorizontalMargin(256, 224,
+        Settings_ExtendedAspectX(), Settings_ExtendedAspectY(), crt, 128);
   }
-  if (event->type == SDL_EVENT_KEY_DOWN || event->type == SDL_EVENT_KEY_UP) {
-    if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat) {
-      switch (event->key.scancode) {
-      case SDL_SCANCODE_ESCAPE:
-      case SDL_SCANCODE_F1: LevelAction(kInputAction_Menu); return;
-      case SDL_SCANCODE_M: *leave = true; return;
-      case SDL_SCANCODE_R: *retry = true; return;
-      case SDL_SCANCODE_P: LevelAction(kInputAction_Pause); return;
-      case SDL_SCANCODE_F2:
-      case SDL_SCANCODE_C: HostDevTools_TakeFullSnapshot(); return;
-      case SDL_SCANCODE_D:
-      case SDL_SCANCODE_TAB:
-        Settings_SetLong(Settings_Find("diorama_mode"), !g_settings.diorama_mode);
-        return;
-      default: break;
-      }
-    }
-    InputMap_HandleKey(event->key.scancode, event->type == SDL_EVENT_KEY_DOWN, event->key.repeat);
-  } else if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
-             event->gbutton.button == SDL_GAMEPAD_BUTTON_BACK) {
-    *leave = true;
-  } else if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
-             event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
-    if (event->button.button == SDL_BUTTON_RIGHT)
-      Diorama_SetDragging(event->type == SDL_EVENT_MOUSE_BUTTON_DOWN);
-    if (event->button.button == SDL_BUTTON_MIDDLE && event->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
-      Diorama_ResetCamera();
-  } else if (event->type == SDL_EVENT_MOUSE_MOTION && Diorama_IsDragging()) {
-    Diorama_AdjustCamera(event->motion.xrel * Diorama_DragRadPerPx(),
-                         event->motion.yrel * Diorama_DragRadPerPx(), 0);
-  } else if (event->type == SDL_EVENT_MOUSE_WHEEL) {
-    Diorama_AdjustCamera(0, 0, -event->wheel.y * Diorama_ZoomStep());
-  } else {
-    InputMap_HandleEvent(event);
-  }
+  if (view.diorama) view.extra_rows = g_settings.diorama_vertical_extend;
+  return view;
 }
 
 static void CaptureFrame(const char *path) {
@@ -211,6 +180,22 @@ static void CaptureFrame(const char *path) {
 
 void ImportedWorldTravel_RequestSnapshot(void) {
   if (s_visit.active) s_visit.snapshot_pending = true;
+}
+
+bool ImportedWorldTravel_RequestRetry(void) {
+  if (!s_visit.active || s_visit.phase != kTravel_Level || !s_visit.ready) return false;
+  s_visit.retry = true;
+  SettingsOverlay_Close();
+  HostInput_ClearHeld();
+  return true;
+}
+
+bool ImportedWorldTravel_RequestReturn(void) {
+  if (!s_visit.active || s_visit.phase != kTravel_Level) return false;
+  s_visit.leave = true;
+  SettingsOverlay_Close();
+  HostInput_ClearHeld();
+  return true;
 }
 
 static void TakeSnapshot(void) {
@@ -257,22 +242,25 @@ static void FinishVisit(void) {
   if (s_visit.replay) fclose(s_visit.replay);
   SettingsOverlay_Close();
   SettingsOverlay_SetHostSettingsOnly(false);
+  Settings_SetImportedLevelActive(false);
   uint8_t after[32];
   sr_support_sha256(g_ram, kSnesWramSize, after);
   const bool intact = !memcmp(s_visit.before, after, 32) &&
-      !memcmp(&s_visit.cpu_before, &g_cpu, sizeof(g_cpu)) &&
-      snes_frame_counter == s_visit.frame_before;
-  fprintf(stderr, "[imported-world] AR1 session %s at frame %d after %u visit frames\n",
-          intact ? "unchanged" : "CHANGED", s_visit.frame_before, s_visit.visit_frame);
+      !memcmp(&s_visit.cpu_before, &g_cpu, sizeof(g_cpu));
+  const bool restored = ActRaiserWorldTravel_Complete();
+  ActRaiserWorldTravel_Return();
+  fprintf(stderr, "[imported-world] AR1 checkpoint %s from frame %d after %u visit frames\n",
+          restored ? (intact ? "restored" : "CHANGED") : "returning",
+          s_visit.frame_before, s_visit.visit_frame);
   InputMap_SetActionHandler(s_visit.action_handler);
   HostInput_ClearHeld();
   if (HostInput_IsPaused() != s_visit.was_paused) HostInput_TogglePause();
   Diorama_SetDragging(false);
-  WorldNavigationTravel_SetApproach(0);
+  WorldNavigationTravel_SetTransition(false);
   HostDisplay_InvalidatePresentHistory();
   HostDisplay_ResetVsyncPacing();
   s_visit = (ImportedVisit){0};
-  if (!intact) SessionFatal_Request("AR1 session changed during imported travel");
+  if (restored && !intact) SessionFatal_Request("AR1 checkpoint changed during imported travel");
 }
 
 void ImportedWorldTravel_EndSession(void) {
@@ -293,8 +281,9 @@ static bool OpenLevel(void) {
   s_visit.ready = false;
   s_visit.startup_ticks = 0;
   if (s_visit.audio) SDL_ClearAudioStream(s_visit.audio);
+  s_visit.captured_view = CaptureView();
   if (!ImportedGameSession_Start(rom, size, s_visit.stage,
-                                 DisplayExtra(), g_settings.diorama_mode)) {
+                                 s_visit.captured_view)) {
     ShowError(ImportedGameSession_Error());
     return false;
   }
@@ -307,6 +296,7 @@ void ImportedWorldTravel_Begin(void) {
   const Ar2WorldAtlas *atlas = Ar2Content_Atlas();
   if (!OnWorldMap() || !g_window || destination < 0 ||
       (size_t)destination >= atlas->destination_count) return;
+  if (!ActRaiserWorldTravel_Begin()) return;
   s_visit.stage = atlas->destinations[destination].flags_and_scene & 255;
   s_visit.active = s_visit.focused = true;
   s_visit.phase = kTravel_Descending;
@@ -320,7 +310,8 @@ void ImportedWorldTravel_Begin(void) {
   HostInput_ClearHeld();
   InputMap_SetActionHandler(LevelAction);
   SettingsOverlay_SetHostSettingsOnly(true);
-  AudioSession_SetPaused(true);
+  WorldNavigationTravel_SetTransition(true);
+  AudioSession_SetPaused(false);
   s_visit.replay = getenv("AR_IMPORTED_REPLAY") ? fopen(getenv("AR_IMPORTED_REPLAY"), "r") : NULL;
   s_visit.replay_fields = s_visit.replay
       ? fscanf(s_visit.replay, "%u %31s %u", &s_visit.replay_frame,
@@ -339,18 +330,19 @@ void ImportedWorldTravel_Begin(void) {
 }
 
 static void BeginAscent(void) {
-  const double elapsed = s_visit.phase == kTravel_Descending
-      ? 90 - fmin(90, s_visit.phase_ticks) : 0;
+  Settings_SetImportedLevelActive(false);
   ImportedGameSession_Cancel();
   SDL_DestroyAudioStream(s_visit.audio);
   s_visit.audio = NULL;
   Ar2Presentation_Close();
   SettingsOverlay_Close();
   s_visit.phase = kTravel_Ascending;
-  s_visit.phase_ticks = elapsed;
+  s_visit.phase_ticks = 0;
+  s_visit.world_ticks = 0;
   s_visit.transition_captured = false;
   s_visit.leave = s_visit.retry = false;
-  WorldNavigationTravel_SetApproach(1 - elapsed / 90);
+  ActRaiserWorldTravel_Return();
+  WorldNavigationTravel_SetTransition(false);
   HostDisplay_InvalidatePresentHistory();
 }
 
@@ -414,8 +406,8 @@ bool ImportedWorldTravel_Update(bool hidden) {
   const double elapsed = headless ? 1 :
       (double)(now - s_visit.last_ns) / RTL_NTSC_FRAME_INTERVAL_NS;
   s_visit.last_ns = now;
-  const int extra = DisplayExtra();
   if (s_visit.phase == kTravel_Level && !ReplayLevel()) { BeginAscent(); return true; }
+  const ArImportedGameView view = CaptureView();
   const bool paused = (s_visit.phase == kTravel_Level && HostInput_IsPaused()) ||
                       SettingsOverlay_IsOpen() ||
                       !s_visit.focused || hidden;
@@ -427,11 +419,23 @@ bool ImportedWorldTravel_Update(bool hidden) {
   /* Match AR1's timing. A cold load may finish on black after the descent;
    * loading never blocks the world animation or its event pump. */
   if (!paused) s_visit.phase_ticks += fmin(5, elapsed);
+  if (ImportedWorldTravel_DrawWorld()) {
+    AudioSession_SetPaused(paused);
+    for (int tick = 0; !paused && tick < 5 &&
+         s_visit.world_ticks < (unsigned)s_visit.phase_ticks; ++tick) {
+      (void)RtlRunFrame(0);
+      AudioSession_AfterTicks();
+      ++s_visit.world_ticks;
+      if (SessionFatal_Requested()) return false;
+      if (s_visit.phase == kTravel_Ascending && ActRaiserWorldTravel_Complete()) break;
+    }
+  }
   /* Optional readback of the preceding, completed world frame. Main-loop
-   * automation can verify both halves without advancing the suspended ROM. */
+   * automation can verify both halves of the native world transition. */
   const char *transition_capture = getenv("AR_IMPORTED_TRANSITION_CAPTURE");
   if (transition_capture && ImportedWorldTravel_DrawWorld() &&
-      s_visit.phase_ticks >= 45 && !s_visit.transition_captured) {
+      s_visit.phase_ticks >= (s_visit.phase == kTravel_Descending ? 200 : 10) &&
+      !s_visit.transition_captured) {
     char path[4096];
     if (snprintf(path, sizeof(path), "%s-%s.bmp", transition_capture,
           s_visit.phase == kTravel_Descending ? "descent" : "ascent") < (int)sizeof(path))
@@ -446,19 +450,19 @@ bool ImportedWorldTravel_Update(bool hidden) {
   }
   if (s_visit.phase == kTravel_Descending) {
     if (!PrepareLevel()) { BeginAscent(); return true; }
-    WorldNavigationTravel_SetApproach(s_visit.phase_ticks / 90);
-    if (s_visit.phase_ticks < 90 || !s_visit.ready) return true;
+    if (!ActRaiserWorldTravel_Ready() || !s_visit.ready) return true;
     s_visit.phase = kTravel_Level;
+    Settings_SetImportedLevelActive(true);
     s_visit.phase_ticks = 0;
     s_visit.deadline = now + RTL_NTSC_FRAME_INTERVAL_NS;
     HostInput_ClearHeld();
+    AudioSession_SetPaused(true);
     fprintf(stderr, "[imported-world] level ready; hid %u startup frames; descent %.1f ms, "
         "%u updates, largest gap %.1f ms%s\n", s_visit.startup_ticks,
         (SDL_GetTicksNS() - s_visit.descent_begin_ns) / 1e6, s_visit.descent_updates,
         s_visit.descent_max_gap_ms, headless ? " (headless ticks)" : "");
   } else if (s_visit.phase == kTravel_Ascending) {
-    WorldNavigationTravel_SetApproach(1 - s_visit.phase_ticks / 90);
-    if (s_visit.phase_ticks >= 90) FinishVisit();
+    if (ActRaiserWorldTravel_Complete()) FinishVisit();
     return true;
   } else if (s_visit.phase == kTravel_Fading && s_visit.phase_ticks >= 18) {
     BeginAscent();
@@ -481,13 +485,26 @@ bool ImportedWorldTravel_Update(bool hidden) {
   }
   const bool stopped = paused || s_visit.phase != kTravel_Level;
   UpdateAudio(stopped);
-  if (stopped) s_visit.deadline = now;
+  if (stopped) {
+    s_visit.deadline = now;
+    const ArImportedGameView previous = s_visit.captured_view;
+    if (previous.extra_columns != view.extra_columns || previous.extra_rows != view.extra_rows ||
+        previous.diorama != view.diorama) {
+      if (!ImportedGameSession_Refresh(view, &s_visit.frame)) {
+        TakeSnapshot();
+        ShowError(ImportedGameSession_Error());
+        BeginAscent();
+        return true;
+      }
+      s_visit.captured_view = view;
+    }
+  }
   else {
     const uint32_t input = s_visit.replay ? s_visit.replay_input : InputMap_State();
     if (now > s_visit.deadline + 5 * RTL_NTSC_FRAME_INTERVAL_NS) s_visit.deadline = now;
     for (int tick = 0; tick < 5 && (headless ? tick == 0 : now >= s_visit.deadline); tick++) {
       ArImportedGameFrame frame;
-      if (!ImportedGameSession_Step(input, extra, g_settings.diorama_mode, &frame)) {
+      if (!ImportedGameSession_Step(input, view, &frame)) {
         TakeSnapshot();
         ShowError(ImportedGameSession_Error());
         BeginAscent();
@@ -495,6 +512,7 @@ bool ImportedWorldTravel_Update(bool hidden) {
       }
       if (frame.event == kArImportedGameEvent_ReturnToWorld) { BeginAscent(); return true; }
       s_visit.frame = frame;
+      s_visit.captured_view = view;
       if (s_visit.audio && g_settings.audio_enabled &&
           SDL_GetAudioStreamQueued(s_visit.audio) < 48000)
         SDL_PutAudioStreamData(s_visit.audio, frame.pcm, frame.pcm_frames * 4);

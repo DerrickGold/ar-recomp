@@ -12,6 +12,7 @@
 #include "actraiser/enhancements/actraiser_world_resume.h"
 #include "app/input_replay.h"
 #include "actraiser/actraiser_angel.h"
+#include "actraiser/actraiser_world_travel.h"
 #if defined(__ANDROID__) && defined(__aarch64__)
 /* Bionic declares ucontext_t but implements none of getcontext/makecontext/
  * swapcontext, so Android switches stacks with the small AArch64 routine
@@ -541,6 +542,12 @@ void ActRaiser_YieldToHost(void) {
    * Preserve the runner's scopes even for native VBlank yields outside an
    * optional block checkpoint/poll callback. */
   cpu_yield_execution(SuspendGameCoroutine, NULL);
+  /* A nested native Advent wait must be allowed to yield even if the outer
+   * world continuation was suspended inside an inline RDNMI polling loop. */
+  const bool yielding = s_rdnmi_yielding;
+  s_rdnmi_yielding = false;
+  ActRaiserWorldTravel_ServiceYield();
+  s_rdnmi_yielding = yielding;
 }
 
 /* HLE failures cannot return through a partly executed emulated routine. The
@@ -1438,6 +1445,7 @@ static bool CreateGameCoroutine(void) {
  * the guard-page mapping and the fiber are not leaked, and so a leak checker
  * run against a clean exit stays quiet. Safe to call without a coroutine. */
 void ActRaiser_DestroyGameCoroutine(void) {
+  ActRaiserWorldTravel_Reset();
   ActRaiserBg3Upload_Reset();
   ActRaiserSpriteOwnership_Reset();
   ActRaiserHleFatal_RegisterHostEscape(NULL);
@@ -1584,7 +1592,8 @@ void RunOneFrameOfGame(void) {
   }
   uint32_t timing_transition;
   if (!ActRaiser_ControlGameTiming(
-          false, RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED,
+          false, ActRaiserWorldTravel_HoldsNativeTicks()
+                     ? 0u : RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED,
           &timing_transition))
     return;
 

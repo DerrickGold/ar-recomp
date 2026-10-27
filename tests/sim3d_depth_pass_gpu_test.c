@@ -101,6 +101,36 @@ static SDL_Surface *ReadPass(ArRenderDevice *device, SDL_Renderer *renderer) {
   return ReadPassWithShadow(device, renderer, ArRenderTexture_Invalid());
 }
 
+static void TestContinentFiltering(ArRenderDevice *device, SDL_Renderer *renderer) {
+  /* Both continent layers must resolve the same magnified edge, including
+   * intermediate colours. Matching only the upload would miss a nearest
+   * sampler accidentally retained on imported geography. */
+  const uint32_t pixels[] = {0xff000000, 0xffffffff, 0xff000000, 0xffffffff};
+  const ArRenderRectI all = {0, 0, 2, 2};
+  const Sim3DDepthPassLayer layers[] = {kSim3DDepthPass_Ground, kSim3DDepthPass_ImportedGround};
+  SDL_Surface *reference = NULL;
+  for (unsigned i = 0; i < 2; ++i) {
+    CHECK(Sim3DDepthPass_Begin(device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
+    CHECK(Sim3DDepthPass_UploadAtlasRegions(device, layers[i], pixels, 2, 2, 8, &all, 1));
+    CHECK(AppendRect(layers[i], 0, 0, kTestWidth, kTestHeight, .5f,
+                    (ArRenderColorF){1, 1, 1, 1}));
+    SDL_Surface *actual = ReadPass(device, renderer);
+    CHECK(actual);
+    if (actual) {
+      const uint32_t edge = ReadArgb(actual, kTestWidth / 2, kTestHeight / 2) & 255;
+      CHECK(edge > 32 && edge < 223);
+      if (reference)
+        for (int y = 0; y < kTestHeight; ++y)
+          CHECK(!memcmp((uint8_t *)reference->pixels + y * reference->pitch,
+                        (uint8_t *)actual->pixels + y * actual->pitch, kTestWidth * 4));
+    }
+    if (!i) reference = actual;
+    else SDL_DestroySurface(actual);
+  }
+  SDL_DestroySurface(reference);
+  Sim3DDepthPass_Reset(device);
+}
+
 static void TestBorrowedBillboards(ArRenderDevice *device, SDL_Renderer *renderer);
 static void TestBillboardRim(ArRenderDevice *device, SDL_Renderer *renderer);
 static void TestBorrowedSurfaceOverlay(ArRenderDevice *device, SDL_Renderer *renderer);
@@ -4412,6 +4442,7 @@ int main(void) {
   SDL_DestroySurface(readback);
   CHECK(SDL_SetRenderTarget(renderer, NULL));
   Sim3DDepthPass_Reset(&render_device);
+  TestContinentFiltering(&render_device, renderer);
   TestColoredTerrainOcclusion(&render_device, renderer);
   TestAtlasRegionPacking(&render_device, renderer);
   TestAtlasVersions(&render_device, renderer);

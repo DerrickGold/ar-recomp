@@ -50,9 +50,9 @@ Builder never falls back to an unrelated executable on `PATH`.
 
 - `gui` opens the local Builder and Workshop and orchestrates the complete
   project build.
-- `game-import` lists supported content IDs. For the optional AR2 Master, run
-  `actraiser-builder game-import --content ar2-master --rom /path/to/ar2.sfc --root /path/to/game`.
-  The same import is available under Workshop → Sights & sounds → Game imports.
+- `game-import` is a developer utility for listing and installing optional
+  content sets from a local ROM. Uninstalled prototypes are not listed in the
+  Workshop's normal import menu.
 - `native-source` validates the US ROM and prepares the runtime's native
   language source.
 - `language` validates, packages, installs, enables, disables, and removes

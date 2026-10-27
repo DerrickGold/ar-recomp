@@ -6,8 +6,8 @@
 #include "sim/world_nav/sim_world_navigation_scene.h"
 
 typedef struct WorldNavigationTravelFrame {
-  bool imported, turning, flat;
-  float turn, focus_x, focus_y, approach;
+  bool imported, turning, flat, transition;
+  float turn, focus_x, focus_y;
   int destination;
 } WorldNavigationTravelFrame;
 
@@ -19,9 +19,7 @@ uint32_t WorldNavigationTravel_Input(uint8_t *wram, size_t size,
 WorldNavigationTravelFrame WorldNavigationTravel_Capture(const uint8_t *wram, size_t size,
                                                          const Ar2WorldAtlas *atlas);
 int WorldNavigationTravel_TakeDestination(void);
-/* Presentation-only Advent/return. Zero is ordinary palace navigation;
- * one is the black landing endpoint. Native campaign state stays suspended. */
-void WorldNavigationTravel_SetApproach(float approach);
-void WorldNavigationTravel_ApplyApproach(const WorldNavigationTravelFrame *travel,
-                                        SimWorldNavigationScene *scene, uint8_t *brightness);
+/* Hide imported labels/palace while the native AR1 transition owns the view.
+ * Rotation, zoom and brightness come from the original ROM's live capture. */
+void WorldNavigationTravel_SetTransition(bool active);
 #endif

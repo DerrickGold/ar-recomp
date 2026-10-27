@@ -15,6 +15,7 @@
 #include "randomizer/randomizer.h"
 #include "host/host_display.h"
 #include "host/host_input.h"
+#include "host/imported_world_travel.h"
 #include "manual/manual_reader.h"
 #include "save/save_editor.h"
 #include "settings_overlay/settings_overlay.h"
@@ -46,6 +47,8 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   if (!desc || desc->type != kSettingType_Action) return false;
 
   switch (desc->action) {
+  case kSettingAction_RetryImportedLevel: return ImportedWorldTravel_RequestRetry();
+  case kSettingAction_ReturnImportedWorld: return ImportedWorldTravel_RequestReturn();
   case kSettingAction_SaveSlots: return SettingsOverlay_OpenSaveSlots(false);
   case kSettingAction_NewRandomizedGame: return SettingsOverlay_OpenSaveSlots(true);
   case kSettingAction_TogglePause: {

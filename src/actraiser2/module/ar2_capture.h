@@ -6,7 +6,7 @@
 /* AR2 module capture owns native PPU planes and the independent HUD surface. */
 
 bool Ar2Capture_Draw(SrRunnerHandle *runner, const SnesRunnerApi *api, const uint8_t *wram,
-                     int display_extra, bool diorama, int camera_shift,
+                     ArImportedGameView view, int camera_shift,
                      SrPpuScanoutIrqCallback irq);
 const Ar2VideoFrame *Ar2Capture_Frame(void);
 #endif

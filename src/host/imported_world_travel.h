@@ -11,6 +11,9 @@ bool ImportedWorldTravel_Active(void);
 bool ImportedWorldTravel_DrawWorld(void);
 /* The shared snapshot action queues capture after AR2's next composed frame. */
 void ImportedWorldTravel_RequestSnapshot(void);
+/* System-menu actions; rejected outside an active level. */
+bool ImportedWorldTravel_RequestRetry(void);
+bool ImportedWorldTravel_RequestReturn(void);
 /* One main-loop iteration; false requests application shutdown. Events,
  * lifecycle and graphics resets remain owned by the application's loop. */
 bool ImportedWorldTravel_Update(bool hidden);

@@ -114,16 +114,20 @@ DioramaVerticalBounds DioramaVerticalBounds_Resolve(
     int authentic_y0, int capture_height) {
   DioramaVerticalBounds bounds = {0};
   if ((plane != SR_PPU_OVERLAY_BG1 && plane != SR_PPU_OVERLAY_BG2) ||
-      world_height < kActRaiserActionCameraViewportHeight ||
-      camera_y < 0 || camera_y > world_height - kActRaiserActionCameraViewportHeight ||
+      world_height < kActRaiserAuthenticHeight ||
+      camera_y < 0 || camera_y > world_height - kActRaiserAuthenticHeight ||
       authentic_y0 < 0 || authentic_y0 > camera_y + 1 ||
       capture_height < kActRaiserAuthenticHeight ||
       authentic_y0 > capture_height - kActRaiserAuthenticHeight)
     return bounds;
   const int bottom_rows =
       capture_height - authentic_y0 - kActRaiserAuthenticHeight;
-  const int available_bottom =
-      world_height - kActRaiserActionCameraViewportHeight - camera_y;
+  /* Scanout starts at camera + 1. AR1 stops before its last row can leave
+   * the map; AR2 can stop at height - 224, with that final row a frame guard.
+   * Accept this native endpoint without allowing any extra rows below it.
+   * Rejecting it disabled the floor clamp until AR2's camera moved upward. */
+  int available_bottom = world_height - kActRaiserActionCameraViewportHeight - camera_y;
+  if (available_bottom < 0) available_bottom = 0;
   if (bottom_rows > available_bottom) return bounds;
   bounds.valid = true;
   bounds.plane = plane;
@@ -304,6 +308,11 @@ bool Diorama_ClampCameraVertically(
 void Diorama_TranslateCameraWorldY(float matrix[16], float shift) {
   for (int row = 0; row < 4; row++)
     matrix[12 + row] += shift * matrix[4 + row];
+}
+
+void Diorama_TranslateCameraWorldX(float matrix[16], float shift) {
+  for (int row = 0; row < 4; row++)
+    matrix[12 + row] += shift * matrix[row];
 }
 
 bool Diorama_OffsetCamera(float matrix[16], int x, int y, float pixel_aspect) {

@@ -1,6 +1,7 @@
 /* Exercise the production camera adapter, not just its arithmetic helpers.
  * ROM parallax/player tails are sinks; planning and projection are real C. */
 #include "actraiser/actraiser_action_bg.h"
+#include "actraiser/actraiser_action_camera.h"
 #include "actraiser_game.h"
 #include "app/settings.h"
 #include "byte_order.h"
@@ -17,7 +18,6 @@ static DioramaLayerOrderTable s_layers;
 static bool s_hle = true;
 static int s_dx, s_dy, s_calls;
 extern RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu);
-extern bool ActRaiser_ActionCameraTravel(uint16_t *minimum, uint16_t *maximum);
 static uint16_t Read(unsigned at) { return ByteOrder_ReadLe16(g_ram + at); }
 static void Write(unsigned at, uint16_t value) { ByteOrder_WriteLe16(g_ram + at, value); }
 uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 at) { (void)cpu; assert(!bank); return g_ram[at]; }

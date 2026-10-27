@@ -459,7 +459,9 @@ static bool ContextAllowsSetting(const SettingDesc *desc) {
   if (desc->category == kSettingCat_Enhancements || desc->category == kSettingCat_Inspector)
     return false;
   if (desc->category != kSettingCat_Extras) return true;
-  return desc->action == kSettingAction_TogglePause || desc->action == kSettingAction_Restart ||
+  return desc->action == kSettingAction_TogglePause || desc->action == kSettingAction_Snapshot ||
+         desc->action == kSettingAction_RetryImportedLevel ||
+         desc->action == kSettingAction_ReturnImportedWorld || desc->action == kSettingAction_Restart ||
          desc->action == kSettingAction_Exit;
 }
 

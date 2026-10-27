@@ -634,6 +634,33 @@ int main(void) {
     assert(HostInput_HandleEvent(&event) && !s_overlay);
     event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
   }
+  /* Imported levels use the same bindings and device arbitration. Former
+   * prototype shortcuts must reach the mapper, including controller Select. */
+  s_overlay = s_capture = s_pad_active = false;
+  s_device_mode = kInputDevice_Keyboard;
+  g_settings.input_device = kInputDevice_Keyboard;
+  int imported_keys = s_keys, imported_pad = s_pad_events;
+  const SDL_Scancode rebound[] = {SDL_SCANCODE_R, SDL_SCANCODE_M, SDL_SCANCODE_TAB};
+  for (unsigned i = 0; i < sizeof(rebound) / sizeof(*rebound); ++i) {
+    SDL_Event key = {.type = SDL_EVENT_KEY_DOWN};
+    key.key.scancode = rebound[i];
+    key.key.key = SDL_GetKeyFromScancode(rebound[i], SDL_KMOD_NONE, false);
+    assert(HostInput_HandleImportedEvent(&key));
+    key.type = SDL_EVENT_KEY_UP;
+    assert(HostInput_HandleImportedEvent(&key));
+  }
+  assert(s_keys == imported_keys + 6);
+  SDL_Event back = {.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN};
+  back.gbutton.button = SDL_GAMEPAD_BUTTON_BACK;
+  assert(HostInput_HandleImportedEvent(&back));
+  assert(s_pad_events == imported_pad + 1);
+  const int actions_before_imported = s_actions;
+  SDL_Event warp = {.type = SDL_EVENT_KEY_DOWN};
+  warp.key.key = SDLK_F6;
+  warp.key.scancode = SDL_SCANCODE_F6;
+  assert(HostInput_HandleImportedEvent(&warp));
+  assert(s_actions == actions_before_imported);
+
   HostInput_EndSession();
   puts("host input: modal routing, device arbitration and releases passed");
   return 0;

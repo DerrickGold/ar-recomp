@@ -3927,6 +3927,17 @@ int main(int argc, char **argv) {
   const bool previous_diorama = g_settings.diorama_mode;
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.diorama_mode != previous_diorama);
+  Settings_SetImportedLevelActive(true);
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false)); /* Back to section navigation. */
+  NavToSection(host_sections - 1); /* System, in the reduced navigation. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  NavToTab(0);
+  RowToKey("retry_imported_level");
+  RowToKey("return_imported_world");
+  RowToKey("take_snapshot");
+  Settings_SetImportedLevelActive(false);
+  CHECK(!Settings_IsAvailable(Settings_Find("retry_imported_level")));
+  CHECK(!Settings_IsAvailable(Settings_Find("return_imported_world")));
   SettingsOverlay_Close();
   SettingsOverlay_SetHostSettingsOnly(false);
   SettingsOverlay_Open();

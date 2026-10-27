@@ -6,9 +6,9 @@
 
 enum { kTurnTicks = 45, kDestinationPadding = 24 };
 static struct {
-  bool imported, visited;
+  bool imported, visited, transition;
   uint16_t x[2], y[2];
-  float from_x, from_y, from_turn, approach;
+  float from_x, from_y, from_turn;
   unsigned ticks;
   uint32_t previous_input;
   int pending;
@@ -63,7 +63,7 @@ WorldNavigationTravelFrame WorldNavigationTravel_Capture(const uint8_t *ram, siz
   float t = s_travel.ticks / (float)kTurnTicks;
   t = t * t * (3 - 2 * t);
   frame.imported = s_travel.imported;
-  frame.approach = s_travel.approach;
+  frame.transition = s_travel.transition;
   frame.turning = s_travel.ticks < kTurnTicks;
   frame.turn = s_travel.from_turn + ((s_travel.imported ? 1 : 0) - s_travel.from_turn) * t;
   frame.focus_x = s_travel.from_x + (x - s_travel.from_x) * t;
@@ -136,31 +136,6 @@ int WorldNavigationTravel_TakeDestination(void) {
   return destination;
 }
 
-void WorldNavigationTravel_SetApproach(float approach) {
-  s_travel.approach = isfinite(approach) ? fmaxf(0, fminf(1, approach)) : 0;
-}
-
-void WorldNavigationTravel_ApplyApproach(const WorldNavigationTravelFrame *travel,
-                                        SimWorldNavigationScene *scene, uint8_t *brightness) {
-  if (!travel || !scene || !brightness || !scene->valid || !travel->imported ||
-      travel->approach <= 0) return;
-  const float t = travel->approach;
-  const float ease = t * t * (3 - 2 * t);
-  /* Drive the same source-to-screen transform and raised-scene Advent
-   * envelope as native travel. Shrinking Mode-7's inverse scale produces
-   * the approach; reverse the phase for ascent. Never edit live WRAM. */
-  const float scale = 1 / (1 - .985f * ease);
-  const float angle = ease * 6.283185307f;
-  const float c = cosf(angle) * scale, s = sinf(angle) * scale;
-  float *m = scene->source_to_screen;
-  const float a = m[0], b = m[1], d = m[3], e = m[4];
-  m[0] = c * a - s * d;
-  m[1] = c * b - s * e;
-  m[3] = s * a + c * d;
-  m[4] = s * b + c * e;
-  m[2] = 128 - m[0] * travel->focus_x - m[1] * travel->focus_y;
-  m[5] = 112 - m[3] * travel->focus_x - m[4] * travel->focus_y;
-  scene->composition.empty_animation = true;
-  const float fade = fmaxf(0, (t - .72f) / .28f);
-  *brightness = (uint8_t)lroundf(*brightness * (1 - fade));
+void WorldNavigationTravel_SetTransition(bool active) {
+  s_travel.transition = active;
 }

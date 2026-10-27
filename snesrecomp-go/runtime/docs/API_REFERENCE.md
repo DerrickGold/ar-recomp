@@ -603,6 +603,15 @@ an opcode callback. V2/V3 audio-table extents and null filters retain the
 unfiltered behavior. Title-specific instruction addresses belong in the game
 adapter, never the runner.
 
+`RTL_GAME_AUDIO_API_V5_SIZE` adds the optional presentation callback
+`apu_port_write_is_handshaked(port, value)`. Return true only inside a native
+upload protocol that waits for the SPC's acknowledgement before sending the
+next data/counter pair. Those writes skip the ordinary 128-sample command dwell;
+APU catch-up, port ordering and already queued deadlines still apply. The
+callback runs on the game thread before the APU lock and must not execute or
+mutate the runner. Older table extents, a null callback and false returns retain
+ordinary pacing. Keep title-specific upload addresses in the game adapter.
+
 `SrAudioTraceSubscription.event_mask` is required in V2. Use only the event
 classes needed by the diagnostic; opcode events are the highest-volume class,
 and a zero mask is invalid. Every event carries the live SPC PC, current DSP

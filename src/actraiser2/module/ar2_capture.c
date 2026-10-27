@@ -1,5 +1,6 @@
 #include "ar2_capture.h"
 #include "ar2_sprites.h"
+#include "diorama/diorama_camera_policy.h"
 #include <string.h>
 
 static uint32_t main_pixels[AR2_CAPTURE_PITCH * AR2_CAPTURE_HEIGHT];
@@ -60,7 +61,7 @@ static void line_state(void *user_data, const SrPpuScanoutLineContext *context) 
 }
 
 bool Ar2Capture_Draw(SrRunnerHandle *runner, const SnesRunnerApi *api, const uint8_t *wram,
-                     int display_extra, bool diorama, int camera_shift,
+                     ArImportedGameView view, int camera_shift,
                      SrPpuScanoutIrqCallback irq) {
   SrGenerationSnapshot generation = {.struct_size = SR_GENERATION_SNAPSHOT_V2_SIZE};
   SrPpuStateSnapshot state = {.struct_size = SR_PPU_STATE_SNAPSHOT_V2_SIZE};
@@ -68,10 +69,26 @@ bool Ar2Capture_Draw(SrRunnerHandle *runner, const SnesRunnerApi *api, const uin
       api->query_ppu_state(runner, &state) != SR_RESULT_OK)
     return false;
   const bool level = Ar2World_Update(&world, wram, 0x20000);
-  if (!level) display_extra = 0;
-  if (display_extra < 0 || display_extra > 128) return false;
-  const int extra = level && diorama ? 128 : display_extra;
+  const int display_extra = level ? view.extra_columns : 0;
+  if (display_extra < 0 || display_extra > 128 ||
+      view.extra_rows < 0 || view.extra_rows > 64) return false;
+  const int extra = level && view.diorama ? 128 : display_extra;
   const int width = 256 + extra * 2;
+  const int view_shift = level ? Ar2World_CaptureShift(world.layers[0].camera_x,
+      world.layers[0].width * 8, display_extra) : 0;
+  const int background_shift = Ar2World_BackgroundCaptureShift(&world, camera_shift, view_shift);
+  int top = 0, bottom = 0;
+  if (level) {
+    DioramaCameraPolicy_VerticalMargins(world.layers[0].camera_y,
+        world.layers[0].height * 8, view.extra_rows, &top, &bottom);
+    /* Flat Auto expands the requested canvas symmetrically, as in AR1.
+     * Diorama can spend unused edge coverage on the opposite side. */
+    if (!view.diorama) {
+      if (top > view.extra_rows) top = view.extra_rows;
+      if (bottom > view.extra_rows) bottom = view.extra_rows;
+    }
+  }
+  const int height = 224 + top + bottom;
   memset(layers, 0, sizeof(layers));
   memset(hud, 0, sizeof(hud));
   memset(screen_objects, 0, sizeof(screen_objects));
@@ -97,7 +114,11 @@ bool Ar2Capture_Draw(SrRunnerHandle *runner, const SnesRunnerApi *api, const uin
                  .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_AVAILABLE,
                  .margin_budget_pixels = extra,
                  .margin_left_pixels = extra,
-                 .margin_right_pixels = extra}};
+                 .margin_right_pixels = extra,
+                 .margin_top_pixels = top,
+                 .margin_bottom_pixels = bottom,
+                 /* BG3's HUD and raster mist do not repeat into world rows. */
+                 .vertical_clip_layer_mask = 1u << SR_PPU_OVERLAY_BG3}};
   if (api->apply_ppu_frame_policy(runner, &policy) != SR_RESULT_OK) return false;
   {
     SrPpuVirtualTilemapRequest maps = {.struct_size = SR_PPU_VIRTUAL_TILEMAP_REQUEST_V2_SIZE,
@@ -105,14 +126,15 @@ bool Ar2Capture_Draw(SrRunnerHandle *runner, const SnesRunnerApi *api, const uin
                                        .layer_mask = level ? 3 : 0};
     for (unsigned i = 0; i < 2; ++i) {
       if (!level) continue; /* Clear a previous room's virtual bindings. */
+      const int shift = i ? background_shift : camera_shift;
       maps.bindings[i] =
           (SrPpuVirtualTilemapBinding){.lookup = Ar2World_Lookup,
                                        .user_data = &world.layers[i],
-                                       .camera_x = world.layers[i].camera_x + camera_shift,
+                                       .camera_x = world.layers[i].camera_x + shift,
                                        .camera_y = world.layers[i].camera_y,
                                        .hscroll_anchor = state.backgrounds[i].h_scroll,
                                        .vscroll_anchor = state.backgrounds[i].v_scroll,
-                                       .flags = camera_shift
+                                       .flags = shift
                                            ? SR_PPU_VIRTUAL_TILEMAP_INCLUDE_AUTHENTIC : 0};
     }
     if (api->replace_ppu_virtual_tilemaps(runner, &maps) != SR_RESULT_OK) return false;
@@ -142,7 +164,8 @@ bool Ar2Capture_Draw(SrRunnerHandle *runner, const SnesRunnerApi *api, const uin
   for (unsigned i = 0; i < SR_PPU_OVERLAY_SOURCE_COUNT; ++i) {
     if (!(captures.source_mask & (1u << i))) continue;
     captures.replacement[i] =
-        (SrPpuOverlayCaptureState){.x0 = -extra, .x1 = 256 + extra, .y1 = 224};
+        (SrPpuOverlayCaptureState){.x0 = -extra, .x1 = 256 + extra,
+                                   .y0 = -top, .y1 = 224 + bottom};
   }
   captures.replacement[SR_PPU_OVERLAY_OBJ].oam_count = 128;
   if (api->compare_exchange_ppu_overlay_captures(runner, &captures) != SR_RESULT_OK) return false;
@@ -157,8 +180,8 @@ bool Ar2Capture_Draw(SrRunnerHandle *runner, const SnesRunnerApi *api, const uin
     objects.range_count = text_count;
     objects.range_width = 256;
     objects.range_height = 224;
-    objects.range_pixels = (uint8_t *)screen_objects;
-    objects.range_pixel_byte_size = sizeof(screen_objects);
+    objects.range_pixels = (uint8_t *)(screen_objects + top * AR2_CAPTURE_PITCH);
+    objects.range_pixel_byte_size = sizeof(screen_objects) - top * AR2_CAPTURE_PITCH * 4;
     objects.range_pitch_bytes = AR2_CAPTURE_PITCH * 4;
   }
   if (api->configure_ppu_obj_capture(runner, &objects) != SR_RESULT_OK) return false;
@@ -187,7 +210,7 @@ bool Ar2Capture_Draw(SrRunnerHandle *runner, const SnesRunnerApi *api, const uin
   /* The PPU centers the active canvas in a wider bound surface. The
    * compositor consumes a compact canvas at the start of each 640px row. */
   const int apron = (AR2_CAPTURE_PITCH - width) / 2;
-  for (int y = 0; y < 224; ++y) {
+  for (int y = 0; y < height; ++y) {
     const unsigned row = y * AR2_CAPTURE_PITCH;
     memmove(main_pixels + row, main_pixels + row + apron, width * 4);
     memmove(screen_objects + row, screen_objects + row + apron, width * 4);
@@ -198,27 +221,35 @@ bool Ar2Capture_Draw(SrRunnerHandle *runner, const SnesRunnerApi *api, const uin
                           .hud = hud,
                           .screen_objects = screen_objects,
                           .width = width,
-                          .height = 224,
+                          .height = height,
+                          .extra_top = top,
+                          .extra_bottom = bottom,
+                          .display_height = view.diorama ? 224 : height,
                           .render_extra = extra,
                           .display_extra = display_extra,
                           .level = level};
-  for (unsigned y = 0; y < 224; ++y) {
+  for (int y = 0; y < height; ++y) {
     const unsigned row = y * AR2_CAPTURE_PITCH;
     for (int x = 0; x < width; ++x)
       layers[kDioramaPlane_Backdrop][row + x] = backdrop;
-    if (level && bg3_owner[y] == 1)
+    const int native_y = y - top;
+    if (native_y < 0 || native_y >= 224) continue;
+    if (level && bg3_owner[native_y] == 1)
       memcpy(hud + row + extra, layers[SR_PPU_OVERLAY_BG3] + row + extra, 256 * 4);
-    else if (bg3_owner[y] == 2)
+    else if (bg3_owner[native_y] == 2)
       memcpy(layers[kDioramaPlane_Bg2Far] + row, layers[SR_PPU_OVERLAY_BG3] + row, width * 4);
-    else if (!bg3_owner[y])
+    else if (!bg3_owner[native_y])
       frame.level = false;
   }
   if (level) {
     frame.camera_x = world.layers[0].camera_x + camera_shift;
     frame.camera_y = world.layers[0].camera_y;
     frame.world_width = world.layers[0].width * 8;
+    /* Keep the entire finite-edge capture filled while framing the visible
+     * viewport independently. Storage headroom must not displace the player. */
+    frame.view_offset_x = view_shift - camera_shift;
     frame.world_height = world.layers[0].height * 8;
-    frame.bg2_camera_x = world.layers[1].camera_x + camera_shift;
+    frame.bg2_camera_x = world.layers[1].camera_x + background_shift;
     frame.bg2_camera_y = world.layers[1].camera_y;
     frame.bg2_world_height = world.layers[1].height * 8;
   }

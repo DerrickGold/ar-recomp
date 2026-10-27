@@ -2358,6 +2358,8 @@ static void PrepareDioramaView(const DioramaCapture *capture,
                       geometry->matrix);
   Diorama_AlignCaptureToNativeCamera(
       geometry->matrix, capture->height, capture->authentic_y0);
+  Diorama_TranslateCameraWorldX(geometry->matrix,
+      -(float)capture->camera_offset_x * par / kActRaiserAuthenticHeight);
 
   float framing_weight = Clampf(view->camera_framing_weight, 0.0f, 1.0f);
   if (framing_weight == 0.0f) {

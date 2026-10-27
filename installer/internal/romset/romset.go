@@ -56,7 +56,7 @@ func Prepare(inputs []Input) (*Plan, error) {
 		}
 		release, err := gamerom.Identify(data)
 		if err != nil {
-			return nil, fmt.Errorf("%s: unsupported ROM; select clean ActRaiser regional ROMs or ActRaiser 2 (USA)", input.Name)
+			return nil, fmt.Errorf("%s: unsupported ROM; select a clean supported ActRaiser ROM", input.Name)
 		}
 		if seen[release.ID] {
 			continue

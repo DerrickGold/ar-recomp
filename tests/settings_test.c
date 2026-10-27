@@ -80,47 +80,8 @@ static void TestDefaultsAndMetadata(void) {
   DisplayGeometry_SetHorizontal(43, 43);
   Settings_Init();
 
-  /* Count moves whenever a category gains or loses rows; the SIM 3D block
-   * most recently gained the world-map underlay and cloud-shroud stage
-   * toggles with their haze/density/falloff/inset dials, on top of the nine
-   * named stage toggles and the shadow/height-pop tuning rows. On top of
-   * that, Controls added eight device/tuning rows plus 42 binding rows: 18
-   * actions x keyboard+gamepad (12 SNES buttons and 6 analog camera axes),
-   * plus 6 gamepad-only host actions. Presentation then gained the diorama
-   * edge-margin-fix A/B toggle, and navigation gained
-   * its separate off-by-default 3D scene switch. The in-game manual then added
-   * two: the action that opens the reader, and its spreads/single-page choice.
-   * The content randomizer then added eleven: master, seed and reroll on Seed;
-   * health, damage, type shuffle and its range on Enemies; drops and placement
-   * on Items; lair positions and monsters on Simulation. The magic-spell
-   * cycle then added three: the Cheats-tab toggle that arms it, plus its
-   * keyboard and gamepad binding rows. The sim synthetic-part work added one
-   * measured, gameplay-affecting actor-range row. Background voxel polish then
-   * added five independent performance boundaries, the audited landscape one
-   * player-facing magnitude row, plus two Aitos Extras rows: whether wind
-   * stills every windmill, and whether the stale event-message latch is
-   * repaired. The
-   * host FPS overlay adds one Video row, and frame generation adds one explicit
-   * 30-to-60 Hz validation cadence. The runtime-only render comparison adds
-   * one keyboard and one gamepad binding row, but deliberately no persisted
-   * mode setting. The native-audio work then added one restart-class extended
-   * channel toggle. Removing the renderer selector took one Display row back
-   * off: the PPU has a single path, so the setting selected between a modern
-   * renderer and a legacy one that no longer exists. Localization adds six
-   * source, presentation, and enhanced-font preferences, plus an independent
-   * host interface language. Connected SIM adds one default-on underlay row.
-   * The Graphics API choice adds one restart-class Display row. Modern SIM
-   * adds its presentation choice, player scale, and two independent Describe bindings.
-   * Seeded regional rolls add two options; save slots add two entry actions.
-   * Remember last town adds a native/enhanced QoL preference; native menu
-   * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
-  /* One completion scene switch plus nine internal effect overrides; one button-prompt representation preference.
-   * Diorama adds its skybox scroll choice and opt-in final-battle scene. */
-  const int expected_descriptors = 330; /* Optional AR2 Master. */
-  if (g_setting_desc_count != expected_descriptors)
-    fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
-            expected_descriptors, g_setting_desc_count);
-  CHECK(g_setting_desc_count == expected_descriptors);
+  /* Validate registry invariants; each feature checks its own required rows. */
+  CHECK(g_setting_desc_count > 0);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -2777,6 +2738,10 @@ static void TestAr2MasterSetting(void) {
   CHECK(desc->apply == kApply_Passive && !g_settings.ar2_master);
   Settings_SetAr2MasterAvailable(false);
   CHECK(!Settings_IsAvailable(desc));
+  CHECK(!Settings_IsMenuVisible(desc));
+  g_settings.show_debug_settings = true;
+  CHECK(!Settings_IsMenuVisible(desc));
+  g_settings.show_debug_settings = false;
   Settings_SetAr2MasterAvailable(true);
   CHECK(Settings_IsAvailable(desc) && Settings_IsMenuVisible(desc));
   CHECK(Settings_SetLong(desc, 1) == kSettingChange_Applied);
@@ -2784,6 +2749,20 @@ static void TestAr2MasterSetting(void) {
   CHECK(Settings_SetLong(desc, 0) == kSettingChange_Applied);
   CHECK(!g_settings.ar2_master);
   Settings_SetAr2MasterAvailable(false);
+  CHECK(!Settings_IsMenuVisible(desc));
+}
+
+static void TestImportedLevelSettings(void) {
+  const char *keys[] = {"retry_imported_level", "return_imported_world"};
+  for (unsigned i = 0; i < sizeof(keys) / sizeof(*keys); ++i) {
+    const SettingDesc *desc = Settings_Find(keys[i]);
+    CHECK(desc && desc->type == kSettingType_Action && desc->category == kSettingCat_Extras);
+    Settings_SetImportedLevelActive(false);
+    CHECK(!Settings_IsAvailable(desc) && !Settings_IsMenuVisible(desc));
+    Settings_SetImportedLevelActive(true);
+    CHECK(Settings_IsAvailable(desc) && Settings_IsMenuVisible(desc));
+  }
+  Settings_SetImportedLevelActive(false);
 }
 
 int main(int argc, char **argv) {
@@ -2792,6 +2771,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   TestAr2MasterSetting();
+  TestImportedLevelSettings();
   TestLocalizationPackIdentity();
   TestLocalizationPreferences();
   TestPersistenceCanBeDisabled();

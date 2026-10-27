@@ -13,6 +13,9 @@ union SDL_Event;
  * which remain the application loop's responsibility. Device changes and
  * releases retain their existing routes even when presses are suppressed. */
 bool HostInput_HandleEvent(const union SDL_Event *event);
+/* Same device/menu/binding routing, with only presentation-safe hotkeys and
+ * action camera controls while another game's native runtime owns gameplay. */
+bool HostInput_HandleImportedEvent(const union SDL_Event *event);
 /* Main-thread routing during action-diorama production: gameplay inputs and
  * host camera pose only. False leaves the event queued until runner pause. */
 bool HostInput_TryHandleStreamEvent(const union SDL_Event *event, bool sim_town);

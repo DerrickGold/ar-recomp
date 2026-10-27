@@ -430,6 +430,12 @@ static bool test_spc_upload_prepare_raw(
     return upload != NULL && source24 == 0x008000u;
 }
 
+static bool test_handshaked_port(uint8_t port, uint8_t value) {
+    (void)port;
+    (void)value;
+    return true;
+}
+
 static void test_registration_and_initialization(void) {
     static const RtlGameIdentity identity = {
         .struct_size = RTL_GAME_IDENTITY_V1_SIZE,
@@ -741,6 +747,26 @@ static void test_registration_and_initialization(void) {
         RtlAudioExtensionConfigure(false);
         check(RtlRegisterGame(&module) == SR_RESULT_OK,
               "restore process-lifetime audio table after filter test");
+    }
+    {
+        RtlGameAudioApi handshake = {
+            .struct_size = RTL_GAME_AUDIO_API_V5_SIZE,
+            .capabilities = RTL_GAME_AUDIO_CAP_PRESENTATION,
+            .apu_port_write_is_handshaked = test_handshaked_port,
+        };
+        RtlGameModule handshake_module = module;
+        handshake_module.audio = &handshake;
+        check(RtlRegisterGame(&handshake_module) == SR_RESULT_OK,
+              "register explicit handshaked-port timing policy");
+        handshake.struct_size = RTL_GAME_AUDIO_API_V4_SIZE;
+        check(RtlRegisterGame(&handshake_module) == SR_RESULT_INVALID_ARGUMENT,
+              "old table extent cannot advertise handshake-only presentation");
+        handshake.struct_size = RTL_GAME_AUDIO_API_V5_SIZE;
+        handshake.apu_port_write_is_handshaked = NULL;
+        check(RtlRegisterGame(&handshake_module) == SR_RESULT_INVALID_ARGUMENT,
+              "handshake-only presentation requires its callback");
+        check(RtlRegisterGame(&module) == SR_RESULT_OK,
+              "restore process-lifetime audio table after handshake test");
     }
 }
 

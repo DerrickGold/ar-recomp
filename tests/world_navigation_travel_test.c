@@ -103,37 +103,11 @@ int main(void) {
   assert(Frame(atlas).destination == 0);
   uint8_t before[kSnesWramSize];
   memcpy(before, ram, sizeof(ram));
-  const SimWorldNavigationScene base = {.valid = true,
-      .source_to_screen = {1, 0, 128 - 720, 0, 1, 112 - 363},
-      .composition = {.valid = true}};
-  float previous_scale = 0;
-  for (int tick = 0; tick <= 90; tick++) {
-    WorldNavigationTravel_SetApproach(tick / 90.f);
-    const WorldNavigationTravelFrame travel = Frame(atlas);
-    SimWorldNavigationScene scene = base;
-    uint8_t brightness = 15;
-    WorldNavigationTravel_ApplyApproach(&travel, &scene, &brightness);
-    const float *m = scene.source_to_screen;
-    assert(fabsf(m[0] * 720 + m[1] * 363 + m[2] - 128) < .01f);
-    assert(fabsf(m[3] * 720 + m[4] * 363 + m[5] - 112) < .01f);
-    const float scale = hypotf(m[0], m[3]);
-    assert(isfinite(scale) && scale >= previous_scale);
-    assert(scene.composition.empty_animation == (tick > 0));
-    if (tick == 90) assert(brightness == 0);
-    previous_scale = scale;
-  }
-  for (int tick = 90; tick >= 0; tick--) {
-    WorldNavigationTravel_SetApproach(tick / 90.f);
-    assert(fabsf(Frame(atlas).approach - tick / 90.f) < .0001f);
-  }
-  SimWorldNavigationScene restored = base;
-  uint8_t brightness = 15;
-  WorldNavigationTravelFrame travel = Frame(atlas);
-  WorldNavigationTravel_ApplyApproach(&travel, &restored, &brightness);
-  assert(!memcmp(&base, &restored, sizeof(base)) && brightness == 15);
+  WorldNavigationTravel_SetTransition(true);
+  assert(Frame(atlas).transition);
   assert(!memcmp(before, ram, sizeof(ram)));
-  WorldNavigationTravel_SetApproach(NAN);
-  assert(Frame(atlas).approach == 0);
+  WorldNavigationTravel_SetTransition(false);
+  assert(!Frame(atlas).transition);
   free(atlas);
   return 0;
 }

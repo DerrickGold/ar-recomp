@@ -119,6 +119,7 @@ bool Diorama_ClampCameraVertically(
     bool clamp_top, bool clamp_bottom, float *world_y_offset);
 
 void Diorama_TranslateCameraWorldY(float matrix[16], float shift);
+void Diorama_TranslateCameraWorldX(float matrix[16], float shift);
 /* Authored view offset relative to native scroll, in native pixels. */
 bool Diorama_OffsetCamera(float matrix[16], int x, int y, float pixel_aspect);
 
@@ -336,6 +337,9 @@ typedef struct DioramaCapture {
   DioramaVerticalBounds vertical_bounds;
   DioramaHorizontalBounds horizontal_bounds;
   int framing_x, framing_y;
+  /* Native camera relative to the capture center, in source pixels. This
+   * registers asymmetric edge captures before authored or dynamic framing. */
+  int camera_offset_x;
   uint8_t bg_apron_mask;
   /* Native camera and command-3 ratio, captured with these exact pixels. */
   int camera_y, bg2_camera_x, bg2_camera_y, bg2_world_height;

@@ -9,6 +9,7 @@
   const choice = document.getElementById("game-imports-content");
   const help = document.getElementById("game-imports-help");
   const next = document.getElementById("game-imports-next");
+  const category = document.querySelector('[data-asset-category="imports"]');
   let items = [], busy = false, closed = false;
   function selection() {
     const item = items.find(row => row.id === choice.value);
@@ -47,6 +48,11 @@
       const data = await read(await request("game-imports"));
       const selected = choice.value;
       items = data.imports;
+      category.hidden = items.length === 0;
+      if (category.hidden && !form.hidden) {
+        document.querySelector('[data-asset-category="music"]').click();
+        form.hidden = true;
+      }
       choice.replaceChildren(...items.map(item => {
         const option = document.createElement("option");
         option.value = item.id;
@@ -73,9 +79,9 @@
   }
   form.addEventListener("submit", event => { event.preventDefault(); return install(); });
   refresh.addEventListener("click", load);
-  document.querySelector('[data-asset-category="imports"]').addEventListener("click", load);
+  category.addEventListener("click", load);
   document.addEventListener("workshop:navigate", () => {
-    if (!form.hidden && !document.getElementById("panel-assets").hidden) load();
+    if (!document.getElementById("panel-assets").hidden) return load();
   });
   document.addEventListener("workshop:closed", () => {
     closed = true;

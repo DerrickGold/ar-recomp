@@ -73,6 +73,18 @@ SrResult RtlGameApplyPpuFramePolicy(const SrPpuFramePolicy *policy);
  * runner's concrete Snes layout. */
 SrRunnerHandle *RtlGameRunner(void);
 
+/** Owner-thread checkpoint for replaying a completed video scanout. Captures
+ * PPU, DMA, CPU-bus latches and WRAM; excludes CPU execution, APU and cartridge
+ * state. Only video IRQ callbacks may run between restores: never a game tick,
+ * audio command, lifecycle change or cartridge write. Output surfaces remain
+ * caller-owned. Checkpoints expire when the linked runner is replaced/reset.
+ * This is not a save state and cannot resume game execution. */
+typedef struct RtlVideoCheckpoint RtlVideoCheckpoint;
+RtlVideoCheckpoint *RtlVideoCheckpoint_Create(void);
+void RtlVideoCheckpoint_Destroy(RtlVideoCheckpoint *checkpoint);
+bool RtlVideoCheckpoint_Capture(RtlVideoCheckpoint *checkpoint);
+bool RtlVideoCheckpoint_Restore(const RtlVideoCheckpoint *checkpoint);
+
 /** Low-overhead event instrumentation for generated/game glue. Query before
  * computing expensive diagnostic context; emission is synchronous and copies
  * the event before returning. */

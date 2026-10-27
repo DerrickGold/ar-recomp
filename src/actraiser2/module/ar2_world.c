@@ -1,13 +1,22 @@
 #include "ar2_world.h"
+#include "actraiser2/ar2_scenes.h"
 
 static uint16_t word(const uint8_t *bytes, size_t index) {
   return bytes[index] | (uint16_t)bytes[index + 1] << 8;
 }
 
+#ifdef AR2_NATIVE_RESEARCH
+static const bool research = true;
+#else
+static const bool research = false;
+#endif
+
+bool Ar2World_SupportsEntrance(unsigned scene) {
+  return Ar2Scenes_IsEntrance(scene, research);
+}
+
 bool Ar2World_SupportsScene(unsigned scene) {
-  /* $15 is Industen's following boss room. It retains the row-major maps
-   * and raster HUD ownership of the entrance; the globe still launches $14. */
-  return scene == 0x14 || scene == 0x15 || scene == 0x16;
+  return Ar2Scenes_Find(scene, research) != NULL;
 }
 
 int Ar2World_CaptureShift(int camera, int world_width, int margin) {
@@ -17,12 +26,38 @@ int Ar2World_CaptureShift(int camera, int world_width, int margin) {
   return (camera < minimum ? minimum : camera > maximum ? maximum : camera) - camera;
 }
 
+int Ar2World_BackgroundCaptureShift(const Ar2World *world, int capture_shift, int view_shift) {
+  if (!world || !world->valid) return capture_shift;
+  const unsigned numerator = world->background_x_ratio & 255;
+  const unsigned denominator = world->background_x_ratio >> 8;
+  int parallax_shift = 0;
+  if (world->background_x_ratio) {
+    /* $80:AD66 adds native foreground motion to independently scrolling BG2.
+     * Keep its authored motion; only compensate the foreground's view stop. */
+    if (world->background_x_autoscroll) parallax_shift = view_shift;
+    else {
+      if (!denominator) return capture_shift;
+      /* $80:ADC9 scales the foreground by the ratio at $05A2 (low/high byte).
+       * Subtract the two rounded positions, not a rounded delta: otherwise
+       * an odd native camera jitters while the widened view is held still. */
+      const int camera = world->layers[0].camera_x;
+      parallax_shift = (camera + view_shift) * (int)numerator / (int)denominator -
+          camera * (int)numerator / (int)denominator;
+    }
+  }
+  /* Diorama captures a larger apron than it displays. Its common viewport
+   * translation must not become an extra parallax movement on BG2. */
+  return parallax_shift + capture_shift - view_shift;
+}
+
 bool Ar2World_Update(Ar2World *world, const uint8_t *wram, size_t size) {
   if (!world) return false;
   world->valid = false;
   if (!wram || size != 0x20000) return false;
   const unsigned scene = word(wram, 0x51a);
   if (!Ar2World_SupportsScene(scene)) return false;
+  world->background_x_ratio = word(wram, 0x5a2);
+  world->background_x_autoscroll = (word(wram, 0x5ca) & 0x20) != 0;
   for (unsigned layer = 0; layer < 2; ++layer) {
     const unsigned index = layer * 2;
     const unsigned width = word(wram, 0x55c + index);

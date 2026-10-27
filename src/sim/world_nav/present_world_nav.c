@@ -834,11 +834,14 @@ static bool PrepareWorldNavigationProjection(
   const bool travelling = travel->imported || travel->turning;
   const float focus_x = travelling ? travel->focus_x : slot->sim.world_navigation.focus_x;
   const float focus_y = travelling ? travel->focus_y : slot->sim.world_navigation.focus_y;
+  const ArRenderPointF chart_focus = travelling
+      ? WorldNavigationImports_ChartPoint(focus_x, focus_y, travel->turn)
+      : (ArRenderPointF){focus_x, focus_y};
   const float *affine = slot->sim.world_navigation_scene.source_to_screen;
   const float heading = atan2f(-affine[3], affine[0]);
   if (!SimWorldNavigationGlobe_BuildFrameAtRadius(out->chart_radius_tiles,
-          focus_x / kSimWorldMapTilePixels,
-          focus_y / kSimWorldMapTilePixels, heading, &out->globe_frame))
+          chart_focus.x / kSimWorldMapTilePixels,
+          chart_focus.y / kSimWorldMapTilePixels, heading, &out->globe_frame))
     return false;
   /* Rotate the chart in planet space before applying the shared inspection
    * camera. Both continents retain their positions on the same globe. */
@@ -870,7 +873,7 @@ static bool PrepareWorldNavigationProjection(
   if (!isfinite(tile_area) || tile_area <= 0.0f) return false;
   float focus_normal[3], focus_metric;
   if (!SimWorldNavigationGlobe_SampleAtRadius(out->chart_radius_tiles,
-          focus_x / kSimWorldMapTilePixels, focus_y / kSimWorldMapTilePixels,
+          chart_focus.x / kSimWorldMapTilePixels, chart_focus.y / kSimWorldMapTilePixels,
           focus_normal, &focus_metric) || focus_metric <= 0) return false;
   /* Match the native tile scale at the travel focus. The spherical chart's
    * local metric would otherwise shrink towns away from the chart centre,

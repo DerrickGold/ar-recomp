@@ -1,4 +1,5 @@
 #include "actraiser2/ar2_content.h"
+#include "actraiser2/ar2_scenes.h"
 #include "actraiser/actraiser_ar2_master_assets.h"
 #include "snesrecomp/support/utf8_fs.h"
 #include "snesrecomp/support/digest.h"
@@ -54,6 +55,5 @@ const uint8_t *Ar2Content_Rom(size_t *size) {
   return s_atlas ? s_pack + kHeaderBytes : NULL;
 }
 bool Ar2Content_Playable(const Ar2WorldDestination *destination) {
-  return destination && ((destination->flags_and_scene & 0xff) == 0x14 ||
-                         (destination->flags_and_scene & 0xff) == 0x16);
+  return destination && Ar2Scenes_IsEntrance(destination->flags_and_scene & 0xff, false);
 }

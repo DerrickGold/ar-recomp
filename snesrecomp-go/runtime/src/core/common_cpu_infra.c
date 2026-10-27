@@ -397,7 +397,9 @@ static bool game_audio_valid(const RtlGameAudioApi *audio) {
     if (presentation != (audio->apu_port_pace != NULL ||
                          audio->apu_port_write != NULL ||
                          audio->spc_upload_completed != NULL ||
-                         audio->mix_output != NULL))
+                         audio->mix_output != NULL ||
+                         (audio->struct_size >= RTL_GAME_AUDIO_API_V5_SIZE &&
+                          audio->apu_port_write_is_handshaked != NULL)))
         return false;
     return true;
 }

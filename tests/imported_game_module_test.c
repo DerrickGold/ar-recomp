@@ -23,6 +23,9 @@ int main(int argc, char **argv) {
   assert(get && !get(0) && !get(AR_IMPORTED_GAME_ABI - 1));
   const ArImportedGameApi *api = get(AR_IMPORTED_GAME_ABI);
   assert(api && api->size == sizeof(*api));
+  assert(api->refresh);
+  ArImportedGameFrame unopened;
+  assert(!api->refresh((ArImportedGameView){0}, &unopened));
   assert(!api->open(NULL, 0, 0x14));
   if (argc > 2) {
     FILE *file = fopen(argv[2], "rb");
@@ -40,7 +43,8 @@ int main(int argc, char **argv) {
       enum { kWalkStart = 550, kWalkEnd = 650 };
       for (int tick = 0; tick < 900; tick++) {
         ArImportedGameFrame frame;
-        if (!api->step(tick > kWalkStart && tick < kWalkEnd ? 0x80 : 0, 64, tick > 600, &frame)) {
+        if (!api->step(tick > kWalkStart && tick < kWalkEnd ? 0x80 : 0,
+            (ArImportedGameView){64, 64, tick > 600}, &frame)) {
           fprintf(stderr, "%s at tick %d\n", api->error(), tick);
           return 1;
         }

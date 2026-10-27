@@ -28,6 +28,8 @@ static uint8_t requested_stage;
 static uint32_t block_pc;
 static int started, in_interrupt;
 static int host_frame;
+static RtlVideoCheckpoint *scanout_start, *scanout_live;
+static ArImportedGameFrame last_frame;
 static unsigned cop_depth;
 static uint32_t cop_rtl_target;
 static int cop_returned_by_rtl;
@@ -172,39 +174,11 @@ static bool dispatch_miss(uint32_t source, uint32_t target) {
   abort();
 }
 
-static bool defer_wide_activation(const CpuState *cpu) {
-  /* $0951 starts at $82:8073, when the Master enters its input loop, and
-   * resets on scene load/death. $095B is too early: it clears before the
-   * stone-to-Master animation has finished. Keep the extra view rendered,
-   * but don't let its actors wake before the player can defend themselves. */
-  if (cpu->emulation || cpu->m_flag || cpu->x_flag ||
-      !Ar2World_SupportsScene(ram_word(0x51a)) || ram_word(0x951)) return false;
-  const unsigned actor = cpu->Y; /* COP dispatcher holds the actor in Y. */
-  if (actor > 0xffd0 || actor == ram_word(0x649)) return false;
-  /* Preserve COP $1E's existing wait and its out-of-world bypass. Only
-   * visibility added by the wider capture needs this extra condition. */
-  const uint16_t x = ram_word(actor), y = ram_word(actor + 2);
-  if ((ram_word(actor + 4) & 0x8000) || x >= ram_word(0x550) || y >= ram_word(0x554))
-    return false;
-  const int left = (int16_t)(x - ram_word(actor + 0x10) - ram_word(0x540));
-  const int right = (int16_t)(x + ram_word(actor + 0x14) - ram_word(0x540));
-  return !((left >= 0 && left < 256) || (left < 0 && right >= 0 && right < 256));
-}
-
 RecompReturn Ar2_DispatchCopHandler(CpuState *cpu) {
-  uint16_t target = cpu_read16(cpu, 0x80, (uint16_t)(0x82db + cpu->X));
+  const uint16_t target = cpu_read16(cpu, 0x80, (uint16_t)(0x82db + cpu->X));
   if (cpu->X >= 0x1a2 || target < 0x847d || target == 0xffff) {
     fprintf(stderr, "unsupported COP signature %02x\n", cpu->X / 2);
     abort();
-  }
-  if (target == 0x87cc && defer_wide_activation(cpu)) {
-    /* Enter COP $1E's native sleep path after TYX and its in-world bounds
-     * checks (carry clear). Native code owns the retry delay, saved task PC,
-     * operand consumption and scheduler return. No actor flags are changed. */
-    cpu->X = cpu->Y;
-    cpu->_flag_C = 0;
-    cpu_mirrors_to_p(cpu);
-    target = 0x87e5;
   }
   return cpu_dispatch_pc_from(cpu, 0x800000 | target, cpu->S, 0x8082d8);
 }
@@ -277,12 +251,29 @@ static const RtlGameExecutionApi execution = {
     .execution_checkpoint = checkpoint,
     .recover_dispatch_miss = dispatch_miss,
 };
+static bool handshaked_audio_write(uint8_t port, uint8_t value) {
+  (void)port;
+  (void)value;
+  /* The native IPL/block and BRR-catalog senders poll $2140 after every
+   * counter write. Adding the runner's ordinary command dwell to each byte
+   * turns a sample-bank upload into minutes of emulated waiting. Keep the
+   * original senders and acknowledgements, with no extra dwell in this range.
+   * Music/SFX commands outside the transfer retain the default pacing. */
+  return block_pc >= 0x80cff7 && block_pc < 0x80d177;
+}
+static const RtlGameAudioApi audio = {
+    .struct_size = RTL_GAME_AUDIO_API_V5_SIZE,
+    .capabilities = RTL_GAME_AUDIO_CAP_PRESENTATION,
+    .apu_port_write_is_handshaked = handshaked_audio_write,
+};
 static const RtlGameModule module = {
     .abi_version = RTL_GAME_MODULE_ABI_VERSION,
     .struct_size = RTL_GAME_MODULE_V2_SIZE,
-    .capabilities = RTL_GAME_MODULE_CAP_IDENTITY | RTL_GAME_MODULE_CAP_EXECUTION,
+    .capabilities = RTL_GAME_MODULE_CAP_IDENTITY | RTL_GAME_MODULE_CAP_EXECUTION |
+                    RTL_GAME_MODULE_CAP_AUDIO,
     .identity = &identity,
     .execution = &execution,
+    .audio = &audio,
 };
 static void irq(void *unused, uint32_t line) {
   (void)unused;
@@ -311,6 +302,10 @@ _Noreturn void sr_native_module_abort(void) {
 }
 
 static void close_game(void) {
+  RtlVideoCheckpoint_Destroy(scanout_start);
+  RtlVideoCheckpoint_Destroy(scanout_live);
+  scanout_start = scanout_live = NULL;
+  last_frame = (ArImportedGameFrame){0};
   if (opened) SnesShutdown();
   Ar2Coroutine_Destroy();
   opened = false;
@@ -323,7 +318,7 @@ static bool open_game(const uint8_t *rom, size_t size, uint8_t stage) {
   error_text[0] = 0;
   failed = false;
   returned_to_world = false;
-  if (size != 0x180000 || (stage != 0x14 && stage != 0x16)) {
+  if (size != 0x180000 || !Ar2World_SupportsEntrance(stage)) {
     snprintf(error_text, sizeof(error_text), "Unsupported AR2 ROM or entrance");
     return false;
   }
@@ -351,13 +346,67 @@ static bool open_game(const uint8_t *rom, size_t size, uint8_t stage) {
     return false;
   }
   opened = true;
+  scanout_start = RtlVideoCheckpoint_Create();
+  scanout_live = RtlVideoCheckpoint_Create();
+  if (!scanout_start || !scanout_live) {
+    snprintf(error_text, sizeof(error_text), "Cannot allocate AR2 video checkpoints");
+    close_game();
+    return false;
+  }
   RtlReset(0);
   RtlSetAudioOutputRate(48000);
   return true;
 }
 
-static bool step_game(uint32_t input, int extra, bool diorama, ArImportedGameFrame *out) {
-  if (!opened || failed || !out || extra < 0 || extra > 128) return false;
+static bool valid_view(ArImportedGameView view) {
+  return view.extra_columns >= 0 && view.extra_columns <= 128 &&
+      view.extra_rows >= 0 && view.extra_rows <= 64;
+}
+
+static bool capture_frame(ArImportedGameView view) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrRunnerHandle *runner = RtlGameRunner();
+  int camera_shift = 0;
+  if (Ar2World_SupportsScene(ram_word(0x51a)))
+    camera_shift = Ar2World_CaptureShift(ram_word(0x538), ram_word(0x55c) * 16,
+                                         view.diorama ? 128 : view.extra_columns);
+  return Ar2Sprites_Publish(runner, api, camera_shift) &&
+      Ar2Capture_Draw(runner, api, g_ram, view, camera_shift, irq);
+}
+
+static bool refresh_frame(ArImportedGameView view, ArImportedGameFrame *out) {
+  if (!opened || failed || returned_to_world || !last_frame.video.main || !out ||
+      !valid_view(view)) return false;
+  if (!RtlVideoCheckpoint_Capture(scanout_live)) return false;
+  const CpuState cpu = g_cpu;
+  const uint32_t pc = block_pc;
+  const unsigned work = checkpoints;
+  volatile bool ok = false;
+  /* Replay only the native video IRQs against the retained scanout start.
+   * The game coroutine and audio timeline remain suspended. Always restore
+   * the live hardware/RAM, including after an IRQ dispatch failure. */
+  if (!setjmp(escape)) {
+    checkpoints = 0;
+    ok = RtlVideoCheckpoint_Restore(scanout_start) && capture_frame(view);
+  }
+  ok = RtlVideoCheckpoint_Restore(scanout_live) && ok;
+  g_cpu = cpu;
+  block_pc = pc;
+  checkpoints = work;
+  in_interrupt = 0;
+  if (!ok) {
+    if (!error_text[0]) snprintf(error_text, sizeof(error_text), "AR2 frame refresh failed");
+    return false;
+  }
+  *out = last_frame;
+  out->video = *Ar2Capture_Frame();
+  out->pcm = NULL;
+  out->pcm_frames = 0;
+  return true;
+}
+
+static bool step_game(uint32_t input, ArImportedGameView view, ArImportedGameFrame *out) {
+  if (!opened || failed || !out || !valid_view(view)) return false;
   if (setjmp(escape)) return false;
   checkpoints = 0;
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
@@ -374,7 +423,7 @@ static bool step_game(uint32_t input, int extra, bool diorama, ArImportedGameFra
   if (!returned_to_world) {
     /* A finite-edge capture can move one margin inward. Keep all actors in
      * that whole view eligible without moving the native gameplay camera. */
-    Ar2Sprites_SetMargin(diorama ? 128 : extra);
+    Ar2Sprites_SetView(view);
     RtlRunFrame(requested_stage ? 0 : input);
   }
   if (failed) return false;
@@ -386,12 +435,7 @@ static bool step_game(uint32_t input, int extra, bool diorama, ArImportedGameFra
                                  .event = kArImportedGameEvent_ReturnToWorld};
     return true;
   }
-  int camera_shift = 0;
-  if (Ar2World_SupportsScene(ram_word(0x51a)))
-    camera_shift = Ar2World_CaptureShift(ram_word(0x538), ram_word(0x55c) * 16,
-                                         diorama ? 128 : extra);
-  if (!Ar2Sprites_Publish(runner, api, camera_shift) ||
-      !Ar2Capture_Draw(runner, api, g_ram, extra, diorama, camera_shift, irq)) {
+  if (!RtlVideoCheckpoint_Capture(scanout_start) || !capture_frame(view)) {
     snprintf(error_text, sizeof(error_text), "AR2 frame capture failed");
     failed = true;
     return false;
@@ -410,6 +454,7 @@ static bool step_game(uint32_t input, int extra, bool diorama, ArImportedGameFra
                                .player_y = ram_word(player + 2),
                                .health = ram_word(0x91d),
                                .lives = ram_word(0x91b)};
+  last_frame = *out;
   return !failed;
 }
 
@@ -437,6 +482,7 @@ static const ArImportedGameApi imported_api = {
     .close = close_game,
     .error = last_error,
     .snapshot = snapshot,
+    .refresh = refresh_frame,
 };
 AR_IMPORTED_GAME_EXPORT const ArImportedGameApi *ArImportedGame_GetApi(uint32_t version) {
   return version == AR_IMPORTED_GAME_ABI ? &imported_api : NULL;

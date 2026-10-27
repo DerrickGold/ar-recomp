@@ -337,7 +337,7 @@ static void TestCapturedWorldVerticalBounds(void) {
     CHECK(bounds.valid && bounds.top_reached && bounds.bottom_reached);
   }
   CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 287, 512, 64, 352).valid);
-  CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 288, 512, 64, 288).valid);
+  CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 289, 512, 64, 288).valid);
   CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 512, 64, 288).valid);
   CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 0, 0, 224).valid);
   CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_OBJ, 0, 512, 0, 224).valid);
@@ -349,6 +349,34 @@ static void TestCapturedWorldVerticalBounds(void) {
    * All 128 extra capture rows belong above it, despite stale editor bounds. */
   bounds = DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 31 + 144, 400, 128, 352);
   CHECK(bounds.valid && !bounds.top_reached && bounds.bottom_reached);
+}
+
+static void TestAr2FloorCameraKeepsExtendedRows(void) {
+  /* October 26 Industen snapshots: floor y=544 and raised platform y=496.
+   * Both captures reach the same 768px floor, though AR2's last native
+   * scanline at y=544 is a guard row rather than another world tile row. */
+  const int cameras[] = {544, 543, 496};
+  const int tops[] = {128, 128, 81};
+  for (unsigned i = 0; i < sizeof(cameras) / sizeof(*cameras); ++i) {
+    const DioramaVerticalBounds bounds = DioramaVerticalBounds_Resolve(
+        SR_PPU_OVERLAY_BG1, cameras[i], 768, tops[i], 352);
+    CHECK(bounds.valid && !bounds.top_reached && bounds.bottom_reached);
+    DioramaProjection projection = Projection();
+    projection.aspect_x = 512.0f / 224.0f;
+    projection.height_scale = 352.0f / 224.0f;
+    const Scene3DCamera camera = {0, 0, 3.25f, .4f};
+    Scene3D_BuildViewProjection(&camera, 160, 100, projection.matrix);
+    CHECK(Diorama_AlignCaptureToNativeCamera(projection.matrix, 352, tops[i]));
+    CHECK(Diorama_CenterCameraVertically(projection.matrix, projection.aspect_x,
+        projection.height_scale, 0, 0, 0, tops[i] / 352.0f, (tops[i] + 224) / 352.0f));
+    CHECK(Diorama_ClampCameraVertically(projection.matrix, projection.aspect_x,
+        projection.height_scale, 0, 0, 0, bounds.top_reached, bounds.bottom_reached, NULL));
+    float top, bottom;
+    FocalBounds(&projection, 0, 1, &top, &bottom);
+    CHECK(top <= .001f && bottom >= 99.999f);
+  }
+  CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 545, 768, 128, 352).valid);
+  CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 544, 768, 127, 352).valid);
 }
 
 static void TestFloorCaptureCoversUpperViewport(void) {
@@ -1016,6 +1044,7 @@ int main(void) {
   TestCaptureAlignmentRejectsInvalidInputs();
   TestCameraFramingRejectsUnprojectableMesh();
   TestCapturedWorldVerticalBounds();
+  TestAr2FloorCameraKeepsExtendedRows();
   TestFloorCaptureCoversUpperViewport();
   TestCameraClampsReachedWorldEdge();
   TestParallaxSharesTheCameraStop();

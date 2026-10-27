@@ -189,8 +189,8 @@ static void CaptureMetadata(SimFrameData *sim, bool owned, uint32_t underlay_ser
   }
   if (!owned) {
     SimWorldNavigationCapture_Capture(sim, RtlGameRunner());
-    WorldNavigationTravel_ApplyApproach(&travel, &sim->world_navigation_scene,
-                                       &sim->world_navigation_brightness);
+    if (travel.imported && travel.transition)
+      sim->world_navigation_scene.composition.empty_animation = true;
   }
 }
 

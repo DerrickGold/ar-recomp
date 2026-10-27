@@ -103,6 +103,8 @@ static bool DrawScene(const ArImportedGameFrame *game, ArRenderRectI viewport, u
                                         AR2_CAPTURE_PITCH * 4)) return false;
     }
     DioramaCapture capture = {.width = frame->width, .height = frame->height,
+        .authentic_y0 = frame->extra_top,
+        .camera_offset_x = frame->view_offset_x,
         .camera_y = frame->camera_y, .bg1_camera_x = frame->camera_x,
         .bg2_camera_x = frame->bg2_camera_x, .bg2_camera_y = frame->bg2_camera_y,
         .bg2_world_height = frame->bg2_world_height, .bg2_revision = game->frame,
@@ -110,7 +112,8 @@ static bool DrawScene(const ArImportedGameFrame *game, ArRenderRectI viewport, u
     capture.horizontal_bounds = DioramaHorizontalBounds_Resolve(
         SR_PPU_OVERLAY_BG1, frame->camera_x, 0, frame->world_width, frame->width, 0);
     capture.vertical_bounds = DioramaVerticalBounds_Resolve(
-        SR_PPU_OVERLAY_BG1, frame->camera_y, frame->world_height, 0, frame->height);
+        SR_PPU_OVERLAY_BG1, frame->camera_y, frame->world_height,
+        frame->extra_top, frame->height);
     const DioramaView view = {.visible_width = visible_width, .viewport = viewport,
         .pixel_aspect = g_settings.pixel_aspect,
         .ignore_aspect_ratio = Settings_IgnoreAspectRatio(),
@@ -123,17 +126,17 @@ static bool DrawScene(const ArImportedGameFrame *game, ArRenderRectI viewport, u
             s_device, &capture, &view, &scene, &projection))) return false;
   } else {
     const ArRenderRectF source = {
-        frame->render_extra - frame->display_extra, 0, visible_width, 224};
+        frame->render_extra - frame->display_extra, 0, visible_width, frame->height};
     const ArRenderRectF destination = {viewport.x, viewport.y, viewport.w, viewport.h};
     if (!ArRenderDevice_UpdateTexture(s_device, s_main, NULL, frame->main, AR2_CAPTURE_PITCH * 4) ||
         !ArRenderDevice_DrawTexture(s_device, s_main, &source, &destination)) return false;
   }
   if (!diorama || options.hud_flat) {
     const int pinned = Settings_ScalePercentToOutput(g_settings.hud_scale_percent);
-    float scale = pinned ? pinned / 100.f : viewport.h / 224.f;
+    float scale = pinned ? pinned / 100.f : viewport.h / (float)frame->display_height;
     const float par = crt ? 7.f / 6.f : 1;
     scale = fminf(scale, viewport.w / (256.f * par));
-    const ArRenderRectF source = {frame->render_extra, 0, 256, 224};
+    const ArRenderRectF source = {frame->render_extra, frame->extra_top, 256, 224};
     const ArRenderRectF destination = {viewport.x + (viewport.w - 256 * par * scale) / 2,
         viewport.y, 256 * par * scale, 224 * scale};
     if (!ArRenderDevice_UpdateTexture(s_device, s_hud, NULL, frame->hud, AR2_CAPTURE_PITCH * 4) ||
@@ -142,9 +145,11 @@ static bool DrawScene(const ArImportedGameFrame *game, ArRenderRectI viewport, u
   /* Native START/PAUSE belongs to the screen, independently of world camera,
    * diorama depth and the player's HUD-size preference. */
   const float text_width = viewport.w * 256.f / visible_width;
-  const ArRenderRectF text_source = {frame->render_extra, 0, 256, 224};
+  const float text_height = viewport.h * 224.f / frame->display_height;
+  const ArRenderRectF text_source = {frame->render_extra, frame->extra_top, 256, 224};
   const ArRenderRectF text_destination = {
-      viewport.x + (viewport.w - text_width) / 2, viewport.y, text_width, viewport.h};
+      viewport.x + (viewport.w - text_width) / 2,
+      viewport.y + (viewport.h - text_height) / 2, text_width, text_height};
   if (!ArRenderDevice_UpdateTexture(s_device, s_screen_objects, NULL,
                                     frame->screen_objects, AR2_CAPTURE_PITCH * 4) ||
       !ArRenderDevice_DrawTexture(s_device, s_screen_objects,
@@ -159,12 +164,12 @@ bool Ar2Presentation_Draw(const ArImportedGameFrame *frame, uint64_t now_ns,
     return false;
   const int visible = 256 + frame->video.display_extra * 2;
   *viewport = ArPresentationLayout_ResolveViewport(width, height, Settings_IgnoreAspectRatio(),
-      g_settings.pixel_aspect == kPixelAspect_Crt43, visible, 224);
+      g_settings.pixel_aspect == kPixelAspect_Crt43, visible, frame->video.display_height);
   const CrtPostConfig crt = Present_CaptureCrtConfig();
   (void)CrtPost_Begin(s_device, &crt);
   bool ok = ArRenderDevice_Clear(s_device, (ArRenderColorF){0, 0, 0, 1}) &&
       DrawScene(frame, *viewport, now_ns);
-  *viewport = CrtPost_End(s_device, visible, 224, *viewport);
+  *viewport = CrtPost_End(s_device, visible, frame->video.display_height, *viewport);
   return ok;
 }
 

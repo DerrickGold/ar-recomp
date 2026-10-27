@@ -8,10 +8,43 @@
 static bool s_uploaded;
 static ArRenderTexture s_flat;
 
+ArRenderPointF WorldNavigationImports_ChartPoint(float x, float y, float turn) {
+  const float centre = kAr2WorldAtlasPixels * .5f;
+  const float scale = 1 + .15f * turn;
+  return (ArRenderPointF){centre + (x - centre) * scale, centre + (y - centre) * scale};
+}
+
+static uint32_t *BuildArt(const Ar2WorldAtlas *atlas, bool globe) {
+  _Static_assert(kAr2WorldAtlasPixels == kSimWorldMapPixels,
+      "Imported geography uses the shared world-map art dimensions");
+  const int size = kSimWorldNavigationArtPixels;
+  uint32_t *pixels = malloc((size_t)size * size * sizeof(*pixels));
+  uint32_t *masked = globe ? malloc(sizeof(atlas->pixels)) : NULL;
+  if (!pixels || (globe && !masked)) {
+    free(pixels);
+    free(masked);
+    return NULL;
+  }
+  if (globe)
+    for (size_t i = 0; i < sizeof(atlas->pixels) / sizeof(*pixels); i++)
+      /* Keep ocean RGB beneath zero alpha so linear shoreline samples do
+       * not interpolate against black. The shared ocean supplies coverage. */
+      masked[i] = atlas->indices[i] == 0x80 ? atlas->pixels[i] & 0x00ffffff : atlas->pixels[i];
+  const bool ready = SimWorldNavigationArt_Build(pixels, size,
+      globe ? masked : atlas->pixels, kAr2WorldAtlasPixels);
+  free(masked);
+  if (!ready) {
+    free(pixels);
+    return NULL;
+  }
+  return pixels;
+}
+
 bool WorldNavigationImports_Normal(const WorldNavigationProjection *projection, float x, float y,
                            float normal[3]) {
-  if (!SimWorldNavigationGlobe_SampleAtRadius(projection->chart_radius_tiles, x / 8, y / 8, normal,
-                                              NULL))
+  const ArRenderPointF chart = WorldNavigationImports_ChartPoint(x, y, 1);
+  if (!SimWorldNavigationGlobe_SampleAtRadius(projection->chart_radius_tiles,
+          chart.x / kSimWorldMapTilePixels, chart.y / kSimWorldMapTilePixels, normal, NULL))
     return false;
   normal[0] = -normal[0];
   normal[2] = -normal[2];
@@ -24,18 +57,17 @@ bool WorldNavigationImports_Draw(const FrameSlot *slot, ArRenderRectI viewport,
   const Ar2WorldAtlas *atlas = Ar2Content_Atlas();
   if (!atlas) return true;
   if (!s_uploaded) {
-    uint32_t *pixels = malloc(sizeof(atlas->pixels));
+    uint32_t *pixels = BuildArt(atlas, true);
     if (!pixels) return false;
-    for (size_t i = 0; i < sizeof(atlas->pixels) / sizeof(*pixels); i++)
-      pixels[i] = atlas->indices[i] == 0x80 ? 0 : atlas->pixels[i];
-    const ArRenderRectI all = {0, 0, 1024, 1024};
+    const int size = kSimWorldNavigationArtPixels;
+    const ArRenderRectI all = {0, 0, size, size};
     s_uploaded = Sim3DDepthPass_UploadAtlasRegions(&g_render_device, kSim3DDepthPass_ImportedGround,
-                                                   pixels, 1024, 1024, 1024 * 4, &all, 1);
+                                                   pixels, size, size, size * 4, &all, 1);
     free(pixels);
     if (!s_uploaded) return false;
   }
-  /* A 64x64 tessellation follows the globe; texture texels retain their
-   * native resolution. Shared ocean depth hides the far hemisphere. */
+  /* A 64x64 tessellation follows the enlarged chart. Both continents use
+   * Scale2x art and linear sampling; shared ocean depth hides the far side. */
   const int dx[4] = {0, 16, 16, 0}, dy[4] = {0, 0, 16, 16};
   const float azimuth = slot->sim.light_azimuth_deg * (3.14159265f / 180);
   const float elevation = slot->sim.light_elevation_deg * (3.14159265f / 180);
@@ -83,11 +115,20 @@ bool WorldNavigationImports_DrawFlat(const FrameSlot *slot, ArRenderRectI viewpo
   const Ar2WorldAtlas *atlas = Ar2Content_Atlas();
   if (!atlas) return false;
   if (!ArRenderTexture_IsValid(s_flat)) {
-    const ArRenderTextureDesc desc = {1024, 1024, kArRenderPixelFormat_Argb8888,
-        kArRenderTextureUsage_Static, kArRenderFilter_Nearest, kArRenderBlendMode_Opaque};
-    if (!ArRenderDevice_CreateTexture(&g_render_device, &desc, &s_flat) ||
-        !ArRenderDevice_UpdateTexture(&g_render_device, s_flat, NULL, atlas->pixels, 1024 * 4))
+    uint32_t *pixels = BuildArt(atlas, false);
+    if (!pixels) return false;
+    const int size = kSimWorldNavigationArtPixels;
+    const ArRenderTextureDesc desc = {size, size, kArRenderPixelFormat_Argb8888,
+        kArRenderTextureUsage_Static, kArRenderFilter_Linear, kArRenderBlendMode_Opaque};
+    ArRenderTexture texture = ArRenderTexture_Invalid();
+    const bool ready = ArRenderDevice_CreateTexture(&g_render_device, &desc, &texture) &&
+        ArRenderDevice_UpdateTexture(&g_render_device, texture, NULL, pixels, size * 4);
+    free(pixels);
+    if (!ready) {
+      ArRenderDevice_DestroyTexture(&g_render_device, texture);
       return false;
+    }
+    s_flat = texture;
   }
   ArRenderVertex2D vertices[4];
   const float brightness = slot->sim.world_navigation_brightness / 15.f;

@@ -409,7 +409,7 @@ static bool IsHostHotkey(SDL_Keycode key) {
   }
 }
 
-static void HandleKeyDown(const SDL_Event *event) {
+static void HandleKeyDown(const SDL_Event *event, bool imported) {
   if (SettingsOverlay_HandleCaptureEvent(event))
     return;
   if (HostInput_KeyboardIsSuppressed()) {
@@ -439,12 +439,23 @@ static void HandleKeyDown(const SDL_Event *event) {
                              event->key.repeat != 0);
     return;
   }
+  if (imported) {
+    switch (event->key.key) {
+    case SDLK_ESCAPE: case SDLK_F1: case SDLK_P:
+    case SDLK_MINUS: case SDLK_KP_MINUS: case SDLK_EQUALS: case SDLK_PLUS:
+    case SDLK_KP_PLUS: case SDLK_F2: case SDLK_C: case SDLK_D: case SDLK_F9:
+      break;
+    default: return; /* AR1 gameplay/debug commands require its active runtime. */
+    }
+    if ((event->key.mod & SDL_KMOD_SHIFT) &&
+        (event->key.key == SDLK_D || event->key.key == SDLK_F9)) return;
+  }
   if (!event->key.repeat &&
       (event->key.key == SDLK_ESCAPE || event->key.key == SDLK_F1)) {
     HostInput_ClearHeld();
     SettingsOverlay_Open();
   } else if (event->key.key == SDLK_P) {
-    if (SceneInspector_HasSelection()) {
+    if (!imported && SceneInspector_HasSelection()) {
       const bool inspector_owned_pause = HostInput_InspectorOwnsPause();
       HostInput_CloseInspectorSelection();
       if (!inspector_owned_pause)
@@ -525,7 +536,8 @@ static void HandleKeyDown(const SDL_Event *event) {
 /* Manual-reader mouse input is modal. Otherwise camera controls precede
  * flat scene inspection; mouse-up releases drags independently of eligibility.
  */
-static void HandleMouse(const SDL_Event *event) {
+static void HandleMouse(const SDL_Event *event, bool imported) {
+  const bool diorama = imported ? g_settings.diorama_mode : Diorama_IsActiveThisFrame();
   switch (event->type) {
   case SDL_EVENT_MOUSE_BUTTON_DOWN:
     if (ManualReader_IsOpen()) {
@@ -533,19 +545,19 @@ static void HandleMouse(const SDL_Event *event) {
       break;
     }
     if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
-        Diorama_IsActiveThisFrame()) {
+        diorama) {
       if (event->button.button == SDL_BUTTON_RIGHT)
         Diorama_SetDragging(true);
       else if (event->button.button == SDL_BUTTON_MIDDLE)
         Diorama_ResetCamera();
-    } else if (!SettingsOverlay_IsOpen() &&
+    } else if (!imported && !SettingsOverlay_IsOpen() &&
                !RenderComparison_FreezesGameplay() &&
                Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready())) {
       if (event->button.button == SDL_BUTTON_RIGHT)
         Sim3DCamera_SetDragging(true);
       else if (event->button.button == SDL_BUTTON_MIDDLE)
         HostInput_ResetSim3DCamera();
-    } else if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
+    } else if (!imported && !SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
       if (event->button.button == SDL_BUTTON_RIGHT) {
         HostInput_CloseInspectorSelection();
       } else if (event->button.button == SDL_BUTTON_LEFT) {
@@ -565,10 +577,10 @@ static void HandleMouse(const SDL_Event *event) {
       break;
     }
     if (!RenderComparison_FreezesGameplay() && Diorama_IsDragging() &&
-        Diorama_IsActiveThisFrame()) {
+        diorama) {
       Diorama_AdjustCamera(event->motion.xrel * Diorama_DragRadPerPx(),
                            event->motion.yrel * Diorama_DragRadPerPx(), 0.0f);
-    } else if (!RenderComparison_FreezesGameplay() &&
+    } else if (!imported && !RenderComparison_FreezesGameplay() &&
                Sim3DCamera_IsDragging() &&
                Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready())) {
       HostInput_AdjustSim3DCamera(event->motion.xrel * Diorama_DragRadPerPx(),
@@ -587,9 +599,9 @@ static void HandleMouse(const SDL_Event *event) {
       break;
     }
     if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
-        Diorama_IsActiveThisFrame())
+        diorama)
       Diorama_AdjustCamera(0.0f, 0.0f, -event->wheel.y * Diorama_ZoomStep());
-    else if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
+    else if (!imported && !SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
              Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready()))
       HostInput_AdjustSim3DCamera(0.0f, 0.0f,
                                   -event->wheel.y * Diorama_ZoomStep());
@@ -609,7 +621,7 @@ static void HandleMouse(const SDL_Event *event) {
   }
 }
 
-bool HostInput_HandleEvent(const SDL_Event *event) {
+static bool HandleEvent(const SDL_Event *event, bool imported) {
   if (TouchControls_HandleEvent(event)) return true;
   if (TouchControls_IsMenuEvent(event)) {
     if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
@@ -635,7 +647,7 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
         s_logged_key_down = true;
         HostInput_LogStatus("first-key-down");
       }
-      HandleKeyDown(event);
+      HandleKeyDown(event, imported);
       break;
     case SDL_EVENT_TEXT_INPUT:
       if (SettingsOverlay_IsOpen())
@@ -649,7 +661,7 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
         s_logged_mouse_down = true;
         HostInput_LogStatus("first-mouse-button-down");
       }
-      HandleMouse(event);
+      HandleMouse(event, imported);
       break;
     case SDL_EVENT_GAMEPAD_ADDED:
     case SDL_EVENT_GAMEPAD_REMOVED:
@@ -682,6 +694,9 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
   }
   return true;
 }
+
+bool HostInput_HandleEvent(const SDL_Event *event) { return HandleEvent(event, false); }
+bool HostInput_HandleImportedEvent(const SDL_Event *event) { return HandleEvent(event, true); }
 
 bool HostInput_TryHandleStreamEvent(const SDL_Event *event, bool sim_town) {
   /* Touches only publish gamepad events, which are classified on their own. */

@@ -760,6 +760,9 @@ static bool WindowScaleAvailable(void) {
 static bool s_ar2_master_available;
 static bool Ar2MasterAvailable(void) { return s_ar2_master_available; }
 void Settings_SetAr2MasterAvailable(bool available) { s_ar2_master_available = available; }
+static bool s_imported_level_active;
+static bool ImportedLevelActive(void) { return s_imported_level_active; }
+void Settings_SetImportedLevelActive(bool active) { s_imported_level_active = active; }
 
 static bool s_hd_replacements_available;
 static bool HdReplacementsAvailable(void) {
@@ -2481,7 +2484,8 @@ const SettingDesc g_setting_descs[] = {
     .type = kSettingType_Bool, .apply = kApply_Passive,
     .category = kSettingCat_Enhancements, .field = &g_settings.ar2_master,
     .defval = 0, .maxval = 1, .step = 1, .available = Ar2MasterAvailable,
-    .modern_env = true, .game_change_kind = kSettingGameChange_QualityOfLife },
+    .modern_env = true, .game_change_kind = kSettingGameChange_QualityOfLife,
+    .hide_when_unavailable = true },
   GAME_CHANGE_BOOL_SETTING(
       native_menu_quick_use, "AR_NATIVE_MENU_QUICK_USE", "Native menu quick use",
       "In the Original SIM menu, Use skips optional explanations and goes to the "
@@ -2678,6 +2682,16 @@ const SettingDesc g_setting_descs[] = {
   ACTION_SETTING("restart_game", kSettingAction_Restart,
                  kSettingCat_Extras, NULL, false, "Restart game",
                  "Persist settings and battery SRAM, then reset the game in this window."),
+  { .key = "retry_imported_level", .label = "Retry level",
+    .tooltip = "Start this level again from its entrance.",
+    .type = kSettingType_Action, .apply = kApply_Action, .category = kSettingCat_Extras,
+    .action = kSettingAction_RetryImportedLevel, .available = ImportedLevelActive,
+    .hide_when_unavailable = true },
+  { .key = "return_imported_world", .label = "Return to world",
+    .tooltip = "Leave this level and return to the palace on the globe.",
+    .type = kSettingType_Action, .apply = kApply_Action, .category = kSettingCat_Extras,
+    .action = kSettingAction_ReturnImportedWorld, .available = ImportedLevelActive,
+    .hide_when_unavailable = true },
   ACTION_SETTING("exit_desktop", kSettingAction_Exit,
                  kSettingCat_Extras, NULL, false, "Exit to desktop",
                  "Persist settings and battery SRAM, then close the application."),
@@ -3084,6 +3098,8 @@ bool Settings_IsMenuVisible(const SettingDesc *desc) {
   if (Settings_IsDebugOnly(desc) && !g_settings.show_debug_settings)
     return false;
   if (desc->menu_hidden) return false;
+
+  if (desc->hide_when_unavailable && !Settings_IsAvailable(desc)) return false;
 
   /* The Gamepad row is pointless with nothing plugged in. */
   if (desc->category == kSettingCat_Input)
