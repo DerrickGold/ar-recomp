@@ -4,10 +4,42 @@
 #include <math.h>
 #include "support/test_assert.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 static ActionEffectRecipes table, before;
 static bool Parse(const char *text) { unsigned line; return ActionEffectRecipes_Parse(&table,text,strlen(text),&line); }
+static void TestDocumentCapacity(void) {
+  static char text[kActionEffectRecipeMaxBytes + 1];
+  size_t size = (size_t)snprintf(text, sizeof(text), "[effects]\nversion=1\n");
+  for (unsigned i = 0; i < kActionEffectRecipeMax; ++i)
+    size += (size_t)snprintf(text + size, sizeof(text) - size,
+        "[source:01:02:0:cave-light:%08x]\nintensity=.75\n", i + 1);
+  assert(Parse(text) && table.count == kActionEffectRecipeMax);
+  before = table;
+  strcat(text, "[source:01:02:0:cave-light:ffffffff]\n");
+  assert(!Parse(text) && !memcmp(&table, &before, sizeof(table)));
+  const char header[] = "[effects]\nversion=1\n";
+  memcpy(text, header, sizeof(header) - 1);
+  memset(text + sizeof(header) - 1, '\n', sizeof(text) - sizeof(header) + 1);
+  unsigned line;
+  assert(ActionEffectRecipes_Parse(&table, text, kActionEffectRecipeMaxBytes, &line));
+  before = table;
+  assert(!ActionEffectRecipes_Parse(&table, text, sizeof(text), &line));
+  assert(!memcmp(&table, &before, sizeof(table)));
+}
+static void TestBundledDocument(const char *path) {
+  FILE *file = fopen(path, "rb"); assert(file);
+  char *text = malloc(kActionEffectRecipeMaxBytes + 1); assert(text);
+  const size_t size = fread(text, 1, kActionEffectRecipeMaxBytes + 1, file);
+  assert(!ferror(file) && !fclose(file));
+  ActionEffectRecipeError error;
+  const bool ok = ActionEffectRecipes_ParseWithError(&table, text, size, &error);
+  if (!ok) fprintf(stderr, "%s:%u: %s\n", path, error.line, error.message);
+  assert(ok);
+  printf("Bundled effects: %u records, %zu bytes, all room budgets valid.\n", table.count, size);
+  free(text);
+}
 static void TestMoteParameters(void) {
   const char *header="[effects]\nversion=1\n[emitter:01:02:0:motes:123]\n";
   char text[512];
@@ -256,6 +288,7 @@ static void TestPerPassBudgets(void) {
 }
 
 int main(int argc,char **argv) {
+  TestDocumentCapacity();
   TestSwampLifeParameters();
   TestPerPassBudgets();
   TestLayerAnchors();
@@ -333,5 +366,6 @@ int main(int argc,char **argv) {
   assert(!memcmp(&table,&before,sizeof(table)));
   puts("Effect recipes: atomic validation, sparse overrides, mote parameters, source identity, terrain scope, retained frames passed.");
   if(argc==2&&!strcmp(argv[1],"--benchmark"))BenchmarkStorage();
+  else if(argc==2)TestBundledDocument(argv[1]);
   return 0;
 }

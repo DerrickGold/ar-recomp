@@ -567,7 +567,9 @@ Overrides are terrain-specific even where scenery edits share
 equivalent US/EU layouts.
 
 Each room/terrain permits 96 enabled emitters and at most 4096 added vertices per render batch;
-the file holds at most 256 records/128 KiB. Conservative costs are 97 vertices
+the file holds at most 1024 records/512 KiB across all rooms and regional profiles.
+The per-room instance and geometry limits are independent of that document capacity.
+Conservative costs are 97 vertices
 per light, four per mote and 296 per free-mist volume. Ground mist reserves
 `(ceil(width / 16) + 1) × 45` vertices for the worst support fragmentation,
 independent of the current camera. Each span uses three density slices and at

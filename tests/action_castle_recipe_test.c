@@ -66,7 +66,48 @@ static void ConfigureScene(ActionEnvironmentScene *s,const ActionCastleField *f,
     Put(s,0,v->check_x,v->check_y,v->top_tile);Put(s,0,v->check_x,v->check_y+16,v->below_tile);
     if(v->kind==kActionCastleSource_Window)Put(s,0,v->x,v->sill-1,v->sill_tile);}
 }
+static void CopiedWindowMembers(void) {
+  /* Editor moves/rotations must resolve against the copied definition, even
+   * when the destination room has no bundled castle field. INI order is free. */
+  const ActionCastleField *field=ActionCastleField_Bundled(3);
+  assert(ActionCastleField_Write(field,roundtrip,sizeof(roundtrip)));
+  const char *member="[member:05:04:1:castle-light:3]\n"
+      "offset-x=24\noffset-y=-8\nwidth-scale=1.5\nlength-scale=.75\n"
+      "angle=12\nlight-scenery=1\nlight-player=1\nlight-enemies=0\n";
+  unsigned line;
+  for(unsigned first=0;first<2;++first) {
+    snprintf(text,sizeof(text),"[effects]\nversion=1\n%s[field:05:04:1:castle-field:ca000003]\n%s%s",
+        first?member:"",roundtrip,first?"":member);
+    assert(ActionEffectRecipes_Parse(&recipes,text,strlen(text),&line));
+    ActionEnvironmentScene scene;ConfigureScene(&scene,field,3);scene.group=5;scene.room=4;
+    memset(&frame,0,sizeof(frame));
+    ActionEffectRecipes_Apply(&recipes,5,4,1,743,&scene,&frame);
+    assert(frame.castle_field_valid&&frame.members.count==1);
+    const ActionNativeMember *m=&frame.members.records[0];
+    assert(m->index==2&&m->offset_x==24&&m->offset_y==-8);
+    assert(m->width_scale==1.5f&&m->length_scale==.75f&&m->angle==12);
+    assert(m->light_receivers_set&&m->light_receivers==3);
+    ActionEffectRecipes_Apply(&recipes,5,4,0,743,&scene,&frame);
+    assert(!frame.members.count); /* Regional edits do not bleed to US. */
+  }
+  previous=recipes;
+  const char *invalid[]={
+    "[member:05:04:1:castle-light:c]\noffset-x=1\n", /* Beyond copied count. */
+    "[member:05:04:0:castle-light:3]\noffset-x=1\n", /* Wrong terrain. */
+    "[member:05:05:1:castle-light:3]\noffset-x=1\n", /* Wrong room. */
+    "[member:05:04:1:castle-light:9]\nangle=12\n", /* Torch, not a window. */
+  };
+  for(unsigned i=0;i<sizeof(invalid)/sizeof(invalid[0]);++i) {
+    snprintf(text,sizeof(text),"[effects]\nversion=1\n%s[field:05:04:1:castle-field:ca000003]\n%s",invalid[i],roundtrip);
+    assert(!ActionEffectRecipes_Parse(&recipes,text,strlen(text),&line));
+    assert(!memcmp(&recipes,&previous,sizeof(recipes)));
+  }
+  snprintf(text,sizeof(text),"[effects]\nversion=1\n%s",member);
+  assert(!ActionEffectRecipes_Parse(&recipes,text,strlen(text),&line));
+  assert(!memcmp(&recipes,&previous,sizeof(recipes)));
+}
 int main(void){
+  CopiedWindowMembers();
   for(unsigned room=2;room<=8;++room)assert(ActionCastleField_Bundled(room));
   LegacyOracle(false);
   LegacyOracle(true);

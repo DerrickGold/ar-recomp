@@ -347,7 +347,8 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
           (strcmp(mode,"field") && (!strcmp(name,"ray-field")||!strcmp(name,"water-field")||!strcmp(name,"atmosphere-field")||!strcmp(name,"moon-field")||!strcmp(name,"marsh-field")||!strcmp(name,"castle-field")||!strcmp(name,"glow-field")||ArcName(name)||ProjectileName(name)||SurfaceName(name))) ||
           (!strcmp(mode, "member") &&
            (!source || (source > ActionEffectMembers_Count(Kind(name), group, room) &&
-                        source > ActionEffectMembers_WaterLimit(Kind(name))))) ||
+                        source > ActionEffectMembers_WaterLimit(Kind(name)) &&
+                        (Kind(name) != kActionEffect_CastleLight || source > kActionCastleFieldMaxSources)))) ||
           ((!strcmp(mode, "emitter")) != ActionEffectRecipes_IsEmitter(Kind(name)))) {
         ok = false; break;
       }
@@ -507,8 +508,9 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
       } else if (!strcmp(key, "angle")) {
         bit = UINT64_C(1) << 38;
         ok = current->member &&
-             ActionEffectMembers_Angled(current->kind, current->group, current->room,
-                                        current->source) &&
+             (current->kind == kActionEffect_CastleLight ||
+              ActionEffectMembers_Angled(current->kind, current->group, current->room,
+                                         current->source)) &&
              Number(value, -30, 30, &m->angle);
       } else
         ok = false;
@@ -692,7 +694,7 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
     if (!r->color_end_set) r->particle_style.color_end=r->tuning.color;
     ok=ActionAuthoredParticles_Valid(&r->particle_style);
   }
-  /* Resolve water members after complete fields validate, independent of INI
+  /* Resolve field members after complete fields validate, independent of INI
    * ordering. A copied field owns its source count in the destination room. */
   for (unsigned i=0; ok && i<next->count; ++i) {
     const ActionEffectRecipe *r=&next->records[i];
@@ -704,6 +706,18 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
         if (field->water_field && field->group==r->group && field->room==r->room && field->terrain==r->terrain)
           count=ActionEffectMembers_WaterCount(r->kind,&next->water_fields[field->water_field-1]);
       }
+    if (r->kind == kActionEffect_CastleLight) {
+      const ActionCastleField *castle = r->group == 2 ? ActionCastleField_Bundled(r->room) : NULL;
+      for (unsigned j = 0; j < next->count; ++j) {
+        const ActionEffectRecipe *field = &next->records[j];
+        if (field->castle_field && field->group == r->group && field->room == r->room &&
+            field->terrain == r->terrain)
+          castle = &next->castle_fields[field->castle_field - 1];
+      }
+      count = castle ? (unsigned)castle->SourceCount[0] : 0;
+      if (r->source <= count && r->shape.angle != 0 &&
+          castle->sources[r->source - 1].kind == kActionCastleSource_Torch) ok = false;
+    }
     if (r->source>count) ok=false;
   }
   /* Bound authored cost independently of native decoration/actor storage.

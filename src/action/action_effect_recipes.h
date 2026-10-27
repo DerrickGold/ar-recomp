@@ -7,7 +7,7 @@
  * generation, never an array index or a transient actor address. */
 /* Catalogue capacity is independent of the unchanged per-room instance and
  * geometry budgets. Regional copies of authored scenes share this table. */
-enum { kActionEffectRecipeMax = 512, kActionEffectRecipeMaxBytes = 131072 };
+enum { kActionEffectRecipeMax = 1024, kActionEffectRecipeMaxBytes = 512 * 1024 };
 /* Draw placement is independent of the source coordinate system. */
 typedef enum ActionEffectAnchor {
   kActionEffectAnchor_Bg1, kActionEffectAnchor_Bg2Point, kActionEffectAnchor_Bg2Raster,

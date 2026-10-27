@@ -18,6 +18,14 @@ const readPython=spawnSync(process.env.PYTHON||'python3',['-c',
 assert.equal(readPython.status,0,readPython.stderr.toString());
 assert.deepEqual(JSON.parse(readPython.stdout),files);
 assert.deepEqual({...await archive.decode(encoded)},files);
+// The distributed effects catalogue must survive Save project intact. This
+// also catches a transport cap lagging behind the native/WASM reader.
+const shipped={...files,'action-effects.ini':fs.readFileSync(new URL('../action-effects.ini',import.meta.url),'utf8')};
+assert.deepEqual({...await archive.decode(archive.encode(shipped))},shipped);
+const capacity=archive.limits['action-effects.ini'];
+assert.deepEqual({...await archive.decode(archive.encode({...files,'action-effects.ini':'\n'.repeat(capacity)}))},
+  {...files,'action-effects.ini':'\n'.repeat(capacity)});
+assert.throws(()=>archive.encode({...files,'action-effects.ini':'\n'.repeat(capacity+1)}),/size limit/);
 
 function pythonZip(mode,entries=Object.entries(files)) {
   const result=spawnSync(process.env.PYTHON||'python3',['-c',

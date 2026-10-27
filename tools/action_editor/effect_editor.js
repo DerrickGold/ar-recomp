@@ -1498,7 +1498,7 @@ const EffectEditor=(()=>{
   $('#effectLoad').onchange=async e=>{
     const file=e.target.files[0];if(!file)return;
     try{
-      if(file.size>131072)throw Error('Effect document exceeds 128 KiB.');
+      if(file.size>ActionProjectArchive.limits['action-effects.ini'])throw Error('Effect document exceeds 512 KiB.');
       if(change(await file.text(),'load effect document'))markSaved();
     }catch(error){status(error.message);}finally{e.target.value='';}
   };

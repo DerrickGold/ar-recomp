@@ -551,6 +551,61 @@ assert.equal(send(encode(data,blobs,data.rooms.find(r=>r.group===1&&r.map===2)),
 configure(wetField.replace('[field:05:01:0:','[field:01:02:0:').replace('counts=0 0 2 0','counts=0 0 0 0'));
 assert.equal(api.RoomPreview_CatalogueValue(sheenIndex(),7),0,'zero contacts never fall back to bundled contacts');
 console.log('Wet-surface fields: portable catalogue, landing handles, member saves, deletion and atomic validation passed.');
+// Reused window recipes must actually capture on temple materials, not merely
+// expose editable handles. Check the shared light maps with real regional art.
+const shippedBlocks=shippedEffects.split(/(?=^\[)/m);
+const properties=block=>Object.fromEntries([...block.matchAll(/^([a-z0-9-]+)=([^\n]*)$/gm)].map(m=>[m[1],m[2]]));
+const sceneryEnergy=()=>draws.filter(d=>d.effect===4).reduce((sum,d)=>sum+energy(d.params[16]),0);
+for(const id of [4,5,6,7,8]) for(const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===5&&r.map===id);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  const castle=shippedBlocks.find(b=>b.startsWith(`[field:05:0${id}:${terrain}:castle-field:`));
+  const values=properties(castle),source=values['source-1'].split(/\s+/).map(Number);
+  const x=source[5],y=source[14]-4;
+  configure(noEffects+castle);api.RoomPreview_EnableEffects(1);
+  assert.equal(api.RoomPreview_SetReceivers(3,x-4,y,x+4,y),1);
+  camera=[Math.max(0,x-128),Math.max(0,y-160)];baselineDistance=3.25;render(undefined,1200);
+  const lit=sceneryEnergy(),actorLight=draws.find(d=>d.effect===5);
+  assert(actorLight&&roleEnergy(actorLight,0)>0&&roleEnergy(actorLight,1)>0,'window light reaches both actor classes');
+  const index=Array.from({length:api.RoomPreview_CatalogueCount()},(_,i)=>i)
+    .find(i=>kindName(api.RoomPreview_CatalogueValue(i,1))==='castle-light');
+  assert.notEqual(index,undefined,'temple window catalogue is editable');
+  assert.equal(api.RoomPreview_CatalogueValue(index,7),Number(values['source-count']));
+  configure(noEffects+castle.replace(/^components=1$/m,'components=0'));render(undefined,1200);
+  assert(lit>sceneryEnergy(),`window material capture lights room 05:0${id} terrain ${terrain}`);
+  configure(shippedEffects);render(undefined,1200);
+  const allocated=creates;
+  for(const clock of [1201,1500,1900,1200]) {render(undefined,clock);assert.equal(creates,allocated,'temple animation reuses textures');}
+  const cells=api.RoomPreview_CollisionGrid(),columns=api.RoomPreview_Width()/16;
+  const collision=new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),cells).slice();
+  const solid=(px,py)=>!!(collision[(py/16|0)*columns+(px/16|0)]&(1<<((py/8&1)*2+(px/8&1))));
+  const map=blobs[room.bg[0].map],pages=room.bg[0].pagesWide;
+  const mistAir=(px,py)=>{
+    const cell=map[(Math.floor(py/256)*pages+Math.floor(px/256))*256+(py>>4&15)*16+(px>>4&15)];
+    // EU marks the lower spike art solid; the mist still belongs at its base.
+    return !solid(px,py)||cell===0x70||cell===0x78;
+  };
+  for(const block of shippedBlocks.filter(b=>b.startsWith(`[emitter:05:0${id}:${terrain}:drips:`))) {
+    const v=properties(block),x=+v.x,y=+v.y,h=+v.height;
+    for(let py=y-h/2;py<y+h/2;py+=4)
+      assert(!solid(x,py),`temple drip at ${x},${py} crosses collision in 05:0${id} terrain ${terrain}`);
+  }
+  for(const block of shippedBlocks.filter(b=>b.startsWith(`[emitter:05:0${id}:${terrain}:wet-contour:`))) {
+    const v=properties(block),x=+v.x,y=+v.y,w=+v.width;
+    for(let px=x-w/2;px<x+w/2;px+=4)
+      assert(solid(px,y)&&!solid(px,y-1),`wet ledge at ${px},${y} needs an exposed top in 05:0${id} terrain ${terrain}`);
+  }
+  for(const block of shippedBlocks.filter(b=>b.startsWith(`[emitter:05:0${id}:${terrain}:cloud-bank:`))) {
+    const v=properties(block),x=+v.x,y=+v.y,w=+v.width;
+    for(let px=x-w/2;px<x+w/2;px+=8) {
+      let supported=false;
+      for(let py=y-8;py<=y+16;++py) supported||=solid(px,py)&&mistAir(px,py-1);
+      assert(supported,`floor wisp at ${px},${y} floats over a gap in 05:0${id} terrain ${terrain}`);
+    }
+  }
+}
+console.log('Marahna temple: regional window capture, both light receivers, editable catalogue, wet ledges, drip paths and texture reuse passed.');
 assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);api.RoomPreview_Reset();
 assert.equal(textures.size,0,'room reset releases all preview textures');
 console.log('Shared player preview: native art, receiver masks, dimming/torch/rim, picking, mirroring and upload reuse passed.');

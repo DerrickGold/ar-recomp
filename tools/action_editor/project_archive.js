@@ -1,7 +1,7 @@
 /* Portable ZIP transport for the game's two INIs. Stored output works offline
  * without a library; imports also accept ordinary deflated ZIP files. */
 const ActionProjectArchive=(()=>{
-  const limits={'diorama-layers.ini':16*1024*1024,'action-effects.ini':131072};
+  const limits={'diorama-layers.ini':16*1024*1024,'action-effects.ini':512*1024};
   const maxSize=20*1024*1024;
   const encoder=new TextEncoder(),decoder=new TextDecoder('utf-8',{fatal:true});
   const crcTable=Uint32Array.from({length:256},(_,index)=>{

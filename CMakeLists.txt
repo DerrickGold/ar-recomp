@@ -2043,7 +2043,8 @@ if(BUILD_TESTING)
         src/action/action_floor_support.c src/action/action_bg_world.c)
     target_include_directories(actraiser_action_effect_recipes_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_action_effect_recipes_test PRIVATE actraiser_math)
-    add_test(NAME actraiser_action_effect_recipes COMMAND actraiser_action_effect_recipes_test)
+    add_test(NAME actraiser_action_effect_recipes COMMAND actraiser_action_effect_recipes_test
+        ${CMAKE_SOURCE_DIR}/action-effects.ini)
 
     add_executable(actraiser_action_effects_test
         tests/action_effects_test.c
