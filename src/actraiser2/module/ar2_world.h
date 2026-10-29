@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* AR2 module adapter for the checked Industen and Benefic rooms. Words are PPU tile attributes;
+/* AR2 module adapter for catalogued action rooms. Words are PPU tile attributes;
  * no AR1 page layout, palette patching, or gameplay state is imposed. */
 enum { AR2_WORLD_TILE_CAPACITY = 65536 };
 typedef struct Ar2WorldLayer {

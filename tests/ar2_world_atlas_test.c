@@ -1,5 +1,6 @@
 #include "support/test_assert.h"
 #include "actraiser2/ar2_world_atlas.h"
+#include "actraiser2/ar2_content.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,6 +24,18 @@ static void LiteralAsset(uint8_t *out, const uint8_t *source) {
 }
 
 int main(void) {
+  const uint8_t entrances[] = {0x14, 0x16, 0x18, 0x1a, 0x1e, 0x21, 0x28,
+                               0x2b, 0x2f, 0x3a, 0x3d, 0x41, 0x49, 0x51};
+  for (unsigned i = 0; i < sizeof(entrances); ++i) {
+    /* Native campaign locks do not gate prototype action entry. */
+    const Ar2WorldDestination destination = {.flags_and_scene = 0x600 | entrances[i],
+        .unlock_gate = 0x0201, .completion_gate = 0x0401};
+    assert(Ar2Content_Playable(&destination));
+  }
+  assert(!Ar2Content_Playable(NULL));
+  assert(!Ar2Content_Playable(&(Ar2WorldDestination){.flags_and_scene = 0x0a}));
+  assert(!Ar2Content_Playable(&(Ar2WorldDestination){.flags_and_scene = 0x15}));
+  assert(!Ar2Content_Playable(&(Ar2WorldDestination){.flags_and_scene = 0x34}));
   uint8_t *rom = calloc(1, 0x180000);
   Ar2WorldAtlas *atlas = malloc(sizeof(*atlas));
   assert(rom && atlas);

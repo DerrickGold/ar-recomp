@@ -18,8 +18,17 @@ END = "# END AR2 COVERAGE"
 DEFAULT_MANIFEST = ROOT / "recomp/ar2/coverage.json"
 # Operand lengths audited against the USA native COP handlers. This is a
 # deliberately finite set, not a guess that every COP continues at PC+2.
-COP_OPERANDS = {0x11: 0, 0x1e: 1, 0x80: 1, 0x81: 1, 0x82: 2, 0x84: 2,
-                0x85: 2, 0x8e: 0, 0x8f: 0, 0x96: 3, 0x9c: 3, 0xb1: 0, 0xc8: 0}
+COP_OPERANDS = {0x00: 3, 0x03: 2, 0x04: 0, 0x11: 0, 0x16: 1, 0x17: 1,
+                0x19: 1, 0x1c: 0, 0x1e: 1, 0x20: 0, 0x25: 2, 0x26: 0,
+                0x80: 1, 0x81: 1, 0x82: 2, 0x84: 2,
+                0x85: 2, 0x86: 3, 0x8c: 1, 0x8e: 0, 0x8f: 0, 0x94: 0,
+                0x96: 3, 0x9c: 3, 0xa2: 0, 0xa9: 2, 0xb0: 0, 0xb1: 0,
+                0xc8: 0, 0xc9: 0}
+# $00 calls a task subroutine: $80:847D stores the return after its 3-byte
+# pointer, and $01 resumes it. The target is executable like $96/$9C's tasks.
+# $04's fallthrough is reached only when the native loop counter expires.
+# Clear/departure operands follow the native handlers at $80:84F5-$80:911B.
+COP_TASK_POINTERS = (0x00, 0x96, 0x9c)
 
 
 def address(text):
@@ -61,7 +70,7 @@ def validate(manifest, rom=None):
         if rom[offset] != 2 or signature not in COP_OPERANDS or entry["m"] or entry["x"]:
             raise ValueError(f"unaudited COP signature/state at {source:06x}")
         if kind == "cop_task":
-            if signature not in (0x96, 0x9c):
+            if signature not in COP_TASK_POINTERS:
                 raise ValueError("COP does not have an audited task pointer")
             expected = int.from_bytes(rom[offset + 2:offset + 5], "little")
         else:
@@ -105,11 +114,19 @@ def sync(manifest, directory, check=False):
         lines = []
         for entry in sorted(entries, key=lambda e: (e["target"], e["m"], e["x"])):
             pc = int(entry["target"][2:], 16)
-            if re.search(rf"^func \S+ {pc:04X}\b", authored, re.M | re.I):
-                raise ValueError(f"coverage duplicates an authored entry: {entry['target']}")
-            variant = (f"_entry_M{entry['m']}X{entry['x']}" if entry['m'] or entry['x'] else "")
+            name = f"bank_{bank:02X}_{pc:04X}"
+            for declaration in re.findall(rf"^func \S+ {pc:04X}\b[^\n]*", authored, re.M | re.I):
+                mode = re.search(r"\bentry_mx:([01]),([01])\b", declaration)
+                # Native COP dispatch can enter the same routine with a new
+                # observed width. Only an explicitly different authored mode
+                # permits that extra variant; unknown modes stay conservative.
+                if mode is None or tuple(map(int, mode.groups())) == (entry['m'], entry['x']):
+                    raise ValueError(f"coverage duplicates an authored entry: {entry['target']}")
+                name = declaration.split()[1]
+            # All widths at a PC share one base symbol. The generator supplies
+            # _M0X0 etc.; distinct aliases would misname the other dispatch slots.
             lines.append(f"# {entry['kind']}: ${entry['source'].upper()} -> ${entry['target'].upper()}\n"
-                         f"func bank_{bank:02X}_{pc:04X}{variant} {pc:04X} entry_mx:{entry['m']},{entry['x']}\n")
+                         f"func {name} {pc:04X} entry_mx:{entry['m']},{entry['x']}\n")
         wanted = authored.rstrip() + "\n\n" + BEGIN + "\n" + "".join(lines) + END + "\n"
         if text != wanted:
             changes.append((path, wanted))
@@ -147,7 +164,7 @@ def record(manifest, report, rom, expand=False):
                 break
             following = pc + 2 + COP_OPERANDS[signature]
             targets = [("cop_continuation", following)]
-            if signature in (0x96, 0x9c):
+            if signature in COP_TASK_POINTERS:
                 targets.append(("cop_task", int.from_bytes(rom[offset + 2:offset + 5], "little")))
             for kind, target in targets:
                 entry = {"kind": kind, "source": f"{pc:06x}", "target": f"{target:06x}", "m": 0, "x": 0}

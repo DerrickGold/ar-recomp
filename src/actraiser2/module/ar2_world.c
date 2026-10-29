@@ -5,18 +5,12 @@ static uint16_t word(const uint8_t *bytes, size_t index) {
   return bytes[index] | (uint16_t)bytes[index + 1] << 8;
 }
 
-#ifdef AR2_NATIVE_RESEARCH
-static const bool research = true;
-#else
-static const bool research = false;
-#endif
-
 bool Ar2World_SupportsEntrance(unsigned scene) {
-  return Ar2Scenes_IsEntrance(scene, research);
+  return Ar2Scenes_IsEntrance(scene);
 }
 
 bool Ar2World_SupportsScene(unsigned scene) {
-  return Ar2Scenes_Find(scene, research) != NULL;
+  return Ar2Scenes_Find(scene) != NULL;
 }
 
 int Ar2World_CaptureShift(int camera, int world_width, int margin) {

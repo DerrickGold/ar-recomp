@@ -1,8 +1,8 @@
-"""Probe the USA AR2 action entrances using a local, research-only native build.
+"""Probe the USA AR2 action entrances using the game's native objects.
 
 This is an investigation sweep, not a full-level completion test. It uses only
 controller inputs (walk, jump, swing, pause/resume), without position, health or
-task writes. Unverified entrances remain disabled in the shipping module.
+task writes. The probe and game use the same entrance and capture policy.
 """
 import argparse
 import concurrent.futures
@@ -25,16 +25,16 @@ MODES = {"native": [], "wide": ["extra 128", "rows 64"],
 # This controller route crosses Almetha's first doorway at native $84:B10F.
 # Accept the documented destination; unrelated scene changes still fail.
 PROFILES = scene_profiles()
-CONNECTED_ROOMS = {entrance: tuple(scene for scene, (owner, _) in PROFILES.items()
+CONNECTED_ROOMS = {entrance: tuple(scene for scene, owner in PROFILES.items()
                                  if owner == entrance and scene != entrance)
-                   for entrance, _ in PROFILES.values()}
+                   for entrance in PROFILES.values()}
 
 
 def entrances(rom):
     records = (1, 2, 3, 4, 5, 6, 8, 10, 11, 21, 14, 17, 18, 13)
     for caption, record in enumerate(records):
         scene = struct.unpack_from("<H", rom, 0x18000 + record * 16 + 8)[0] & 255
-        if scene not in PROFILES or PROFILES[scene][0] != scene:
+        if PROFILES.get(scene) != scene:
             raise ValueError(f"native world entrance {scene:02x} has no scene profile")
         label = rom[0x181B5 + caption * 21:0x181B5 + caption * 21 + 14]
         yield scene, label.decode("ascii").strip().replace("x", "'")

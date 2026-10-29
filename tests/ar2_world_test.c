@@ -2,11 +2,14 @@
 #include "actraiser2/module/ar2_world.h"
 
 int main(void) {
-  /* The research executable's broader catalog must not enable shipping warps. */
+  /* All action entrances are available; connected rooms are not direct warps. */
+  const bool entrances[256] = {[0x14] = true, [0x16] = true, [0x18] = true,
+      [0x1a] = true, [0x1e] = true, [0x21] = true, [0x28] = true, [0x2b] = true,
+      [0x2f] = true, [0x3a] = true, [0x3d] = true, [0x41] = true, [0x49] = true, [0x51] = true};
   for (unsigned scene = 0; scene < 256; ++scene) {
-    assert(Ar2World_SupportsEntrance(scene) == (scene == 0x14 || scene == 0x16));
+    assert(Ar2World_SupportsEntrance(scene) == entrances[scene]);
     assert(Ar2World_SupportsScene(scene) ==
-           (scene == 0x14 || scene == 0x15 || scene == 0x16));
+           (entrances[scene] || scene == 0x15 || scene == 0x34));
   }
   const int margins[] = {0, 43, 72, 128};
   for (unsigned i = 0; i < sizeof(margins) / sizeof(*margins); i++) {

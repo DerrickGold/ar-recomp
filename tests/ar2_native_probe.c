@@ -2,6 +2,7 @@
  * dump PATH | image PATH | terrain PATH | background PATH | palette PATH | hud PATH | text PATH |
  * snapshot PREFIX | actors | extra DEC | rows DEC | view 0/1 | refresh |
  * watch PC(hex) | watch-block PC(hex) | require PC(hex) | timing PATH (per-step CSV) |
+ * observe-block PC(hex) (first executed block hit: CPU and lifecycle state on stderr) |
  * artifacts PREFIX (snapshot and last completed image on exit, including failure).
  * Watches count actual native dispatches or executed blocks.
  * Writes are explicit test fixtures, not
@@ -18,8 +19,22 @@
 extern const ArImportedGameApi *ArImportedGame_GetApi(uint32_t version);
 
 static unsigned word(unsigned at) { return g_ram[at] | g_ram[at + 1] << 8; }
-static struct { uint32_t pc; unsigned hits; bool blocks; } watches[32];
-static unsigned watch_count;
+static struct { uint32_t pc; unsigned hits; bool blocks, observe; } watches[32];
+static unsigned watch_count, probe_tick;
+
+static void observe(uint32_t pc) {
+  /* Read at the native block boundary, before its instructions execute.
+   * No snapshot/runner calls inside the callback: those would be reentrant. */
+  fprintf(stderr, "native observation {\"pc\":\"%06x\",\"frame\":%u,"
+          "\"a\":%u,\"x\":%u,\"y\":%u,\"s\":%u,\"d\":%u,\"db\":%u,\"pb\":%u,"
+          "\"m\":%u,\"x_flag\":%u,\"scene\":%u,\"pending\":%u,\"control\":%u,"
+          "\"transition\":%u,\"record\":%u,\"record_offset\":%u,\"source_request\":%u,\"boss\":%u,"
+          "\"progress\":[%u,%u,%u,%u,%u],\"score\":[%u,%u],\"time\":%u}\n",
+          pc, probe_tick, g_cpu.A, g_cpu.X, g_cpu.Y, g_cpu.S, g_cpu.D, g_cpu.DB, g_cpu.PB,
+          g_cpu.m_flag, g_cpu.x_flag, word(0x51a), word(0x518), word(0x951), word(0x95b),
+          word(0x971), word(0x975), word(0x97b), word(0x659), g_ram[0x90c], g_ram[0x90d],
+          g_ram[0x90e], g_ram[0x90f], g_ram[0x910], word(0x929), word(0x92b), word(0x94d));
+}
 
 static double milliseconds(void) {
   struct timespec now;
@@ -33,8 +48,9 @@ static void dispatch(void *unused, SrRunnerHandle *runner, const SrRunnerEvent *
   for (unsigned i = 0; i < watch_count; ++i)
     if (watches[i].pc == event->pc24 &&
         (watches[i].blocks ? event->type == SR_EVENT_EXECUTION_BLOCK :
-         event->type == SR_EVENT_DYNAMIC_DISPATCH && (event->flags & SR_EVENT_DISPATCH_FOUND)))
-      ++watches[i].hits;
+         event->type == SR_EVENT_DYNAMIC_DISPATCH && (event->flags & SR_EVENT_DISPATCH_FOUND))) {
+      if (++watches[i].hits == 1 && watches[i].observe) observe(event->pc24);
+    }
 }
 
 static void actors(void) {
@@ -163,6 +179,7 @@ int main(int argc, char **argv) {
        "boss_actor,boss_health,camera_min_x,camera_max_x,native_camera_x,native_camera_y,"
        "bg2_camera_x,bg2_camera_y,view_offset_x,native_bg2_x,native_bg2_y");
   for (unsigned tick = 0; tick < strtoul(argv[3], NULL, 10); tick++) {
+    probe_tick = tick;
     while (line[0]) {
       unsigned when, a, b;
       char command[16], path[900];
@@ -181,11 +198,13 @@ int main(int argc, char **argv) {
           fprintf(stderr, "Frozen capture changed native state or pixels at frame %u: %s\n", tick, api->error());
           return 1;
         }
-      } else if ((!strcmp(command, "watch") || !strcmp(command, "watch-block")) &&
+      } else if ((!strcmp(command, "watch") || !strcmp(command, "watch-block") ||
+                  !strcmp(command, "observe-block")) &&
                  sscanf(line, "%*u %*s %x", &a) == 1 &&
                  a <= 0xffffff && watch_count < 32) {
-        const bool blocks = !strcmp(command, "watch-block");
+        const bool blocks = strcmp(command, "watch") != 0;
         watches[watch_count].pc = a;
+        watches[watch_count].observe = !strcmp(command, "observe-block");
         watches[watch_count++].blocks = blocks;
         uint64_t *token = blocks ? &block_subscription : &subscription;
         if (!*token) {
@@ -335,6 +354,9 @@ int main(int argc, char **argv) {
     }
   }
   if (!frame.event && !artifacts(api, artifact_prefix, &frame)) return 2;
+  for (unsigned i = 0; i < watch_count; ++i)
+    if (watches[i].observe)
+      fprintf(stderr, "native observation count %06x: %u\n", watches[i].pc, watches[i].hits);
   if (script) fclose(script);
   if (timing && fclose(timing)) return 2;
   if (subscription) runner_api->unsubscribe_events(RtlGameRunner(), subscription);

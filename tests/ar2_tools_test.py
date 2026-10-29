@@ -44,9 +44,35 @@ class CoverageTests(unittest.TestCase):
         manifest = coverage.load(coverage.DEFAULT_MANIFEST)
         coverage.sync(manifest, metadata.ROOT / "recomp/ar2", check=True)
         profiles = metadata.scene_profiles()
-        self.assertEqual([scene for scene, (entrance, public) in profiles.items()
-                          if scene == entrance and public], [0x14, 0x16])
-        self.assertEqual(profiles[0x34], (0x3a, False))
+        self.assertEqual([scene for scene, entrance in profiles.items() if scene == entrance],
+                         [0x14, 0x16, 0x18, 0x1a, 0x1e, 0x21, 0x28, 0x2b, 0x2f,
+                          0x3a, 0x3d, 0x41, 0x49, 0x51])
+        self.assertEqual(profiles[0x34], 0x3a)
+
+    def test_clear_task_operands_do_not_become_code(self):
+        rom = bytearray(coverage.ROM_BYTES)
+        # Native-shaped task call, delay, loop setup, loop exit, sound and
+        # departure. Each inline operand must be skipped, even when it is $02.
+        code = bytes.fromhex('02 00 55 9b 82 02 25 02 00 02 03 02 00 02 04 02 17 02 02 26 '
+                             '02 86 02 02 02 02 8c 02 02 94 02 a9 02 02 02 b0 02 c9 02 a2 6b')
+        rom[0x2efa2:0x2efa2 + len(code)] = code
+        digest = hashlib.sha256(rom).hexdigest()
+        with tempfile.TemporaryDirectory() as temporary, patch.object(coverage, 'ROM_SHA256', digest):
+            folder = Path(temporary)
+            (folder / 'stderr.log').write_text('Uncovered AR2 code 809605 -> 82efa2 (M0 X0)\n')
+            (folder / 'exit.cpu.json').write_text(json.dumps(
+                {'failed': True, 'm': 0, 'x_flag': 0, 'scene': 0x15}))
+            report = {'rom_sha256': digest, 'cases': [{'artifacts': temporary,
+                      'missing_dispatch': ['809605', '82efa2', '0', '0']}]}
+            result = coverage.record({'version': 1, 'rom_sha256': digest, 'entries': []},
+                                     report, rom, expand=True)
+            targets = {e['target'] for e in result['entries']}
+            self.assertEqual(targets, {'82efa2', '829b55', '82efa7', '82efab',
+                                       '82efaf', '82efb1', '82efb4', '82efb6', '82efbb',
+                                       '82efbe', '82efc0', '82efc4', '82efc6', '82efc8', '82efca'})
+            bad = copy.deepcopy(result)
+            next(e for e in bad['entries'] if e['kind'] == 'cop_task')['target'] = '829b56'
+            with self.assertRaises(ValueError): coverage.validate(bad, rom)
 
     def test_evidence_validation_and_atomic_cfg_update(self):
         for pc in ("008000", "808000", "c08000"):
@@ -67,13 +93,32 @@ class CoverageTests(unittest.TestCase):
             expected = cfg.read_bytes()
             coverage.sync(manifest, directory, check=True)
             self.assertEqual(cfg.read_bytes(), expected)
-            cfg.write_text(cfg.read_text().replace("entry_mx:0,0", "entry_mx:1,1"))
+            mode = f"entry_mx:{first['m']},{first['x']}"
+            cfg.write_text(cfg.read_text().replace(mode, f"entry_mx:{1-first['m']},{first['x']}"))
             with self.assertRaises(ValueError): coverage.sync(manifest, directory, check=True)
             coverage.sync(manifest, directory)
             self.assertEqual(cfg.read_bytes(), expected)
             bad = copy.deepcopy(manifest)
             bad["entries"][0]["target"] = "978000"
             with self.assertRaises(ValueError): coverage.sync(bad, directory)
+            self.assertEqual(cfg.read_bytes(), expected)
+
+    def test_observed_width_variant_can_share_an_authored_address(self):
+        manifest = coverage.load(coverage.DEFAULT_MANIFEST)
+        observed = copy.deepcopy(next(e for e in manifest['entries'] if e['kind'] == 'observed'))
+        observed.update(target='8082c3', m=1, x=0)
+        manifest['entries'] = [observed]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            cfg = directory / 'bank80.cfg'
+            authored = 'bank = 80\nfunc bank_80_82C3 82C3 entry_mx:0,0\n'
+            cfg.write_text(authored)
+            coverage.sync(manifest, directory)
+            expected = cfg.read_bytes()
+            self.assertTrue(cfg.read_text().startswith(authored))
+            self.assertIn('func bank_80_82C3 82C3 entry_mx:1,0', cfg.read_text())
+            observed['m'] = 0
+            with self.assertRaises(ValueError): coverage.sync(manifest, directory)
             self.assertEqual(cfg.read_bytes(), expected)
 
 

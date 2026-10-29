@@ -59,8 +59,12 @@ int main(int argc, char **argv) {
   uint8_t *rom = malloc(0x180000);
   assert(file && rom && fread(rom, 1, 0x180000, file) == 0x180000);
   fclose(file);
-  for (int visit = 0; visit < 3; visit++) {
-    const uint8_t stage = visit == 1 ? 0x16 : 0x14;
+  /* Cancel the first load, then enter every action destination through the
+   * actual shared module and owner thread used by the main game. */
+  const uint8_t stages[] = {0x14, 0x14, 0x16, 0x18, 0x1a, 0x1e, 0x21, 0x28,
+                            0x2b, 0x2f, 0x3a, 0x3d, 0x41, 0x49, 0x51};
+  for (unsigned visit = 0; visit < sizeof(stages); visit++) {
+    const uint8_t stage = stages[visit];
     assert(ImportedGameSession_Start(rom, 0x180000, stage, (ArImportedGameView){128, 64, true}));
     if (!visit) {
       SDL_Delay(5);
@@ -81,7 +85,7 @@ int main(int argc, char **argv) {
     }
     ImportedGameSession_Close();
   }
-  assert(ImportedGameSession_Start(rom, 0x180000, 0x18, (ArImportedGameView){0}));
+  assert(ImportedGameSession_Start(rom, 0x180000, 0x0a, (ArImportedGameView){0}));
   ArImportedGameFrame frame;
   unsigned ticks;
   assert(Wait(&frame, &ticks) == kImportedGame_Failed);
@@ -89,6 +93,6 @@ int main(int argc, char **argv) {
   assert(!ImportedGameSession_Step(0, (ArImportedGameView){0}, &frame));
   ImportedGameSession_EndSession();
   free(rom);
-  puts("asynchronous startup, cancellation, owner-thread stepping and repeated visits passed");
+  puts("all 14 entrances: asynchronous startup, cancellation, owner-thread stepping and refresh passed");
   return 0;
 }

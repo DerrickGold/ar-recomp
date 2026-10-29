@@ -45,7 +45,7 @@ void Ar2Content_Load(void) {
     fprintf(stderr, "[ar2-world] ignored: %s\n", error);
     Ar2Content_Close();
   } else {
-    fprintf(stderr, "[ar2-world] continent loaded; Industen and Benefic available\n");
+    fprintf(stderr, "[ar2-world] continent loaded; action entrances available\n");
   }
 }
 
@@ -55,5 +55,5 @@ const uint8_t *Ar2Content_Rom(size_t *size) {
   return s_atlas ? s_pack + kHeaderBytes : NULL;
 }
 bool Ar2Content_Playable(const Ar2WorldDestination *destination) {
-  return destination && Ar2Scenes_IsEntrance(destination->flags_and_scene & 0xff, false);
+  return destination && Ar2Scenes_IsEntrance(destination->flags_and_scene & 0xff);
 }

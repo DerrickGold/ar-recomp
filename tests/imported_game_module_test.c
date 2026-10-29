@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
     fclose(file);
     for (int visit = 0; visit < 3; visit++) {
       uint8_t stage = visit == 1 ? 0x16 : 0x14;
-      assert(!api->open(rom, 0x180000, 0x18));
+      assert(!api->open(rom, 0x180000, 0x0a)); /* Towns are not action entrances. */
       assert(api->open(rom, 0x180000, stage));
       bool active = false, audible = false, moved = false;
       uint16_t walk_start = 0;

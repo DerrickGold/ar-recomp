@@ -14,14 +14,14 @@ def scene_profiles():
     for line in text.splitlines():
         if not line.strip():
             continue
-        match = re.fullmatch(r"AR2_SCENE\((0x[0-9a-f]+), (0x[0-9a-f]+), (Production|Research)\)", line)
+        match = re.fullmatch(r"AR2_SCENE\((0x[0-9a-f]+), (0x[0-9a-f]+)\)", line)
         if not match:
             raise ValueError(f"invalid AR2 scene profile: {line}")
         scene, entrance = (int(value, 16) for value in match.group(1, 2))
         if scene in profiles:
             raise ValueError(f"duplicate AR2 scene {scene:02x}")
-        profiles[scene] = (entrance, match[3] == "Production")
-    if any(entrance not in profiles or profiles[entrance][0] != entrance
-           for entrance, _ in profiles.values()):
+        profiles[scene] = entrance
+    if any(entrance not in profiles or profiles[entrance] != entrance
+           for entrance in profiles.values()):
         raise ValueError("AR2 connected room has no entrance profile")
     return profiles

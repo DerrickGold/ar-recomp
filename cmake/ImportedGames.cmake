@@ -52,10 +52,6 @@ if(ar2_installed_pack)
     string(REGEX REPLACE "^source = " "" source "${line}")
     list(APPEND ar2_sources "${CMAKE_SOURCE_DIR}/${source}")
   endforeach()
-  # Only the research harness permits unverified entrances/capture profiles.
-  # Share generated code and runtime objects; compile this small policy twice.
-  set(ar2_world_source "${CMAKE_SOURCE_DIR}/src/actraiser2/module/ar2_world.c")
-  list(REMOVE_ITEM ar2_sources "${ar2_world_source}")
   add_library(actraiser2-objects OBJECT ${ar2_sources} ${ar2_generated} ${SNESRECOMP_RUNNER_SOURCES})
   add_dependencies(actraiser2-objects ar2_prepare)
   snesrecomp_configure_runtime_target(actraiser2-objects)
@@ -63,7 +59,7 @@ if(ar2_installed_pack)
   target_compile_definitions(actraiser2-objects PRIVATE abort=sr_native_module_abort)
   set_target_properties(actraiser2-objects PROPERTIES POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
-  add_library(actraiser2-native SHARED "${ar2_world_source}")
+  add_library(actraiser2-native SHARED)
   target_link_libraries(actraiser2-native PRIVATE actraiser2-objects)
   set_target_properties(actraiser2-native PROPERTIES PREFIX ""
     C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
@@ -76,13 +72,16 @@ if(ar2_installed_pack)
   if(BUILD_TESTING)
     # Link the same private objects into a developer-only harness. RAM probes
     # and controlled fixtures never become part of the shipping module ABI.
-    add_executable(actraiser_ar2_native_probe tests/ar2_native_probe.c "${ar2_world_source}")
-    target_compile_definitions(actraiser_ar2_native_probe PRIVATE AR2_NATIVE_RESEARCH=1)
+    add_executable(actraiser_ar2_native_probe tests/ar2_native_probe.c)
     target_link_libraries(actraiser_ar2_native_probe PRIVATE actraiser2-objects)
     add_test(NAME actraiser_ar2_native_progression
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ar2_native_progression_test.py"
         $<TARGET_FILE:actraiser_ar2_native_probe> "${ar2_output}/ar2.sfc")
     set_tests_properties(actraiser_ar2_native_progression PROPERTIES TIMEOUT 300)
+    add_test(NAME actraiser_ar2_native_completion
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ar2_native_completion_test.py"
+        $<TARGET_FILE:actraiser_ar2_native_probe> "${ar2_output}/ar2.sfc")
+    set_tests_properties(actraiser_ar2_native_completion PROPERTIES TIMEOUT 300)
     add_test(NAME actraiser_ar2_native_activation
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ar2_native_activation_test.py"
         $<TARGET_FILE:actraiser_ar2_native_probe> "${ar2_output}/ar2.sfc")
