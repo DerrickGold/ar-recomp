@@ -144,7 +144,9 @@ function fixture() {
 /* Final-battle material uses the same project/undo path as scenery. */
 {
   const data=fixture();data.rooms[0]={...data.rooms[0],group:7,map:8};
-  const {run,elements}=editor(data,{ini:'; retained\n[layers:07:08]\nbg1-policy = edge:world\n'});
+  const {run,elements}=editor(data,{ini:'; retained\n[layers:07:08]\nbg1-policy = edge:world\n',view:{environmentalEffects:false}});
+  assert.equal(elements.get('#sharedEffects').checked,false);
+  assert(!manifest.includes('sharedFinalBattle'),'no room-specific enable switch');
   run('SharedRoomPreview.validateScenery=()=>{};NativeBloomEditor.refresh();');
   assert.equal(elements.get('#nebula-apply').disabled,false);
   run("$('#nebula-strength').value='1.2';$('#nebula-radius').value='11';$('#nebula-player').checked=true;$('#nebula-enemies').checked=false;$('#nebula-apply').onclick();");

@@ -148,7 +148,6 @@ def main() -> None:
     parser.add_argument('--frames', type=int, default=240)
     parser.add_argument('--size', type=int, nargs=2, default=[1280, 800])
     parser.add_argument('--mode', choices=['both', 'on', 'off'], default='both')
-    parser.add_argument('--final-battle', action='store_true', help='Enable the optional native-nebula material in 07:08')
     parser.add_argument('--wake-deck', action='store_true')
     parser.add_argument('--wsl', action='store_true')
     parser.add_argument('--capture', action='store_true', help='PNG sequence, no performance measurements; use a smaller --size')
@@ -173,8 +172,7 @@ def main() -> None:
     provenance = dict(plan=plan, layers_sha256=sha(layers), effects_sha256=sha(effects),
                       binaries={label: sha(path) for label, path in binaries},
                       assets={p.name: sha(p) for p in rooms.iterdir() if p.suffix in ('.arscene', '.bin')},
-                      warmup_frames=args.frames, dimensions=args.size, capture=args.capture,
-                      final_battle=args.final_battle)
+                      warmup_frames=args.frames, dimensions=args.size, capture=args.capture)
     for route in plan:
         if not (rooms/(route['room']+'.arscene')).is_file():
             parser.error(f'Missing scene for {route["name"]}: {route["room"]}.arscene')
@@ -184,8 +182,7 @@ def main() -> None:
     (output/'inputs.json').write_text(json.dumps(provenance, indent=2)+'\n')
     env = {k: v for k, v in os.environ.items() if not k.startswith(('AR_', 'SDL_', 'SNESRECOMP_', 'LD_PRELOAD'))}
     env.update(AR_BENCH_WIDTH=str(args.size[0]), AR_BENCH_HEIGHT=str(args.size[1]),
-               AR_BENCH_WARMUP=str(args.frames), AR_BENCH_STEP='2', AR_BENCH_CLOCK='0',
-               AR_BENCH_FINAL_BATTLE=str(int(args.final_battle)))
+               AR_BENCH_WARMUP=str(args.frames), AR_BENCH_STEP='2', AR_BENCH_CLOCK='0')
     if args.wake_deck:
         env.update(DISPLAY=':0', WAYLAND_DISPLAY='wayland-0', XDG_RUNTIME_DIR=f'/run/user/{os.getuid()}',
                    DBUS_SESSION_BUS_ADDRESS=f'unix:path=/run/user/{os.getuid()}/bus', SDL_VIDEO_DRIVER='wayland')

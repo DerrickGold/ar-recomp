@@ -230,7 +230,6 @@ typedef struct FrameSlot {
    * source records/map objects. */
   ActionEffectFrame action_effects;
   ActionSceneEffectFrame action_scene_effects;
-  bool death_heim_final_battle;
   uint16_t action_scene_clock;
   bool action_effect_lighting;
   bool action_effect_particles;

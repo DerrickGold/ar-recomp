@@ -116,7 +116,7 @@ static void Capture(unsigned ticks, uint8_t section) {
   assert(frame.action_effect_lighting == g_settings.action_effect_lighting);
   assert(frame.action_effect_particles == g_settings.action_effect_particles);
   assert(frame.action_environmental_effects == g_settings.action_environmental_effects);
-  assert(frame.death_heim_final_battle == g_settings.death_heim_final_battle);
+  assert(frame.action_scene_clock == expected_scene_clock);
   assert(environment_calls == previous_environment_calls +
       (g_settings.action_environmental_effects ? builds : 0));
   assert(manifest_calls == previous_manifest_calls +
@@ -185,7 +185,6 @@ int main(void) {
   seen_observer->landing_dust.valid = 1;
   seen_observer->landing_dust.puffs[0].active = 1;
   g_settings.action_environmental_effects = false;
-  g_settings.death_heim_final_battle = true; /* Independent scene preference/clock. */
   Capture(0, kDioramaLayerSection_AitosWaterfall);
   assert(!seen_observer->landing_dust.valid && !seen_observer->landing_dust.puffs[0].active);
   g_settings.action_environmental_effects = true;

@@ -62,7 +62,7 @@
     <p class="hint" id="paletteStatus" role="status"></p>
   </details>
   <details id="nebulaSettings" class="side-section" data-settings="nebula"><summary>Native nebula glow (07:08)</summary>
-    <p class="hint">Enhance the original animated background. Glow and fighter illumination share its actual projected colours. Black space stays dark. Enable Native nebula glow in the shared view to preview; game preference remains independent.</p>
+    <p class="hint">Enhance the original animated background. Glow and fighter illumination share its actual projected colours. Black space stays dark. Use the shared view's Environmental effects switch to preview.</p>
     <div class="ctl"><label for="nebula-strength">Glow strength</label><input id="nebula-strength" type="number" min="0" max="3" step="0.05"></div>
     <div class="ctl"><label for="nebula-radius">Glow radius (native pixels)</label><input id="nebula-radius" type="number" min="1" max="24" step="1"></div>
     <div class="ctl"><label for="nebula-threshold">Bright-pixel threshold</label><input id="nebula-threshold" type="number" min="0" max="0.95" step="0.05"></div>
@@ -459,7 +459,6 @@
     <label title="Captured pixels per side, independent of the display crop. Game default: 120.">Capture width margin <input id="sharedExtra" type="number" min="0" max="128" step="8" value="120" style="width:55px"></label>
     <label>Capture row budget <select id="sharedVertical"><option value="0">0</option><option value="32">32</option><option value="64" selected>64</option></select></label>
     <label><input id="sharedEffects" type="checkbox" checked> Environmental effects</label>
-    <label id="sharedFinalBattleControl" hidden title="Preview the game's optional Death Heim final battle backdrop. Only applies to 07:08 in Diorama 3D; saved separately in game settings."><input id="sharedFinalBattle" type="checkbox"> Native nebula glow (07:08)</label>
     <label>Backdrop <select id="sharedSky"><option value="0">Plane only</option><option value="1" selected>Skybox only</option><option value="2">Both</option></select></label>
     <label title="Multiplier relative to the saved game camera baseline. 1 matches normal gameplay.">Inspect zoom <input id="sharedDistance" type="range" min="0.5" max="2.5" step="0.01" value="1" style="width:80px"></label>
     <label>Yaw <input id="sharedYaw" type="range" min="-0.7" max="0.7" step="0.01" value="0" style="width:65px"></label>

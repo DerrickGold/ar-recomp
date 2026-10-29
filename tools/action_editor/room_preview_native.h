@@ -23,7 +23,6 @@ unsigned RoomPreview_Width(void);
 unsigned RoomPreview_Height(void);
 int RoomPreview_CameraX(void);
 int RoomPreview_SetView(float distance, float yaw, float pitch, int aspect_mode, int dynamic_camera);
-void RoomPreview_FinalBattle(int enabled);
 /* Five floats per opening in DioramaPreview_Input(): centre, width, power,
  * edge offset and reach, all relative to the authored region. */
 unsigned RoomPreview_CloudOpenings(uint32_t seed, unsigned count);

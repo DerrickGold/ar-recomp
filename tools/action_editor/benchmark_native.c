@@ -195,7 +195,6 @@ int main(int argc, char **argv) {
             "player-y frames\n"
             "AR_BENCH_WIDTH/HEIGHT (1280/800), AR_BENCH_EFFECTS (1), AR_BENCH_SKY (1),\n"
             "AR_BENCH_WARMUP (one full route), AR_BENCH_CLOCK (0), AR_BENCH_STEP (2).\n"
-            "AR_BENCH_FINAL_BATTLE=1 enables the optional native-nebula material in 07:08.\n"
             "AR_BENCH_SHOT saves a PNG after the last measured frame.\n"
             "AR_BENCH_PROFILE=path.csv adds owner-thread CPU and submission diagnostics.\n"
             "AR_BENCH_FRAME_PROBE=library enables the optional Vulkan timestamp probe.\n"
@@ -203,7 +202,7 @@ int main(int argc, char **argv) {
             argv[0]);
     return 2;
   }
-  int width, height, frames, warmup, clock, step, sky, enabled, final_battle, x, y, ex, ey, px, py;
+  int width, height, frames, warmup, clock, step, sky, enabled, x, y, ex, ey, px, py;
   if (!Integer("frames", argv[11], 2, 100000, &frames) ||
       !EnvInt("AR_BENCH_WIDTH", 1280, 1, 2048, &width) ||
       !EnvInt("AR_BENCH_HEIGHT", 800, 1, 2048, &height) ||
@@ -211,7 +210,6 @@ int main(int argc, char **argv) {
       !EnvInt("AR_BENCH_CLOCK", 0, 0, INT_MAX, &clock) ||
       !EnvInt("AR_BENCH_STEP", 2, 0, 60, &step) || !EnvInt("AR_BENCH_SKY", 1, 0, 2, &sky) ||
       !EnvInt("AR_BENCH_EFFECTS", 1, 0, 1, &enabled) ||
-      !EnvInt("AR_BENCH_FINAL_BATTLE", 0, 0, 1, &final_battle) ||
       !Integer("x", argv[5], INT_MIN, INT_MAX, &x) ||
       !Integer("y", argv[6], INT_MIN, INT_MAX, &y) ||
       !Integer("end-x", argv[7], INT_MIN, INT_MAX, &ex) ||
@@ -280,7 +278,6 @@ int main(int argc, char **argv) {
         !Load(path, RoomPreview_LoadPlayer) || !RoomPreview_ReceiverStyle(1, 1))
       goto cleanup;
   }
-  RoomPreview_FinalBattle(final_battle);
   RoomPreview_EnableEffects(enabled);
   RoomPreview_SetSourceProjection(Effects, Skybox);
   if (!RoomPreview_SetView(3.25f, 0, 0, 1, 1)) goto cleanup;

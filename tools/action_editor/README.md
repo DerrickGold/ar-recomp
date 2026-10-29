@@ -1199,9 +1199,9 @@ Malformed numeric arguments and route plans are rejected before rendering.
 Failure/timeout telemetry is retained, and incomplete or inconsistent timing
 rows cannot become accepted summary statistics.
 
-For room `07:08`, use `--final-battle` (or `AR_BENCH_FINAL_BATTLE=1` for a
-direct invocation) to preview the optional native-nebula enhancement. It is
-independent of the environmental-effects toggle and recorded in `inputs.json`.
+Room `07:08`'s native-nebula lighting and dust follow the normal effects toggle:
+`--mode on/off/both` (or `AR_BENCH_EFFECTS=1/0` for a direct invocation). The
+before/after benchmark therefore includes them without a room-specific switch.
 
 Vulkan and DX12 retain upload staging per texture by default. This matters for
 the native editor's CPU-rendered tile images: allocating and mapping fresh
@@ -1995,10 +1995,11 @@ projection stay in their adapters.
 
 ### Native final-battle nebula
 
-The optional room `07:08` enhancement grades and blooms the original projected
-background. **Native nebula glow (07:08)** in Shared renderer previews the game
-preference; **Settings → Native nebula glow** edits the material. These are
-independent, so disabling a preview does not erase authored values.
+Room `07:08`'s environmental effects grade and bloom the original projected
+background. The regular **Environmental effects** switch in Shared renderer
+controls the preview; **Settings → Native nebula glow** edits the material.
+Disabling environmental effects does not erase authored values. The editor
+initializes its preview switch from the game's environmental-effects setting.
 
 `native-bloom` in the room's `diorama-layers.ini` section stores `strength`,
 `radius` (native image pixels), `threshold`, `saturation`, `contrast`, `light`

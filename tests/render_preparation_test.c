@@ -227,9 +227,9 @@ int main(void) {
   RenderPreparation_PrepareSelectedFeatures(&device);
   RenderPreparation_PrepareSelectedFeatures(&device);
   assert(action_prepares == 0 && interpolation_prepares == 0);
-  g_settings.death_heim_final_battle = true;
+  g_settings.action_environmental_effects = true;
   RenderPreparation_PrepareSelectedFeatures(&device);
-  assert(rift_prepares == 0); /* Toggle reuses the boot-prepared artwork. */
+  assert(rift_prepares == 0); /* Environmental effects reuses the boot-prepared material. */
   assert(RenderPreparation_Prepare(&device, &features));
   assert(action_prepares == 1 && interpolation_prepares == 1 && rift_prepares == 1);
   RenderPreparation_PrepareSelectedFeatures(NULL);

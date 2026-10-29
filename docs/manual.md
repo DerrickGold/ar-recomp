@@ -361,29 +361,28 @@ written atomically to `settings.ini`; action rows are not persisted.
 
 ### Death Heim final battle
 
-With **Action 3D → Scene → Diorama 3D** enabled, turn on **Death Heim final
-battle** to enhance room `07:08`'s original nebula artwork. The native blue and
+With **Action 3D → Scene → Diorama 3D** and **Environmental effects** enabled,
+room `07:08` enhances its original nebula artwork. The native blue and
 magenta ribbons, stars, black space, wave animation and layer geometry remain.
 Bright filaments receive a soft coloured glow and a modest colour/contrast
 adjustment. Their projected light also illuminates the player and enemies.
 Sprites, projectiles and the HUD retain their original artwork.
 
-The setting defaults to **Off** and saves as `death_heim_final_battle` in
-`settings.ini`. It follows the original animation, pause and room fades.
-Other rooms, flat mode, combat and the separate completion-scene preference
-are unchanged. Disabling it restores the ordinary native rendering. It uses
+The glow and drifting coloured dust follow the same **Environmental effects**
+setting as other action rooms, including animation, pause and room fades.
+Turning environmental effects off restores the ordinary native rendering. The
+separate completion-scene preference remains independent. The nebula uses
 the selected skybox, layer and camera settings; no generated backdrop or floor
 is loaded. Unsupported renderers retain the native scene.
 
 In the action editor, select **Death Heim · Room 8**, open **Shared renderer**
-and check **Native nebula glow (07:08)**. Under **Settings → Native nebula glow**,
+and enable **Environmental effects**. Under **Settings → Native nebula glow**,
 adjust glow strength, spread, highlight threshold, saturation, contrast and
 fighter illumination. Player and enemy receivers can be enabled independently.
 Shift-click a value to restore its default, or reset the whole material.
 Save project includes the `native-bloom` definition in `diorama-layers.ini`.
-The preview checkbox is separate from those authored values: enable the game
-preference separately. The player preview, aspect ratios and camera orbit use
-the same renderer as the game.
+The preview switch does not erase authored values. The player preview, aspect
+ratios and camera orbit use the same renderer as the game.
 
 ### Death Heim completion scene
 

@@ -387,8 +387,9 @@ for(const view of [[960,600,1,0,0,1,0],[960,540,1,0,0,0,0],[800,600,1.2,.15,-.1,
   assert(visible,`soft light must cover the visible floor before its centre enters: ${view} y=${y}`);
  }
 console.log('Kassandora 2/5 soft light: continuous partial visibility across camera-edge entry, three aspects, tilt and background modes.');
-// The optional final backdrop shares the live renderer and must not alter the
-// player stand-in, camera projection, or the return to native room rendering.
+// The final nebula follows the same environmental master as other rooms.
+// Toggling it preserves the player stand-in, projection and original artwork.
+assert.equal(api.RoomPreview_FinalBattle,undefined);
 const finalRoom=data.rooms.find(r=>r.group===7&&r.map===8);
 assert.equal(send(encode(data,blobs,finalRoom),api.RoomPreview_Load),1);
 assert.equal(send(Buffer.from('[layers:07:08]\n'),api.RoomPreview_Configure),1);
@@ -398,9 +399,9 @@ assert.equal(api.RoomPreview_ReceiverStyle(0,0),1);
 assert.equal(api.RoomPreview_SetReceivers(1,96,200,0,0),1);
 camera=[0,0];baselineDistance=3.25;
 for (const view of [[800,600,1,0,0,0,0],[960,540,1,0,0,1,0],[960,600,1.4,.3,-.2,2,0]]) {
-  api.RoomPreview_FinalBattle(0);render(view);render(view);
+  api.RoomPreview_EnableEffects(0);render(view);render(view);
   const native=structuredClone(draws);
-  api.RoomPreview_FinalBattle(1);render(view);
+  api.RoomPreview_EnableEffects(1);render(view);
   assert(draws.some(d=>d.effect===6&&d.params[3]===0),'extract light from native art');
   assert(draws.some(d=>d.effect===6&&d.params[3]===1),'separable glow filter');
   assert(draws.some(d=>d.effect===6&&d.params[3]===2),'original art gets its colour grade');
@@ -413,8 +414,8 @@ for (const view of [[800,600,1,0,0,0,0],[960,540,1,0,0,1,0],[960,600,1.4,.3,-.2,
   assert.equal(uploads.length,0,'retained nebula preview uploads no textures');
   const pause=structuredClone(draws);render(view);
   assert.deepEqual(draws,pause,'same paused tick reproduces every draw');
-  api.RoomPreview_FinalBattle(0);render(view);render(view);
-  assert.deepEqual(draws,native,'disabling the rift restores identical native geometry and player');
+  api.RoomPreview_EnableEffects(0);render(view);render(view);
+  assert.deepEqual(draws,native,'disabling environmental effects restores identical native geometry and player');
 }
 console.log('Native nebula: original art, bounded filtering, native fallback, aspect/orbit and resource reuse passed.');
 // Cloud density is baked once; only a small shared mesh moves each tick. Its
@@ -422,7 +423,7 @@ console.log('Native nebula: original art, bounded filtering, native fallback, as
 const dustDraw=()=>draws.filter(d=>textures.get(d.id)?.w===576&&textures.get(d.id)?.h===96);
 const dustConfig=(dust,speed=1)=>`[layers:07:08]\nnative-bloom = strength:.85 radius:13 threshold:.24 saturation:1.08 contrast:1.05 light:1.3 receivers:6 dust:${dust} dust-scale:1 dust-speed:${speed} dust-blue:467ccf dust-rose:bc438b\n`;
 const setDust=(density,speed)=>assert.equal(send(Buffer.from(dustConfig(density,speed)),api.RoomPreview_Configure),1);
-api.RoomPreview_FinalBattle(1);setDust(.3);
+api.RoomPreview_EnableEffects(1);setDust(.3);
 render(undefined,1200);assert.equal(dustDraw().length,1,'six veils share one draw');
 const dustTexture=dustDraw()[0].id,dustMesh=structuredClone(dustDraw());
 assert.equal(dustMesh[0].v.length,210*8);
@@ -444,14 +445,14 @@ console.log('Nebula dust: one retained batch, animated/paused/seeking clocks and
 // output gain cannot be encoded in normalized texture/vertex colour.
 for(const strength of [0,.8,1.5,3]) {
   assert.equal(send(Buffer.from(`[layers:07:08]\nnative-bloom = strength:${strength} radius:13 threshold:0.22 saturation:1.08 contrast:1.05 light:1.3 receivers:6\n`),api.RoomPreview_Configure),1);
-  api.RoomPreview_FinalBattle(1);render();
+  api.RoomPreview_EnableEffects(1);render();
   const glow=draws.find(d=>d.effect===6&&d.params[3]===3);
   assert(glow,`native glow remains active at strength ${strength}`);
   assert(Math.abs(glow.params[6]-strength)<.0001,'gain travels through the shared shader ABI');
   for(let i=0;i<glow.v.length;i+=8) for(let c=2;c<6;c++)
     assert(glow.v[i+c]>=0&&glow.v[i+c]<=1,'texture tint remains normalized');
 }
-api.RoomPreview_FinalBattle(0);
+api.RoomPreview_EnableEffects(0);
 // Palette-only scenery uses a retained black texel, not another full-screen
 // illumination pass. The same grade travels through the real WASM ABI.
 const gradeRoom=data.rooms.find(r=>r.group===5&&r.map===1);

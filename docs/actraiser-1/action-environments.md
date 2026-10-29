@@ -40,14 +40,15 @@ their authored light positions remain consistent across the room transition.
 
 ## Death Heim final battle
 
-For room `07:08`, enable **Action 3D → Scene → Diorama 3D** and **Death Heim
-final battle**. The latter is opt-in; the completion-scene setting is independent.
+For room `07:08`, enable **Action 3D → Scene → Diorama 3D** and **Environmental
+effects**, the same master used by other action rooms. The completion-scene
+setting is independent.
 The enhancement adds glow, colour grading, fighter illumination, and sparse
 drifting dust to the original nebula and starfield artwork.
 
-In the editor's **Shared renderer**, enable **Native nebula glow (07:08)**.
-Use **Settings → Native nebula glow** to edit the material. The preview checkbox
-does not change the game's preference. Project and level INI exports preserve
+In the editor's **Shared renderer**, enable **Environmental effects**.
+Use **Settings → Native nebula glow** to edit the material. The preview switch
+does not erase authored values. Project and level INI exports preserve
 the material in `diorama-layers.ini`:
 
 ```ini

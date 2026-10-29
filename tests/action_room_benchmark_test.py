@@ -107,7 +107,6 @@ class NativeArgumentsTest(unittest.TestCase):
         cases = [(None, 11, 'wrong'), (None, 5, '12px'), (None, 7, str(2**80)),
                  ('AR_BENCH_WIDTH', None, '0'), ('AR_BENCH_HEIGHT', None, '2049'),
                  ('AR_BENCH_WARMUP', None, '-1'), ('AR_BENCH_EFFECTS', None, '2'),
-                 ('AR_BENCH_FINAL_BATTLE', None, '2'),
                  ('AR_BENCH_STEP', None, 'abc'), ('AR_BENCH_CLOCK', None, '')]
         for variable, position, value in cases:
             with self.subTest(variable=variable, position=position, value=value):

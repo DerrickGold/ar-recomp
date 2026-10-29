@@ -2050,12 +2050,6 @@ const SettingDesc g_setting_descs[] = {
     kDioramaSkyModeLabels, kDioramaSky_Count, Diorama_ModeIsOn, NULL,
     NULL, NULL },
     BOOL_SETTING_MODERN(
-        death_heim_final_battle, "AR_DEATH_HEIM_FINAL_BATTLE", "Death Heim final battle",
-        "Enhance the native final boss nebula (07:08) with selective glow, richer colour "
-        "and source-matched light on the fighters. Requires Action Diorama 3D. "
-        "Keeps the original fight, sprites and timing. Off restores the native background.",
-        kSettingCat_Presentation, 0, false, CompletionSceneAvailable, NULL),
-    BOOL_SETTING_MODERN(
         death_heim_completion_world, "AR_DEATH_HEIM_COMPLETION_WORLD", "Death Heim completion scene",
         "Replace Death Heim's completion background with a heavenly ocean vista. "
         "Requires Action Diorama 3D; applies its own backdrop settings. Independent of Town and "
@@ -3601,8 +3595,10 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
     char *value = TextParse_TrimLeft(equals + 1);
     TextParse_StripInlineComment(value);
 
-    /* Removed menu state may remain in settings.ini until the next save. */
-    if (!strcmp(key, "cheat_moonjump_button")) continue;
+    /* Retired controls may remain until the next save. Native nebula lighting
+     * now follows environmental effects; its old flag must not override them. */
+    if (!strcmp(key, "cheat_moonjump_button") ||
+        !strcmp(key, "death_heim_final_battle")) continue;
 
     if (!strcmp(key, "cheat_moonjump")) {
       moonjump_toggle_seen = true;

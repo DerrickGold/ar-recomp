@@ -482,8 +482,7 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
   const SrPpuStateSnapshot *ppu = frame ? &frame->state : NULL;
   s_receiver_lighting=NULL;
   s_projected_receivers=false;
-  if(g_settings.action_environmental_effects ||
-      (g_settings.death_heim_final_battle && g_diorama_frame_active && map_group==7 && map_number==8)) {
+  if(g_settings.action_environmental_effects) {
     const ActRaiserSpriteOwnership ownership=ActRaiserSpriteOwnership_Presented(map_group,map_number);
     const ActionReceiverLighting *lighting=ownership.valid?
         ActionEffectManifest_PrepareReceivers(map_group,map_number,g_ram,kActRaiserWramSize,g_diorama_frame_active):NULL;

@@ -820,7 +820,7 @@ retry_projection:;
       .backdrop = completion_world ? DrawCompletionBackdrop : NULL,
       .backdrop_userdata = &completion,
   };
-  DioramaAstralRift_Attach(slot->death_heim_final_battle, device, &scene);
+  DioramaAstralRift_Attach(slot->action_environmental_effects, device, &scene);
   DioramaSnapshotCapture_Write(slot, &capture, &view, &scene);
   const PresentationOutcome diorama = Diorama_Composite(
       device, &capture, &view, &scene, &action_projection);

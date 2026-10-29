@@ -61,8 +61,8 @@ const PaletteEditor=(()=>{
   return {refresh,restore};
 })();
 
-/* Shared native-art glow. Authoring remains independent of the user-facing
- * final battle preference; the preview checkbox chooses enhanced/native. */
+/* Shared native-art glow. Environmental effects controls its preview and
+ * in-game activation; authored material values remain independently editable. */
 const defaultNativeBloom={strength:.85,radius:13,threshold:.24,saturation:1.08,contrast:1.05,light:1.3,receivers:6,
   dust:.3,'dust-scale':1,'dust-speed':1,'dust-blue':'467ccf','dust-rose':'bc438b'};
 function parseNativeBloom(values) {
@@ -115,7 +115,7 @@ const NativeBloomEditor=(()=>{
       undoStack.push({label:'native nebula glow',nativeBloom:{room:roomKey(room),before,after}});
       if(undoStack.length>kMaxUndo)undoStack.shift();redoStack.length=0;
       markEditorChanged();SharedRoomPreview.invalidate();refreshHistoryButtons();refresh();draw();
-      $('#nebula-status').textContent='Applied. Enable Native nebula glow in the shared view to preview. Save project to keep it.';
+      $('#nebula-status').textContent='Applied. Enable Environmental effects in the shared view to preview. Save project to keep it.';
     }catch(e){$('#nebula-status').textContent=`Not applied: ${e.message}`;}
   }
   function restore(op,which) {

@@ -2,7 +2,7 @@
 #define AR_DIORAMA_ASTRAL_RIFT_H
 #include "diorama.h"
 
-/* The existing final-battle preference now enhances captured native artwork.
+/* Environmental effects enhance the final battle's captured native artwork.
  * It never replaces/omits capture planes or loads generated art. Shared by
  * the game and editor; flat presentation never calls Attach. */
 bool DioramaAstralRift_Prepare(ArRenderDevice *device);

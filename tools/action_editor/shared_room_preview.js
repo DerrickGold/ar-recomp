@@ -38,7 +38,7 @@ const SharedRoomPreview = (() => {
   $('#sharedPixels').value=savedView.pixelAspect==='crt'?'1':'0';
   $('#sharedVertical').value=String(savedView.vertical??64);
   $('#sharedSky').value=String(savedView.skybox??1);
-  $('#sharedFinalBattle').checked=!!savedView.finalBattle;
+  $('#sharedEffects').checked=savedView.environmentalEffects??true;
   function viewArguments(choice=$('#sharedAspect').value) {
     const auto=choice==='auto'||choice==='stretch';
     // Use the editor window, not the remaining canvas area: opening tools or
@@ -138,8 +138,6 @@ const SharedRoomPreview = (() => {
       backend.stats.creates=backend.stats.draws=0;
       const start=performance.now();
       api.RoomPreview_EnableEffects($('#sharedEffects').checked ? 1 : 0);
-      $('#sharedFinalBattleControl').hidden=room.group!==7||room.map!==8||!!room.section;
-      api.RoomPreview_FinalBattle($('#sharedFinalBattle').checked ? 1 : 0);
       const renderFrame=()=>api.RoomPreview_Render(...args);
       let ok=renderFrame();
       let uploads=api.RoomPreview_Uploads();

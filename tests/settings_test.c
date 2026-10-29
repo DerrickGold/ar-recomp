@@ -2676,9 +2676,7 @@ static void TestAutoBootPreservesDisplayPreferences(void) {
 static void TestCompletionSettings(void) {
   ClearSettingsEnv();
   Settings_Init();
-  const SettingDesc *battle=Settings_Find("death_heim_final_battle");
-  CHECK(battle && !g_settings.death_heim_final_battle && !Settings_IsAvailable(battle));
-  CHECK(Settings_IsMenuVisible(battle) && !Settings_IsDebugOnly(battle));
+  CHECK(Settings_Find("death_heim_final_battle")==NULL);
   const char *keys[]={"death_heim_completion_world","death_heim_completion_waves",
     "death_heim_completion_pixel_water","death_heim_completion_clouds",
     "death_heim_completion_light_shafts","death_heim_completion_cherubs",
@@ -2695,8 +2693,6 @@ static void TestCompletionSettings(void) {
     }
   }
   g_settings.diorama_mode = true;
-  CHECK(Settings_IsAvailable(battle));
-  CHECK(Settings_SetLong(battle,1)==kSettingChange_Applied);
   g_settings.sim3d_mode=g_settings.sim3d_world_navigation=false;
   for (int skybox = kDioramaSky_Off; skybox < kDioramaSky_Count; skybox++) {
     g_settings.diorama_skybox = skybox;
@@ -2710,6 +2706,7 @@ static void TestCompletionSettings(void) {
   const char *path="actraiser-completion-settings-test.ini";
   CHECK(WriteTextFile(path, "diorama_mode = On\n"
                             "death_heim_final_battle = On\n"
+                            "action_environmental_effects = Off\n"
                             "diorama_skybox = Off\n"
                             "death_heim_completion_feathers = Off\n"
                             "death_heim_completion_sun_glints = Off\n"));
@@ -2720,9 +2717,10 @@ static void TestCompletionSettings(void) {
     CHECK(value == (i != 6 && i != 9));
   }
   CHECK(Settings_Save(path));
+  CHECK(!FileContains(path,"death_heim_final_battle"));
   Settings_InitWithFile(path);
   CHECK(g_settings.death_heim_completion_world && !g_settings.death_heim_completion_feathers);
-  CHECK(g_settings.death_heim_final_battle);
+  CHECK(!g_settings.action_environmental_effects); /* Retired flag cannot override the master. */
   CHECK(!g_settings.death_heim_completion_sun_glints);
   CHECK(!g_settings.sim3d_mode && !g_settings.sim3d_world_navigation);
   CHECK(g_settings.diorama_skybox == kDioramaSky_Off);
