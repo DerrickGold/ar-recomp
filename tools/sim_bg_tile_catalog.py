@@ -8,7 +8,7 @@ The catalog joins two authoritative sources:
 * the stock ROM supplies the 94 structure draw lists at $03:D928-$03:DC73.
 
 That draw-list range is not exhaustive: the animal-pen lists at $03:D6BF and
-$03:D53E lie outside it (see docs/rom-map.md, Aitos animal pen).
+$03:D53E lie outside it (see docs/actraiser-1/rom-map.md, Aitos animal pen).
 
 The result is intended for the object-extrusion research pass: it keeps every
 tile/metatile/list address visible so houses, cathedrals, factories, and trees

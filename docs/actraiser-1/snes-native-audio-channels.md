@@ -2,7 +2,7 @@
 
 This reference describes the US game's SPC700 driver, voice allocation, and
 sound-effect tables. For game settings and replacement music, see the
-[manual](manual.md) and [Workshop guide](builder-workshop.md).
+[manual](../manual.md) and [Workshop guide](../builder-workshop.md).
 
 ## Confirmed channel layout
 

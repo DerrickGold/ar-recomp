@@ -167,7 +167,7 @@ static void ResetEffectLifetimes(void) {
 }
 
 /* D3c classification tables.  Every entry is transcribed from the locked
- * height policy in docs/sim-object-catalog.md; the renderer must never
+ * height policy in docs/actraiser-1/sim-object-catalog.md; the renderer must never
  * rediscover a height from OAM attributes or pixel shape. */
 enum {
   /* Record classes with a real 16-entry state table; all are flying. */

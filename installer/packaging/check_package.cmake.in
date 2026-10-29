@@ -15,15 +15,38 @@ set(_required_ttf_runtime "@SNESBUILD_REQUIRED_TTF_RUNTIME@")
 set(_required_ttf_link "@SNESBUILD_REQUIRED_TTF_LINK@")
 # Only player/content-author guides and public SDK references are distributed.
 set(_public_game_docs
-    README.md manual.md builder-workshop.md desktop-packaging.md
-    release-notes.md regional-settings.md regional-media.md
-    regional-differences.md regional-differences-technical.md unused-content.md
-    language-pack-format.md language-packs.md language-authoring-reference.json
-    language-archive.schema.json ram-map.md rom-map.md research-symbol-map.md
-    save-format.md randomizer.md sim-object-catalog.md diorama-depth-shapes.md
-    sim-menu-reference.md sim-model-art-index.md text-template-core.md
-    dialogue-system.md snes-native-audio-channels.md performance-overlay.md
-    GAME-LICENSE.txt)
+    README.md
+    manual.md
+    builder-workshop.md
+    desktop-packaging.md
+    android.md
+    release-notes.md
+    language-pack-format.md
+    language-packs.md
+    language-authoring-reference.json
+    language-archive.schema.json
+    text-template-core.md
+    diorama-depth-shapes.md
+    performance-overlay.md
+    actraiser-1/README.md
+    actraiser-1/action-environments.md
+    actraiser-1/regional-settings.md
+    actraiser-1/regional-media.md
+    actraiser-1/regional-differences.md
+    actraiser-1/regional-differences-technical.md
+    actraiser-1/unused-content.md
+    actraiser-1/ram-map.md
+    actraiser-1/rom-map.md
+    actraiser-1/research-symbol-map.md
+    actraiser-1/save-format.md
+    actraiser-1/randomizer.md
+    actraiser-1/sim-object-catalog.md
+    actraiser-1/sim-menu-reference.md
+    actraiser-1/sim-model-art-index.md
+    actraiser-1/dialogue-system.md
+    actraiser-1/snes-native-audio-channels.md
+    GAME-LICENSE.txt
+)
 set(_public_runtime_docs
     README.md API_REFERENCE.md GAME_ENHANCEMENT_INTEGRATION.md INPUT_AND_BOOT.md)
 set(_required_license_files

@@ -3524,7 +3524,7 @@ static void TestCapturedEruptionRecords(void) {
    * staged. Nothing reads it now: the throw is placed by the script's own
    * clock and by which column the record is standing in, so the field and its
    * plumbing were removed rather than left as an observation with no
-   * observer. The measurement itself lives in docs/ram-map.md. */
+   * observer. The measurement itself lives in docs/actraiser-1/ram-map.md. */
   SimRenderMetadata_Reset();
   CaptureEruptionFixture(&frame, wram, kEruptionRecordsGf20723);
   CHECK(frame.source_count == 8);

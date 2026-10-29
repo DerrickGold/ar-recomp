@@ -2,7 +2,7 @@
 
 #include <stddef.h>
 
-/* Evidence: docs/regional-differences-technical.md, "Action rules in code",
+/* Evidence: docs/actraiser-1/regional-differences-technical.md, "Action rules in code",
  * "Miracle costs", "European items and spell inventory" and "European
  * simulation numeric rules". All European difficulties share these prices;
  * this does not equate their inventory, enemies or other gameplay rules. */

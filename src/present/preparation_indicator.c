@@ -8,7 +8,7 @@
 #include "host/host_clock.h"
 
 /* US ROM file offsets. The HUD bar is BG3 font art; the angel is town OBJ
- * art posed by her own animation program (see docs/rom-map.md). */
+ * art posed by her own animation program (see docs/actraiser-1/rom-map.md). */
 enum {
   kFontAssetOffset = 0x0BECFB,   /* LZSS: 256 BG3 2bpp tiles */
   kFontBytes = 0x1000,

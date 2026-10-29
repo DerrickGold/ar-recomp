@@ -1,6 +1,17 @@
 /* Diagnostic-only Metal command/drawable timing. Never linked into the game.
- * Build and usage: docs/gpu-presentation-timing.md. Hooks public protocol
- * methods on the active concrete classes, without changing their ordering.
+ * Hooks public protocol methods on the active concrete classes, without
+ * changing their ordering. Build on macOS with the game's SDL3 SDK; for
+ * Homebrew on Apple Silicon (adjust the include/library paths as needed):
+ * clang -dynamiclib -O2 -g -std=c11 -fobjc-arc -Wall -Wextra -Werror \
+ *   -I/opt/homebrew/include tools/profile_metal.m -L/opt/homebrew/lib -lSDL3 \
+ *   -framework Foundation -framework Metal -framework QuartzCore \
+ *   -framework AppKit -framework ApplicationServices -o /tmp/ar-profile-metal.dylib
+ * Prefix a local development run with DYLD_INSERT_LIBRARIES=/tmp/ar-profile-metal.dylib,
+ * AR_METAL_TIMING_TRACE=/absolute/path/metal.csv, AR_FRAME_PACING_TRACE=/absolute/path/pacing.csv,
+ * and SDL_GPU_DRIVER=metal. Keep the desktop unlocked and the game visible.
+ * Analyze with tools/analyze_metal_presentation.py METAL_CSV PACING_CSV.
+ * Check the exit summary for overflow/incomplete records. Use a disposable
+ * development process; this probe does not support in-process unloading.
  * Events stay in a bounded buffer until exit; no GPU waits/readbacks are added.
  */
 #import <Foundation/Foundation.h>

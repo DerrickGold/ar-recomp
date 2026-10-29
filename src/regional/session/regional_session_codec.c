@@ -6,7 +6,7 @@
 #include <string.h>
 
 /* Stable v1-v70 persistence, separate from live activation. See
- * docs/save-format.md for the wire contract before extending. */
+ * docs/actraiser-1/save-format.md for the wire contract before extending. */
 enum {
   kHeaderBytes = 36,
   kPayloadCapacity = kSaveCheckpointPayloadMax,

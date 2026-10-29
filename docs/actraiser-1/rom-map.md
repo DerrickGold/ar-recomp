@@ -498,7 +498,7 @@ except for page 19. The US page 0 call clears carry, while the other immediate
 terminal-page calls set it. Page indices and the sequence bound are extracted
 from the native callers; not all twenty stored pages are active in each release.
 The source asset/consumer evidence and raw page/atlas previews are available
-through the [Go localization commands](language-pack-format.md#tooling).
+through the [Go localization commands](../language-pack-format.md#tooling).
 
 These are different identity layers. The action object handler and composition
 pointer select behavior/layout within a common resident atlas; the small bank-6
@@ -652,7 +652,7 @@ variant denotes selection state, not whether a command is available.
 ### Town OBJ composition landmarks (bank $01, classified 2026-07-22)
 
 Composition addresses consumed by `$01:ADAD`/`$AE6F` via world record `+08`.
-`docs/sim-object-catalog.md` is the full catalogue; these are the ones the
+`docs/actraiser-1/sim-object-catalog.md` is the full catalogue; these are the ones the
 sim3d height/anchor classifier keys on, recorded here because several are easy
 to mistake for their neighbours.
 
@@ -695,7 +695,7 @@ the rest of the town's ambient art.
 | `$01:A85B` | `$DD9F/$DDA5/$DDAB`, 4 ticks each, looping | eruption ground fire |
 
 The eruption's three scripts are consecutive and are run by records that all
-publish packed identity `$0E01` in `+$0E`; see `docs/ram-map.md`. One record
+publish packed identity `$0E01` in `+$0E`; see `docs/actraiser-1/ram-map.md`. One record
 walks `$A853 -> $A857 -> $A85B` across a single flight, so these are phases of
 one fireball rather than three actors.
 
@@ -897,7 +897,7 @@ The resulting common-bank directory is stable and verified 1:1 (DIR page
 indefinitely. Music key-ons observed in this range were not intentional
 shared-bank instruments: they came from the fixed bootstrap race that cleared
 the sequencer's `$11FF=$0C` instrument-base byte after the common upload (see
-[Workshop guide](builder-workshop.md)).
+[Workshop guide](../builder-workshop.md)).
 
 ### Compressed Data (0x70000+)
 Extensive compressed sprite composition, map arrangement, and tileset data

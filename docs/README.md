@@ -1,77 +1,55 @@
-# ActRaiser documentation
+# ActRaiser Recompiled documentation
 
-Guides for playing ActRaiser Recompiled, creating replacement content, and
-working with the original game's data. For downloads and build instructions,
-start with the [project README](https://github.com/DerrickGold/ar-recomp#quick-start).
+Player guides, content-authoring contracts, and maintained game-data references.
+For downloads and build instructions, start with the
+[project README](https://github.com/DerrickGold/ar-recomp#quick-start).
+The [release notes](release-notes.md) describe the next release's changes.
 
-The [next release notes](release-notes.md) are a draft of changes since v0800,
-highlighting player-facing changes and Builder fixes.
-
-## Playing and customizing
+## Playing and creating content
 
 - [Manual](manual.md) — controls, settings, saves, and troubleshooting.
-- [Regional settings](regional-settings.md) — per-campaign gameplay and
-  presentation presets, customization groups, safe switching and saving.
-- [Regional differences](regional-differences.md) — a plain-English comparison
-  of the releases, their mechanics, and what is still being investigated.
-- [Unused content and oddities](unused-content.md) — debug facilities,
-  developer-text reports, unexplained artwork and skipped code; separate
-  from features removed or changed between regions.
-- [Modern SIM menu](manual.md#modern-sim-menu) — enable the compact town menu,
-  adjust its scale, and use the angel's Describe hint.
 - [Builder and Workshop](builder-workshop.md) — building the game and replacing
   artwork, music, and text.
 - [Desktop packages and user data](desktop-packaging.md) — portable installs,
   save locations, and packaging a local build.
-- [Android preview builds](android.md) — building a test APK from source,
-  installing it over USB, touch controls, and where data lives.
-- [Language packs](language-packs.md) — authoring, validating, installing, and
-  sharing translations.
-- [Language pack format](language-pack-format.md) — UTF-8 scripts, placeholders,
-  and page/control rules.
-- [Performance overlay](performance-overlay.md) — reading measurements and
-  reporting a slow scene.
+- [Android preview builds](android.md) — source builds, installation, touch
+  controls, and data locations.
+- [Language packs](language-packs.md) and [pack format](language-pack-format.md)
+  — translation authoring, validation, installation, and sharing.
+- [Text templates and standalone sample](text-template-core.md) — typography,
+  playback controls, and a reusable host example.
+- [Performance overlay](performance-overlay.md) — interpreting measurements
+  and reporting a slow scene.
+- [Action scene editor](https://github.com/DerrickGold/ar-recomp/blob/main/tools/action_editor/README.md)
+  and [diorama depth shapes](diorama-depth-shapes.md) — authoring enhanced rooms.
 
-## Modding references
+These application and tool guides remain at the top level. Native gameplay,
+memory layouts, scripts, and save formats are grouped by game.
 
-The game-data references describe the US ROM unless stated otherwise. Entries
-marked uncertain should not be treated as verified offsets or behavior.
+## ActRaiser 1
 
-- [RAM map](ram-map.md) and [ROM map](rom-map.md) — known state and data regions.
-- [ActRaiser 2 scene and task formats](actraiser-2-data-formats.md) — partial
-  USA-format findings and the distinction between assets and executable tasks.
-- [ActRaiser 2 main-game prototype](actraiser-2-prototype.md) — multi-ROM builds,
-  continent travel, native module ownership, controls and current limits.
-- [Projectile identity and lifetime](ram-map.md#projectile-identity-and-lifetime)
-  — retained source/backlink semantics, native phase continuity, and effect ownership.
-- [Regional differences: technical evidence](regional-differences-technical.md)
-  — ROM tables, native code boundaries, measurements, and limits of the evidence.
-- [Regional media extraction and package format](regional-media.md)
-- [Symbol map](research-symbol-map.md) — ROM addresses and their known purposes.
-- [Dialogue and menu text](dialogue-system.md) — text encoding, source identities,
-  and replacement boundaries.
-- [Simulation command menu](sim-menu-reference.md) — actions, original icons,
-  offering inventories, and description/confirmation boundaries.
-- [Text templates and standalone sample](text-template-core.md) — mixed typography,
-  playback controls and a runnable example for other hosts.
-- [Save format](save-format.md) — SRAM layout, checksum, and editable fields.
-- [Native audio channels](snes-native-audio-channels.md) — original SPC driver
-  voices, requests, and effect sequences.
-- [Simulation objects](sim-object-catalog.md) — object records and visual identities.
-- [SIM 3D model art index](sim-model-art-index.md) — original/3D comparisons,
-  regional variants and reproduction instructions.
-- [Action scene editor](https://github.com/DerrickGold/ar-recomp/blob/main/tools/action_editor/README.md) and
-  [diorama depth shapes](diorama-depth-shapes.md) — authoring enhanced room layouts.
+The [ActRaiser 1 index](actraiser-1/README.md) contains regional settings and
+comparisons, action environments, the randomizer, and native modding references.
+Start with its [RAM map](actraiser-1/ram-map.md),
+[ROM map](actraiser-1/rom-map.md), or [save format](actraiser-1/save-format.md)
+when inspecting game data. References describe the USA release unless another
+release is explicitly named; uncertain entries retain their evidence limits.
 
 For other game ports and native extensions, see the
-[recompiler guide](https://github.com/DerrickGold/ar-recomp/tree/main/snesrecomp-go) and
-[runner SDK](../snesrecomp-go/runtime/docs/README.md).
+[recompiler guide](https://github.com/DerrickGold/ar-recomp/tree/main/snesrecomp-go)
+and [runner SDK](../snesrecomp-go/runtime/docs/README.md).
 
-Public documentation covers player/modder guides, file formats, reusable-tool
-and SDK usage, overall project status, and durable reverse-engineering findings.
-Implementation ownership maps, task handovers, plans, benchmark runs and
-validation journals belong in the ignored `development/` tree. Keep native-game
-evidence separate from the port's implementation history; public links must not
-depend on local-only records. Public guides retain active controls, authoring
-contracts and preview limits; embedded implementation journals belong in the
-archive too.
+## Documentation placement
+
+Keep player/modder guides, published file formats, reusable-tool usage and
+durable reverse-engineering findings here. Give each game's native references
+their own directory and state the release and address space. Never reuse one
+game's RAM addresses, script meanings, or campaign rules as another's reference.
+
+Implementation plans, prototype integration notes, probing recipes, handovers,
+benchmark runs and validation journals belong in the ignored `development/`
+tree. Its `docs/actraiser-1/` and `docs/actraiser-2/` directories hold separate
+game research; `docs/shared/` holds host/bundle work and shared rendering research.
+Keep useful controls and authoring instructions in the public guide when moving
+a mixed document's research history. Public links and release packages must not
+depend on those local records.

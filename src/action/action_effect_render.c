@@ -207,7 +207,7 @@ static void EmberOffsetBurst(float dir_x, float dir_y, float t,
  * and reading the raw velocity for every slot would point them all the same
  * way.
  *
- * This is not a guess: docs/ram-map.md's entry for slot +06/+08 already records
+ * This is not a guess: docs/actraiser-1/ram-map.md's entry for slot +06/+08 already records
  * that the per-tick velocity is decoded by $00:8E2F and that "flip bits mirror
  * the authored deltas". Direct per-slot capture is still absent — only slot
  * $06A0's bytes survive (pinned in action_effects_test.c: velocity (4,2), no

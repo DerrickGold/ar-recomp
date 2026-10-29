@@ -2,7 +2,7 @@
 #include <stddef.h>
 
 /* Eligible service counts at the existing host clock; no PAL-rate conversion.
- * docs/regional-differences-technical.md#simulation-rules-in-code */
+ * docs/actraiser-1/regional-differences-technical.md#simulation-rules-in-code */
 static const ArRegionalDevelopmentDescriptor kRules[kArRegionalDevelopmentRule_Count] = {
   {"development_service_divider", {1,5,1}},
   {"development_long_cycle", {720,480,720}},

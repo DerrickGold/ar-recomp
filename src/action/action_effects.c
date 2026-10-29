@@ -1510,7 +1510,7 @@ static uint8_t MatchBloodpoolBossLightning(
 /* First-act magic uses the resident $5000 family, not the second-act boss
  * signatures above. Match the authored visual AND its saved continuation;
  * body poses, spear pieces and copied-but-not-initialized children share the
- * source record. See docs/ram-map.md, "First-act boss magic". */
+ * source record. See docs/actraiser-1/ram-map.md, "First-act boss magic". */
 static uint8_t MatchCentaurLightning(const ActionObjectSnapshot *object) {
   if (object->source_descriptor != 0xAD45 || object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||

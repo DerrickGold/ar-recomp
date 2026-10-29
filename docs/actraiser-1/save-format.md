@@ -2,11 +2,11 @@
 
 ActRaiser's native battery save is an 8 KiB SRAM image. This reference documents
 the US layout and the Recomp's lossless INI alternative. For the in-game editor,
-see the [manual](manual.md#save-editor); for corresponding memory locations,
+see the [manual](../manual.md#save-editor); for corresponding memory locations,
 see the [RAM map](ram-map.md).
 Complete campaigns use the [checkpoint journal](#regional-campaign-checkpoints)
 and portable `.arsave` format described below. For automatic adoption of older
-saves, see [Upgrading older saves](manual.md#upgrading-older-saves).
+saves, see [Upgrading older saves](../manual.md#upgrading-older-saves).
 
 The starting field map came from
 [RyudoSynbios/game-tools-collection](https://github.com/RyudoSynbios/game-tools-collection/tree/master/src/lib/templates/actraiser/saveEditor).
@@ -313,7 +313,7 @@ Native launchers resolve portable/custom/per-user storage and pass an absolute
 `AR_USER_DATA_DIR`. The game honors it before executable-relative folder-bundle
 anchoring, preserves absolute launch arguments for restart, and resolves all
 save/settings leaves beneath that working root. Slot indexes contain only IDs,
-formats and relative layout information. See [data locations](manual.md#launching-the-game)
+formats and relative layout information. See [data locations](../manual.md#launching-the-game)
 for the Windows, macOS and Linux roots.
 
 The collection owns a process lock at `saves/slots.lock`. It reads only the

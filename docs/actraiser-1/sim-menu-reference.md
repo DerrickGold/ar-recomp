@@ -5,7 +5,7 @@ action boundaries for modding and data extraction. Findings were checked
 against the USA ROM and source tree at `2407b6d` on 2026-09-19. Unless specified
 otherwise, program/data addresses below are in bank `$01` and WRAM is in bank
 `$7E`. For the optional modern interface, see the
-[player manual](manual.md#modern-sim-menu).
+[player manual](../manual.md#modern-sim-menu).
 
 The six-town menu has **six categories and 15 actions**. The offering selector
 has **20 item identities**, with eight usable inventory slots. The Sky Palace
@@ -25,7 +25,7 @@ python3 tools/sim_menu_catalog.py --rom ar.sfc \
   --out development/research/sim-menu/catalog.json
 ```
 
-The [catalogue tool](../tools/sim_menu_catalog.py) verifies the ROM against the
+The [catalogue tool](../../tools/sim_menu_catalog.py) verifies the ROM against the
 existing USA text-route SHA-256, then resolves category/action selection bytes,
 fixed-record anchors, icon families, both palette variants, animation scripts,
 composition parts, item handlers, and 65 related dialogue routes. It accepts a
@@ -50,7 +50,7 @@ entry with its actual M/X widths.
 
 ## Entry, selection and dispatch
 
-The optional [native quick-use setting](manual.md#native-sim-menu-quick-use)
+The optional [native quick-use setting](../manual.md#native-sim-menu-quick-use)
 retains `$8B7D` navigation and all native presentation. Its town-scoped wrapper
 recognizes the `$8C43` release/press polls with saved JSR returns `$8B91/$8B98`.
 Describe is mapped to native Use at those polls, with a full-flow flag captured
@@ -427,7 +427,7 @@ an item's descriptive or acquisition text.
 The shared position instruction `$04:8930` serves Bread/Wheat/Skull; its return
 contexts are `$01:9CFE`, `$01:9D75` and `$01:9EEF`. It passes through
 `$93A8/$8E29` with catalogue caller `$01:93B2` in the
-[runtime dialogue routes](../tools/data/localization/us-runtime-dialogue-routes-v1.json).
+[runtime dialogue routes](../../tools/data/localization/us-runtime-dialogue-routes-v1.json).
 `$93A8` also carries effect-adjacent dialogue. Music's two-page success message
 must complete before its following event write. Native release/press barriers
 separate inventory selection, acknowledgement and target acceptance.

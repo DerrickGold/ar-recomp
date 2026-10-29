@@ -5,7 +5,7 @@ lifetimes. Addresses without a release qualifier refer to the verified USA
 LoROM. They are not portable language-pack IDs. Retail scripts, font pixels,
 generated decompilation, and replay captures must be obtained locally; none is
 included here. For the author-facing contract see
-[language-pack-format.md](language-pack-format.md).
+[language-pack-format.md](../language-pack-format.md).
 
 ## Two consumers, not one text format
 

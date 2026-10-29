@@ -135,16 +135,16 @@ game before requesting one. The Progress Log still saves gameplay progress.
 Press SNES **X** or **F3** on a regional option to read its full description;
 Up/Down scrolls, Left/Right pages, and Back/Esc returns to the same option.
 
-The [regional settings reference](regional-settings.md) explains each group,
+The [regional settings reference](actraiser-1/regional-settings.md) explains each group,
 pending changes and save recovery. Some artwork and music need a locally
-extracted [regional media package](regional-media.md); missing media falls back
+extracted [regional media package](actraiser-1/regional-media.md); missing media falls back
 to US assets without changing your requested region or language.
 
 The experimental **Randomizer** section appears with **Show debug settings**
 enabled. Configure it at the title screen before New Game; its seed and options
 belong to that campaign and are restored on Continue. Independent Action and
 Town options can roll regional rules as well as the existing content shuffles.
-See [Seeded campaigns](randomizer.md) for exclusions and backup requirements.
+See [Seeded campaigns](actraiser-1/randomizer.md) for exclusions and backup requirements.
 
 ## Controls
 
@@ -599,7 +599,7 @@ virtual voice. Voices 8-39 therefore carry overlapping effects while physical
 voices 0-7 remain dedicated to music. Exact duplicate posts from the same
 producer in one game frame are deliberately coalesced. The game-facing audio
 identities and controls are catalogued in
-[Native audio channels](snes-native-audio-channels.md).
+[Native audio channels](actraiser-1/snes-native-audio-channels.md).
 
 Custom music (OGG streaming in place of SPC songs) is covered in
 [Asset replacement](#asset-replacement-hd-art--music) below.
@@ -826,7 +826,7 @@ applying when their action or simulation engine becomes active.
 | `AR_INF_MP=1` (or `=<n>`) | infinite magic scrolls (pins the working count; never written to the save file) |
 | `AR_INF_SP=1` | sim mode: infinite SP (miracle points), self-calibrating to your max |
 | `AR_ANGEL_HP=1` | sim mode: infinite angel health, self-calibrating to your max |
-| `AR_PIN=<8-hex-PAR>[,...]` | generic Pro Action Replay code pinner (e.g. `7E00210A`); catalogue in `codes.txt` / [`ram-map.md`](ram-map.md) |
+| `AR_PIN=<8-hex-PAR>[,...]` | generic Pro Action Replay code pinner (e.g. `7E00210A`); catalogue in `codes.txt` / [`ram-map.md`](actraiser-1/ram-map.md) |
 | `AR_WARP=<region_hex><map_hex>` | sets the raw `$18:$19` target used by `F6` (default `0101`); use the verified table below |
 | `AR_WARP_AT=<gameframe>` | fires the `AR_WARP` target automatically once the initialized game-frame counter reaches the value (the power-on `$5555` sentinel is ignored; headless runs can't press F6); same state caveats as F6 |
 | `AR_TURBO_MULT=<n>` | game frames per rendered frame while `T` turbo is on (default 8) |

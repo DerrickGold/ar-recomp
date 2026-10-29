@@ -5,7 +5,7 @@
 /* The 43 used action records have the same pre-timer fields in all five
  * releases. Only these six initial times differ (US/EU/DE/FR versus JP).
  * Profile24 is shared by Marahna section8 and the Death Heim Viper rematch.
- * Source: docs/regional-differences-technical.md#action-timer-profiles. */
+ * Source: docs/actraiser-1/regional-differences-technical.md#action-timer-profiles. */
 static const ArRegionalTimerDescriptor kRules[kArRegionalTimerRule_Count] = {
   {"time_fillmore_section_1", 0x03, {0x0300, 0x0200, 0x0300}},
   {"time_fillmore_section_3", 0x05, {0x0200, 0x0100, 0x0200}},

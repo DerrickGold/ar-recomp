@@ -6,6 +6,25 @@ Workshop, debug utilities, benchmarks, and build scripts. Start with the
 [Builder entry points](installer/README.md), or the
 [recompiler and runtime](snesrecomp-go/README.md) for the area you are changing.
 
+## Documentation ownership
+
+Use [the documentation index](docs/README.md) for player and authoring guides.
+Keep native game references under `docs/actraiser-1/` or the corresponding
+game directory, with the ROM/release and address space stated explicitly.
+Shared application, Builder, rendering controls, and language-pack guides stay
+at the top level. Do not mix AR2 values into AR1's memory maps or campaign rules.
+
+Internal research belongs in the ignored `development/` tree:
+`development/docs/actraiser-1/`, `development/docs/actraiser-2/`, and
+`development/docs/shared/` (including `shared/rendering/`). Keep prototype
+integration, probing fixtures, plans, handovers, and benchmark/validation
+journals there. Preserve useful controls and authoring contracts publicly when
+separating a mixed document. Public links must not depend on ignored files.
+
+When moving a public guide, update incoming links and the documentation install
+list and distribution check in `installer/packaging/`. Packages preserve the
+same per-game directory layout as the repository.
+
 ## Developer checks
 
 Install the [native build dependencies](README.md#build-from-source), Ninja,
@@ -55,7 +74,7 @@ developer checks.
 `make release-remote <ssh-config-name>` runs packaging on your own SSH build
 host, streams progress, saves local diagnostics, and retrieves verified
 downloads with automatic remote cleanup. See
-[remote packaging](docs/desktop-packaging.md#packaging-on-an-ssh-build-host)
+[remote packaging](docs/desktop-packaging.md#packaging-across-build-hosts)
 for prerequisites and options. This target also packages without running checks.
 
 Use `make release-checked` or `make release-checked-<platform>` to run the full

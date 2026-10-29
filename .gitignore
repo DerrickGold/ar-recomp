@@ -182,6 +182,8 @@ runs/
 /archive/
 # Internal game, recompiler, and Builder architecture, investigations, plans,
 # checklists, and validation evidence. Player/modder guides belong in /docs.
+# Game research: development/docs/actraiser-1/ and actraiser-2/.
+# Host/bundle and renderer research: development/docs/shared/.
 /development/
 # Prevent older report generators from reintroducing local evidence as docs.
 /docs/artifacts/

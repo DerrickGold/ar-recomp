@@ -8,8 +8,8 @@
 
 /* ---------------------------------------------------------------- ROM layout
  *
- * Addresses are mapped in docs/research-symbol-map.md and
- * docs/regional-differences-technical.md, and dumped by tools/act_content.py.
+ * Addresses are mapped in docs/actraiser-1/research-symbol-map.md and
+ * docs/actraiser-1/regional-differences-technical.md, and dumped by tools/act_content.py.
  * The native ROM path and host placement path share the transforms below.
  * ROM offsets are LINEAR file offsets, matching
  * RomFixedPtr's LoROM mapping: file = (bank << 15) | (addr & 0x7fff).

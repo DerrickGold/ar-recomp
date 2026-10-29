@@ -2,7 +2,7 @@
  * town's 128-record array into checksummed SRAM without losing support,
  * marks, rendering, or crossing state. Allocation, scene hooks and the census
  * bridge accessor must remain coordinated. ROM mapping and persistence details
- * live in docs/ram-map.md and docs/save-format.md. */
+ * live in docs/actraiser-1/ram-map.md and docs/actraiser-1/save-format.md. */
 
 #include "actraiser_cell_map.h"
 #include "actraiser_bridge_extension.h"

@@ -29,7 +29,7 @@
  * builds rows when asked.
  *
  * SCOPE: the LIVE room only. A level's room set cannot be enumerated -- $19 is
- * not a uniform act selector (docs/ram-map.md records that act 2 starts at
+ * not a uniform act selector (docs/actraiser-1/ram-map.md records that act 2 starts at
  * $02/$02/$03/$04/$04/$05 depending on the region, Death Heim uses $01 for its
  * hub and $02-$08 for arenas) and no table of valid rooms exists in the ROM
  * notes. Listing a fixed $01..$08 would therefore offer rooms that do not

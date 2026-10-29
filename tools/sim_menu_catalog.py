@@ -2,7 +2,7 @@
 """Collect the verified USA SIM menu's identities, icon parts, and text routes.
 
 Read-only ROM research; no game patching and no retail text or pixel export.
-See docs/sim-menu-reference.md for control flow and interpretation.
+See docs/actraiser-1/sim-menu-reference.md for control flow and interpretation.
 """
 
 from __future__ import annotations

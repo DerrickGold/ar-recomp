@@ -156,7 +156,7 @@ void ActRaiser_ApplyCheats(void) {
    * (bank $7E/$7F, 16-bit addr, byte value), applied every frame in EVERY
    * mode (unlike the mode-gated hand cheats below). Turns the whole
    * ./codes.txt catalogue (flamingspinach's 88 engineered codes — see
-   * docs/ram-map.md "Cheat-derived WRAM map") into ready-made debug cheats
+   * docs/actraiser-1/ram-map.md "Cheat-derived WRAM map") into ready-made debug cheats
    * AND address-mapping probes with zero per-cheat C. Example:
    *   AR_PIN=7E00210A,7E029901   (INF MP + HAVE FIRE — the §7.18 kit)
    * Bad tokens are reported once and skipped. Max 32 pins. */
@@ -174,7 +174,7 @@ void ActRaiser_ApplyCheats(void) {
    * equip menu / angel, so they must pin in every mode) ─────────────────── */
 
   /* AR_ALL_MAGIC=1: unlock all four spells. HAVE flags $0299-$029C = 01/02/03/04
-   * (cheat-map values, docs/ram-map.md). Pinned in ALL modes so the sim-mode
+   * (cheat-map values, docs/actraiser-1/ram-map.md). Pinned in ALL modes so the sim-mode
    * equip menu lists them; SELECTING one still goes through the menu (the equip
    * routine $01:915D derives $02AC from these). docs/SEAMS.md has the full
    * magic wiring map and cast-gate interaction. */

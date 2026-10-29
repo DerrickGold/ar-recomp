@@ -701,7 +701,7 @@ or room/observer reset. If the parent source is already unavailable on first
 observation, a parent-specific filter cannot match; a later occupant of that slot
 does not retroactively become the child's parent. State, visual-frame and handler
 filters still follow the child's current facts. See the native
-[projectile identity and lifetime](../../docs/ram-map.md#projectile-identity-and-lifetime)
+[projectile identity and lifetime](../../docs/actraiser-1/ram-map.md#projectile-identity-and-lifetime)
 reference.
 
 Attached X/Y are offsets from the actor. The map marker uses the reference actor
@@ -1280,9 +1280,6 @@ also include dependencies and scheduling gaps, not pure GPU utilization.
 Compare first-submit return to first GPU timestamp, the GPU span, and last GPU
 timestamp to idle return separately. A delayed first timestamp does not itself
 identify the OS, compositor or driver as the cause.
-
-The measured Aitos/Marahna hot-path findings and next experiments are recorded
-in [the 2026-10-29 audit](../../docs/environment-hotpaths-20261029.md).
 
 ### Captured scenes through WebGL2
 
@@ -1985,26 +1982,6 @@ module always uses it and gains no process-environment import. The
 `EditorRoomScene_RasterCount` diagnostic counts actual PPU scanouts, and the
 native room oracle prints it when `AR_EDITOR_RASTER_STATS=1` is set.
 
-October 27, 2026 validation compared 5,400 timeline/camera/capture samples across
-all 150 regional room variants: tile and effect hashes matched the uncached
-path, with scanouts reduced from 5,506 to 3,449 including additional regression
-checks. Still-camera previews with animated effects at 1920×1080 on Apple M2
-Metal gave these median run-mean CPU submission times (two runs per mode in
-off/on/on/off order, 600 frames each, excluding the first 30):
-
-| Preview | Uncached (ms) | Reused (ms) | Reduction |
-| --- | ---: | ---: | ---: |
-| Marahna shrine | 2.302 | 1.489 | 35% |
-| Marahna gallery | 3.139 | 1.955 | 38% |
-| Viper chamber | 3.369 | 2.007 | 40% |
-
-Frames that change the tile image still pay the normal scanout cost; this is
-an average editor CPU reduction, not evidence of improved native-game p99 or
-display pacing. Scrolling runs also benefited when consecutive frames shared
-the same resolved tile camera/animation state, but CPU/system variation makes
-their exact percentages less useful. Local scripts and raw results are in
-`runs/effect-packing-20261027/benchmark-cache*.py` and `cache-parity.py`.
-
 ### Shared cloud materials
 
 Native rendering and the WASM preview use the cloud material, motion and mesh
@@ -2014,8 +1991,7 @@ controls retain their profiles and serialized properties. This does not change
 saved regions, BG1/BG2 anchors, timeline behaviour, palette or layer ordering.
 New cloud styles should extend these material/shape profiles instead of adding
 another private baker. Scene-specific floor support, actor emission and
-projection stay in their adapters. See `docs/aitos-act1-effects.md` for the
-consolidation parity checks and render-path boundaries.
+projection stay in their adapters.
 
 ### Native final-battle nebula
 

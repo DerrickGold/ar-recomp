@@ -39,7 +39,7 @@ start to finish.** Development and visual improvements remain active.
 | 🟡 | **Action Mode Enhancements:** Extensive presentation work remains in 3D Diorama mode: manually extending tile maps to fill widescreen space, correcting background policies, and fixing skybox rendering. Adding unique environmental effects is an ongoing per-level effort, with treatments for Fillmore Acts 1/2, Bloodpool Acts 1/2, Kassandora Acts 1/2, and Death Heim's completion scene. |
 | ✅ | **Platforms:** Windows, macOS arm64, and Steam Deck have been tested and boot successfully. macOS x86_64 and generic Linux still need representative launch testing. |
 | ✅ | **Localization:** Language packs, enhanced fonts, and Workshop authoring are ready. Players can create and distribute their own translations. |
-| 🔵 | **Regionalization:** Implementation is complete and ready for testing. [US, Japanese, and European gameplay presets](docs/regional-settings.md) support per-campaign customization, with independent [regional artwork and music](docs/regional-media.md). |
+| 🔵 | **Regionalization:** Implementation is complete and ready for testing. [US, Japanese, and European gameplay presets](docs/actraiser-1/regional-settings.md) support per-campaign customization, with independent [regional artwork and music](docs/actraiser-1/regional-media.md). |
 | 🟡  | **Full Decompilation:** In progress. The goal is to produce human readable code, and decouple the game mechanics from the SNES' 60.0988 hz processing cycle for proper variable frame rate support (i.e. proper pacing at 45fps for steam deck, or at higher frame rates on more powerful machines), and remove limitations from the games memory/object management to remove limitations like max number of objects drawn/managed, increased play field handling, etc|
 | 📋 | **Achievements:** In planning. |
 
@@ -472,8 +472,8 @@ campaign's rules rather than the title screen's new-game choices. Changes that
 require town redevelopment ask for confirmation and create a recovery copy
 before applying.
 
-See [regional settings](docs/regional-settings.md) for the full option list
-and activation timing, and [regional media](docs/regional-media.md) for artwork
+See [regional settings](docs/actraiser-1/regional-settings.md) for the full option list
+and activation timing, and [regional media](docs/actraiser-1/regional-media.md) for artwork
 and music requirements.
 
 ### Live authentic comparison
@@ -532,7 +532,7 @@ slots restarts the game and does not capture unsaved gameplay. See
 [save slots and recovery](docs/manual.md#save-slots) and
 [save editing, import, and export](docs/manual.md#save-editor) for details.
 
-The [experimental randomizer](docs/randomizer.md) is available at the title
+The [experimental randomizer](docs/actraiser-1/randomizer.md) is available at the title
 screen after enabling **Show debug settings**. It supports seeded campaigns,
 including independent rolls for regional action and town rules. A complete
 randomized campaign has not yet been play-tested.
@@ -598,7 +598,7 @@ installation without the Builder; see [Android preview builds](docs/android.md).
 To package releases on another machine, use `make release-remote <ssh-config-name>`.
 It sends the current source tree, streams build progress, saves a local build
 log, retrieves verified packages into `release/`, and cleans temporary remote
-files. See [remote packaging](docs/desktop-packaging.md#packaging-on-an-ssh-build-host)
+files. See [remote packaging](docs/desktop-packaging.md#packaging-across-build-hosts)
 for prerequisites and cache options.
 
 ### Layout and testing
@@ -638,7 +638,8 @@ For benchmark definitions and development details, see
 
 | Document | What it is |
 |---|---|
-| [`docs/README.md`](docs/README.md) | Curated game-documentation index |
+| [`docs/README.md`](docs/README.md) | Public application, authoring, and game-reference index |
+| [`docs/actraiser-1/README.md`](docs/actraiser-1/README.md) | AR1 gameplay, regional releases, native data, and action environments |
 | [`docs/manual.md`](docs/manual.md) | Player and power-user reference |
 | [`docs/release-notes.md`](docs/release-notes.md) | Upcoming release changes, upgrade instructions, and remaining testing |
 | [`tools/action_editor/README.md`](tools/action_editor/README.md) | Offline action scenery, background policy, and effects authoring |
@@ -646,14 +647,14 @@ For benchmark definitions and development details, see
 | [`docs/android.md`](docs/android.md) | Building and testing the Android preview without the Builder |
 | [`docs/language-pack-format.md`](docs/language-pack-format.md) | UTF-8 translation pack authoring and validation contract |
 | [`docs/language-packs.md`](docs/language-packs.md) | Direct `.arlang` installation, sharing, and editor-free/AI authoring |
-| [`docs/regional-settings.md`](docs/regional-settings.md) | Regional gameplay presets, independent options, and campaign saving |
-| [`docs/regional-media.md`](docs/regional-media.md) | Extracting and using regional artwork and music from your own ROMs |
+| [`docs/actraiser-1/regional-settings.md`](docs/actraiser-1/regional-settings.md) | Regional gameplay presets, independent options, and campaign saving |
+| [`docs/actraiser-1/regional-media.md`](docs/actraiser-1/regional-media.md) | Extracting and using regional artwork and music from your own ROMs |
 | [`installer/README.md`](installer/README.md) | ActRaiser Builder ownership and developer entry points |
 | [`docs/diorama-depth-shapes.md`](docs/diorama-depth-shapes.md) | Depth effects for custom action-room layouts |
-| [`docs/save-format.md`](docs/save-format.md) | SRAM fields, checksums, and save editing |
+| [`docs/actraiser-1/save-format.md`](docs/actraiser-1/save-format.md) | SRAM fields, checksums, and save editing |
 | [`docs/performance-overlay.md`](docs/performance-overlay.md) | Reading performance information and reporting slow scenes |
-| [`docs/snes-native-audio-channels.md`](docs/snes-native-audio-channels.md) | Original SPC channel ownership and effect sequencing |
-| [`docs/rom-map.md`](docs/rom-map.md) | ROM data regions and cross-release localization evidence |
+| [`docs/actraiser-1/snes-native-audio-channels.md`](docs/actraiser-1/snes-native-audio-channels.md) | Original SPC channel ownership and effect sequencing |
+| [`docs/actraiser-1/rom-map.md`](docs/actraiser-1/rom-map.md) | ROM data regions and cross-release localization evidence |
 
 ## License
 

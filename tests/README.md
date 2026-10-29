@@ -109,7 +109,7 @@ hit timer. It checks same-pass sword/beam exclusion, repeated passes, immunity,
 deflection, lethal hits, score, and later hits by a surviving projectile. No ROM,
 save, generated source or game executable is changed. Keep the game build current;
 this is separate from the ROM-free CTest tier. See the
-[native sword and beam rules](../docs/ram-map.md#sword-and-beam-damage).
+[native sword and beam rules](../docs/actraiser-1/ram-map.md#sword-and-beam-damage).
 Controlled fixtures do not establish complete-campaign coverage.
 
 ## Shared implementation dependencies

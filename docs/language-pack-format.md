@@ -982,7 +982,7 @@ accepted Unicode spelling in later enhanced dialogue, independently of which
 pack is selected. Native rendering keeps the original keyboard-position
 fallback spelling. Unicode is preserved in a separate `.arname` save companion,
 not in the ROM-compatible SRAM name field; see
-[Unicode name persistence](save-format.md#unicode-player-names-and-emulator-interchange).
+[Unicode name persistence](actraiser-1/save-format.md#unicode-player-names-and-emulator-interchange).
 
 Use one Unicode grapheme per position. A precomposed letter such as `é` is one
 key; an emoji or a base letter plus combining marks is also one key when it is

@@ -8,7 +8,7 @@
  *
  * The native data passes change the object-type stat records, the
  * bank-$0A object placement streams, and the sim-mode lair table — all mapped
- * in docs/research-symbol-map.md and docs/regional-differences-technical.md.
+ * in docs/actraiser-1/research-symbol-map.md and docs/actraiser-1/regional-differences-technical.md.
  * The existing native path transforms the loaded ROM image: register the live
  * cart buffer once, keep a pristine copy, and rewrite data from a seed. Regional
  * placement programs and regional actor stats have value-only entry points

@@ -2,7 +2,7 @@
 #define AR_ACTRAISER_GAME_H
 
 /* Semantic names for ActRaiser state that has already been established in
- * docs/ram-map.md. Keep uncertain direct-page scratch and polymorphic object
+ * docs/actraiser-1/ram-map.md. Keep uncertain direct-page scratch and polymorphic object
  * fields local to the routine that interprets them. This header is only for
  * meanings that are stable across handwritten game-specific code. */
 

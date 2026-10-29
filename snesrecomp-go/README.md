@@ -356,7 +356,7 @@ v2regen trace-diff sequence oracle.jsonl recomp.jsonl --skip-zp
 v2regen trace-diff aligned oracle.jsonl recomp.jsonl \
   --clock-low 0x88 --clock-high 0x89
 v2regen mx-diff recomp_mx.txt oracle_mx.txt --offset 0
-v2regen wram get --symbols docs/ram-map.md \
+v2regen wram get --symbols docs/actraiser-1/ram-map.md \
   --file saves/dump_wram.bin 21 0295
 v2regen chr-render rom game.sfc 0x68000 0x8000 build/chr.png --cols 16
 v2regen stub-census --gen-dir src/gen

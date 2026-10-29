@@ -175,7 +175,7 @@ typedef enum SimRenderObjectTrait {
 } SimRenderObjectTrait;
 
 /* D3c presentation planes.  These are art/presentation classes derived from
- * docs/sim-object-catalog.md, not a gameplay Z coordinate: the ROM keeps
+ * docs/actraiser-1/sim-object-catalog.md, not a gameplay Z coordinate: the ROM keeps
  * every world record on one planar map and `+$1A/+$1C` remain planar
  * velocities. */
 typedef enum SimHeightClass {

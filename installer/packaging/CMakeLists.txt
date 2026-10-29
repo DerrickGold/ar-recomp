@@ -504,30 +504,35 @@ install(FILES
     ${GAME_ROOT}/docs/manual.md
     ${GAME_ROOT}/docs/builder-workshop.md
     ${GAME_ROOT}/docs/desktop-packaging.md
+    ${GAME_ROOT}/docs/android.md
     ${GAME_ROOT}/docs/release-notes.md
-    ${GAME_ROOT}/docs/regional-settings.md
-    ${GAME_ROOT}/docs/regional-media.md
-    ${GAME_ROOT}/docs/regional-differences.md
-    ${GAME_ROOT}/docs/regional-differences-technical.md
-    ${GAME_ROOT}/docs/unused-content.md
     ${GAME_ROOT}/docs/language-pack-format.md
     ${GAME_ROOT}/docs/language-packs.md
     ${GAME_ROOT}/docs/language-authoring-reference.json
     ${GAME_ROOT}/docs/language-archive.schema.json
-    ${GAME_ROOT}/docs/ram-map.md
-    ${GAME_ROOT}/docs/rom-map.md
-    ${GAME_ROOT}/docs/research-symbol-map.md
-    ${GAME_ROOT}/docs/save-format.md
-    ${GAME_ROOT}/docs/randomizer.md
-    ${GAME_ROOT}/docs/sim-object-catalog.md
-    ${GAME_ROOT}/docs/sim-menu-reference.md
-    ${GAME_ROOT}/docs/sim-model-art-index.md
     ${GAME_ROOT}/docs/text-template-core.md
     ${GAME_ROOT}/docs/diorama-depth-shapes.md
-    ${GAME_ROOT}/docs/dialogue-system.md
-    ${GAME_ROOT}/docs/snes-native-audio-channels.md
     ${GAME_ROOT}/docs/performance-overlay.md
     DESTINATION utils/docs)
+install(FILES
+    ${GAME_ROOT}/docs/actraiser-1/README.md
+    ${GAME_ROOT}/docs/actraiser-1/action-environments.md
+    ${GAME_ROOT}/docs/actraiser-1/regional-settings.md
+    ${GAME_ROOT}/docs/actraiser-1/regional-media.md
+    ${GAME_ROOT}/docs/actraiser-1/regional-differences.md
+    ${GAME_ROOT}/docs/actraiser-1/regional-differences-technical.md
+    ${GAME_ROOT}/docs/actraiser-1/unused-content.md
+    ${GAME_ROOT}/docs/actraiser-1/ram-map.md
+    ${GAME_ROOT}/docs/actraiser-1/rom-map.md
+    ${GAME_ROOT}/docs/actraiser-1/research-symbol-map.md
+    ${GAME_ROOT}/docs/actraiser-1/save-format.md
+    ${GAME_ROOT}/docs/actraiser-1/randomizer.md
+    ${GAME_ROOT}/docs/actraiser-1/sim-object-catalog.md
+    ${GAME_ROOT}/docs/actraiser-1/sim-menu-reference.md
+    ${GAME_ROOT}/docs/actraiser-1/sim-model-art-index.md
+    ${GAME_ROOT}/docs/actraiser-1/dialogue-system.md
+    ${GAME_ROOT}/docs/actraiser-1/snes-native-audio-channels.md
+    DESTINATION utils/docs/actraiser-1)
 # Independently authored syntax/demo artifacts; no retail prose.
 install(DIRECTORY ${GAME_ROOT}/examples/language-pack/ DESTINATION utils/examples/language-pack
     PATTERN ".DS_Store" EXCLUDE)
