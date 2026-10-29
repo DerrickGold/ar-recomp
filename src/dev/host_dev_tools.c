@@ -174,6 +174,12 @@ DevToolsCaptureResult HostDevTools_WriteFramebufferPpm(FILE *file, bool require_
   return DevTools_WriteFramebufferPpm(file, &context, require_composite);
 }
 
+DevToolsCaptureResult HostDevTools_WriteFramebufferPngAtPhase(FILE *file, bool require_composite,
+    float phase, const struct FrameSlot *uploaded_frame) {
+  const DevToolsContext context = CurrentContext();
+  return DevTools_WriteFramebufferPngAtPhase(file, &context, require_composite, phase, uploaded_frame);
+}
+
 DevToolsCaptureResult HostDevTools_WriteFramebufferPpmAtPhase(
     FILE *file, bool require_composite, float phase,
     const struct FrameSlot *uploaded_frame) {

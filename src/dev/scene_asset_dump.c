@@ -16,7 +16,7 @@
 
 #include "actraiser_game.h"
 #include "byte_order.h"
-#include "snesrecomp/support/crc32.h"
+#include "render/image_write.h"
 #include "snes_bgr555.h"
 
 enum {
@@ -64,91 +64,13 @@ static bool MakeDirectory(const char *path) {
   return false;
 }
 
-static bool WriteChunk(FILE *file, const char type[4],
-                       const uint8_t *data, size_t size) {
-  if (size > 0xffffffffu) return false;
-  uint8_t header[8];
-  ByteOrder_WriteBe32(header, (uint32_t)size);
-  memcpy(header + 4, type, 4);
-  uint32_t crc = crc32_update(UINT32_C(0xFFFFFFFF), header + 4, 4);
-  crc = crc32_update(crc, data, size) ^ UINT32_C(0xFFFFFFFF);
-  uint8_t crc_bytes[4];
-  ByteOrder_WriteBe32(crc_bytes, crc);
-  return fwrite(header, 1, sizeof(header), file) == sizeof(header) &&
-         (!size || fwrite(data, 1, size, file) == size) &&
-         fwrite(crc_bytes, 1, sizeof(crc_bytes), file) == sizeof(crc_bytes);
-}
-
-/* PNG's IDAT payload is a zlib stream. Stored DEFLATE blocks keep this tiny
- * writer dependency-free and lossless; asset dumps favor exactness and
- * portability over compression ratio. */
-bool WritePng(const char *path, const uint8_t *rgba,
-              int width, int height) {
-  if (!path || !rgba || width <= 0 || height <= 0) return false;
-  size_t stride = (size_t)width * kRgbaChannels;
-  if (stride / kRgbaChannels != (size_t)width) return false;
-  size_t raw_size = (stride + 1) * (size_t)height;
-  if (raw_size / (size_t)height != stride + 1) return false;
-  uint8_t *raw = (uint8_t *)malloc(raw_size);
-  if (!raw) return false;
-  for (int y = 0; y < height; y++) {
-    size_t offset = (size_t)y * (stride + 1);
-    raw[offset] = 0;
-    memcpy(raw + offset + 1, rgba + (size_t)y * stride, stride);
-  }
-
-  size_t blocks = (raw_size + 65534) / 65535;
-  size_t z_size = 2 + raw_size + blocks * 5 + 4;
-  uint8_t *z = (uint8_t *)malloc(z_size);
-  if (!z) {
-    free(raw);
-    return false;
-  }
-  size_t at = 0, source = 0;
-  z[at++] = 0x78;
-  z[at++] = 0x01;
-  while (source < raw_size) {
-    size_t remaining = raw_size - source;
-    uint16_t length = (uint16_t)(remaining > 65535 ? 65535 : remaining);
-    bool final = source + length == raw_size;
-    z[at++] = final ? 1 : 0;
-    z[at++] = (uint8_t)length;
-    z[at++] = (uint8_t)(length >> 8);
-    uint16_t inverse = (uint16_t)~length;
-    z[at++] = (uint8_t)inverse;
-    z[at++] = (uint8_t)(inverse >> 8);
-    memcpy(z + at, raw + source, length);
-    at += length;
-    source += length;
-  }
-  uint32_t s1 = 1, s2 = 0;
-  for (size_t i = 0; i < raw_size; i++) {
-    s1 = (s1 + raw[i]) % 65521u;
-    s2 = (s2 + s1) % 65521u;
-  }
-  ByteOrder_WriteBe32(z + at, (s2 << 16) | s1);
-  at += 4;
-  free(raw);
-
+/* The host encoder compresses losslessly; borrowed art and alpha are unchanged. */
+bool WritePng(const char *path, const uint8_t *rgba, int width, int height) {
+  if (!path || !rgba || width <= 0 || width > INT32_MAX / 4 || height <= 0) return false;
   FILE *file = sr_fopen(path, "wb");
-  if (!file) {
-    free(z);
-    return false;
-  }
-  static const uint8_t signature[8] = {
-    0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'
-  };
-  uint8_t ihdr[13] = {0};
-  ByteOrder_WriteBe32(ihdr, (uint32_t)width);
-  ByteOrder_WriteBe32(ihdr + 4, (uint32_t)height);
-  ihdr[8] = 8;
-  ihdr[9] = 6; /* RGBA */
-  bool ok = fwrite(signature, 1, sizeof(signature), file) == sizeof(signature) &&
-            WriteChunk(file, "IHDR", ihdr, sizeof(ihdr)) &&
-            WriteChunk(file, "IDAT", z, at) &&
-            WriteChunk(file, "IEND", NULL, 0);
+  if (!file) return false;
+  bool ok = ArImage_WritePng(file, rgba, width, height, width * 4, kArImageRgba32);
   if (fclose(file) != 0) ok = false;
-  free(z);
   if (!ok) fprintf(stderr, "[scene-assets] cannot write %s\n", path);
   return ok;
 }

@@ -70,9 +70,10 @@ void DevAutomation_ArmScheduledDioramaDump(void) {
   }
 }
 
-/* Framebuffer capture to PPM (works headless — g_pixels is always populated).
- * AR_SHOT_AT_GF=N      : one shot to saves/shot.ppm at game-frame >= N.
- * AR_SHOT_EVERY=N      : a SERIES — saves/shot_<gf>.ppm every N game-frames,
+/* Lossless framebuffer capture (also supports the headless native fallback).
+ * AR_SHOT_AT_GF=N      : one shot to saves/shot.png at game-frame >= N.
+ * AR_SHOT_EVERY=N      : a SERIES — saves/shot_<gf>.png every N game-frames,
+ * AR_SHOT_FORMAT=ppm   : explicit legacy format for older artifact contracts.
  *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
  *   state vs bug state frame by frame.
  * AR_SHOT_REQUIRE_COMPOSITE=1: fail the run instead of using raw PPU fallback.
@@ -83,6 +84,7 @@ static bool schedule_initialized;
 static bool shot_done;
 static bool shot_at_enabled;
 static bool shot_series_enabled;
+static bool shot_ppm;
 static unsigned shot_at;
 static unsigned shot_every;
 static unsigned shot_from;
@@ -123,6 +125,8 @@ static void InitScreenshotSchedule(void) {
       else
         shot_phase = phase;
     }
+    value = getenv("AR_SHOT_FORMAT");
+    shot_ppm = value && !strcmp(value, "ppm");
     schedule_initialized = true;
   }
 }
@@ -150,16 +154,17 @@ void DevAutomation_CaptureScheduledScreenshot(const struct FrameSlot *uploaded_f
   const unsigned gf =
       ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
   int want = 0;
+  const char *extension = shot_ppm ? "ppm" : "png";
   char fname[320];
   fname[0] = 0;
   if (shot_at_enabled && !shot_done && gf >= shot_at) {
     shot_done = true;
     want = 1;
-    RunDirFile(fname, sizeof(fname), "shot.ppm");
+    RunDirFile(fname, sizeof(fname), "shot.%s", extension);
   } else if (shot_series_enabled && gf >= shot_from && gf <= shot_to &&
              (gf % shot_every) == 0) {
     want = 1;
-    RunDirFile(fname, sizeof(fname), "shot_%u.ppm", gf);
+    RunDirFile(fname, sizeof(fname), "shot_%u.%s", gf, extension);
   }
   if (want) {
     const char *strict = getenv("AR_SHOT_REQUIRE_COMPOSITE");
@@ -167,7 +172,8 @@ void DevAutomation_CaptureScheduledScreenshot(const struct FrameSlot *uploaded_f
     FILE *pf = sr_fopen(fname, "wb");
     if (pf) {
       DevToolsCaptureResult shot_size =
-          HostDevTools_WriteFramebufferPpmAtPhase(pf, require_composite, shot_phase, uploaded_frame);
+          shot_ppm ? HostDevTools_WriteFramebufferPpmAtPhase(pf, require_composite, shot_phase, uploaded_frame) :
+                     HostDevTools_WriteFramebufferPngAtPhase(pf, require_composite, shot_phase, uploaded_frame);
       const bool closed = fclose(pf) == 0;
       if (!closed) shot_size.kind = kDevToolsCapture_Failed;
       if (shot_size.kind == kDevToolsCapture_Failed) {

@@ -134,8 +134,9 @@ static void DestroyTexture(void *context, ArRenderTexture texture) {
 }
 
 /* SDL's GPU renderer allocates and releases a transfer buffer per update.
- * Retain one per texture on D3D12, with aligned rows to avoid its additional
- * realignment allocation. SDL cycles staging that is still in flight. */
+ * Retain one per texture on D3D12/Vulkan: this avoids D3D12 row-realignment
+ * allocations and repeated mapping faults on the Deck. SDL cycles staging
+ * that is still in flight; mapped upload memory is only written, never read. */
 #define AR_UPLOAD_PROPERTY "actraiser.texture.upload"
 typedef struct TextureUpload {
   SDL_GPUDevice *device;
@@ -971,7 +972,8 @@ static bool CreateForWindowWithDriver(ArRenderDevice *device,
     }
     backend->output_window = window;
     backend->reuse_texture_uploads = SDL_GetHintBoolean("AR_SDL_GPU_UPLOAD_REUSE",
-        !strcmp(SDL_GetGPUDeviceDriver(gpu), "direct3d12"));
+        !strcmp(SDL_GetGPUDeviceDriver(gpu), "direct3d12") ||
+        !strcmp(SDL_GetGPUDeviceDriver(gpu), "vulkan"));
     backend->output_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
     backend->metal_drawable_policy = !strcmp(SDL_GetGPUDeviceDriver(gpu), "metal");
     if (backend->metal_drawable_policy) {

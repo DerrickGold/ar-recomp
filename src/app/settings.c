@@ -2051,8 +2051,8 @@ const SettingDesc g_setting_descs[] = {
     NULL, NULL },
     BOOL_SETTING_MODERN(
         death_heim_final_battle, "AR_DEATH_HEIM_FINAL_BATTLE", "Death Heim final battle",
-        "Replace the final boss backdrop (07:08) with the Astral Rift: flowing nebulae, "
-        "distant stars and a fractured celestial halo. Requires Action Diorama 3D. "
+        "Enhance the native final boss nebula (07:08) with selective glow, richer colour "
+        "and source-matched light on the fighters. Requires Action Diorama 3D. "
         "Keeps the original fight, sprites and timing. Off restores the native background.",
         kSettingCat_Presentation, 0, false, CompletionSceneAvailable, NULL),
     BOOL_SETTING_MODERN(

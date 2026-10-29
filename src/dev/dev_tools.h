@@ -54,6 +54,11 @@ void DevTools_FormatInspectorInfo(const DevToolsContext *context,
 bool DevTools_DumpSceneAssets(const DevToolsContext *context);
 DevToolsCaptureResult DevTools_WriteFramebufferPpm(
     FILE *file, const DevToolsContext *context, bool require_composite);
+DevToolsCaptureResult DevTools_WriteFramebufferPng(
+    FILE *file, const DevToolsContext *context, bool require_composite);
+DevToolsCaptureResult DevTools_WriteFramebufferPngAtPhase(
+    FILE *file, const DevToolsContext *context, bool require_composite, float phase,
+    const struct FrameSlot *uploaded_frame);
 /* Diagnostic replay capture at an explicit frame-generation phase. Normal
  * screenshots always use the current, non-interpolated endpoint. Reuse an
  * uploaded frame when supplied, avoiding recapture and broken motion history. */

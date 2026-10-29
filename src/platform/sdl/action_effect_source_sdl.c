@@ -351,6 +351,7 @@ static bool Uniform(const DioramaProjection *v, unsigned width, unsigned height,
         sky->motion_source == 4 ? 5 : sky->motion_source == 3 ? 3 : 6;
     u->sky_mapping = sky->resident;
     u->sky_meta[0] = sky->count; u->sky_meta[1] = sky->active_band;
+    u->sky_meta[2] = sky->texture_offset.x; u->sky_meta[3] = sky->texture_offset.y;
     if (sky->world_plane.valid) {
       u->planes[2] = Plane(v, &sky->world_plane, motion_slot);
       u->planes[2].sky[2] = 2;
@@ -424,7 +425,7 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
     shadow_count = 0;
     for (unsigned i = 0; i < batch->count; ++i) {
       const ActionEffectSourcePrimitive *s = &batch->primitives[i];
-      if (s->meta[0] > kActionSourceFloorTriangle || s->meta[1] > 8) return false;
+      if (s->meta[0] > kActionSourceRainbowTriangle || s->meta[1] > 8) return false;
       if (s->meta[3] && scenery && scenery->valid) shadow_count = scenery->count;
     }
     if (shadow_count > kActionMoonlightMaxOccluders) return false;
@@ -497,7 +498,9 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
           primitive.meta[2] = UINT32_C(0x80000000) | (vertex_count << 4) | count;
           vertex_count += count;
         }
-        if (brightness != 1.0f)
+        if (primitive.meta[0] == kActionSourceRainbowTriangle)
+          primitive.extra[0] = brightness;
+        else if (brightness != 1.0f)
           for (unsigned c = 0; c < (primitive.meta[0] == kActionSourceQuad ? 4u : 3u); ++c)
             for (unsigned rgb = 0; rgb < 3; ++rgb)
               (c < 3 ? primitive.colors[c] : primitive.extra)[rgb] *= brightness;
@@ -599,6 +602,9 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
     }
     light_cycled = true;
   }
+  /* Shadow/light preparation uses clock.w as its stage. Projection reuses
+   * that slot for the sky-source destination; clock.z remains shadow count. */
+  u.clock[3] = view->bg2_skybox.to_texture;
   SDL_PushGPUComputeUniformData(cmd, 0, &u, sizeof(u));
   const SDL_GPUStorageBufferReadWriteBinding out = {.buffer = p->vertices, .cycle = true};
   SDL_GPUComputePass *compute = SDL_BeginGPUComputePass(cmd, NULL, 0, &out, 1);
@@ -636,12 +642,36 @@ failed:
   return false;
 }
 
+static bool StaticSkyPacket(const ActionEffectSourceBatch *batch) {
+  if(!batch||!batch->weather_only||batch->failed||!batch->count||batch->count>kActionSourceMaximumPrimitives||
+      !batch->primitives||batch->light_count)return false;
+  for(unsigned i=0;i<batch->count;++i) {
+    const ActionEffectSourcePrimitive *s=&batch->primitives[i];
+    /* origin.z stores the source flags as an exactly representable float. */
+    const unsigned flags=(unsigned)s->origin[2];
+    if(s->meta[1]!=kActionEffectProjectionPlane_Bg2||s->meta[3]||
+        !(flags&2u)||(flags&~23u))return false;
+  }
+  return true;
+}
+
 bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *motion,
     uint32_t mask, float phase, const ActionEffectSourceBatch *batch,
     const DioramaProjection *view, const ActionMoonlightOcclusion *scenery,
     ArRenderBlendMode blend, float brightness) {
   if (!p->batch_open) p->batch_failed = false;
   if (p->batch_failed) return false;
+  DioramaProjection single_sky;
+  if(view&&view->valid&&!view->bg2_plane.valid&&!view->bg2_skybox.world_plane.valid&&!view->bg2_skybox.to_texture&&
+      view->bg2_skybox.count>1&&view->bg2_skybox.count<=kDioramaBgMaxValidSpans&&
+      view->bg2_skybox.active_band>=0&&view->bg2_skybox.active_band<(int)view->bg2_skybox.count&&StaticSkyPacket(batch)) {
+    /* Fixed-point weather uses one affine sky mapping per source. Its shape
+     * does not follow row distortions, so the union of the bands can be drawn
+     * once. Native lighting, shadow/transport jobs, raster anchors and mixed
+     * packets retain per-band sampling and interpolation. */
+    if(view->bg2_skybox.active_band>0)return true;
+    single_sky=*view;single_sky.bg2_skybox.active_band=-1;view=&single_sky;
+  }
   const bool ok = Draw(p, device, motion, mask, phase, batch, view, scenery, blend, brightness);
   if (ok && !batch->count) return true;
   return FinishDraw(p, ok);
@@ -698,7 +728,8 @@ static bool Skybox(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *
   } u = {.target = {width, height, viewport.x, viewport.y},
          .motion = {slot, phase, input->periodic, input->band}, .mapping = input->mapping, .heat=input->heat};
   SDL_PushGPUVertexUniformData(cmd, 0, &u, sizeof(u));
-  const float f[4] = {1.f / texture_width, 1.f / texture_height, input->radius, 0};
+  float f[112] = {1.f / texture_width, 1.f / texture_height, input->radius, 0};
+  memcpy(f+4,&input->cloud_light,sizeof(input->cloud_light));
   SDL_PushGPUFragmentUniformData(cmd, 0, f, sizeof(f));
   SDL_ScaleMode scale;
   if (!SDL_GetTextureScaleMode(texture, &scale)) {

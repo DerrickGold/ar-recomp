@@ -4,7 +4,8 @@
 Requires a staged game directory (ar.sfc, config.ini, seed.srm, input.rec,
 assets/, game-assets/, diorama-layers.ini). Never writes its inputs. Captures
 are correctness evidence, NOT performance measurements. Compare with --compare;
-numpy accelerates image analysis; Pillow adds PNG previews. Keep raw evidence until differences have
+numpy accelerates image analysis; Pillow decodes the default PNG captures and
+adds difference previews (legacy PPMs still work). Keep evidence until differences have
 been reviewed. Use the same executable/backend and settings for both variants;
 --allow-binary-change explicitly permits a comparison between builds. Free Cam
 isolates rendering by default; use --camera-mode 'Dynamic Cam' to check framing.
@@ -27,7 +28,7 @@ import subprocess
 import sys
 
 from compare_pipeline_performance import (
-    capture_evidence, run_evidence, stage_asset_directory, validate_run_completion
+    capture_evidence, read_capture_rgb, run_evidence, stage_asset_directory, validate_run_completion
 )
 
 
@@ -218,13 +219,13 @@ def compare(a):
                 'phase', 'start', 'end', 'every', 'final_wram_sha256'):
         if cpu[key] != gpu[key]:
             raise ValueError(f'Unmatched {key}; comparison invalid')
-    if cpu['images'].keys() != gpu['images'].keys():
+    frame_names = [{Path(name).stem[5:]: name for name in run['images']} for run in (cpu, gpu)]
+    if frame_names[0].keys() != frame_names[1].keys():
         raise ValueError('Unmatched frame sets')
     work = a.output.resolve()
     work.mkdir(parents=True, exist_ok=False)
     rows, worst = [], None
-    for name in sorted(cpu['images'], key=lambda n: int(n[5:-4])):
-        gf = name[5:-4]
+    for gf in sorted(frame_names[0], key=int):
         for key in ('room', 'bg1', 'bg2', 'phase'):
             if cpu['states'][gf][key] != gpu['states'][gf][key]:
                 raise ValueError(f'Frame {gf} differs in {key}')
@@ -237,11 +238,11 @@ def compare(a):
                     raise ValueError(f'Frame {gf}: resident candidate mask excludes a reference plane')
         elif cpu['variant'] == gpu['variant'] and cpu['states'][gf] != gpu['states'][gf]:
             raise ValueError(f'Frame {gf}: generated plane masks differ')
-        paths = [Path(r['run_dir']) / name for r in (cpu, gpu)]
-        images = [p.read_bytes().split(b'\n', 3) for p in paths]
-        if images[0][:3] != images[1][:3]:
+        paths = [Path(r['run_dir']) / names[gf] for r, names in zip((cpu, gpu), frame_names)]
+        images = [read_capture_rgb(p) for p in paths]
+        if images[0][0] != images[1][0]:
             raise ValueError(f'Frame {gf}: output dimensions differ')
-        c, g = [i[3] for i in images]
+        c, g = [i[1] for i in images]
         pixels = len(c) // 3
         changed = over_2 = maximum = total = 0
         if c != g:
@@ -269,7 +270,7 @@ def compare(a):
     if any(worst[0]) and Image is not None and np is not None:
         for tag, path in zip(('cpu', 'gpu'), worst[2]):
             Image.open(path).save(work / f'worst-{tag}.png')
-        c, g = [np.asarray(Image.open(p), dtype=np.int16) for p in worst[2]]
+        c, g = [np.asarray(Image.open(p).convert('RGB'), dtype=np.int16) for p in worst[2]]
         Image.fromarray(np.clip(np.abs(c-g)*16, 0, 255).astype('uint8')).save(work / 'worst-difference-x16.png')
     report = dict(cpu=str(a.compare[0].resolve()), gpu=str(a.compare[1].resolve()),
                   binary_sha256=[cpu['binary_sha256'], gpu['binary_sha256']],

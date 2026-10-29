@@ -14,7 +14,7 @@ int main(int argc, char **argv) {
     ++argv;
   }
   if (argc != 3 && argc != 5 && argc != 9) {
-    fprintf(stderr, "usage: %s scene.ardi output.bmp "
+    fprintf(stderr, "usage: %s scene.ardi output.png "
         "[width height [distance-scale yaw pitch skybox]]\n", argv[0]);
     return 2;
   }
@@ -81,7 +81,7 @@ int main(int argc, char **argv) {
              (SDL_GetPerformanceCounter() - begin) * 1000 / frequency / iterations, iterations);
   }
   SDL_Surface *pixels=ok ? SDL_RenderReadPixels(ArSdlRenderBackend_Renderer(&device),NULL) : NULL;
-  ok=pixels && SDL_SaveBMP(pixels,argv[2]);
+  ok=pixels && SDL_SavePNG(pixels,argv[2]);
   if (!ok) fprintf(stderr,"replay failed: %s\n",SDL_GetError());
   else printf("%dx%d shared compositor reference: %s\n",width,height,argv[2]);
   SDL_DestroySurface(pixels);

@@ -155,7 +155,7 @@ const SharedRoomPreview = (() => {
       }
       skyboxKey=source;
       const error=backend.gl.getError();
-      if(!ok||error)throw Error(`Room rendering failed (${error}).`);
+      if(!ok||error)throw Error(`Room rendering failed (${error}). ${backend.warnings.join(' ')}`.trim());
       // Use the capture's stopped camera for UI, picking and subsequent drags.
       // Keeping the requested position would accumulate hidden overscroll.
       refreshNativeCameraControls();
@@ -426,6 +426,13 @@ const SharedRoomPreview = (() => {
     ensureRoom();
     return [api.RoomPreview_RayFieldMapScale(0),api.RoomPreview_RayFieldMapScale(1)];
   }
+  function cloudOpenings(seed,count) {
+    if(!api)return [];
+    const length=api.RoomPreview_CloudOpenings(seed,count);
+    const values=new Float32Array(api.memory.buffer,api.DioramaPreview_Input(),length),openings=[];
+    for(let i=0;i<length;i+=6)openings.push({centre:values[i],width:values[i+1],power:values[i+2],offset:values[i+3],reach:values[i+4],endWidth:values[i+5]});
+    return openings;
+  }
   initialize();
-  return {measure,placePlayerAt,syncSources,validateScenery,validatePolicyDocument,policyPlan,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;measures.clear();}};
+  return {measure,cloudOpenings,placePlayerAt,syncSources,validateScenery,validatePolicyDocument,policyPlan,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;measures.clear();}};
 })();

@@ -574,6 +574,54 @@ static bool ValidSkyboxBand(const DioramaSkyboxBandProjection *band) {
       band->output_y1 > band->output_y0;
 }
 
+void Diorama_MergeSkyWeatherBands(DioramaSkyboxProjection *sky) {
+  if (!sky || !sky->to_texture || sky->count > kDioramaBgMaxValidSpans) return;
+  unsigned count = 0;
+  if (sky->resident.meta[0] > 0) {
+    /* Raw GPU bands all share one vertical affine mapping, including after
+     * generated camera motion. Equal U intervals therefore form one run. */
+    if (sky->resident.meta[0] != sky->count ||
+        sky->count > kDioramaSkyboxSourceBands) return;
+    for (unsigned i = 0; i < sky->count; ++i) {
+      const float *band = sky->resident.bands[i];
+      if (!(band[1] > band[0]) || !(band[3] > band[2])) continue;
+      float *previous = count ? sky->resident.bands[count - 1] : NULL;
+      if (previous && previous[0] == band[0] && previous[1] == band[1] &&
+          previous[3] == band[2]) {
+        previous[3] = band[3];
+      } else {
+        if (count != i)
+          memcpy(sky->resident.bands[count], band, sizeof(sky->resident.bands[0]));
+        ++count;
+      }
+    }
+    memset(sky->resident.bands + count, 0,
+           (kDioramaSkyboxSourceBands - count) * sizeof(sky->resident.bands[0]));
+    sky->resident.meta[0] = count;
+  } else {
+    for (unsigned i = 0; i < sky->count; ++i) {
+      const DioramaSkyboxBandProjection band = sky->bands[i];
+      if (!ValidSkyboxBand(&band)) continue;
+      DioramaSkyboxBandProjection *previous = count ? &sky->bands[count - 1] : NULL;
+      /* Allow only floating-point normalization error: less than .0005
+       * source pixels across the full output height. */
+      if (previous && previous->x0 == band.x0 && previous->x1 == band.x1 &&
+          previous->y1 == band.y0 && previous->output_y1 == band.output_y0 &&
+          fabsf((previous->y1 - previous->y0) / (previous->output_y1 - previous->output_y0) -
+                (band.y1 - band.y0) / (band.output_y1 - band.output_y0)) < .0005f) {
+        previous->y1 = band.y1;
+        previous->output_y1 = band.output_y1;
+      } else {
+        sky->bands[count++] = band;
+      }
+    }
+    memset(sky->bands + count, 0,
+           (kDioramaBgMaxValidSpans - count) * sizeof(sky->bands[0]));
+  }
+  sky->count = count;
+  sky->active_band = -1;
+}
+
 bool Diorama_SkyboxCaptureBounds(const DioramaProjection *projection,
                                  float *x0, float *y0, float *x1, float *y1) {
   if (!projection || !projection->valid || !x0 || !y0 || !x1 || !y1)

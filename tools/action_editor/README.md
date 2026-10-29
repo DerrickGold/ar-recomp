@@ -429,6 +429,75 @@ strands=12
 projection plane and fixed-point flag. Bounds, geometry limits and batching are
 unchanged, and only required source/attachment masks are requested.
 
+Light fans also expose **Cloud-break modulation** (`twinkle`, 0–1). It slowly
+changes the transmission of the fan and its individual strands over **Cycle
+frames**, while their positions and angles remain fixed. Zero keeps existing
+fans steady. For distant storm god rays, use `bg2-point`, background placement,
+disable scenery occlusion, and leave the foreground light receivers off.
+Foreground artwork still covers the sky effect normally.
+**Ray source feathering** (`fade-in`, 0–0.5) fades the start of each strand over
+a fraction of its length. Zero preserves crisp window/doorway attachments.
+
+For Aitos-style backlit cloud edges, choose **Cloud-break lighting** on BG2.
+This material combines a cream-colored edge, amber halo, broad angled shafts
+and a lower-cloud reflection. Its rectangle covers the whole composition;
+edge/reflection heights are fractions within it. Drag corners to resize or
+use the rotation handle to aim the shafts. Opening count, pattern seed, moving
+cloud cover, cycle time, softness and four component strengths are editable.
+Openings have independently seeded positions, widths, brightness and spill
+lengths, allowing clusters and dark gaps. Adding openings preserves the earlier
+ones; changing the seed reshuffles the composition. Map guides use the shared
+renderer layout to show source widths, widening beam envelopes and directions.
+Each opening casts one continuous shaft across its full width, spreading a
+soft wash into the sky. **Sky beam strength** controls the light in the air
+independently of the cloud's surface color; **Sky beam falloff** controls how
+quickly it fades below the opening. These retain the existing `streak-strength`
+and `falloff` INI keys. Shafts keep a fixed source and direction while cloud
+cover varies their brightness. The cream
+edge and amber spill colors also determine their warm scattering color.
+Both colors are configurable. The same transmission warms rolling BG2 clouds
+and lets the bright openings show through them. All controls support Shift-reset,
+copy/paste, undo and project export. Sparse INI definitions use the native defaults.
+
+**Background base brightness** (`background-brightness`, 0–1; default 1) dims
+the BG2 artwork before this sunlight is applied. It can deepen a waterfall
+crevice while preserving bright, warm illumination through the opening.
+The dimming follows the world-space rectangle with a 10% feather on each edge;
+overlaps use the strongest dimming rather than stacking. This happens in the
+existing sky/plane material, with no extra pass or texture. Mist, foreground
+scenery and actors keep their own lighting controls. The neutral default leaves
+existing rooms unchanged; disabling the light also disables its background dimming.
+
+This is atmospheric BG2 illumination, so it does not illuminate actors or
+foreground scenery. It supports live captured BG2 planes and skyboxes; named
+ROM replacement skies and dedicated periodic skyboxes retain their own material.
+Up to four enabled regions per room/terrain are accepted. All effects remain
+under **Environmental effects**. Aitos 04:01 contains four editable examples,
+with two softer depth bands of **Distant storm lightning**. The lightning
+**Distant bolt softness** control feathers the bolt without a new blur pass.
+Each strike has an irregular main channel and thinner forks. Sustained return
+strokes retrace the lingering channel and reveal additional forks; some strikes
+have a third pulse. **Bolt paths** controls the main channel plus up to three
+forks; **Channel bends** controls the irregularity. **Storm pattern seed**
+changes both shapes and timing. **Mean strike interval** controls the quiet
+spacing, while **Active fraction** stretches the whole sequence: bright holds,
+spacing between discharges and the fading afterglow. The channel remains visible
+between pulses.
+The dashed **Cloud attachment** guide marks the possible strike origins, 12%
+below the region's top. Place this guide inside the cloud artwork, not in the
+clear sky below it. The flash halo is centred on the same origin. The guide
+moves and scales with the region, including copied and pasted effects.
+**Horizontal parallax** sets camera travel relative to BG1 (Aitos uses 0.25
+for the source cloud band); leave it blank to inherit BG2. **Ground palette**
+and **Ground colour indices** select the distant terrain to strike. Aitos uses
+palette 1 and indices `1,2,3,4,5,6,7,8,9,10`. The region height becomes a maximum
+reach: the main bolt and forks stop at their first terrain contact, including
+native raster scroll and tile edits. A missing contact hides the strike. Set
+indices to `none` for airborne lightning. These controls require a BG2 point
+anchor; changing to another anchor clears them. Copy/paste, Shift-reset and
+project export retain these settings.
+All of this uses the shared renderer, including deterministic reverse scrubbing.
+
 **Paint ground mist** switches to BG1's map and enables the shared collision
 overlay. Drag a rectangle around the floors you want to cover (up to 512 × 512
 pixels). Each column searches downward for its first supported floor; spikes
@@ -830,7 +899,7 @@ keep the source width narrow for a vine tip. **Water landing** (`ripple=1`)
 adds a small expanding ring at that bottom edge after impact. This is explicit,
 not automatic water detection: enable it only above verified open water and
 keep the fall clear of platforms. The preset starts with ripples disabled.
-BG1 **Canopy response** lets dew catch the same light as nearby scenery.
+BG1 **Light response** lets dew catch the same canopy light as nearby scenery.
 The drop and ripple share one deterministic clock; panning or reverse scrubbing
 does not restart either. Moss and ripple masks use the atlas's remaining cells,
 without enlarging it. The editor and native game use the same kernels and budgets.
@@ -857,7 +926,87 @@ single render batch. Validation reserves each entire field in its draw pass and
 all possible material-light passes, including actor copies. Independent alpha
 foliage and additive lighting no longer consume each other's batch allowance;
 camera culling is never used to admit an over-budget pass. The shared immutable
-1024×512 atlas is built/uploaded at renderer startup and uses existing shaders.
+1024×768 atlas is built/uploaded at renderer startup and uses existing shaders.
+
+**Cloud volume** is available on textured, rolling `cloud-bank` emitters.
+A positive `volume` selects rounded cloud billows; its 0–1 value deepens the
+contrast between the main crest tint and **Shadowed body tint**. Zero preserves
+existing mist. The editor enables rolling when volume is first enabled and
+clears volume when texturing/rolling is disabled or a ground path is drawn.
+Drift, billow, cycle and seed move and distribute fixed shapes without stretching
+their density or shading. All lobes stay inside the saved region as it is resized.
+BG1 and BG2 anchors, copy/paste, reset and project ZIP export use the same controls.
+The Aitos sky uses BG2 fixed-point anchoring so raster bands cannot bend a cloud.
+
+Eight density/lighting pairs are baked from small 3D cloud volumes at startup.
+They use the same two masked quads per lobe and alpha batch as rolling mist;
+there is no per-frame volume integration, new shader or additional render pass.
+Cloud opening light tints the baked illumination without erasing its shadows.
+The atlas grows by 1 MiB on the GPU, with 256 KiB of additional cached alpha and
+500 KiB of shared startup scratch on the CPU. Existing mist and canopy cells
+retain their pixel content.
+
+**Spray rainbow response** (`rainbow`, 0–1) is available on textured rolling
+cloud banks. Moving spray reveals fragments of a shared directional spectrum,
+using direct **Cloud-break lighting**, droplet density and the current viewing
+ray. The spectrum is centred opposite the sunlight; it is not an arch fitted to
+each bank. Resizing a bank changes the spray coverage, not the optical curvature.
+
+On the Cloud-break light, **Sun direction in depth** (`sun-depth`, −85° to 85°;
+default 48°) supplies the out-of-plane direction missing from the 2D beam angle.
+Positive values shine from behind the viewer into the scene; negative values
+shine toward the viewer and generally hide the rainbow. This control changes
+the spray's optical response without moving the sky openings. Nearby banks
+under the same sunlight show pieces of the same spectrum. Camera rotation and
+zoom change it smoothly; output resolution does not set its curvature.
+
+This is a broadened RGB approximation to a primary rainbow, intended for the
+source artwork and fine spray, not a droplet-size simulation. BG1 mist samples
+BG2 sunlight using the captured camera translation. Ambient halo and reflected
+light do not generate rainbows. Zero sunlight, zero density or disabled lighting
+also suppress the spectrum. Both controls support copy/paste, Shift-reset and
+project/INI export. A ground contour or disabled texturing/rolling clears the
+bank's response.
+
+The bounded mesh uses the existing alpha batch and atlas. Native rendering
+retains its spray/illumination samples and evaluates the view-dependent colour
+in the existing GPU projection shader; the editor/reference renderer uses the
+same optical math. No additional shader pipeline, texture, pass or readback is
+needed. The existing effect projection pipeline is prewarmed at game startup.
+Aitos's local waterfall spray banks use a response of 0.9. The main lower mist
+uses 0.65 in 04:02 and 1 in 04:03, in all regional profiles. Incident light,
+viewing angle and mist density attenuate the result. The foreground wisps keep
+their response off so overlapping near/far banks do not duplicate the spectrum.
+
+BG1 rolling mist's **Light response** (`canopy-response`, 0–1) also catches
+Cloud-break sunlight. Its existing lobe colours sample the same world field,
+translated from BG1 to BG2, while retaining alpha, shape and shaded undersides.
+This is independent of the rainbow response and adds no geometry or pass.
+The Aitos boss funnel uses one centred vertical opening, a 41.5° sun depth,
+and responsive lower/airborne mist and platform spray. The crossing keeps its
+angled light. All of these controls remain ordinary editable effect properties.
+
+**Spray sparkle response** (`sparkle`, 0–1; default 0) adds fine droplets to
+textured rolling cloud banks. They follow the moving billows, sample the same
+density mask and catch direct Cloud-break sunlight. Empty air and unlit mist
+do not sparkle; the sun's colour warms the highlights. Ambient halo alone does
+not illuminate them. There are at most four candidates per body lobe, with
+independent clocks, using the existing particle geometry and alpha batch.
+The inspector enables rolling when needed and clears the response when rolling
+or texturing is disabled or a ground contour is added. Copy/paste, Shift-reset
+and project/INI export preserve the control. Budget validation reserves the
+maximum added geometry before admitting a bank.
+
+Particle regions also offer **Water glints (flowing)** (`pattern=water-glints`).
+These small reflections follow the configured travel and twinkle, unlike the
+existing stationary **Surface glints**. For distant waterfalls, use BG2 fixed
+point anchoring, background placement and **Light response** (`canopy-response`)
+of 1. This makes glints follow BG2 scrolling and appear only in direct sunlight;
+foreground scenery covers them. They use the existing additive BG2 decoration
+pass. A response below 1 allows some glints outside the light. BG1 regions and
+particle paths retain their canopy-light response and also sample sky light.
+The Aitos defaults add flowing glints over both waterfall backgrounds and
+sparkles on local spray and lower foreground mist, leaving broad clouds soft.
 
 **Rolling ground dust** is a cloud bank with an optional `points` contour.
 Trace the ground in its effect modal, or edit up to 16 local X,Y pairs in
@@ -908,14 +1057,20 @@ position and visibility without writing game memory or allocating game objects.
 Its offset, area, tint, density and billow use the existing actor attachment
 controls and preview; the shipped definition covers all three terrain profiles.
 
-**Background heat shimmer** is a `heat-haze` region placed on BG2. It displaces
-the existing background UV samples in the shared diorama renderer, including
-skybox-only mode; actors and foreground textures remain sharp. Amplitude and
-intensity control displacement (capped at four native pixels), lifetime sets
-the cycle, and the rectangle feathers the edges. Up to four regions are
-supported; overlapping envelopes take the strongest displacement. This uses
-a fixed mesh and the resident skybox shader, with no scene readback or extra
-render target. The flat game view does not apply these BG2-only regions.
+**Scenery heat shimmer** is a `heat-haze` region placed on either map. BG1
+anchoring distorts playfield scenery above lava (low/high/far priority bands
+share the same displacement). BG2 anchoring distorts the distant background,
+including skybox-only mode. Actors and HUD remain sharp. Amplitude and intensity
+control displacement (capped at four native pixels), lifetime sets the cycle,
+and the rectangle feathers its edges. Up to four regions are supported per
+room; overlapping envelopes take the strongest displacement. Move/resize the
+map marker or switch its BG1/BG2 anchor in the modal to edit the heated air.
+
+BG1 heat runs per fragment in the existing prewarmed scenery material, before
+ordinary/DOF/priority filtering. This avoids camera-dependent coarse mesh
+waves and adds no draw pass, scene capture or GPU readback. BG2 retains its
+fixed mesh/resident skybox path. These authored regions use the shared diorama
+renderer; flat mode retains its separate native lava-lake heat effect.
 
 Placed torches expose **Moving torch shadows**. Their spill uses the shared
 scenery coverage field with a slight source sway. The direct spill is softly
@@ -982,6 +1137,153 @@ build/actraiser_action_scene_replay --ppm frame.ppm scene.arscene
 See [the snapshot contract](scene-snapshot.md) for the format and comparison
 scope. Original-background snapshots do not include enhanced Diorama scenes.
 
+Scheduled game captures (`AR_SHOT_AT_GF` / `AR_SHOT_EVERY`), F2 snapshots,
+scene-asset dumps and native shared-renderer captures now write compressed,
+lossless PNG images. This changes image storage only; memory/PPU dumps keep their
+existing binary formats. `AR_SHOT_FORMAT=ppm` explicitly restores the legacy
+scheduled-capture format for byte-contract tools. Existing PPM evidence remains
+readable by the comparison tools. PNG pixel comparison requires Pillow; encoding
+uses the already-required SDL 3.4+ API and introduces no new runtime library.
+Capture readback/compression runs only when requested, never in ordinary rendering
+or the measured room-sweep frames.
+
+### Standalone native room sweeps
+
+`actraiser_action_room_benchmark` runs the same complete-room renderer without a
+browser, emulation or controller replay. It loads `.arscene` room assets and the
+two authored INIs directly. It supports scrolling, animation, environmental
+receivers, extended scenery and native Metal/Vulkan/DX12. No personal settings or
+saves are written. The fixture export is local ROM-derived data; do not distribute it.
+
+```sh
+cmake -S . -B build-render-perf -DCMAKE_BUILD_TYPE=Release -DAR_TESTS_ONLY=ON -DBUILD_TESTING=ON
+cmake --build build-render-perf --target actraiser_action_room_benchmark
+node tools/action_editor/export_gpu_rooms.mjs build/action-editor/ar-action-layer-editor.html runs/sweep-assets 0
+python3 tools/action_editor/benchmark_rooms.py \
+  --binary build-render-perf/actraiser_action_room_benchmark \
+  --rooms runs/sweep-assets --layers diorama-layers.ini --effects action-effects.ini \
+  --output runs/room-benchmark --drivers metal
+```
+
+The supplied route plan covers Marahna 05:01–08 and Aitos 04:01–03, including
+high/low sections and lava pits. Use `--only` to select named routes or `--plan`
+for another JSON plan. Review captures to verify that each route exposes the
+intended effects; the CSV coordinates are **requested** camera positions, subject
+to the normal room clamps. Actor stand-ins follow the route; this is not a
+benchmark of scripted enemies, game logic, interpolation, CRT or presentation pacing.
+
+Each execution warms the **entire camera route and animation interval**, seeks
+back and then records 240 frames. The runner repeats three times, alternates
+effects off/on and backend order, checks the backend and rejects late shader
+compilation. `--baseline` adds a paired executable comparison. `--wake-deck`
+wakes/checks the desktop display before every execution and rejects runs where
+the internal backlight turns off; Linux telemetry records clocks, temperature
+and GPU load. Stage the binary, SDL library, scripts, room assets and INIs in an
+isolated Deck directory and set `LD_LIBRARY_PATH` there. Under WSL, use `--wsl`
+and `--drivers direct3d12 vulkan` to launch native Windows executables. With a
+locked/off Windows display, use those paired results only for compatibility and
+gross backend differences, not gameplay pacing.
+
+`prepare_ms` includes editor room rasterization and texture preparation;
+`compose_submit_ms` covers effect/compositor preparation and submission.
+`gpu_wait_ms` is the remaining queued work at a deliberate GPU-idle wait, **not a
+GPU timestamp**. Their sum is serial completion time, not the production game's
+overlapped frame budget. `submit_elapsed_ms` is the combined preparation and
+submission **wall time**, not thread CPU usage (older traces called this
+redundant column `cpu_ms`). Actual thread CPU times require `AR_BENCH_PROFILE`.
+Warmup has no CSV rows. No images/readbacks occur in
+measured frames. `summary.json` records per-run means, medians, p95/p99; keep the
+three individual results when comparing variation. Every run retains its raw
+CSV, log, display status and telemetry, with input hashes in `inputs.json`.
+Malformed numeric arguments and route plans are rejected before rendering.
+Failure/timeout telemetry is retained, and incomplete or inconsistent timing
+rows cannot become accepted summary statistics.
+
+For room `07:08`, use `--final-battle` (or `AR_BENCH_FINAL_BATTLE=1` for a
+direct invocation) to preview the optional native-nebula enhancement. It is
+independent of the environmental-effects toggle and recorded in `inputs.json`.
+
+Vulkan and DX12 retain upload staging per texture by default. This matters for
+the native editor's CPU-rendered tile images: allocating and mapping fresh
+staging for every upload caused repeated minor page faults on the Deck.
+`AR_SDL_GPU_UPLOAD_REUSE=0` remains available for direct executable diagnostics;
+the repeat runner clears inherited rendering overrides to keep its default
+measurements reproducible. Metal keeps its existing upload policy.
+
+For videos, capture separately at a smaller resolution:
+
+```sh
+python3 tools/action_editor/benchmark_rooms.py \
+  --binary build-render-perf/actraiser_action_room_benchmark \
+  --rooms runs/sweep-assets --layers diorama-layers.ini --effects action-effects.ini \
+  --output runs/cloud-preview --drivers metal --only aitos-clouds \
+  --capture --size 640 400 --frames 240 --repeats 1
+# Run for either the off/on capture directory produced above:
+ffmpeg -framerate 30 -i frames/frame-%06d.png -c:v libx264 -crf 25 -pix_fmt yuv420p -movflags +faststart preview.mp4
+```
+
+Capture-only mode writes lossless compressed PNGs and a camera trace, deliberately
+omitting performance numbers. The animation step is two game ticks at 60 Hz per
+output frame (30 fps). Use identical routes, settings and frame counts for
+before/after captures. `AR_BENCH_SHOT=/path/final.png` optionally saves just the
+last frame after a timed run. `--mode on` or `off` selects one configuration.
+
+#### Diagnosing a slow route
+
+For a direct benchmark invocation, `AR_BENCH_PROFILE=cpu.csv` adds owner-thread
+CPU times for room preparation, composition and completion waiting, plus source
+effect/skybox callback times and source packet counters. This is opt-in and does
+not change the ordinary sweep CSV. The source draw/submission counters cover
+the effect backend only, not all renderer or driver calls. Callback times are
+nested inside composition; do not add them to the outer totals. Thread-clock
+sampling has a cost, so retain ordinary runs for before/after comparisons.
+
+`tools/profile_vulkan_sweep.c` is a **Linux diagnostic proxy**, not part of the
+game or its portable renderer. It records actual Vulkan submissions and
+timestamp-query intervals, and correlates GPU time with `CLOCK_MONOTONIC` using
+`VK_EXT_calibrated_timestamps`. Build with Vulkan headers and a Linux compiler
+(or the same Linux cross compiler used for the benchmark):
+
+```sh
+cc -O2 -Wall -Wextra -shared -fPIC tools/profile_vulkan_sweep.c -ldl -o profile-vulkan.so
+SDL_GPU_DRIVER=vulkan \
+SDL_VULKAN_LIBRARY="$PWD/profile-vulkan.so" \
+AR_BENCH_FRAME_PROBE="$PWD/profile-vulkan.so" \
+AR_VK_PROFILE=gpu.csv AR_BENCH_PROFILE=cpu.csv AR_BENCH_WARMUP=240 \
+  build-render-perf/actraiser_action_room_benchmark \
+  sweep.csv diorama-layers.ini action-effects.ini rooms/0401.arscene \
+  0 712 3800 712 128 888 240
+```
+
+Use an awake display and the same full-route warmup/repeats as ordinary sweeps.
+The repeat runner deliberately clears inherited rendering overrides; the above
+is a direct diagnostic invocation. Do not run file transfers or other profiling
+processes during measurement. The proxy requires one device/owner thread,
+64-bit graphics/compute timestamps and the calibrated-timestamp extension. It
+supports the harness's `vkQueueSubmit` / device-idle path, **not arbitrary game
+execution**, and fails rather than silently overflowing its fixed capacities.
+It uses no pixel readback and reads timestamp results only after the harness's
+existing idle wait. Its query collection still adds overhead to the instrumented
+wall-clock wait; compare ordinary runs separately. `AR_BENCH_SHOT` captures after
+the probe closes; per-frame capture mode cannot be combined with the probe.
+`benchmark_probe.h` defines the frame/close protocol used by the optional
+library. Failed benchmark runs also collect pending work before closing it;
+neither the protocol nor the probe is linked into the game.
+
+The GPU CSV includes `command_span`, draw/compute/upload events, CPU
+`queue_submit` calls and the CPU `device_idle` interval. `start_ns`/`end_ns` use
+the calibrated host clock; `deviation_ns` records calibration uncertainty.
+Shader IDs are FNV-1a-64 hashes of each module's SPIR-V bytes. Draw timestamps
+span top-to-bottom pipeline stages and include overlapping work/dependencies:
+**their durations are not additive or exclusive shader costs**. Command spans
+also include dependencies and scheduling gaps, not pure GPU utilization.
+Compare first-submit return to first GPU timestamp, the GPU span, and last GPU
+timestamp to idle return separately. A delayed first timestamp does not itself
+identify the OS, compositor or driver as the cause.
+
+The measured Aitos/Marahna hot-path findings and next experiments are recorded
+in [the 2026-10-29 audit](../../docs/environment-hotpaths-20261029.md).
+
 ### Captured scenes through WebGL2
 
 WASM-enabled `build.sh` also builds `ar-renderer-preview.html` and adds a link near
@@ -1010,7 +1312,7 @@ python3 tools/action_editor/build_compositor.py build/action-editor/ar-renderer-
 
 # Replay precisely those pixels/settings using the native GPU backend.
 cmake --build build --target actraiser_diorama_replay actraiser_diorama_snapshot_test
-build/actraiser_diorama_replay runs/compositor-fillmore/scene.ardi runs/compositor-fillmore/native.bmp
+build/actraiser_diorama_replay runs/compositor-fillmore/scene.ardi runs/compositor-fillmore/native.png
 ```
 
 The native capture environment controls are `AR_DIORAMA_SNAPSHOT=/path/scene.ardi`
@@ -1702,3 +2004,55 @@ display pacing. Scrolling runs also benefited when consecutive frames shared
 the same resolved tile camera/animation state, but CPU/system variation makes
 their exact percentages less useful. Local scripts and raw results are in
 `runs/effect-packing-20261027/benchmark-cache*.py` and `cache-parity.py`.
+
+### Shared cloud materials
+
+Native rendering and the WASM preview use the cloud material, motion and mesh
+kernels in `src/render/cloud_material.*`, `cloud_noise.h`, `cloud_motion.h` and
+`cloud_mesh.h`. The existing cloud-bank, mist, spray, smoke and complete-field
+controls retain their profiles and serialized properties. This does not change
+saved regions, BG1/BG2 anchors, timeline behaviour, palette or layer ordering.
+New cloud styles should extend these material/shape profiles instead of adding
+another private baker. Scene-specific floor support, actor emission and
+projection stay in their adapters. See `docs/aitos-act1-effects.md` for the
+consolidation parity checks and render-path boundaries.
+
+### Native final-battle nebula
+
+The optional room `07:08` enhancement grades and blooms the original projected
+background. **Native nebula glow (07:08)** in Shared renderer previews the game
+preference; **Settings → Native nebula glow** edits the material. These are
+independent, so disabling a preview does not erase authored values.
+
+`native-bloom` in the room's `diorama-layers.ini` section stores `strength`,
+`radius` (native image pixels), `threshold`, `saturation`, `contrast`, `light`
+and `receivers` (player 2, enemies 4, both 6, neither 0). Save project, level INI,
+undo/redo and Shift-click defaults use the same values. The controls are disabled
+outside the final battle. Reset removes the override and restores engine defaults.
+
+The same section also controls drifting space dust: `dust` (density, 0–1),
+`dust-scale` (spread, 0.5–2), `dust-speed` (integer 0–4), and six-digit RGB
+`dust-blue` / `dust-rose` colours. Density zero disables the additional clouds;
+speed zero freezes them. Old material lines load the new default cloud settings.
+The sparse wisps use the shared cloud density, mesh and motion kernels and sit
+behind fighters. Their gameplay clock freezes when paused; editor seeking is
+deterministic, including the scene-clock wrap.
+
+Six cloud variants share one 576×96 procedural atlas (216 KiB) and one geometry
+draw into the existing background target, before light extraction. The atlas is
+prepared with boot resources. No additional shader, filter pass or per-frame
+texture upload is needed. Native resident skyboxes publish their already-resolved
+source bands for matching CPU detail placement; this requires no GPU readback.
+
+Native and WASM renderers share the original raster-wave input, colour shader
+and projected radiance map. Original art stays at output resolution; the two
+filter targets are bounded to 640×360. The original geometry is submitted once,
+then actors and foreground priority bands retain their painter slots. Authored
+lights, dimming and atmospheric overlays remain available. There are no new
+bitmap assets, CPU readbacks or effect image uploads during animation. Shaders
+are included in the existing boot preparation for Metal, Vulkan and DirectX 12.
+The default halo is broader than the bright filament cores, with restrained
+saturation and separate fighter illumination. Glow strength supports the full
+0–3 range without exceeding normalized texture-tint limits or disabling the
+enhancement. Existing authored scenery illumination is reused for extraction
+and the normal scene; it is not rendered twice.

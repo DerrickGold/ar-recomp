@@ -506,7 +506,7 @@ typedef struct ActionSourcePacketCache {
   ActionEffectSourceLightJob *lights;
   unsigned count, capacity, light_count, light_capacity;
   uint64_t revision;
-  bool valid, failed, requested, lighting, particles, scenery_exposure_in_mesh, scenery_lighting_in_material, atmosphere_unlit;
+  bool valid, failed, requested, lighting, particles, scenery_exposure_in_mesh, scenery_lighting_in_material, atmosphere_unlit, weather_only;
   unsigned particle_count;
   uint8_t particle_indices[kActionAuthoredMaxInstances];
   ActionEffectLocalRect particle_bounds[kActionAuthoredMaxInstances];
@@ -545,11 +545,12 @@ static bool RetainSourcePacket(ActionSourcePacketCache *cache,
   if (source->light_count)
     memcpy(cache->lights, source->lights, source->light_count * sizeof(*cache->lights));
   cache->count = source->count;
+  cache->weather_only = source->weather_only;
   cache->light_count = source->light_count;
   return true;
 }
 
-/* Only source visibility changes require new particle cells. Camera matrices,
+/* Only source visibility changes require new particle cells or cloud patches. Camera matrices,
  * output size and the active skybox band are GPU projection inputs and must
  * not rebuild/upload identical source geometry on every repaint. */
 static bool UpdateSourceParticleBounds(ActionSourcePacketCache *cache,
@@ -590,11 +591,13 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
     if (pass < kActionEffectRenderLayer_Count)
       for (unsigned i = 0; i < slot->action_scene_effects.authored_count && i < kActionAuthoredMaxInstances; ++i) {
         const ActionEffectInstance *effect = &slot->action_scene_effects.authored[i];
-        if (effect->kind == kActionEffect_AuthoredParticleArea && effect->render_layer == pass)
+        if (ActionEffectSource_UsesViewBounds(effect) &&
+            (effect->render_layer==pass || (ActionEffectReceivers_IsLight(effect->kind) &&
+             (ActionEffectReceivers_Layer(effect)==pass || ActionEffectReceivers_SurfaceLayer(effect)==pass))))
           cache->particle_indices[cache->particle_count++] = (uint8_t)i;
       }
   }
-  if (particles && cache->particle_count &&
+  if (cache->particle_count &&
       UpdateSourceParticleBounds(cache, &slot->action_scene_effects, projection))
     cache->valid = false;
   if (!cache->valid || cache->lighting != lighting || cache->particles != particles ||
@@ -641,6 +644,7 @@ static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
       .primitives = cache->primitives, .count = cache->count, .capacity = cache->capacity,
       .lights = cache->lights, .light_count = cache->light_count,
       .light_capacity = cache->light_capacity, .failed = cache->failed,
+      .weather_only = cache->weather_only,
       .revision = cache->revision, .packet_slot = packet_slot};
   if (!submit(device, &source, projection->diorama_projection,
           &slot->action_scene_effects.scenery, blend,
@@ -954,6 +958,29 @@ bool PresentActionEffects_DrawActorLight(void *userdata, const DioramaProjection
   return DrawMaterialLight(userdata, diorama, receiver);
 }
 
+bool PresentActionEffects_DrawSkyWeather(void *userdata, const DioramaProjection *diorama, bool submit) {
+  PresentActionPlaneEffectContext *context=userdata;
+  const FrameSlot *slot=context->slot;
+  ActionEffectProjectionContext projection=DecorationProjection(slot,context->viewport,diorama);
+  const unsigned layer=kActionEffectRenderLayer_Bg2Weather;
+  if (context->source_draw) {
+    ActionSourcePacketCache *cache=PrepareSourcePacket(slot,&projection,layer,true,true);
+    if (cache->failed) return false;
+    if (!submit) return cache->count>0;
+    if (!cache->count) return true;
+    return DrawSourceDecoration(context->device,slot,&projection,layer,true,true,
+        kArRenderBlendMode_Add,context->source_draw);
+  }
+  ActionSceneEffectRenderBatch *geometry=&s_action_effect_render_scratch.scene;
+  if (!ActionSceneDecorationRender_Build(&slot->action_scene_effects,layer,true,true,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&projection,geometry))return false;
+  if (!submit)return geometry->index_count>0;
+  if (!geometry->index_count)return true;
+  FadeEffectVertices(slot,geometry->vertices,geometry->vertex_count);
+  EffectBatch batch=SceneBatchView(context->device,geometry);
+  return EffectRenderer_Submit(context->device,&batch,kArRenderBlendMode_Add);
+}
+
 void PresentActionEffects_DrawDioramaPlane(
     void *userdata, int plane, const DioramaProjection *diorama_projection) {
   PresentActionPlaneEffectContext *context = userdata;
@@ -970,6 +997,7 @@ void PresentActionEffects_DrawDioramaPlane(
   static bool announced[kActionEffectRenderLayer_Count];
   for (unsigned i = 0; i < sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]); i++) {
     const ActionDecorationPass *pass = &kDecorationPasses[i];
+    if (pass->layer==kActionEffectRenderLayer_Bg2Weather && diorama_projection->bg2_skybox.weather_composited) continue;
     if (pass->attachment != plane ||
         (pass->finite_plane_only && diorama_projection->bg2_skybox.count)) continue;
     if (pass->layer == kActionEffectRenderLayer_Bg2Alpha && !FrameUsesBg2Alpha(slot))

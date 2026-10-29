@@ -45,6 +45,7 @@ typedef struct ActionSceneryShadow {
   float x, y, step;
   bool valid;
 } ActionSceneryShadow;
+#include "action_cloud_light.h"
 typedef struct ActionEffectGeometryWriter {
   ArRenderVertex2D *vertices;
   int32_t *indices;
@@ -57,6 +58,9 @@ typedef struct ActionEffectGeometryWriter {
   unsigned light_receiver; /* Zero for visible atmospheric volume. */
   const ActionSceneEffectFrame *frame; /* Captured bodies and canopy transport for rolling mist. */
   bool atmosphere_unlit;
+  bool cloud_light_ready;
+  DioramaCloudLight cloud_light;
+  float sun_directions[3][4];
 } ActionEffectGeometryWriter;
 bool ActionSceneryShadow_Prepare(ActionSceneryShadow *shadow, ActionSceneryShadowCache *cache,
                                  const ActionMoonlightOcclusion *occlusion,

@@ -154,12 +154,36 @@ def run_evidence(log: str, root: Path | None = None) -> dict:
             "final_wram_sha256": digest(run_dir / "dump_wram.bin")}
 
 
+def read_capture_rgb(path: Path) -> tuple[tuple[int, int], bytes]:
+    """Decode diagnostic PNGs or legacy P6 captures for pixel comparisons."""
+    if path.suffix == '.png':
+        try:
+            from PIL import Image
+        except ImportError as error:
+            raise RuntimeError('PNG comparison requires Pillow (python -m pip install Pillow)') from error
+        try:
+            with Image.open(path) as image:
+                if image.format != 'PNG' or min(image.size) <= 0:
+                    raise ValueError(f'Invalid composite PNG: {path}')
+                return image.size, image.convert('RGB').tobytes()
+        except (OSError, SyntaxError) as error:
+            raise ValueError(f'Incomplete composite PNG: {path}') from error
+    parts = path.read_bytes().split(b'\n', 3)
+    if len(parts) != 4 or parts[0] != b'P6' or parts[2] != b'255':
+        raise ValueError(f'Invalid composite PPM: {path}')
+    width, height = map(int, parts[1].split())
+    if width <= 0 or height <= 0 or len(parts[3]) != width*height*3:
+        raise ValueError(f'Incomplete composite PPM: {path}')
+    return (width, height), parts[3]
+
+
 def capture_evidence(run_dir: Path, start: int, end: int, every: int) -> dict:
     if start < 0 or end < start or end > 65535 or every < 1:
         raise ValueError("Invalid composite capture schedule")
-    expected = {f"shot_{frame}.ppm" for frame in range(start, end + 1)
+    extension = "png" if any(run_dir.glob("shot_*.png")) else "ppm"
+    expected = {f"shot_{frame}.{extension}" for frame in range(start, end + 1)
                 if frame % every == 0}
-    images = {path.name: digest(path) for path in run_dir.glob("shot_*.ppm")}
+    images = {path.name: digest(path) for path in run_dir.glob(f"shot_*.{extension}")}
     if not expected or images.keys() != expected:
         missing = sorted(expected - images.keys())
         extra = sorted(images.keys() - expected)
@@ -167,12 +191,7 @@ def capture_evidence(run_dir: Path, start: int, end: int, every: int) -> dict:
                          f"{len(missing)} missing {missing[:10]}, "
                          f"{len(extra)} extra {extra[:10]}")
     for name in images:
-        parts = (run_dir / name).read_bytes().split(b"\n", 3)
-        if len(parts) != 4 or parts[0] != b"P6" or parts[2] != b"255":
-            raise ValueError(f"Invalid composite PPM: {name}")
-        width, height = map(int, parts[1].split())
-        if width <= 0 or height <= 0 or len(parts[3]) != width * height * 3:
-            raise ValueError(f"Incomplete composite PPM: {name}")
+        read_capture_rgb(run_dir / name)
     return images
 
 
@@ -205,7 +224,7 @@ def validate_capture_view(log: str, images: dict, required: str) -> None:
                 raise ValueError("View trace reset during capture run")
             transitions.append((frame, view))
     for name in images:
-        frame = int(re.fullmatch(r"shot_(\d+)\.ppm", name)[1])
+        frame = int(re.fullmatch(r"shot_(\d+)\.(?:ppm|png)", name)[1])
         view = next((view for at, view in reversed(transitions) if at <= frame), None)
         if view != required:
             raise ValueError(f"Capture {name} requires view={required}, observed {view}")

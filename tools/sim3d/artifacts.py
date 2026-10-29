@@ -118,7 +118,8 @@ def validate_d2_artifacts(prefix: Path) -> tuple[dict, list[str]]:
 def read_composite_series(run_dir: Path) -> list[tuple[int, str]]:
     """One run's composited screenshots, as (game_frame, sha256) pairs."""
     series = []
-    for path in sorted(run_dir.glob("shot_*.ppm"), key=lambda item: int(item.stem.split("_")[1])):
+    extension = 'png' if any(run_dir.glob('shot_*.png')) else 'ppm'
+    for path in sorted(run_dir.glob(f"shot_*.{extension}"), key=lambda item: int(item.stem.split("_")[1])):
         series.append((int(path.stem.split("_")[1]), hashlib.sha256(path.read_bytes()).hexdigest()))
     return series
 
@@ -266,18 +267,28 @@ def validate_d3_artifact(
     scene_flash_channel_budget: int = 0,
 ) -> tuple[dict, list[str]]:
     """Retain and compare the two requested geometry-profile readbacks."""
-    candidates = sorted(
-        path for path in output.glob("runs/*/shot.ppm") if path.parent.name != "latest"
-    )
-    picker_candidates = sorted(
-        path for path in output.glob("runs/*/shot_1000.ppm") if path.parent.name != "latest"
-    )
+    def screenshots(stem: str) -> list[Path]:
+        paths = {}
+        for suffix in ('ppm', 'png'):
+            for path in output.glob(f"runs/*/{stem}.{suffix}"):
+                if path.parent.name != "latest":
+                    paths[path.parent] = path
+        return sorted(paths.values())
+
+    candidates = screenshots('shot')
+    picker_candidates = screenshots('shot_1000')
     if len(candidates) != 2:
         return {"candidate_paths": [str(path) for path in candidates]}, [
             f"{label} expected two renderer screenshots, found {len(candidates)}"
         ]
 
-    def read_ppm(path: Path) -> tuple[list[int], bytes]:
+    def read_image(path: Path) -> tuple[list[int], bytes]:
+        if path.suffix == '.png':
+            from PIL import Image
+            with Image.open(path) as image:
+                if image.format != 'PNG':
+                    raise ValueError(f"{label} renderer screenshot is not PNG: {path}")
+                return list(image.size), image.convert('RGB').tobytes()
         chunks = path.read_bytes().split(b"\n", 3)
         if len(chunks) != 4 or chunks[0] != b"P6" or chunks[2] != b"255":
             raise ValueError(f"{label} renderer screenshot is not P6: {path}")
@@ -287,15 +298,15 @@ def validate_d3_artifact(
             raise ValueError(f"{label} screenshot dimensions/payload disagree: {path}")
         return dimensions, pixels
 
-    dimensions, projected = read_ppm(candidates[0])
-    authentic_dimensions, authentic = read_ppm(candidates[1])
+    dimensions, projected = read_image(candidates[0])
+    authentic_dimensions, authentic = read_image(candidates[1])
     if len(picker_candidates) != 2:
         return {
             "candidate_paths": [str(path) for path in candidates],
             "picker_candidate_paths": [str(path) for path in picker_candidates],
         }, [f"{label} expected two picker screenshots, found {len(picker_candidates)}"]
-    picker_dimensions, picker_enhanced = read_ppm(picker_candidates[0])
-    picker_auth_dimensions, picker_authentic = read_ppm(picker_candidates[1])
+    picker_dimensions, picker_enhanced = read_image(picker_candidates[0])
+    picker_auth_dimensions, picker_authentic = read_image(picker_candidates[1])
     colors = {projected[index : index + 3] for index in range(0, len(projected), 3)}
     nonblack = sum(
         projected[index : index + 3] != b"\0\0\0" for index in range(0, len(projected), 3)

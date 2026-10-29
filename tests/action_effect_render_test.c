@@ -529,6 +529,10 @@ static void TestSceneFeatureSwitchesAndDeterminism(void) {
 
 static void TestSceneKindsRemainIndependent(void) {
   ActionSceneEffectFrame frame = {.effect_count = 6, .visible_count = 6};
+  /* This assertion pins the legacy glow/ember contract; molten surface
+   * geometry is exercised separately by the surface recipe tests. */
+  frame.surface_fields_valid=1;frame.surface_fields[0]=*ActionSurfaceField_Bundled(0);
+  frame.surface_fields[0].MoltenSurface[0]=0;frame.surface_fields[0].MoltenBursts[0]=0;
   frame.effects[0] = SceneEffect(kActionEffect_WallTorch, 100);
   frame.effects[1] = SceneEffect(kActionEffect_EnemyFireball, 200);
   frame.effects[2] = SceneEffect(kActionEffect_LightningTrap, 300);
@@ -574,6 +578,8 @@ static void TestBossRushEffectStyles(void) {
 
 static void TestAitosLavaLightingAndParticles(void) {
   ActionSceneEffectFrame frame = {.effect_count = 2, .visible_count = 2};
+  frame.surface_fields_valid=1;frame.surface_fields[0]=*ActionSurfaceField_Bundled(0);
+  frame.surface_fields[0].MoltenSurface[0]=0;frame.surface_fields[0].MoltenBursts[0]=0;
   frame.effects[0] = SceneEffect(kActionEffect_AitosLavaPit, 400);
   frame.effects[1] = SceneEffect(kActionEffect_AitosLavaFireball, 520);
   static ActionSceneEffectRenderBatch lighting, particles, repeat;
@@ -1727,11 +1733,13 @@ static void TestSceneCapacityAndMalformedInput(void) {
    * within it without manufacturing that separate map-derived record. */
   CHECK(batch.vertex_count ==
         kActionSceneEffectRenderMaxVertices - kActionAuthoredMaxVertices - kActionSceneEffectWaterfallMistExtraVertices -
+            kActionSceneEffectMaxInstances * kActionSceneEffectMoltenVerticesPerPit -
             kActionSceneEffectLavaReservoirParticleExtraVertices -
             kActionSceneEffectLavaReservoirGlowExtraVertices -
             kActionSceneEffectMaxFlamingWheels * kActionSceneEffectFlamingWheelExtraVertices);
   CHECK(batch.index_count ==
         kActionSceneEffectRenderMaxIndices - kActionAuthoredMaxIndices - kActionSceneEffectWaterfallMistExtraIndices -
+            kActionSceneEffectMaxInstances * kActionSceneEffectMoltenIndicesPerPit -
             kActionSceneEffectLavaReservoirParticleExtraIndices -
             kActionSceneEffectLavaReservoirGlowExtraIndices -
             kActionSceneEffectMaxFlamingWheels * kActionSceneEffectFlamingWheelExtraIndices);

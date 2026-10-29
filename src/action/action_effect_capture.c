@@ -209,7 +209,7 @@ void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
   dst->action_effects = s_pending.spells;
   dst->action_scene_effects = s_pending.scene;
   dst->death_heim_final_battle = g_settings.death_heim_final_battle;
-  dst->death_heim_final_battle_tick = s_action_effect_observer.scene_clock;
+  dst->action_scene_clock = s_pending.observer.scene_clock;
   dst->diorama_layer_section = s_pending.section;
   s_pending.valid = false;
   dst->diorama_map_group = g_ram[kActRaiserWram_MapGroup];

@@ -188,7 +188,7 @@ int main(int argc,char **argv) {
         const bool mismatch = over || retained_cold || retained_warm || fade_changed || restored_changed || invalid_slot_changed;
         if(mismatch) ++failures;
         if(mismatch || getenv("AR_ORACLE_SAVE")) {
-          for(unsigned i=0;i<image_count;++i){char path[1024];snprintf(path,sizeof(path),"%s/room-%02d-p%u-s%u-m%u-%s.bmp",argv[1],room-3,pose,sky,motion,names[i]);SDL_SaveBMP(images[i],path);}
+          for(unsigned i=0;i<image_count;++i){char path[1024];snprintf(path,sizeof(path),"%s/room-%02d-p%u-s%u-m%u-%s.png",argv[1],room-3,pose,sky,motion,names[i]);SDL_SavePNG(images[i],path);}
         }
       }
       printf("{\"room\":\"%s\",\"pose\":%u,\"sky\":%u,\"motion\":%u,\"named_skybox\":%u,\"primitives\":%u,\"changed\":%u,\"over2\":%u,\"peak\":%u,\"retained_cold_changed\":%u,\"retained_warm_changed\":%u,\"fade_changed\":%u,\"restored_changed\":%u,\"invalid_slot_changed\":%u,\"gpu_hash\":\"%016" PRIx64 "\",\"rendered\":%s}\n",

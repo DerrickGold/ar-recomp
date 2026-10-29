@@ -1,11 +1,13 @@
-/* Exercise the actual PPM capture function. Only its producer/presenter/
+/* Exercise the actual PNG/legacy PPM capture functions. Only their producer/presenter/
  * readback dependencies are stubs; no GPU claim is made. */
 #include "dev/dev_tools.h"
 #include "host/host_display.h"
 #include "present/presentation_frame_generation.h"
+#include "render/image_write.h"
 #include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
+#include <SDL3/SDL.h>
 
 static int captured, uploaded, presented, readbacks, released;
 static bool fatal, fatal_upload, fatal_present;
@@ -90,6 +92,57 @@ int main(void) {
   assert(bytes == 35 && !memcmp(ppm, "P6\n4 2\n255\n", 11));
   assert(!memcmp(ppm + 11, rgb, 24));
   assert(fclose(file) == 0);
+
+  /* PNG preserves the exact readback RGB without raw-frame disk growth. */
+  Reset();file=tmpfile();assert(file);
+  result=DevTools_WriteFramebufferPng(file,&context,true);
+  assert(result.kind==kDevToolsCapture_Composite&&readbacks==1&&released==1);
+  long png_size=ftell(file);assert(png_size>8&&png_size<4096);
+  unsigned char png[4096];rewind(file);
+  assert(fread(png,1,(size_t)png_size,file)==(size_t)png_size);
+  assert(!memcmp(png,"\x89PNG\r\n\x1a\n",8));
+  SDL_Surface *decoded=SDL_LoadPNG_IO(SDL_IOFromConstMem(png,(size_t)png_size),true);
+  assert(decoded&&decoded->w==4&&decoded->h==2);
+  for(int y=0;y<2;++y)for(int x=0;x<4;++x) {
+    Uint8 r,g,b,a;assert(SDL_ReadSurfacePixel(decoded,x,y,&r,&g,&b,&a));
+    assert(r==0x73&&g==0x73&&b==0x73&&a==255);
+  }
+  SDL_DestroySurface(decoded);assert(fclose(file)==0);
+
+  /* Solid diagnostic frames must really compress, rather than merely wrapping
+   * raw pixels in PNG stored blocks. Preserve nonopaque scene-asset alpha too. */
+  static uint8_t rgba[128 * 64 * 4];
+  for (unsigned i=0;i<sizeof(rgba);i+=4) {
+    rgba[i]=0x12;rgba[i+1]=0x34;rgba[i+2]=0x56;rgba[i+3]=0x78;
+  }
+  file=tmpfile();assert(file);
+  assert(ArImage_WritePng(file,rgba,128,64,128*4,kArImageRgba32));
+  png_size=ftell(file);assert(png_size>8&&png_size<(long)sizeof(rgba)/8);
+  rewind(file);assert(fread(png,1,(size_t)png_size,file)==(size_t)png_size);
+  decoded=SDL_LoadPNG_IO(SDL_IOFromConstMem(png,(size_t)png_size),true);
+  assert(decoded&&decoded->w==128&&decoded->h==64);
+  Uint8 r,g,b,a;assert(SDL_ReadSurfacePixel(decoded,127,63,&r,&g,&b,&a));
+  assert(r==0x12&&g==0x34&&b==0x56&&a==0x78);
+  SDL_DestroySurface(decoded);assert(fclose(file)==0);
+
+  /* Native fallback is an opaque screenshot even when the framebuffer's
+   * unused alpha byte is zero; host-endian ARGB still yields the correct RGB. */
+  Reset();file=tmpfile();assert(file);
+  DevToolsContext native_context=context;native_context.readback.capture_rgb24=NULL;
+  const uint32_t sample[]={0x00123456,0x00789abc,0x00abcdef,0x00345678};
+  memcpy(native,sample,sizeof(sample));
+  result=DevTools_WriteFramebufferPng(file,&native_context,false);
+  assert(result.kind==kDevToolsCapture_NativeFramebuffer&&!readbacks);
+  png_size=ftell(file);assert(png_size>8&&png_size<4096);rewind(file);
+  assert(fread(png,1,(size_t)png_size,file)==(size_t)png_size);
+  decoded=SDL_LoadPNG_IO(SDL_IOFromConstMem(png,(size_t)png_size),true);
+  assert(decoded&&decoded->w==2&&decoded->h==2);
+  for(int y=0;y<2;++y)for(int x=0;x<2;++x) {
+    Uint8 r,g,b,a;assert(SDL_ReadSurfacePixel(decoded,x,y,&r,&g,&b,&a));
+    uint32_t expected=sample[y*2+x];
+    assert(r==(expected>>16)&&g==((expected>>8)&255)&&b==(expected&255)&&a==255);
+  }
+  SDL_DestroySurface(decoded);assert(fclose(file)==0);
 
   /* Fatal render with a nonempty viewport: failed, no readback, no native
    * fallback (even when allowed), and no PPM bytes written. */

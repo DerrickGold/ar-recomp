@@ -97,6 +97,83 @@ static void TestSwampLifeParameters(void) {
   }
   assert(!Parse(text)); /* Three trail quads count against the bounded room budget. */
 }
+static void TestCloudLightParameters(void) {
+  const char *header="[effects]\nversion=1\n[emitter:04:01:0:cloud-light:1]\n";
+  char text[2048];assert(Parse(header));
+  assert(table.records[0].anchor==kActionEffectAnchor_Bg2Point);
+  assert(table.records[0].field_style.cloud.edge==9);
+  assert(table.records[0].field_style.cloud.background_brightness==1);
+  assert(table.records[0].particle_style.color_end==0xed8a3d);
+  snprintf(text,sizeof(text),"%sbackground-brightness=0.72\n",header);
+  assert(Parse(text)&&fabsf(table.records[0].field_style.cloud.background_brightness-.72f)<.0001f);
+  before=table;
+  const char *bad[]={"falloff=0\n","falloff=nan\n","edge-strength=17\n",
+      "cloud-cover=1.1\n","edge-strength=1\nedge-strength=2\n",
+      "background-brightness=nan\n","background-brightness=-0.1\n","background-brightness=1.1\n",
+      "background-brightness=0.5\nbackground-brightness=0.8\n",
+      "strands=6\n","anchor=bg1\n","anchor=bg2-raster\n","placement=foreground\n"};
+  for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);++i) {
+    snprintf(text,sizeof(text),"%s%s",header,bad[i]);
+    assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));
+  }
+  strcpy(text,header);
+  for(unsigned i=2;i<=5;++i) {
+    char record[100];snprintf(record,sizeof(record),"[emitter:04:01:0:cloud-light:%x]\n",i);strcat(text,record);
+    assert(Parse(text)==(i<=4));
+  }
+}
+static void TestStormParameters(void) {
+  const char *header="[effects]\nversion=1\n[emitter:04:01:0:storm-lightning:1]\n";
+  char text[512];
+  assert(Parse(header));
+  const ActionEffectRecipe *r=&table.records[0];
+  assert(r->lifetime==720&&r->field_style.strands==3&&r->field_style.placement==0);
+  assert(r->width==192&&r->height==112&&r->field_style.activity==.05f);
+  before=table;
+  const char *bad[]={"lifetime=119\n","lifetime=4097\n","strands=0\n","strands=5\n",
+      "strands=2.5\n","activity=0\n","activity=.201\n","activity=nan\n",
+      "amplitude=33\n","seed=-1\n","seed=4294967296\n",
+      "anchor=bg2-point\nparallax-x=1.1\n","anchor=bg2-point\nparallax-x=nan\n",
+      "anchor=bg2-point\nparallax-x=.25\nparallax-x=.5\n",
+      "anchor=bg2-point\nground-palette=8\n","anchor=bg2-point\nground-palette=1.5\n",
+      "anchor=bg2-point\nground-colors=0\n","anchor=bg2-point\nground-colors=16\n",
+      "anchor=bg2-point\nground-colors=1,1\n","anchor=bg2-point\nground-colors=1,\n",
+      "anchor=bg1\nground-colors=1\n","anchor=bg2-raster\nparallax-x=.25\n"};
+  for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);++i) {
+    snprintf(text,sizeof(text),"%s%s",header,bad[i]);
+    assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));
+  }
+  snprintf(text,sizeof(text),"%slifetime=120\nstrands=4\nactivity=.2\namplitude=32\nseed=4294967295\n",header);
+  assert(Parse(text));
+  snprintf(text,sizeof(text),"%slifetime=4096\nstrands=1\nactivity=.01\namplitude=0\nseed=0\n",header);
+  assert(Parse(text));
+  snprintf(text,sizeof(text),"%sanchor=bg2-point\nparallax-x=.25\nground-palette=1\nground-colors=1,2,9,10\n",header);
+  assert(Parse(text));
+  assert(table.records[0].field_style.storm.parallax_set &&
+      table.records[0].field_style.storm.parallax_x==.25f &&
+      table.records[0].field_style.storm.ground_palette==1 &&
+      table.records[0].field_style.storm.ground_colors==0x606);
+}
+static void TestSkyWeatherBudgets(void) {
+  /* Both background passes fit individually. With no receiving surfaces,
+   * their combined geometry must not reserve an unused foreground pass. */
+  char text[8192];
+  for(unsigned receivers=0;receivers<2;++receivers) {
+    strcpy(text,"[effects]\nversion=1\n");
+    for(unsigned i=0;i<12;++i) {
+      char line[512];
+      snprintf(line,sizeof(line),"[emitter:04:01:0:%s:%x]\nstrands=%u\nanchor=bg2-point\n"
+          "placement=background\nlight-scenery=%u\nlight-player=0\nlight-enemies=0\n%s",
+          i<8?"storm-lightning":"light-fan",i,i<8?1:5,receivers,i<8?"":"twinkle=.6\nshadows=0\n");
+      strcat(text,line);
+    }
+    assert(Parse(text)==!receivers);
+  }
+  assert(!Parse("[effects]\nversion=1\n[emitter:04:01:0:light-fan:1]\ntwinkle=1.01\n"));
+  assert(Parse("[effects]\nversion=1\n[emitter:04:01:0:light-fan:1]\nfade-in=.25\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:04:01:0:light-fan:1]\nfade-in=.51\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:04:01:0:light-fan:1]\nfade-in=nan\n"));
+}
 static void TestFloorSupport(void) {
   uint8_t map[3*256]={0};
   ActionEnvironmentScene scene={.group=1,.room=2,
@@ -166,7 +243,7 @@ static void TestFieldsAndReceivers(void) {
     assert(table.records[0].tuning.illumination==0&&table.records[0].tuning.intensity==1);
     ++lights_checked;
   }
-  assert(lights_checked==42);
+  assert(lights_checked==43);
   const char *lights[]={"[emitter:01:02:0:soft-light:1]","[emitter:01:02:0:light-gradient:1]",
       "[emitter:01:02:0:torch:1]","[source:01:02:0:wall-torch:0]","[member:01:01:0:forest-forward:1]"};
   for(unsigned i=0;i<sizeof(lights)/sizeof(lights[0]);++i) {
@@ -178,11 +255,46 @@ static void TestFieldsAndReceivers(void) {
   }
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-area:1]\nx=8000\ny=8000\nwidth=16000\nheight=16000\nparticles=8\npattern=snow\n"));
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nwake=.5\ncanopy-response=.8\n"));
+  assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nvolume=.9\nanchor=bg2-point\n"));
+  assert(table.records[0].field_style.volume==.9f);
+  assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nrainbow=.6\n"));
+  assert(table.records[0].field_style.rainbow==.6f);
+  assert(table.records[0].field_style.sparkle==0);
+  assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nsparkle=.75\nanchor=bg2-point\n"));
+  assert(table.records[0].field_style.sparkle==.75f);
+  assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-area:1]\nanchor=bg2-point\npattern=water-glints\ncanopy-response=1\n"));
+  assert(table.records[0].field_style.pattern==kActionParticle_WaterGlints);
+  assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-light:1]\nsun-depth=-35\n"));
+  assert(table.records[0].field_style.cloud.sun_depth==-35);
   before=table;
   const char *bad[]={
+    "[emitter:01:02:0:cloud-bank:1]\nsparkle=1\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nsparkle=1\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nsparkle=nan\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nsparkle=1.1\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nsparkle=.5\nsparkle=.6\n",
+    "[emitter:01:02:0:motes:1]\nsparkle=.5\n",
+    "[emitter:01:02:0:particle-area:1]\nanchor=bg2-raster\ncanopy-response=1\n",
+    "[emitter:01:02:0:cloud-light:1]\nsun-depth=nan\n",
+    "[emitter:01:02:0:cloud-light:1]\nsun-depth=86\n",
+    "[emitter:01:02:0:cloud-light:1]\nsun-depth=-86\n",
+    "[emitter:01:02:0:cloud-light:1]\nsun-depth=48\nsun-depth=50\n",
+    "[emitter:01:02:0:cloud-bank:1]\nsun-depth=48\n",
+    "[emitter:01:02:0:cloud-bank:1]\nrainbow=1\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrainbow=1\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nrainbow=nan\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nrainbow=1.1\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nrainbow=.5\nrainbow=.6\n",
+    "[emitter:01:02:0:motes:1]\nrainbow=.5\n",
+    "[emitter:01:02:0:cloud-bank:1]\nvolume=1\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nvolume=1\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nvolume=1.01\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nvolume=nan\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nvolume=1\nvolume=.5\n",
+    "[emitter:01:02:0:motes:1]\nvolume=1\n",
     "[emitter:01:02:0:cloud-bank:1]\nrolling=.8\n",
     "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nwake=.8\n",
-    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nanchor=bg2-point\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nwake=1\nanchor=bg2-point\n",
     "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nactor-target=player\n",
     "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=1.1\n",
     "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nwake=nan\n",
@@ -285,11 +397,23 @@ static void TestPerPassBudgets(void) {
   assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\nshadows=1\n"));
   assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\ntextured=1\nshadows=1\nanchor=bg2-point\n"));
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-path:1]\npattern=glints\ncanopy-response=1\n"));
+  for(unsigned sparkles=0;sparkles<2;++sparkles) {
+    char banks[1024]="[effects]\nversion=1\n";
+    for(unsigned i=0;i<3;++i) {
+      char row[256];snprintf(row,sizeof(row),"[emitter:01:02:0:cloud-bank:%u]\n"
+          "textured=1\nrolling=1\nstrands=24\nrainbow=1\nsparkle=%u\n",i,sparkles);
+      strcat(banks,row);
+    }
+    assert(Parse(banks)==!sparkles); /* Reserve all droplets; never rely on culling. */
+  }
 }
 
 int main(int argc,char **argv) {
   TestDocumentCapacity();
   TestSwampLifeParameters();
+  TestCloudLightParameters();
+  TestStormParameters();
+  TestSkyWeatherBudgets();
   TestPerPassBudgets();
   TestLayerAnchors();
   TestFieldsAndReceivers();

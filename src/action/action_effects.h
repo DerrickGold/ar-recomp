@@ -101,6 +101,8 @@ typedef enum ActionEffectKind {
   kActionEffect_AuthoredFoliage,
   kActionEffect_AuthoredCanopy,
   kActionEffect_AuthoredFireflies,
+  kActionEffect_AuthoredStorm,
+  kActionEffect_AuthoredCloudLight,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -221,6 +223,8 @@ typedef enum ActionEffectRenderLayer {
   kActionEffectRenderLayer_Bg1Light,
   /* Detached combat smoke, alpha blended and controlled by Particles. */
   kActionEffectRenderLayer_WorldSmoke,
+  /* Background weather is composited into the sky source before its blur. */
+  kActionEffectRenderLayer_Bg2Weather,
   kActionEffectRenderLayer_Count,
 } ActionEffectRenderLayer;
 
@@ -286,6 +290,8 @@ enum {
   kActionAuthoredMaxInstances = 96,
   kActionAuthoredMaxVertices = 4096,
   kActionAuthoredMaxIndices = 24576,
+  kActionMistRainbowColumns = 8, kActionMistRainbowRows = 6,
+  kActionMistSparklesPerStrand = 4,
   kActionSceneEffectObserverTrackCount = 80,
   kActionEffectObjPriorityCount = 4,
   kActionLandingDustMaxPuffs = 6,
@@ -341,21 +347,38 @@ typedef struct ActionEffectParticleStyle {
 typedef enum ActionParticlePattern {
   kActionParticle_Motes, kActionParticle_Dust, kActionParticle_Leaves,
   kActionParticle_Snow, kActionParticle_Sand, kActionParticle_Insects,
-  kActionParticle_Scarabs, kActionParticle_Sparks, kActionParticle_Glints, kActionParticle_Count,
+  kActionParticle_Scarabs, kActionParticle_Sparks, kActionParticle_Glints,
+  kActionParticle_WaterGlints, kActionParticle_Count,
 } ActionParticlePattern;
 enum { kActionParticleCellSize=256, kActionParticleMaxCells=64, kActionContourMaxPoints=16 };
 typedef enum ActionGlowStyle {
   kActionGlow_Insects, kActionGlow_Wisps, kActionGlow_Moss, kActionGlow_Count,
 } ActionGlowStyle;
+typedef struct ActionCloudLightStyle {
+#define CLOUD_PROPERTY(member,key,value,low,high) float member;
+#include "action_cloud_light_properties.inc"
+#undef CLOUD_PROPERTY
+} ActionCloudLightStyle;
+typedef struct ActionStormStyle {
+  float parallax_x; /* Fraction of playfield camera travel; unset keeps BG2's rate. */
+  uint16_t ground_colors; /* Palette-index mask; zero leaves the strike airborne. */
+  uint8_t ground_palette, parallax_set;
+} ActionStormStyle;
 typedef struct ActionEffectFieldStyle {
+  ActionCloudLightStyle cloud;
+  ActionStormStyle storm;
   float angle, fan, softness, drift, amplitude;
   float thickness; /* Fan strand width multiplier; zero retains legacy width. */
+  float fade_in; /* Fan source feathering as a fraction of its reach; zero keeps a hard opening. */
   float scatter, bounce; /* Canopy air scattering and short surface return. */
   uint8_t textured; /* Cloud bank uses the shared wispy density mask. */
   float rolling, wake, canopy_response; /* Textured floor mist: billows, body wakes, canopy scattering. */
+  float volume; /* Rolling clouds: rounded, internally shaded billows; zero preserves wispy mist. */
+  float rainbow; /* View/light-angle spectral response of spray; zero adds no geometry. */
+  float sparkle; /* Small sunlit droplets following moving mist density; zero adds no geometry. */
   float carry; /* Ground dust: downwind distance over which lifted dust settles. */
   float gust, activity; /* Shared wind envelope; active fraction of a particle cycle. */
-  float twinkle; /* Brief highlights on existing grains; does not change their motion. */
+  float twinkle; /* Grain highlights or slow fan transmission; never changes geometry/motion. */
   float chorus, trail; /* Glow clusters: loose answering pulses, short wisp trails. */
   uint8_t glow_style, ripple; /* Explicit water landing at the bottom of a drip region. */
   uint8_t shadows; /* Placed torch/fan spill uses the scenery shadow mask. */
@@ -408,6 +431,9 @@ typedef struct ActionEffectInstance {
   uint16_t particle_count, particle_lifetime;
   ActionEffectParticleStyle particle_style;
   ActionEffectFieldStyle field_style;
+  /* Captured first terrain intersections, measured in path segments. No
+   * borrowed tile/VRAM data survives into a render packet. */
+  struct { float end[4]; uint8_t valid; } storm_contact;
 } ActionEffectInstance;
 
 /* Diagnostic payload: the raw identity of a cohort slot that was ACTIVE while
@@ -527,6 +553,8 @@ typedef struct ActionFireballSmoke {
 
 typedef struct ActionSceneEffectFrame {
   uint16_t game_frame;
+  /* Convert foreground world samples to the fixed-point background light field. */
+  float bg1_to_bg2_x, bg1_to_bg2_y;
   /* Nonzero only on the temporary frame used to build one actor light map. */
   uint8_t light_receiver;
   uint8_t effect_count;

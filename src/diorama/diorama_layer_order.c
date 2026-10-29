@@ -492,7 +492,7 @@ int DioramaLayerOrder_VirtualBand(const DioramaRoomOverride *room, int bg,
 
 bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   if (!room || !room->used) return false;
-  if (room->scenery_grade.set) return true;
+  if (room->scenery_grade.set || room->native_bloom.set) return true;
   for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++)
     if (room->framing[profile].set) return true;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
@@ -1342,6 +1342,36 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
     if (out_error) *out_error = "bad terrain suffix (us, jp, eu or ge)";
     return false;
   }
+  if (!strcmp(token, "native-bloom")) {
+    DioramaNativeBloom b = DioramaNativeBloom_Default();
+    int consumed = 0;
+    char tail;
+    if (scoped || sscanf(equals+1,
+        " strength:%f radius:%f threshold:%f saturation:%f contrast:%f light:%f receivers:%u %n",
+        &b.strength, &b.radius, &b.threshold, &b.saturation, &b.contrast,
+        &b.light, &b.receivers, &consumed) != 7 ||
+        !isfinite(b.strength) || b.strength < 0 || b.strength > 3 ||
+        !isfinite(b.radius) || b.radius < 1 || b.radius > 24 ||
+        !isfinite(b.threshold) || b.threshold < 0 || b.threshold > .95f ||
+        !isfinite(b.saturation) || b.saturation < 0 || b.saturation > 2 ||
+        !isfinite(b.contrast) || b.contrast < .5f || b.contrast > 2 ||
+        !isfinite(b.light) || b.light < 0 || b.light > 4 || (b.receivers & ~6u)) {
+      if (out_error) *out_error = "invalid native-bloom strength/radius/threshold/saturation/contrast/light/receivers";
+      return false;
+    }
+    /* Old saved projects omit dust; new saves write the complete material. */
+    if (equals[1+consumed] && (sscanf(equals+1+consumed,
+        "dust:%f dust-scale:%f dust-speed:%u dust-blue:%6x dust-rose:%6x %c",
+        &b.dust,&b.dust_scale,&b.dust_speed,&b.dust_blue,&b.dust_rose,&tail)!=5 ||
+        !isfinite(b.dust)||b.dust<0||b.dust>1 ||
+        !isfinite(b.dust_scale)||b.dust_scale<.5f||b.dust_scale>2 || b.dust_speed>4 ||
+        b.dust_blue>0xffffffu||b.dust_rose>0xffffffu)) {
+      if(out_error)*out_error="invalid native-bloom dust/dust-scale/dust-speed/dust-blue/dust-rose";
+      return false;
+    }
+    room->native_bloom=b;
+    return true;
+  }
   if (!strcmp(token, "scenery-grade")) {
     DioramaSceneryGrade grade = {.set=true};
     unsigned shadow, highlight;
@@ -1654,6 +1684,12 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
            section);
   else
     APPEND("[layers:%02X:%02X]\n", room->map_group, room->map_number);
+  if (room->native_bloom.set) {
+    const DioramaNativeBloom *b=&room->native_bloom;
+    APPEND("native-bloom = strength:%.6g radius:%.6g threshold:%.6g saturation:%.6g contrast:%.6g light:%.6g receivers:%u dust:%.6g dust-scale:%.6g dust-speed:%u dust-blue:%06x dust-rose:%06x\n",
+        b->strength,b->radius,b->threshold,b->saturation,b->contrast,b->light,b->receivers,
+        b->dust,b->dust_scale,b->dust_speed,(unsigned)b->dust_blue,(unsigned)b->dust_rose);
+  }
   if (room->scenery_grade.set) {
     const DioramaSceneryGrade *g=&room->scenery_grade;
     APPEND("scenery-grade = strength:%.6g saturation:%.6g shadows:%06x highlights:%06x\n",

@@ -69,7 +69,7 @@ const EmitterMapTools=(()=>{
     if(gesture.scope!==sceneKey(room)||gesture.layer!==bgIndex){cancel();return;}
     const p=point(ev),e=gesture.initial;
     if(gesture.corner?.rotate) {
-      const angle=EffectGeometry.angleAt(e,p),limit=e.native?30:e.kind==='canopy-light'?70:180;
+      const angle=EffectGeometry.angleAt(e,p),limit=e.native?30:['canopy-light','cloud-light'].includes(e.kind)?70:180;
       gesture.draft={...e,angle:Math.max(-limit,Math.min(limit,Math.round(angle/(ev.altKey?15:1))*(ev.altKey?15:1)))};
     } else if(gesture.corner?.ray&&e.kind==='light-fan') {
       const o=EffectGeometry.origin(e),a=EffectGeometry.direction(e);
@@ -96,7 +96,7 @@ const EmitterMapTools=(()=>{
       p.x=snapped(p.x,ev);p.y=snapped(p.y,ev);
       const c=gesture.corner,anchorY=e.anchorY??.5;
       const fixed={x:e.x-c.sx*e.width/2,y:e.y+((1-c.sy)/2-anchorY)*e.height};
-      const limit=e.native?32768:['particle-area','exposure','light-gradient','heat-haze','cloud-bank','foliage-shadow','canopy-light'].includes(e.kind)?16384:512;
+      const limit=e.native?32768:['particle-area','exposure','light-gradient','heat-haze','cloud-bank','cloud-light','foliage-shadow','canopy-light'].includes(e.kind)?16384:512;
       let width=e.resizeWidth?Math.max(e.minWidth??4,Math.min(e.maxWidth||limit,2*Math.round(Math.abs(p.x-fixed.x)/2))):e.width;
       let height=e.resizeHeight?Math.max(4,Math.min(e.maxHeight||limit,2*Math.round(Math.abs(p.y-fixed.y)/2))):e.height;
       if(e.native) {
@@ -176,6 +176,31 @@ const EmitterMapTools=(()=>{
           Math.max(0,e.width-(f[0]+f[2])*sx)*view.scale,Math.max(0,e.height-(f[1]+f[3])*sy)*view.scale);ctx.setLineDash([]);
       }
       const cx=view.x+e.x*view.scale,cy=view.y+e.y*view.scale;
+      if(e.kind==='storm-lightning') {
+        const source=EffectGeometry.origin(e);
+        ctx.setLineDash([3,4]);
+        line([{x:e.x-e.width*.3,y:source.y},{x:e.x+e.width*.3,y:source.y}]);
+        ctx.setLineDash([]);
+        ctx.fillStyle=ctx.strokeStyle;
+        if(selected)ctx.fillText('Cloud attachment',view.x+(e.x-e.width*.3)*view.scale,
+          view.y+source.y*view.scale-6);
+      }
+      if(e.kind==='cloud-light') {
+        const top=e.y-e.height/2,edge=top+e.edgePosition*e.height,echo=top+e.echoPosition*e.height;
+        const slope=Math.tan((e.angle||0)*Math.PI/180);
+        ctx.save();ctx.beginPath();
+        ctx.rect(view.x+(e.x-e.width/2)*view.scale,view.y+top*view.scale,e.width*view.scale,e.height*view.scale);ctx.clip();
+        ctx.setLineDash([3,4]);
+        line([{x:e.x-e.width*.4,y:edge},{x:e.x+e.width*.4,y:edge}]);
+        for(const opening of SharedRoomPreview.cloudOpenings(e.seed,e.strands)) {
+          const x=e.x+(opening.centre-.5)*e.width,y=edge+opening.offset*e.height;
+          const reach=opening.reach*e.height,width=opening.width*e.width,endWidth=opening.endWidth*e.width;
+          line([{x:x-width,y},{x:x+width,y},
+            {x:x+slope*reach+endWidth,y:y+reach},{x:x+slope*reach-endWidth,y:y+reach}],true);
+          line([{x,y},{x:x+slope*reach,y:y+reach}]);
+        }
+        line([{x:e.x-e.width*.3,y:echo},{x:e.x+e.width*.3,y:echo}]);ctx.restore();ctx.setLineDash([]);
+      }
       ctx.fillStyle=e.enabled?'#151b29':'#454951';ctx.fillRect(cx-6,cy-6,12,12);
       ctx.strokeRect(cx-6,cy-6,12,12);ctx.fillStyle=ctx.strokeStyle;
       ctx.fillRect(cx-3,cy-1,6,2);ctx.fillRect(cx-1,cy-3,2,6);

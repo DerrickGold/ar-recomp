@@ -25,6 +25,9 @@ bool HostDevTools_DioramaDumpArmed(void);
 void HostDevTools_ServiceDioramaDump(void);
 DevToolsCaptureResult HostDevTools_WriteFramebufferPpm(FILE *file, bool require_composite);
 struct FrameSlot;
+DevToolsCaptureResult HostDevTools_WriteFramebufferPngAtPhase(
+    FILE *file, bool require_composite, float phase,
+    const struct FrameSlot *uploaded_frame);
 DevToolsCaptureResult HostDevTools_WriteFramebufferPpmAtPhase(
     FILE *file, bool require_composite, float phase,
     const struct FrameSlot *uploaded_frame);

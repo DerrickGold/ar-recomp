@@ -1,3 +1,4 @@
+#include "render/cloud_motion.h"
 /* Bloodpool marsh details: immutable scenery anchors and paused-clock motion.
  * Bounded CPU geometry using existing alpha/additive layers; no particle pool,
  * texture uploads or backend-specific rendering. Tests: action_effect_render. */
@@ -10,9 +11,11 @@ static float Falloff(float x) {
 
 static void CloudStyle(const ActionMoonField *f, uint16_t ticks, float *x, float *y, float *alpha) {
   const float slow = (ticks&((unsigned)f->CloudMotion[0]-1))*f->CloudMotion[1];
-  *x = f->CloudMotion[2]+f->CloudMotion[3]*sinf(slow+f->CloudMotion[4]);
-  *y = f->CloudMotion[5]+f->CloudMotion[6]*cosf(slow*f->CloudMotion[7]+f->CloudMotion[8]);
-  *alpha = f->CloudOpacity[0]+f->CloudOpacity[1]*(.5f+.5f*sinf(slow+f->CloudMotion[9]));
+  const CloudOrbitMotion motion={f->CloudMotion[2],f->CloudMotion[3],f->CloudMotion[4],
+      f->CloudMotion[5],f->CloudMotion[6],f->CloudMotion[7],f->CloudMotion[8],
+      f->CloudOpacity[0],f->CloudOpacity[1],f->CloudMotion[9]};
+  const CloudOrbitSample sample=CloudMotion_Orbit(motion,slow);
+  *x=sample.x;*y=sample.y;*alpha=sample.alpha;
 }
 
 float BloodpoolCloudTransmission(const ActionMoonField *f, uint16_t ticks) {

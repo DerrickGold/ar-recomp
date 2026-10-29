@@ -51,9 +51,9 @@ const imports={
  effect(kind,p,n){
    assert(kind>=-1&&kind<=5);
    if(kind>=0){
-     assert.equal(effect,-1);assert.equal(n,[3,3,9,4,29,19][kind]);
+     assert.equal(effect,-1);assert.equal(n,[3,3,9,4,173,19][kind]);
      const params=new Float32Array(api.memory.buffer,p,n);assert(params.every(Number.isFinite));
-     if(kind===4)assert(textures.has(params[28])&&params[28]!==target,'illumination map is a valid separate texture');
+     if(kind===4)assert(textures.has(params[172])&&params[172]!==target,'illumination map is a valid separate texture');
    }
    effect=kind;return 1;
  },

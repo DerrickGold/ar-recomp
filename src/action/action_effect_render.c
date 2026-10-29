@@ -1,3 +1,4 @@
+#include "render/cloud_mesh.h"
 /* ActionEffectRender: builds the host-drawn geometry for spells (light spill,
  * bodies, embers, bursts) and for the heat shimmer, and owns the geometry
  * helpers the scene-effect builders share (action_effect_render_internal.h).
@@ -149,17 +150,7 @@ float DeterministicPulse(const ActionEffectInstance *effect) {
  * of breathing uniformly, and the amplitudes sum to exactly 1 so the result
  * cannot exceed the caller's `flare` budget. No transcendental involved. */
 float FlameSilhouette(unsigned seed, unsigned ticks, int segment) {
-  int i1 = (segment + (int)((ticks / 3u + seed) &
-                            kActionEffectGlowSegmentMask)) &
-      kActionEffectGlowSegmentMask;
-  int i2 = (segment * 3 + (int)((ticks / 2u + seed * 5u) &
-                                kActionEffectGlowSegmentMask)) &
-      kActionEffectGlowSegmentMask;
-  int i3 = (segment * 5 + (int)((ticks + seed * 11u) &
-                                kActionEffectGlowSegmentMask)) &
-      kActionEffectGlowSegmentMask;
-  return 0.52f * kCircle32[i1][0] + 0.31f * kCircle32[i2][0] +
-      0.17f * kCircle32[i3][0];
+  return CloudMesh_Harmonic(kCircle32,seed,ticks,segment);
 }
 
 ArRenderColorF MixColor(ArRenderColorF a, ArRenderColorF b, float t) {

@@ -1340,6 +1340,7 @@ if(BUILD_TESTING)
         src/sim/world_nav/sim_world_navigation_mountain_transition.c
         src/sim/world_nav/sim_world_navigation_clouds.c
         src/sim/world_nav/sim_world_navigation_sky_clouds.c
+        src/render/cloud_material.c
         src/sim/mountains/sim_background_mountain_mesh.c
         src/sim/mountains/sim_background_mountain_objects.c
         src/render/presentation_layout.c
@@ -1554,7 +1555,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_present_sim_sun COMMAND actraiser_present_sim_sun_test)
 
     add_executable(actraiser_present_sim3d_clouds_test
-        tests/present_sim3d_clouds_test.c src/sim/sim3d/present_sim3d_clouds.c
+        tests/present_sim3d_clouds_test.c src/sim/sim3d/present_sim3d_clouds.c src/render/cloud_material.c
         src/sim/sim3d/present_sim3d_environment.c
         src/sim/world_nav/sim_world_navigation_globe.c)
     target_link_libraries(actraiser_present_sim3d_clouds_test PRIVATE
@@ -1850,6 +1851,7 @@ if(BUILD_TESTING)
         src/sim/world_nav/sim_world_navigation_terrain.c
         src/sim/world_nav/sim_world_navigation_clouds.c
         src/sim/world_nav/sim_world_navigation_sky_clouds.c
+        src/render/cloud_material.c
         src/sim/world_nav/sim_world_navigation_globe.c
         src/sim/world_nav/sim_world_navigation_mountains.c
         src/sim/world_nav/sim_world_navigation_mountain_transition.c
@@ -2270,6 +2272,13 @@ if(BUILD_TESTING)
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
     endif()
 
+    add_executable(actraiser_cloud_material_test
+        tests/cloud_material_test.c src/render/cloud_material.c)
+    target_include_directories(actraiser_cloud_material_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests)
+    target_link_libraries(actraiser_cloud_material_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_cloud_material COMMAND actraiser_cloud_material_test)
+
     set(AR_ACTION_EFFECT_TEST_SOURCES
         src/action/action_map_effect_scene.c
         src/action/action_effect_render.c
@@ -2303,6 +2312,7 @@ if(BUILD_TESTING)
         src/action/action_ray_field_render.c
         src/action/action_environment_geometry.c
         src/action/action_effect_masks.c
+        src/render/cloud_material.c
         src/action/action_scene_lightning_render.c
         src/action/action_effect_projection.c
         src/diorama/diorama_projection.c
@@ -2514,7 +2524,7 @@ if(BUILD_TESTING)
     file(STRINGS "${CMAKE_SOURCE_DIR}/tools/action_editor/compositor_sources.txt"
         _diorama_compositor_sources)
     add_executable(actraiser_diorama_compositor_test
-        tests/diorama_compositor_test.c ${_diorama_compositor_sources})
+        tests/diorama_compositor_test.c src/render/cloud_material.c ${_diorama_compositor_sources})
     target_include_directories(actraiser_diorama_compositor_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -2523,7 +2533,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_action_camera_test tests/actraiser_action_camera_test.c
         src/actraiser/enhancements/actraiser_action_camera.c
-        tests/diorama_compositor_test.c ${_diorama_compositor_sources})
+        tests/diorama_compositor_test.c src/render/cloud_material.c ${_diorama_compositor_sources})
     target_compile_definitions(actraiser_action_camera_test PRIVATE AR_COMPOSITOR_WASM=1)
     target_include_directories(actraiser_action_camera_test PRIVATE src tests
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -2539,7 +2549,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_diorama_replay
         tools/action_editor/replay_compositor.c tools/action_editor/compositor_profile_stub.c
-        src/diorama/diorama_snapshot.c ${_diorama_compositor_sources}
+        src/diorama/diorama_snapshot.c src/render/cloud_material.c ${_diorama_compositor_sources}
         src/platform/sdl/diorama_effect_backend_sdl.c
         src/render/gpu_compile_log.c src/app/session_fatal.c)
     target_include_directories(actraiser_diorama_replay PRIVATE
@@ -2563,7 +2573,7 @@ if(BUILD_TESTING)
         ${_room_environment_sources}
         src/action/action_scene_snapshot.c src/action/action_room_scene.c
         src/action/action_bg_world.c src/action/action_bg_plan.c src/action/action_camera_bounds.c
-        src/diorama/diorama.c src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c
+        src/diorama/diorama.c src/diorama/diorama_astral_rift.c src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c
         src/diorama/diorama_projection.c src/diorama/diorama_skybox_uv.c src/diorama/diorama_depth_shapes.c
         src/render/scene3d_math.c src/render/presentation_layout.c
         snesrecomp-go/runtime/src/scene_renderer.c snesrecomp-go/runtime/src/snes/ppu.c)
@@ -2592,7 +2602,25 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/snesrecomp-go/runtime/src/core)
     target_link_libraries(actraiser_action_room_gpu_compare PRIVATE actraiser_render_sdl_test_support)
 
-    foreach(_room_oracle IN ITEMS actraiser_action_room_gpu_compare actraiser_action_room_capture_test)
+    # Benchmark the same complete-room renderer on native GPU backends. Keep
+    # source coverage identical to the visual oracle; only its driver differs.
+    get_target_property(_room_gpu_sources actraiser_action_room_gpu_compare SOURCES)
+    list(REMOVE_ITEM _room_gpu_sources tools/action_editor/check_native_projection.c)
+    add_executable(actraiser_action_room_benchmark
+        tools/action_editor/benchmark_native.c src/platform/sdl/frame_producer_sdl.c ${_room_gpu_sources})
+    get_target_property(_room_gpu_includes actraiser_action_room_gpu_compare INCLUDE_DIRECTORIES)
+    target_include_directories(actraiser_action_room_benchmark PRIVATE ${_room_gpu_includes})
+    target_link_libraries(actraiser_action_room_benchmark PRIVATE actraiser_render_sdl_test_support)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME actraiser_action_room_benchmark_tools
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/action_room_benchmark_test.py
+                --binary $<TARGET_FILE:actraiser_action_room_benchmark>)
+        set_tests_properties(actraiser_action_room_benchmark_tools PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+    endif()
+
+    foreach(_room_oracle IN ITEMS actraiser_action_room_gpu_compare actraiser_action_room_benchmark actraiser_action_room_capture_test)
         if(MSVC)
             target_compile_options(${_room_oracle} PRIVATE /Gy)
             target_link_options(${_room_oracle} PRIVATE /OPT:REF)
@@ -2970,7 +2998,8 @@ if(BUILD_TESTING)
         COMMAND actraiser_scheduled_settings_test)
 
     add_executable(actraiser_dev_tools_capture_trace_test
-        tests/dev_tools_capture_trace_test.c src/dev/dev_tools_capture.c)
+        tests/dev_tools_capture_trace_test.c src/dev/dev_tools_capture.c src/platform/sdl/image_write_sdl.c)
+    target_link_libraries(actraiser_dev_tools_capture_trace_test PRIVATE SDL3::SDL3)
     target_include_directories(actraiser_dev_tools_capture_trace_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_dev_tools_capture_trace
@@ -3321,6 +3350,7 @@ if(BUILD_TESTING)
         tests/scene_asset_dump_test.c
         ${SNESRECOMP_RUNNER_CRC32_SOURCE}
         src/dev/scene_asset_dump.c
+        src/platform/sdl/image_write_sdl.c
     )
     target_include_directories(actraiser_scene_asset_dump_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -3328,6 +3358,7 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/third_party/stb
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
+    target_link_libraries(actraiser_scene_asset_dump_test PRIVATE SDL3::SDL3)
     add_test(NAME actraiser_scene_asset_dump COMMAND actraiser_scene_asset_dump_test)
 
     add_executable(actraiser_music_manifest_test
@@ -4117,6 +4148,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_diorama_frame_generation_test
         tests/diorama_frame_generation_test.c
         src/action/action_effect_masks.c
+        src/render/cloud_material.c
         src/diorama/diorama_projection.c
         src/diorama/diorama_depth_shapes.c
         src/render/scene3d_math.c

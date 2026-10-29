@@ -261,6 +261,24 @@ typedef struct DioramaSceneryGrade {
   bool set;
 } DioramaSceneryGrade;
 
+/* Light extracted from the already projected native background. Radius is
+ * measured in capture pixels, independently of output resolution. Receiver
+ * bits use the same player=2/enemy=4 convention as environmental lights. */
+typedef struct DioramaNativeBloom {
+  float strength, radius, threshold, saturation, contrast, light;
+  unsigned receivers;
+  float dust, dust_scale;
+  unsigned dust_speed; /* Integer harmonics preserve the 16-bit gameplay clock's wrap. */
+  uint32_t dust_blue, dust_rose;
+  bool set;
+} DioramaNativeBloom;
+
+static inline DioramaNativeBloom DioramaNativeBloom_Default(void) {
+  return (DioramaNativeBloom){.strength=.85f,.radius=13,.threshold=.24f,
+      .saturation=1.08f,.contrast=1.05f,.light=1.3f,.receivers=6,
+      .dust=.3f,.dust_scale=1,.dust_speed=1,.dust_blue=0x467ccf,.dust_rose=0xbc438b,.set=true};
+}
+
 typedef struct DioramaRoomOverride {
   bool used;
   uint8_t map_group;   /* $18 */
@@ -272,6 +290,7 @@ typedef struct DioramaRoomOverride {
   DioramaStampLayerOverride stamp_layers[2];
   DioramaBgPolicyOverride bg_policy[2];
   DioramaSceneryGrade scenery_grade;
+  DioramaNativeBloom native_bloom;
   struct {
     bool set;
     int16_t x, y; /* view offset in native pixels, relative to native scroll */

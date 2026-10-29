@@ -1,10 +1,17 @@
 #include "action_environment_scene.h"
 
+static bool BackgroundDepth(const ActionEnvironmentScene *scene, float *rows) {
+  const ActionRoomSceneFrameRequest request = {.camera_x=scene->camera_x[0],
+      .camera_y=scene->camera_y[0],.game_frame=scene->clock,.animation_phase=-1,.page_phase=-1};
+  return ActionRoomScene_RasterCameraSensitivity(scene->background_scene,&request,rows);
+}
+
 bool ActionEnvironmentScene_FromRoom(ActionEnvironmentScene *out,
     const ActionRoomScene *room, const ActionRoomSceneFrameState *frame) {
   if (!out || !room || !frame) return false;
   ActionEnvironmentScene s = {.group = room->group, .room = room->map,
-    .clock = (uint16_t)frame->game_frame, .big_endian = true};
+    .clock = (uint16_t)frame->game_frame, .big_endian = true,
+    .background_frame = frame, .background_scene = room, .capture_background_depth = BackgroundDepth};
   for (unsigned bg = 0; bg < 2; ++bg) {
     const ActionRoomSceneBg *source = &room->bg[bg];
     if (!ActionRoomScene_HasBackground(room,bg+1)) return false;

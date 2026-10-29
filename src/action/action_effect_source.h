@@ -17,6 +17,7 @@ enum {
   kActionSourceRibbon = 7,
   kActionSourceLitTriangle = 8,
   kActionSourceFloorTriangle = 9,
+  kActionSourceRainbowTriangle = 10,
   kActionSourceMaxLightJobs = 8,
   kActionSourceMaxLightPoints = 129 * 17,
   kActionSourceMaximumPrimitives = 16384,
@@ -28,7 +29,8 @@ enum {
 /* Thirteen 16-byte words; mirrored by action_effect_project.comp.glsl. */
 typedef struct ActionEffectSourcePrimitive {
   uint32_t meta[4]; /* kind, projection plane, object priority, shadow enabled */
-  float origin[4];  /* capture XY; flags: atmosphere=1, static=2, clipped=4, grid=8 */
+  float origin[4];  /* capture XY; flags: atmosphere=1, static=2, clipped=4, grid=8,
+                    * camera-rate=16; W holds the optional playfield camera rate. */
   float clip[4];    /* effect-local authored bounds, before motion */
   float points[6][4]; /* Grid: points[5] = world X, cell X, spacing; glow: coefficient extent. */
   float colors[3][4];
@@ -55,6 +57,7 @@ typedef struct ActionEffectSourceBatch {
   ActionEffectProjectionContext context;
   ActionEffectSourcePrimitive *primitives;
   unsigned count, capacity;
+  bool weather_only; /* Textured clouds, bolts and unshadowed fans can share sky bands. */
   ActionEffectSourceLightJob *lights;
   unsigned light_count, light_capacity;
   bool lit_triangles;
@@ -71,10 +74,11 @@ typedef struct ActionEffectSourceBatch {
  * points. An unexpected recipe use fails the entire batch, never drops art. */
 bool ActionEffectSource_ProjectPoint(void *, const ActionEffectInstance *, float, float,
                                      ArRenderPointF *);
-/* Uses batch.context to bound room-wide particle generation, with a motion
- * apron and all skybox bands. Retained particle packets must be invalidated
+/* Uses batch.context to bound room-wide particle and weather generation, with
+ * a motion apron and all skybox bands. Retained packets must be invalidated
  * when the generation view changes; final clipping stays on the GPU. */
 bool ActionEffectSource_ClipBounds(void *, const ActionEffectInstance *, ActionEffectLocalRect *);
+bool ActionEffectSource_UsesViewBounds(const ActionEffectInstance *);
 /* The same finite generation view used by ClipBounds, before intersecting the
  * emitter geometry. Packet caches key on these bounds, not screen transforms. */
 bool ActionEffectSource_ParticleViewBounds(const ActionEffectProjectionContext *,
@@ -82,6 +86,10 @@ bool ActionEffectSource_ParticleViewBounds(const ActionEffectProjectionContext *
 bool ActionEffectSource_Triangle(ActionEffectSourceBatch *, const ActionEffectInstance *,
                                  const ArRenderVertex2D *, const int *,
                                  const ActionEffectLocalRect *);
+/* Four incident sunlight weights per corner; four world-space directions in
+ * the remaining three point words. Camera-dependent spectrum stays on GPU. */
+bool ActionEffectSource_RainbowTriangle(ActionEffectSourceBatch *, const ActionEffectInstance *,
+    const ArRenderVertex2D *, const int *, const ActionEffectLocalRect *, const float directions[3][4]);
 bool ActionEffectSource_Particle(ActionEffectSourceBatch *, const ActionEffectInstance *, float,
                                  float, float, float, float, float, ArRenderColorF);
 bool ActionEffectSource_Leaf(ActionEffectSourceBatch *, const ActionEffectInstance *,

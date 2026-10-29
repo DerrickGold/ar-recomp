@@ -1,7 +1,9 @@
+#include "render/cloud_mesh.h"
 /* Shared environment mesh clipping and soft light patches. Phase: pure. */
 #include "action/action_effect_render_internal.h"
 #include "action_effect_members.h"
 #include "action_light_kinds.h"
+#include "action_storm.h"
 
 typedef struct SceneClipVertex {
   ArRenderVertex2D vertex; /* Position is still effect-local, before projection. */
@@ -149,20 +151,10 @@ bool AppendSceneSoftPatch(ActionEffectGeometryWriter *writer,
     const ActionEffectInstance *effect,
     const ActionEffectLocalRect *clip, float x, float y, float rx, float ry,
     ArRenderColorF color, float lean, ActionEffectProjectPointFn project_point, void *userdata) {
-  ArRenderVertex2D vertices[35];
-  int mapped[35];
-  for (int row = 0; row < 5; row++) {
-    const float v = (row-2)*.5f;
-    for (int col = 0; col < 7; col++) {
-      const float u = (col-3)/3.0f;
-      const int at = row*7+col;
-      vertices[at] = (ArRenderVertex2D){
-        {x + u*rx + v*lean, y + v*ry},
-        {color.r,color.g,color.b,color.a*SceneSoftFalloff(u)*SceneSoftFalloff(v)}, {0,0},
-      };
-      mapped[at] = -1;
-    }
-  }
+  ArRenderVertex2D vertices[kCloudPatchVertices];
+  int mapped[kCloudPatchVertices];
+  CloudMesh_Patch(vertices,x,y,rx,ry,color,lean);
+  for(unsigned i=0;i<kCloudPatchVertices;++i)mapped[i]=-1;
   for (int row = 0; row < 4; row++) {
     for (int col = 0; col < 6; col++) {
       const int a = row*7+col, b = a+7;
@@ -198,7 +190,27 @@ bool ActionEffectSource_ParticleViewBounds(const ActionEffectProjectionContext *
     projection.bg2_skybox.active_band = -1;
     context.diorama_projection = &projection;
   }
-  if (!ActionEffectProjection_ViewBounds(&context, effect, bounds)) return false;
+  const DioramaSkyboxSourceMapping *sky=context.diorama_projection?
+      &context.diorama_projection->bg2_skybox.resident:NULL;
+  if(sky&&sky->meta[0]>0&&!context.diorama_projection->bg2_plane.valid&&
+      effect->projection_plane==kActionEffectProjectionPlane_Bg2) {
+    /* Resident bands are fitted on the GPU and have no CPU band rectangles.
+     * Their fitted window stays inside the raw U ranges and vertical follow
+     * interval. Cull against that conservative envelope, never guessed bands
+     * or a GPU readback. This also covers a static anchor spanning many rows. */
+    if(sky->meta[0]>kDioramaSkyboxSourceBands||sky->meta[1]<=0||sky->meta[2]<=0)return false;
+    float left=INFINITY,right=-INFINITY;
+    for(unsigned i=0;i<(unsigned)sky->meta[0];++i)if(sky->bands[i][1]>sky->bands[i][0]) {
+      left=fminf(left,sky->bands[i][0]*sky->meta[1]);
+      right=fmaxf(right,sky->bands[i][1]*sky->meta[1]);
+    }
+    const float top=sky->fit[0]>0?sky->follow[0]:sky->vertical[2]*sky->meta[2];
+    const float bottom=sky->fit[0]>0?sky->follow[1]+sky->fit[0]:sky->vertical[3]*sky->meta[2];
+    const ArRenderPointF origin=ActionEffectProjection_CaptureOrigin(&context,effect);
+    *bounds=(ActionEffectLocalRect){left-sky->output[2]-origin.x,top-sky->output[3]-origin.y,
+        right-sky->output[2]-origin.x,bottom-sky->output[3]-origin.y};
+    if(!RectIsSane(bounds)||bounds->x0>=bounds->x1||bounds->y0>=bounds->y1)return false;
+  } else if (!ActionEffectProjection_ViewBounds(&context, effect, bounds)) return false;
   /* Only bound particle birth-cell work here. This apron covers the resident
    * global-motion endpoints (+/-7 pixels) and their interpolated displacement
    * (up to 10.5). GPU clipping still decides visibility on every repaint.
@@ -211,6 +223,14 @@ bool ActionEffectSource_ParticleViewBounds(const ActionEffectProjectionContext *
   return true;
 }
 
+bool ActionEffectSource_UsesViewBounds(const ActionEffectInstance *effect) {
+  return effect&&(effect->kind==kActionEffect_AuthoredParticleArea||
+      effect->kind==kActionEffect_AuthoredStorm||
+      (effect->kind==kActionEffect_AuthoredFan&&effect->projection_plane==kActionEffectProjectionPlane_Bg2&&
+       (effect->flags&kActionEffectFlag_StaticAnchor)&&!effect->field_style.shadows)||
+      (effect->kind==kActionEffect_AuthoredCloud&&effect->field_style.rolling>0));
+}
+
 bool ActionEffectSource_ClipBounds(void *userdata, const ActionEffectInstance *effect,
     ActionEffectLocalRect *bounds) {
   if (!effect || !bounds || effect->geometry.kind != kActionEffectGeometry_Rect) return false;
@@ -221,7 +241,12 @@ bool ActionEffectSource_ClipBounds(void *userdata, const ActionEffectInstance *e
     bounds->x1 = fminf(bounds->x1, effect->clip_rect.x1);
     bounds->y1 = fminf(bounds->y1, effect->clip_rect.y1);
   }
-  if (effect->kind == kActionEffect_AuthoredParticleArea) {
+  if (ActionEffectSource_UsesViewBounds(effect)) {
+    /* Long weather banks otherwise resubmit the entire level's masks for
+     * every skybox raster band. Admit only patches intersecting the union of
+     * visible bands plus the same motion apron used by particle areas. Their
+     * seeded positions remain world-relative; GPU clipping still handles
+     * each band and repaint. */
     const ActionEffectSourceBatch *source = userdata;
     if (!source) return false;
     ActionEffectLocalRect view;
@@ -242,13 +267,18 @@ static ActionEffectSourcePrimitive *SourcePrimitive(ActionEffectSourceBatch *b,
   }
   const ArRenderPointF origin = ActionEffectProjection_CaptureOrigin(&b->context, e);
   ActionEffectSourcePrimitive *p = &b->primitives[b->count++];
+  const bool weather=(e->kind==kActionEffect_AuthoredCloud&&e->field_style.textured)||
+      e->kind==kActionEffect_AuthoredStorm||
+      (e->kind==kActionEffect_AuthoredFan&&!e->field_style.shadows);
+  b->weather_only=weather&&(b->count==1||b->weather_only);
   *p = (ActionEffectSourcePrimitive){
     .meta = {kind, e->projection_plane == kActionEffectProjectionPlane_Obj ?
         (e->obj_priority ? 5u + e->obj_priority : 0u) : e->projection_plane, e->obj_priority, 0},
     .origin = {origin.x, origin.y,
                (e->render_layer == kActionEffectRenderLayer_Atmosphere ? 1 : 0) |
                (e->flags & kActionEffectFlag_StaticAnchor ? 2 : 0) |
-               (e->flags & kActionEffectFlag_ClippedMesh ? 4 : 0)},
+               (e->flags & kActionEffectFlag_ClippedMesh ? 4 : 0) |
+               (ActionStorm_CustomParallax(e) ? 16 : 0), e->field_style.storm.parallax_x},
     .clip = {-1e9f, -1e9f, 1e9f, 1e9f}};
   if ((e->flags & kActionEffectFlag_ClipToRect) && !(e->flags & kActionEffectFlag_ClippedMesh)) {
     const ActionEffectLocalRect *r = &e->clip_rect;
@@ -284,6 +314,17 @@ bool ActionEffectSource_Particle(ActionEffectSourceBatch *b, const ActionEffectI
   p->points[1][0] = px; p->points[1][1] = py;
   p->extra[0] = width; p->extra[1] = reach;
   memcpy(p->colors[0], &color, sizeof(color));
+  return true;
+}
+
+bool ActionEffectSource_RainbowTriangle(ActionEffectSourceBatch *b,const ActionEffectInstance *e,
+    const ArRenderVertex2D *v,const int *triangle,const ActionEffectLocalRect *clip,
+    const float directions[3][4]) {
+  if(!ActionEffectSource_Triangle(b,e,v,triangle,clip))return false;
+  ActionEffectSourcePrimitive *p=&b->primitives[b->count-1];
+  p->meta[0]=kActionSourceRainbowTriangle;
+  memcpy(p->points+3,directions,3*sizeof(p->points[0]));
+  p->extra[0]=1; /* Presentation fade, applied after optical response. */
   return true;
 }
 

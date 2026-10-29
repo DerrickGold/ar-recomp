@@ -1,5 +1,6 @@
 #include "action_effect_projection.h"
 #include "action_light_kinds.h"
+#include "action_storm.h"
 
 #include <math.h>
 #include <string.h>
@@ -208,6 +209,19 @@ ArRenderPointF ActionEffectProjection_CaptureOrigin(const ActionEffectProjection
     origin.x -= 0.5f * ((int)context->bg1_camera_x + context->bg2_camera_x) - cx;
     origin.y -= 0.5f * ((int)context->bg1_camera_y + context->bg2_camera_y) - cy;
   }
+  if (ActionStorm_CustomParallax(effect)) {
+    const float rate = effect->field_style.storm.parallax_x;
+    origin.x += cx - rate * context->bg1_camera_x;
+    if (context->diorama_projection) {
+      const DioramaProjection *p = context->diorama_projection;
+      const float bg2_motion = p->bg2_plane.valid ? p->bg2_plane.capture_offset.x :
+          p->bg2_skybox.world_plane.valid ? p->bg2_skybox.world_plane.capture_offset.x :
+          p->bg2_skybox.capture_offset.x;
+      /* Projectors already add BG2 capture motion; replace only that X term
+       * with the bolt's depth, including fractional generated camera frames. */
+      origin.x += rate * p->bg1_plane.capture_offset.x - bg2_motion;
+    }
+  }
   return origin;
 }
 
@@ -373,6 +387,18 @@ static bool ProjectPoint(
       valid = Diorama_ProjectCapturedPoint(
           context->diorama_projection, capture_x, texture_y,
           effect->obj_priority, &projected, NULL, NULL);
+    if (valid && effect->projection_plane==kActionEffectProjectionPlane_Bg2 &&
+        context->diorama_projection->bg2_skybox.to_texture) {
+      const DioramaProjection *p=context->diorama_projection;
+      const DioramaSkyboxProjection *sky=&p->bg2_skybox;
+      if (sky->active_band<0 || sky->active_band>=(int)sky->count) return false;
+      const DioramaSkyboxBandProjection *band=&sky->bands[sky->active_band];
+      const float u=(projected.x-p->output_x)/p->output_width;
+      const float v=((projected.y-p->output_y)/p->output_height-band->output_y0)/
+          (band->output_y1-band->output_y0);
+      projected=(ArRenderPointF){band->x0+u*(band->x1-band->x0)+sky->texture_offset.x,
+          band->y0+v*(band->y1-band->y0)+sky->texture_offset.y};
+    }
     if (valid) *point = projected;
     return valid;
   }

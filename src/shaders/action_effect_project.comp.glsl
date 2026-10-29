@@ -14,6 +14,41 @@ layout(std430,set=1,binding=0) writeonly buffer Vertices { vec4 values[]; } vert
 #include "action_effect_context.glsl"
 
 #include "action_effect_projection.glsl"
+#define RAINBOW_INLINE
+#define RAINBOW_VEC3 vec3
+#define RAINBOW_VEC4 vec4
+#define RAINBOW_V3 vec3
+#define RAINBOW_V4 vec4
+#define RAINBOW_EXP exp
+#define RAINBOW_SQRT sqrt
+#define RAINBOW_MAX max
+#include "../render/mist_rainbow_math.inc"
+#undef RAINBOW_INLINE
+#undef RAINBOW_VEC3
+#undef RAINBOW_VEC4
+#undef RAINBOW_V3
+#undef RAINBOW_V4
+#undef RAINBOW_EXP
+#undef RAINBOW_SQRT
+#undef RAINBOW_MAX
+vec4 rainbow_color(Primitive p,int corner) {
+    vec2 pixel;
+    if(!project_effect(int(p.meta.y),p.origin.xy+p.points[corner].xy,p.origin.y,
+        (uint(p.origin.z)&2u)!=0u,pixel))return vec4(0);
+    vec2 ndc=(pixel-settings.viewport.xy)/settings.viewport.zw*2-1;
+    vec3 ray=RainbowViewDirection(ndc.x,-ndc.y,
+        vec3(settings.matrix[0][0],settings.matrix[1][0],settings.matrix[2][0]),
+        vec3(settings.matrix[0][1],settings.matrix[1][1],settings.matrix[2][1]),
+        vec3(settings.matrix[0][3],settings.matrix[1][3],settings.matrix[2][3]));
+    vec3 rgb=vec3(0);
+    for(int j=0;j<4;++j)if(p.colors[corner][j]>0) {
+        vec3 sun=vec3(p.points[3][j],p.points[4][j],p.points[5][j]);
+        rgb+=p.colors[corner][j]*RainbowSpectrum(dot(ray,sun));
+    }
+    vec4 color=RainbowFinish(rgb.r,rgb.g,rgb.b);
+    color.rgb*=p.extra.x;
+    return color;
+}
 struct ClipVertex { vec2 point; vec4 color; vec2 uv; };
 float distance_to(vec2 p,vec4 b,int edge) {
     if(edge==0)return p.x-b.x;
@@ -52,12 +87,26 @@ float shadow_visibility(vec2 light,vec2 point,float strength) {
     float blocked=coverage(light+(point-light)*.74)+coverage(light+(point-light)*.85)+coverage(light+(point-light)*.96);
     return 1-.86*strength*blocked/3;
 }
+vec2 destination_point(vec2 point) {
+    if(settings.clock.w!=0) {
+        // Weather is projected in output space first, then rasterized into
+        // the destination sky strip before its shared blur. Apply this to
+        // clipped triangles as well as particles and fixed-size primitives.
+        SkyBand band=sky_band(int(settings.sky_meta.y));
+        if(any(greaterThanEqual(band.bounds.xy,band.bounds.zw)) || band.rows.y<=band.rows.x)
+            return vec2(0);
+        vec2 q=(point-settings.viewport.xy)/settings.viewport.zw;
+        q.y=(q.y-band.rows.x)/(band.rows.y-band.rows.x);
+        return mix(band.bounds.xy,band.bounds.zw,q)+settings.sky_meta.zw;
+    }
+    return point;
+}
 void emit_vertex(uint at,vec2 point,vec4 color) {
-    vertices.values[at*2]=vec4(point,0,0);
+    vertices.values[at*2]=vec4(destination_point(point),0,0);
     vertices.values[at*2+1]=color;
 }
 void emit_mask_vertex(uint at,vec2 point,vec4 color,vec2 uv) {
-    vertices.values[at*2]=vec4(point,uv);
+    vertices.values[at*2]=vec4(destination_point(point),uv);
     vertices.values[at*2+1]=color;
 }
 bool local_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
@@ -76,7 +125,8 @@ bool local_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
                (source.y>plane.bounds.w && plane.fold.x==0))return false;
         }
     }
-    return project_effect(int(p.meta.y), p.origin.xy+point, p.origin.y, (flags&2u)!=0u, screen);
+    if(!project_effect(int(p.meta.y), p.origin.xy+point, p.origin.y, (flags&2u)!=0u, screen))return false;
+    return true;
 }
 bool local_scale(Primitive p, vec4 bounds, vec2 local, out vec2 point, out float scale) {
     vec2 x,y;
@@ -98,7 +148,11 @@ void main() {
     uint count=packed?p.meta.z&15u:15u;
     for(uint i=0;i<count;i++)emit_vertex(base+i,vec2(0),vec4(0));
     int plane=int(p.meta.y);
-    vec4 bounds=effect_bounds(plane,p.origin.xy,uint(p.origin.z),(p.meta.x==0u || p.meta.x==8u || p.meta.x==9u));
+    // Terrain-bound weather follows its source cloud's depth. Preserve the
+    // rigid channel; do not choose a new scroll rate for each vertex row.
+    if((uint(p.origin.z)&16u)!=0u)
+        p.origin.x+=p.origin.w*motion_offset(0).x-effect_motion(plane).x;
+    vec4 bounds=effect_bounds(plane,p.origin.xy,uint(p.origin.z),(p.meta.x==0u || p.meta.x==8u || p.meta.x==9u || p.meta.x==10u));
     bounds=vec4(max(bounds.xy,p.clip.xy),min(bounds.zw,p.clip.zw));
     if(any(greaterThanEqual(bounds.xy,bounds.zw)))return;
     if((uint(p.origin.z)&8u)!=0u) {
@@ -106,10 +160,11 @@ void main() {
         float first=(floor((bounds.x+world)/step)-1)*step;
         if(cell<first || cell>=ceil(bounds.z+world))return;
     }
-    if((p.meta.x==0u || p.meta.x==8u)) {
+    if((p.meta.x==0u || p.meta.x==8u || p.meta.x==10u)) {
         ClipVertex a[8],b[8];int n=3;
         for(int j=0;j<3;j++) {
             a[j]=ClipVertex(p.points[j].xy,p.colors[j],p.meta.x==0u?p.points[j].zw:vec2(0));
+            if(p.meta.x==10u)a[j].color=rainbow_color(p,j);
             if(p.meta.x==8u) {
                 float light=p.points[j].z>0?lighting.values[uint(p.points[j].z)-1]:0;
                 a[j].color.a=min(p.extra.x,p.points[j].w+p.colors[j].a*light);

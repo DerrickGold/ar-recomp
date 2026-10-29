@@ -1301,6 +1301,7 @@ static unsigned source_count, source_submissions;
 static uint64_t source_revision;
 static const DioramaProjection *source_projection;
 static float source_brightness;
+static bool source_weather_only;
 
 static bool InspectSourcePacket(ArRenderDevice *device, const ActionEffectSourceBatch *batch,
     const DioramaProjection *projection, const ActionMoonlightOcclusion *scenery,
@@ -1310,6 +1311,7 @@ static bool InspectSourcePacket(ArRenderDevice *device, const ActionEffectSource
   if (!batch->count) return true;
   source_projection = projection;
   source_brightness = brightness;
+  source_weather_only = batch->weather_only;
   source_count = batch->count;
   source_revision = batch->revision;
   source_hash = 2166136261u;
@@ -1423,7 +1425,7 @@ static void SourcePacketCaptureLifetime(void) {
   PresentActionEffects_Reset(&device);
 }
 
-static void SourceParticleViewLifetime(unsigned index) {
+static void SourceParticleViewLifetime(unsigned index, bool weather) {
   Backend b;
   ArRenderDevice device;
   Init(&b, &device);
@@ -1441,12 +1443,20 @@ static void SourceParticleViewLifetime(unsigned index) {
     .particle_style={.active=1,.size_min=.35f,.size_max=.75f,.travel_y=32,.spread=1},
     .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-8000,-8000,8000,8000}},
   };
+  if(weather) {
+    ActionEffectInstance *effect=&frame.action_scene_effects.authored[index];
+    effect->kind=kActionEffect_AuthoredCloud;
+    effect->particle_count=0;
+    effect->geometry.data.rect=(ActionEffectLocalRect){-8000,-1200,8000,-600};
+    effect->field_style=(ActionEffectFieldStyle){.textured=1,.rolling=.8f,.strands=24};
+  }
   DioramaProjection projection={.valid=true,.bg2_skybox={.count=2,.active_band=0,
       .bands={{0,0,512,224,0,.5f},{0,224,512,448,.5f,1}}}};
   source_submissions=0;
   PresentActionEffects_InvalidateSourcePackets();
   PresentActionEffects_DrawWithSource(&device,&frame,viewport,&projection,InspectSourcePacket);
   assert(source_submissions==1 && source_count && source_count<512);
+  assert(source_weather_only==weather);
   uint64_t revision=source_revision;
   const uint32_t hash=source_hash;
   projection.bg2_skybox.active_band=1;
@@ -1532,7 +1542,7 @@ int main(void) {
    * through the last authored slot, without rebuilding for pure reprojection. */
   const unsigned particle_slots[]={0,31,32,63,64,kActionAuthoredMaxInstances-1};
   for(unsigned i=0;i<sizeof(particle_slots)/sizeof(particle_slots[0]);++i)
-    SourceParticleViewLifetime(particle_slots[i]);
+    for(unsigned weather=0;weather<2;++weather)SourceParticleViewLifetime(particle_slots[i],weather!=0);
   AuthoredOnlyComposition();
   TexturedCloudResources();
   TestEffectMasterBrightness();

@@ -69,8 +69,8 @@ static bool AppendAuthoredEnvironmentBase(ActionEffectGeometryWriter *writer,
   if (!writer || !effect || !project) return false;
   const ActionEffectLocalRect *r = &effect->geometry.data.rect;
   if (effect->geometry.kind != kActionEffectGeometry_Rect || !RectIsSane(r) ||
-      r->x1-r->x0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure||effect->kind==kActionEffect_AuthoredGradient||effect->kind==kActionEffect_AuthoredHeat||effect->kind==kActionEffect_AuthoredCloud||effect->kind==kActionEffect_AuthoredFoliage||effect->kind==kActionEffect_AuthoredCanopy)?16384:512) ||
-      r->y1-r->y0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure||effect->kind==kActionEffect_AuthoredGradient||effect->kind==kActionEffect_AuthoredHeat||effect->kind==kActionEffect_AuthoredCloud||effect->kind==kActionEffect_AuthoredFoliage||effect->kind==kActionEffect_AuthoredCanopy)?16384:512) || effect->particle_count > 128 ||
+      r->x1-r->x0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure||effect->kind==kActionEffect_AuthoredGradient||effect->kind==kActionEffect_AuthoredHeat||effect->kind==kActionEffect_AuthoredCloud||effect->kind==kActionEffect_AuthoredFoliage||effect->kind==kActionEffect_AuthoredCanopy||effect->kind==kActionEffect_AuthoredCloudLight)?16384:512) ||
+      r->y1-r->y0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure||effect->kind==kActionEffect_AuthoredGradient||effect->kind==kActionEffect_AuthoredHeat||effect->kind==kActionEffect_AuthoredCloud||effect->kind==kActionEffect_AuthoredFoliage||effect->kind==kActionEffect_AuthoredCanopy||effect->kind==kActionEffect_AuthoredCloudLight)?16384:512) || effect->particle_count > 128 ||
       effect->particle_lifetime < 16 || effect->particle_lifetime > 4096 ||
       !isfinite(effect->tuning.intensity) || effect->tuning.intensity < 0 || effect->tuning.intensity > 4)
     return false;

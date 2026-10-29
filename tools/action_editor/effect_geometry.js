@@ -3,7 +3,11 @@
 const EffectGeometry=(()=>{
   const rad=Math.PI/180;
   const isRay=e=>e.guide?.[0]>0||e.kind==='light-fan';
-  function origin(e){return {x:e.x,y:e.y+(e.guide?.[0]===2?e.guide[4]*(e.scaleY||1):0)};}
+  function origin(e){
+    if(e.kind==='cloud-light')return {x:e.x,y:e.y+((e.edgePosition??.15)-.5)*e.height};
+    if(e.kind==='storm-lightning')return {x:e.x,y:e.y+(.12-.5)*e.height};
+    return {x:e.x,y:e.y+(e.guide?.[0]===2?e.guide[4]*(e.scaleY||1):0)};
+  }
   function slope(e) {
     const base=e.guide?.[1]||0,angle=(e.angle||0)*rad;
     return (e.guide?.[0]===1?-Math.tan(Math.atan(base)+angle):

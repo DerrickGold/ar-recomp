@@ -41,7 +41,7 @@ function editor(data,options={}) {
     replaceChildren(...children) {this.children=[...children];}
     getContext() { return this.context ??= {putImageData(image) {this.image=image;},
       drawImage() {},clearRect() {},setTransform() {},fillRect() {},
-      beginPath() {},moveTo() {},lineTo() {},closePath() {},stroke() {},arc() {},fill() {},
+      beginPath() {},moveTo() {},lineTo() {},closePath() {},stroke() {},arc() {},fill() {},rect() {},clip() {},
       setLineDash(value) {this.dash=value;},measureText(text) {return {width:text.length*7};},
       fillText(text,x,y) {(this.labels??=[]).push({text,x,y});},
       strokeRect(x,y,w,h) {(this.strokes??=[]).push({x,y,w,h,color:this.strokeStyle});},
@@ -139,6 +139,35 @@ function fixture() {
     bg1Attributes:0x10, bg2Attributes:1, frameWidth:256, frameHeight:224,
     terrainProfiles:[{profile:0,label:'US'}, {profile:1,label:'Japanese'},
       {profile:2,label:'European'}]};
+}
+
+/* Final-battle material uses the same project/undo path as scenery. */
+{
+  const data=fixture();data.rooms[0]={...data.rooms[0],group:7,map:8};
+  const {run,elements}=editor(data,{ini:'; retained\n[layers:07:08]\nbg1-policy = edge:world\n'});
+  run('SharedRoomPreview.validateScenery=()=>{};NativeBloomEditor.refresh();');
+  assert.equal(elements.get('#nebula-apply').disabled,false);
+  run("$('#nebula-strength').value='1.2';$('#nebula-radius').value='11';$('#nebula-player').checked=true;$('#nebula-enemies').checked=false;$('#nebula-apply').onclick();");
+  run("$('#nebula-dust').value='.45';$('#nebula-dust-scale').value='1.7';$('#nebula-dust-speed').value='3';$('#nebula-dust-blue').value='#123456';$('#nebula-dust-rose').value='#abcdef';$('#nebula-apply').onclick();");
+  const exported=run('mergeDioramaIni()');
+  assert.match(exported,/native-bloom = strength:1.2 radius:11 .*receivers:2/);
+  assert.match(exported,/dust:0.45 dust-scale:1.7 dust-speed:3 dust-blue:123456 dust-rose:abcdef/);
+  assert.match(exported,/; retained/);
+  const reloaded=editor(data,{ini:exported});
+  assert.equal(reloaded.run('roomConfig(room).nativeBloom.radius'),11);
+  assert.equal(reloaded.run("roomConfig(room).nativeBloom['dust-blue']"),'123456');
+  run('undo();undo()');assert.doesNotMatch(run('mergeDioramaIni()'),/native-bloom/);
+  run('redo();redo()');assert.equal(run('mergeDioramaIni()'),exported);
+  elements.get('#nebula-dust').listeners.click({shiftKey:true,preventDefault(){}});
+  assert.equal(Number(elements.get('#nebula-dust').value),.3);
+  elements.get('#nebula-radius').listeners.click({shiftKey:true,preventDefault(){}});
+  assert.equal(Number(elements.get('#nebula-radius').value),13);
+  run("$('#nebula-apply').onclick();");assert.equal(run('roomConfig(room).nativeBloom.radius'),13);
+  run("$('#nebula-reset').onclick();");assert.doesNotMatch(run('mergeDioramaIni()'),/native-bloom/);
+  run("$('#room').value='1';$('#room').onchange();NativeBloomEditor.refresh();");
+  assert.equal(elements.get('#nebula-apply').disabled,true);
+  run('undo()');assert.equal(run('room.map'),8);
+  assert.equal(run('roomConfig(room).nativeBloom.receivers'),2);
 }
 
 /* Same ROM room, independent scenery identities, including cross-scene undo. */
@@ -2630,6 +2659,136 @@ cpr('EffectEditor.pasteEffects(400,200)');assert.equal(cpr('EffectEditor.mapEmit
 cpr(`setLayer(1)`);assert.equal(cpr('EffectEditor.pasteEffects(100,100)'),false);
 console.log('Multi-effect copy/paste preserves spacing and settings, repeats with fresh identities, isolates BG coordinates and undoes atomically');
 
+const weatherEditor=editor(fixture()),wtr=weatherEditor.run;
+wtr(`loadIniText('','weather.ini');setLayer(1);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ EffectEditor.placeEmitter('storm-lightning',160,64);EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(wtr('EffectEditor.mapEmitters(1)[0].x'),160);
+assert.match(wtr('EffectEditor.text()'),/^anchor=bg2-point$/m);
+assert.match(wtr('EffectEditor.text()'),/^light-player=0$/m);
+assert.equal(Number(weatherEditor.elements.get('#emitterlifetime').min),120);
+assert.equal(Number(weatherEditor.elements.get('#emitterStrands').max),4);
+assert.equal(weatherEditor.elements.get('#emitterFoliageSeed').disabled,false);
+assert.equal(weatherEditor.elements.get('#receiverControls').hidden,false);
+assert.equal(weatherEditor.elements.get('#stormControls').hidden,false);
+wtr(`for(const [key,value] of [['parallax-x','.25'],['ground-palette','1'],['ground-colors','1,2,9,10']]) {
+ const control=$('#storm-'+key);control.value=value;control.onchange({target:control});
+}`);
+assert.match(wtr('EffectEditor.text()'),/^parallax-x=\.25$/m);
+assert.match(wtr('EffectEditor.text()'),/^ground-colors=1,2,9,10$/m);
+wtr(`EffectEditor.editEmitter(EffectEditor.selected(),{width:320,height:144,seed:913,activity:.08});
+ EffectEditor.copyEffects();EffectEditor.pasteEffects(512,80);`);
+assert.equal(wtr('EffectEditor.mapEmitters(1).length'),2);
+assert.equal(wtr('EffectEditor.mapEmitters(1).find(e=>e.id===EffectEditor.selected()).x'),512);
+assert.ok(Math.abs(wtr('EffectGeometry.origin(EffectEditor.mapEmitters(1).find(e=>e.id===EffectEditor.selected())).y')-
+  (80+(.12-.5)*144))<1e-6,'the cloud-attachment guide follows resized and pasted storm regions');
+assert.match(wtr('EffectEditor.text()'),/^seed=913$/m);
+assert.equal(weatherEditor.elements.get('#storm-parallax-x').value,'.25');
+assert.equal(weatherEditor.elements.get('#storm-ground-colors').value,'1,2,9,10');
+wtr(`$('#storm-parallax-x').value='.5';$('#storm-parallax-x').onchange({target:$('#storm-parallax-x')});
+ $('#storm-parallax-x').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.equal(weatherEditor.elements.get('#storm-parallax-x').value,'.25');
+wtr(`$('#emitterAnchor').value='bg1';$('#emitterAnchor').onchange({target:$('#emitterAnchor')});`);
+assert.equal(weatherEditor.elements.get('#storm-parallax-x').value,'');
+assert.equal(weatherEditor.elements.get('#storm-ground-colors').value,'none');
+wtr('undo()');
+assert.equal(weatherEditor.elements.get('#storm-ground-colors').value,'1,2,9,10');
+wtr(`EffectEditor.editEmitter(EffectEditor.selected(),{width:480});`);
+wtr(`$('#emitterwidth').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.equal(Number(weatherEditor.elements.get('#emitterwidth').value),320,'a copied effect resets to its pasted definition');
+wtr(`setLayer(0);EffectEditor.placeEmitter('cloud-bank',120,160);
+ EffectEditor.editEmitter(EffectEditor.selected(),{textured:1,rolling:.8,wake:.5,'canopy-response':.4});
+ EffectEditor.editEmitter(EffectEditor.selected(),{anchor:'bg2-point'});EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(weatherEditor.elements.get('#emitterRolling').disabled,false);
+assert.equal(weatherEditor.elements.get('#emitterWake').disabled,true);
+assert.equal(weatherEditor.elements.get('#emitterLightResponse').disabled,true);
+assert.doesNotMatch(wtr('EffectEditor.text()'),/^(wake|canopy-response)=/m);
+wtr(`EffectEditor.editEmitter(EffectEditor.selected(),{volume:.9,rainbow:.6,sparkle:.8,'color-end':'68748c'});
+ EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(weatherEditor.elements.get('#emitterVolume').disabled,false);
+assert.equal(Number(weatherEditor.elements.get('#emitterVolume').value),.9);
+wtr(`setLayer(1);EffectEditor.copyEffects();EffectEditor.pasteEffects(700,180);`);
+assert.equal(weatherEditor.elements.get('#emitterRainbow').disabled,false);
+assert.equal(Number(weatherEditor.elements.get('#emitterRainbow').value),.6);
+assert.match(wtr('EffectEditor.text()'),/^rainbow=0.6$/m);
+assert.equal(weatherEditor.elements.get('#emitterSparkle').disabled,false);
+assert.match(wtr('EffectEditor.text()'),/^sparkle=0.8$/m);
+wtr(`EffectEditor.editEmitter(EffectEditor.selected(),{sparkle:.2});
+ $('#emitterSparkle').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.equal(Number(weatherEditor.elements.get('#emitterSparkle').value),.8);
+wtr(`EffectEditor.editEmitter(EffectEditor.selected(),{rainbow:.2});
+ $('#emitterRainbow').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.equal(Number(weatherEditor.elements.get('#emitterRainbow').value),.6);
+assert.equal(Number(weatherEditor.elements.get('#emitterVolume').value),.9);
+assert.match(wtr('EffectEditor.text()'),/^volume=0.9$/m);
+wtr(`EffectEditor.editEmitter(EffectEditor.selected(),{volume:.4});
+ $('#emitterVolume').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.equal(Number(weatherEditor.elements.get('#emitterVolume').value),.9);
+wtr(`EffectEditor.editEmitter(EffectEditor.selected(),{rolling:0});`);
+assert.equal(Number(weatherEditor.elements.get('#emitterVolume').value),0);
+assert.equal(Number(weatherEditor.elements.get('#emitterRainbow').value),0);
+assert.equal(Number(weatherEditor.elements.get('#emitterSparkle').value),0);
+wtr(`EffectEditor.editEmitter(EffectEditor.selected(),{volume:1});`);
+assert.match(wtr('EffectEditor.text()'),/^rolling=0?\.8$/m);
+console.log('Cloud volume: BG2 controls, copy/paste, export, reset and rolling-mode dependencies passed');
+const waterSparkleEditor=editor(fixture()),wpr=waterSparkleEditor.run;
+wpr(`loadIniText('','water-glints.ini');setLayer(1);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ EffectEditor.placeEmitter('particle-area',300,200);
+ EffectEditor.editEmitter(EffectEditor.selected(),{anchor:'bg2-point',pattern:'water-glints','canopy-response':1,'travel-y':96,particles:16,lifetime:120});
+ EffectEditor.selectEmitter(EffectEditor.selected());EffectEditor.copyEffects();EffectEditor.pasteEffects(600,200);`);
+assert.equal(waterSparkleEditor.elements.get('#emitterLightResponse').disabled,false);
+assert.match(wpr('EffectEditor.text()'),/^pattern=water-glints$/m);
+assert.match(wpr('EffectEditor.text()'),/^canopy-response=1$/m);
+assert.match(wpr('EffectEditor.text()'),/^travel-y=96$/m);
+assert.match(wpr('EffectEditor.text()'),/^anchor=bg2-point$/m);
+console.log('Sunlit waterfall particles: BG2 anchoring, flowing pattern and response survive copy/paste/export');
+console.log('Storm region placement, resizing, copy/paste, defaults and BG2 cloud controls passed');
+wtr(`setLayer(1);EffectEditor.placeEmitter('light-fan',240,68);
+ EffectEditor.editEmitter(EffectEditor.selected(),{twinkle:.6,'fade-in':.25,lifetime:1260,shadows:0});
+ EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(weatherEditor.elements.get('#emitterTwinkle').disabled,false);
+assert.equal(weatherEditor.elements.get('#emitterRayFadeIn').disabled,false);
+assert.match(weatherEditor.elements.get('#emitterTwinkle').title,/cloud openings/);
+wtr(`EffectEditor.copyEffects();EffectEditor.pasteEffects(512,80);`);
+assert.match(wtr('EffectEditor.text()'),/^twinkle=0.6$/m);
+assert.match(wtr('EffectEditor.text()'),/^lifetime=1260$/m);
+assert.match(wtr('EffectEditor.text()'),/^fade-in=0.25$/m);
+console.log('Cloud-break ray modulation stays editable through copy/paste and export');
+
+const cloudEditor=editor(fixture()),clr=cloudEditor.run;
+clr(`loadIniText('','cloud-light.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};`);
+assert.equal(clr("EffectEditor.placeEmitter('cloud-light',160,100)"),false,'cloud material requires BG2 coordinates');
+clr(`setLayer(1);EffectEditor.placeEmitter('cloud-light',160,100);EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(cloudEditor.elements.get('#cloudLightControls').hidden,false);
+assert.equal(cloudEditor.elements.get('#receiverControls').hidden,true,'distant cloud material cannot illuminate foreground actors');
+assert.equal(cloudEditor.elements.get('#emitterAnchor').disabled,true);
+assert.equal(Number(cloudEditor.elements.get('#emitterStrands').max),5);
+assert.equal(Number(cloudEditor.elements.get('#cloudLight-background-brightness').value),1);
+clr(`EffectEditor.editEmitter(EffectEditor.selected(),{width:900,height:420,angle:-48,'edge-strength':12,'echo-strength':.8,'sun-depth':52,'background-brightness':.72});
+ EffectEditor.copyEffects();EffectEditor.pasteEffects(620,140);`);
+assert.equal(clr('EffectEditor.mapEmitters(1).length'),2);
+assert.equal(clr('EffectEditor.mapEmitters(1).find(e=>e.id===EffectEditor.selected()).angle'),-48);
+assert.match(clr('EffectEditor.text()'),/^edge-strength=12$/m);
+assert.match(clr('EffectEditor.text()'),/^sun-depth=52$/m);
+assert.match(clr('EffectEditor.text()'),/^background-brightness=0.72$/m);
+clr(`EffectEditor.editEmitter(EffectEditor.selected(),{'background-brightness':.3});
+ $('#cloudLight-background-brightness').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.equal(Number(cloudEditor.elements.get('#cloudLight-background-brightness').value),.72);
+clr(`EffectEditor.editEmitter(EffectEditor.selected(),{'sun-depth':-35});
+ $('#cloudLight-sun-depth').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.equal(Number(cloudEditor.elements.get('#cloudLight-sun-depth').value),52);
+clr(`EffectEditor.editEmitter(EffectEditor.selected(),{'edge-strength':2});
+ $('#cloudLight-edge-strength').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.equal(Number(cloudEditor.elements.get('#cloudLight-edge-strength').value),12,'copied cloud fields reset to their pasted definition');
+clr(`EffectEditor.editEmitter(EffectEditor.selected(),{anchor:null,width:null,height:null,angle:null,strands:null,lifetime:null});
+ EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(Number(cloudEditor.elements.get('#emitterwidth').value),272);
+assert.equal(Number(cloudEditor.elements.get('#emitterlifetime').value),1440);
+assert.equal(clr('EffectEditor.mapEmitters(1).find(e=>e.id===EffectEditor.selected()).angle'),-32);
+assert.equal(clr('EffectEditor.mapEmitters(1).find(e=>e.id===EffectEditor.selected()).strands'),3);
+assert.equal(clr('EffectEditor.mapEmitters(1).find(e=>e.id===EffectEditor.selected()).seed'),104,
+  'map guides carry the same pattern seed as the material');
+console.log('Cloud material placement, BG2 isolation, sparse defaults, sizing, angles, copy/paste and reset/export passed');
+
 // Use the context menu and keyboard/mouse handlers at a scrolled, zoomed map
 // with a sidebar offset. A rejected paste must be visible beside the map.
 const pasteEditor=editor(fixture()),psr=pasteEditor.run;
@@ -2698,6 +2857,19 @@ assert.equal(sur('undoStack.length'),1);const surfaceSaved=sur('EffectEditor.tex
 assert.equal(bir('EffectEditor.mapEmitters().find(e=>e.attached).x'),bir('actor.x'));
 assert.equal(bir('EffectEditor.mapEmitters().find(e=>e.attached).y'),bir('actor.y'));
 console.log('Aitos surface placement, heat parameters, modal undo and actor-relative map markers passed');
+
+const moltenEditor=editor(fixture()),mol=moltenEditor.run;
+const moltenData=fs.readFileSync(path.join(root,'assets/effects/lava-pit-field.ini'),'utf8')
+ .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
+mol(`loadIniText('','molten.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.surfaceFieldDefinition=()=>${JSON.stringify(moltenData)};$('#emitterPreset').value='lava-pit-field';EffectEditor.openModal(null,192,208)`);
+assert.match(mol('EffectEditor.text()'),/^source-1=192 208 -16 -16 16 16 1$/m);
+assert.match(mol('EffectEditor.text()'),/^projection=1 8$/m);
+assert.match(mol('EffectEditor.text()'),/^receivers=7$/m);
+mol(`EffectEditor.editEmitter(EffectEditor.selected(),{'molten-surface':'0.7 8 360 6 4 0.6','molten-bursts':'2 240 0.4 28 4'});$('#effectInspectorApply').onclick()`);
+const moltenSaved=mol('EffectEditor.text()');assert.match(moltenSaved,/^molten-bursts=2 240 0.4 28 4$/m);
+mol('undo()');assert.doesNotMatch(mol('EffectEditor.text()'),/\[field:/);mol('redo()');assert.equal(mol('EffectEditor.text()'),moltenSaved);
+console.log('Molten lava source placement, surface/burst controls, receiver flags, export and undo passed');
 
 // Multiple runtime actors share one authored definition in the source picker.
 bir(`globalThis.bindingId=EffectEditor.selected();
@@ -2983,7 +3155,12 @@ pathRun(`setLayer(1);EffectEditor.placeEmitter('heat-haze',256,192);EffectEditor
 assert.equal(pathUi.elements.get('#emitterAmplitude').disabled,false);
 assert.equal(pathUi.elements.get('#effectColor').disabled,true);
 assert.match(pathRun('EffectEditor.text()'),/anchor=bg2-point/);
-console.log('Particle routes preserve tracing order, resize/copy/undo; shared gusts, torch shadows and BG2 heat controls passed');
+pathRun(`setLayer(0);EffectEditor.placeEmitter('heat-haze',128,96);EffectEditor.selectEmitter(EffectEditor.mapEmitters(0).find(e=>e.kind==='heat-haze').id);`);
+assert.equal(pathUi.elements.get('#emitterAnchor').disabled,false);
+pathRun(`EffectEditor.editEmitter(EffectEditor.selected(),{width:176,height:128,amplitude:2.2});`);
+assert.match(pathRun('EffectEditor.text()'),/anchor=bg1/);
+assert.match(pathRun('EffectEditor.text()'),/amplitude=2.2/);
+console.log('Particle routes, torch shadows and editable BG1/BG2 heat controls passed');
 
 // Region handles edit the same complete fields consumed by native and WASM.
 const resizeRegions=editor(fixture()),rsize=resizeRegions.run;

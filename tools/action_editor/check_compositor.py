@@ -16,7 +16,7 @@ def check(sanitize=False):
     common = ["-O2", "-std=c11", "-Wall", "-Wextra", "-Werror",
               "-I", str(ROOT / "src"), "-I", str(ROOT / "tests"),
               "-I", str(ROOT / "snesrecomp-go/runtime/include"),
-              "tests/diorama_compositor_test.c", *sources]
+              "tests/diorama_compositor_test.c", "src/render/cloud_material.c", *sources]
     with tempfile.TemporaryDirectory(prefix="diorama-compositor-") as directory:
         work = Path(directory)
         native, wasm, trace = work / "native", work / "compositor.wasm", work / "native.trace"

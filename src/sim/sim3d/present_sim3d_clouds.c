@@ -3,12 +3,13 @@
  * reach. Its camera-dependent mesh is retained; drift changes only sampling.
  *
  * The layer table is shared with the world-map sky through
- * present_sim3d_environment.h; town texture generation stays here. */
+ * present_sim3d_environment.h; material baking is shared with action and sky clouds. */
 
 #include "sim/sim3d/present_sim3d_clouds.h"
 #include "sim/sim3d/present_sim3d_environment.h"
 #include "sim/sim3d/present_sim3d_project.h"
 
+#include "render/cloud_material.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -258,61 +259,9 @@ static void PrepareSimCloudFallback(void) {
   s_sim_cloud_mesh.fallback_ready = true;
 }
 
-/* Deterministic value noise. A hash rather than rand() so the field is
- * identical every run and a checkpoint image is reproducible. */
-static float CloudHash(int x, int y) {
-  uint32_t h = (uint32_t)x * 374761393u + (uint32_t)y * 668265263u;
-  h = (h ^ (h >> 13)) * 1274126177u;
-  return (float)((h ^ (h >> 16)) & 0xFFFF) / 65535.0f;
-}
-
-static float CloudSmooth(float t) { return t * t * (3.0f - 2.0f * t); }
-
-/* Tileable value noise at `period` cells across the texture. */
-static float CloudNoise(float x, float y, int period) {
-  int x0 = (int)floorf(x), y0 = (int)floorf(y);
-  float fx = CloudSmooth(x - (float)x0), fy = CloudSmooth(y - (float)y0);
-  int xa = ((x0 % period) + period) % period;
-  int ya = ((y0 % period) + period) % period;
-  int xb = (xa + 1) % period, yb = (ya + 1) % period;
-  float n00 = CloudHash(xa, ya), n10 = CloudHash(xb, ya);
-  float n01 = CloudHash(xa, yb), n11 = CloudHash(xb, yb);
-  float top = n00 + (n10 - n00) * fx;
-  float bottom = n01 + (n11 - n01) * fx;
-  return top + (bottom - top) * fy;
-}
-
 enum { kSimCloudTexturePixels = 512 };
-
-static uint32_t SimCloudTexel(int x, int y) {
-  float amplitude = 0.5f, total = 0.0f, sum = 0.0f;
-  int period = 4;
-  for (int octave = 0; octave < kSimCloudOctaves; octave++) {
-    /* Include both periodic endpoints. Navigation's padded texture contains
-     * exact copies of this base field, so the first and last texels must
-     * match under linear filtering. */
-    const float scale =
-        (float)period / (float)(kSimCloudTexturePixels - 1);
-    /* Offset every octave off its lattice axes. Sampling every octave at
-     * y=0/period made the periodic boundary a coherent straight feature even
-     * though its endpoint values matched. */
-    const float octave_x = 0.37f + (float)octave * 0.53f;
-    const float octave_y = 0.61f + (float)octave * 0.29f;
-    total += CloudNoise((float)x * scale + octave_x,
-                        (float)y * scale + octave_y, period) *
-        amplitude;
-    sum += amplitude;
-    amplitude *= 0.5f;
-    period *= 2;
-  }
-  float density = (total / sum - 0.42f) / 0.38f;
-  if (density < 0.0f) density = 0.0f;
-  if (density > 1.0f) density = 1.0f;
-  density = CloudSmooth(density);
-  unsigned alpha = (unsigned)(density * 255.0f + 0.5f);
-  unsigned tint = 236 + (unsigned)(density * 19.0f);
-  if (tint > 255) tint = 255;
-  return (alpha << 24) | (tint << 16) | (tint << 8) | 255u;
+static uint32_t SimCloudTexel(int x,int y) {
+  return CloudMaterial_SheetTexel(x,y,kSimCloudTexturePixels,kSimCloudOctaves);
 }
 
 static ArRenderTexture EnsureSimCloudTexture(void) {

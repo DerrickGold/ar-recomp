@@ -202,7 +202,13 @@ enum {
       kActionSceneEffectGlowsPerInstance * kActionEffectGlowIndices +
       (kActionSceneEffectWaterfallMistParticleCount -
        kActionSceneEffectParticlesPerInstance) * 6,
+  /* Up to 16 crust cells and four overlapping swell/ripple pairs per pit.
+   * Eight-sided three-ring meshes plus five droplet quads per burst. Alpha
+   * detail and receiver lighting use separate existing batches. */
+  kActionSceneEffectMoltenVerticesPerPit = (16 + 2 * 4) * (1 + 3 * 8) + 4 * 5 * 4,
+  kActionSceneEffectMoltenIndicesPerPit = (16 + 2 * 4) * 8 * 15 + 4 * 5 * 6,
   kActionSceneEffectRenderMaxVertices = kActionAuthoredMaxVertices +
+      kActionSceneEffectMaxInstances * kActionSceneEffectMoltenVerticesPerPit +
       kActionSceneEffectMaxGlows * kActionEffectGlowVertices +
       kActionSceneEffectMaxParticles * 4 +
       kActionSceneEffectMaxLightningFilaments *
@@ -221,6 +227,7 @@ enum {
       kActionSceneEffectMaxFlamingWheels *
           kActionSceneEffectFlamingWheelExtraVertices,
   kActionSceneEffectRenderMaxIndices = kActionAuthoredMaxIndices +
+      kActionSceneEffectMaxInstances * kActionSceneEffectMoltenIndicesPerPit +
       kActionSceneEffectMaxGlows * kActionEffectGlowIndices +
       kActionSceneEffectMaxParticles * 6 +
       kActionSceneEffectMaxLightningFilaments *

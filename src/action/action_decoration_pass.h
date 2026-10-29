@@ -26,6 +26,8 @@ static const ActionDecorationPass kDecorationPasses[] = {
    kArRenderBlendMode_Add, true, false, "BG1-high lava decoration"},
   {kActionEffectRenderLayer_Bg2Plane, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_BG2,
    kArRenderBlendMode_Add, true, false, "BG2-local decoration"},
+  {kActionEffectRenderLayer_Bg2Weather, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_BG2,
+   kArRenderBlendMode_Add, true, false, "BG2 storm weather"},
   {kActionEffectRenderLayer_Bg2HighPlane, kDioramaPlane_Bg2Hi, SR_PPU_OVERLAY_BG2,
    kArRenderBlendMode_Add, true, false, "BG2-high water decoration"},
   {kActionEffectRenderLayer_Bg2Alpha, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_BG2,

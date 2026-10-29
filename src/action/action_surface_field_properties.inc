@@ -50,3 +50,7 @@ SURFACE_VECTOR(HeatMotion, "heat-motion", 3, 0, 4)
 SURFACE_VECTOR(HeatEnvelope, "heat-envelope", 2, 0, 1)
 SURFACE_VECTOR(HeatWave, "heat-wave", 5, -64, 64)
 SURFACE_VECTOR(HeatCross, "heat-cross", 3, -64, 64)
+/* Optional in older saved fields; upgrade with disabled molten detail. */
+SURFACE_VECTOR(MoltenSurface, "molten-surface", 6, 0, 4096)
+SURFACE_VECTOR(MoltenBursts, "molten-bursts", 5, 0, 4096)
+SURFACE_VECTOR(MoltenColor, "molten-color", 4, 0, 1)

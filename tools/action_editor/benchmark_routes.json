@@ -1,0 +1,274 @@
+[
+  {
+    "name": "swamp-floor",
+    "room": "0501",
+    "start": [
+      0,
+      224
+    ],
+    "end": [
+      1760,
+      224
+    ],
+    "player": [
+      128,
+      404
+    ]
+  },
+  {
+    "name": "swamp-roofs",
+    "room": "0501",
+    "start": [
+      0,
+      0
+    ],
+    "end": [
+      1760,
+      0
+    ],
+    "player": [
+      128,
+      224
+    ]
+  },
+  {
+    "name": "swamp-doorways",
+    "room": "0502",
+    "start": [
+      0,
+      224
+    ],
+    "end": [
+      1256,
+      224
+    ],
+    "player": [
+      128,
+      404
+    ]
+  },
+  {
+    "name": "swamp-boss",
+    "room": "0503",
+    "start": [
+      0,
+      0
+    ],
+    "end": [
+      256,
+      0
+    ],
+    "player": [
+      128,
+      210
+    ]
+  },
+  {
+    "name": "temple-shrine",
+    "room": "0504",
+    "start": [
+      528,
+      216
+    ],
+    "end": [
+      736,
+      216
+    ],
+    "player": [
+      656,
+      384
+    ]
+  },
+  {
+    "name": "temple-lattice",
+    "room": "0505",
+    "start": [
+      0,
+      128
+    ],
+    "end": [
+      512,
+      240
+    ],
+    "player": [
+      128,
+      344
+    ]
+  },
+  {
+    "name": "temple-gallery",
+    "room": "0506",
+    "start": [
+      1408,
+      64
+    ],
+    "end": [
+      2024,
+      64
+    ],
+    "player": [
+      1536,
+      224
+    ]
+  },
+  {
+    "name": "temple-lower",
+    "room": "0506",
+    "start": [
+      720,
+      1120
+    ],
+    "end": [
+      1152,
+      1120
+    ],
+    "player": [
+      848,
+      1296
+    ]
+  },
+  {
+    "name": "temple-shaft-upper",
+    "room": "0507",
+    "start": [
+      1008,
+      720
+    ],
+    "end": [
+      1008,
+      1104
+    ],
+    "player": [
+      1136,
+      896
+    ]
+  },
+  {
+    "name": "temple-shaft-lower",
+    "room": "0507",
+    "start": [
+      720,
+      1504
+    ],
+    "end": [
+      1152,
+      1504
+    ],
+    "player": [
+      848,
+      1680
+    ]
+  },
+  {
+    "name": "viper-chamber",
+    "room": "0508",
+    "start": [
+      0,
+      256
+    ],
+    "end": [
+      256,
+      256
+    ],
+    "player": [
+      128,
+      480
+    ]
+  },
+  {
+    "name": "aitos-clouds",
+    "room": "0401",
+    "start": [
+      0,
+      712
+    ],
+    "end": [
+      3800,
+      712
+    ],
+    "player": [
+      128,
+      888
+    ]
+  },
+  {
+    "name": "aitos-lava-west",
+    "room": "0401",
+    "start": [
+      1450,
+      768
+    ],
+    "end": [
+      1800,
+      768
+    ],
+    "player": [
+      1578,
+      944
+    ]
+  },
+  {
+    "name": "aitos-lava-east",
+    "room": "0401",
+    "start": [
+      3340,
+      768
+    ],
+    "end": [
+      3720,
+      768
+    ],
+    "player": [
+      3468,
+      944
+    ]
+  },
+  {
+    "name": "waterfall-upper",
+    "room": "0402",
+    "start": [
+      64,
+      128
+    ],
+    "end": [
+      1472,
+      128
+    ],
+    "player": [
+      192,
+      304
+    ]
+  },
+  {
+    "name": "waterfall-lower",
+    "room": "0402",
+    "start": [
+      700,
+      500
+    ],
+    "end": [
+      1450,
+      540
+    ],
+    "player": [
+      828,
+      676
+    ]
+  },
+  {
+    "name": "waterfall-boss",
+    "room": "0403",
+    "start": [
+      0,
+      0
+    ],
+    "end": [
+      256,
+      0
+    ],
+    "player": [
+      128,
+      210
+    ]
+  }
+]

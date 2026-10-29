@@ -1129,11 +1129,7 @@ static struct {
   bool valid, previous_valid;
 } s_raster_camera;
 
-bool ActRaiserActionBg_LiveRasterCameraSensitivity(
-    const uint8_t *wram, size_t wram_size, float rows[kActionRoomSceneFrameHeight],
-    float subtexel[kActionRoomSceneFrameHeight], int32_t *raster_camera_x) {
-  if (!wram || wram_size <= kActRaiserWram_GameFrame + 1u || !rows || !subtexel)
-    return false;
+static int32_t RasterTableCamera(const uint8_t *wram) {
   const uint16_t frame = ReadWram16(wram, kActRaiserWram_GameFrame);
   const uint16_t camera = ReadWram16(wram, kActRaiserWram_Bg1CameraX);
   if (!s_raster_camera.valid || s_raster_camera.frame != frame) {
@@ -1144,9 +1140,17 @@ bool ActRaiserActionBg_LiveRasterCameraSensitivity(
     s_raster_camera.camera = camera;
     s_raster_camera.valid = true;
   }
-  const int32_t table_camera = s_raster_camera.previous_valid &&
+  return s_raster_camera.previous_valid &&
       s_raster_camera.previous_frame == (uint16_t)(frame - 1u)
       ? s_raster_camera.previous_camera : camera;
+}
+
+bool ActRaiserActionBg_LiveRasterCameraSensitivity(
+    const uint8_t *wram, size_t wram_size, float rows[kActionRoomSceneFrameHeight],
+    float subtexel[kActionRoomSceneFrameHeight], int32_t *raster_camera_x) {
+  if (!wram || wram_size <= kActRaiserWram_GameFrame + 1u || !rows || !subtexel)
+    return false;
+  const int32_t table_camera = RasterTableCamera(wram);
   if (raster_camera_x) *raster_camera_x = table_camera;
   const uint8_t group = wram[kActRaiserWram_MapGroup];
   const uint8_t map = wram[kActRaiserWram_CurrentMap];
@@ -1760,6 +1764,23 @@ static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
   memcpy(out->transparent, tile.transparent_rows, 8);
   return true;
 }
+static bool EnvironmentRasterFrame(const ActionEnvironmentScene *scene, ActionRoomSceneFrameState *out) {
+  if (!EnsureRoomScene(scene->group, scene->room) ||
+      (s_observer.room_scene->raster_effect != kActionRoomRaster_None &&
+       !RasterDmaContractMatches(s_observer.room_scene->raster_effect))) return false;
+  const ActionRoomSceneFrameRequest request = {
+    .camera_x = scene->camera_x[0], .camera_y = scene->camera_y[0],
+    .raster_camera_x = RasterTableCamera(g_ram), .have_raster_camera_x = true,
+    .game_frame = ReadWram16(g_ram, kActRaiserWram_GameFrame), .animation_phase = -1, .page_phase = -1};
+  return ActionRoomScene_BuildFrameState(s_observer.room_scene, &request, out);
+}
+static bool EnvironmentRasterDepth(const ActionEnvironmentScene *scene, float *rows) {
+  if (!EnsureRoomScene(scene->group, scene->room)) return false;
+  const ActionRoomSceneFrameRequest request = {.camera_x=scene->camera_x[0],
+      .camera_y=scene->camera_y[0],.game_frame=scene->clock,.animation_phase=-1,.page_phase=-1};
+  return ActionRoomScene_RasterCameraSensitivity(s_observer.room_scene,&request,rows);
+}
+
 bool ActRaiserActionBg_BindEnvironmentScenery(ActionEnvironmentScene *scene) {
   SrPpuStateSnapshot ppu;
   SrBorrowedU16Span vram;
@@ -1771,6 +1792,8 @@ bool ActRaiserActionBg_BindEnvironmentScenery(ActionEnvironmentScene *scene) {
     scene->tile_base[i] = ppu.backgrounds[i].tile_base_word;
   scene->tile_edit = EnvironmentTileEdit;
   scene->tile_edit_context = scene;
+  scene->capture_background_frame = EnvironmentRasterFrame;
+  scene->capture_background_depth = EnvironmentRasterDepth;
   return true;
 }
 

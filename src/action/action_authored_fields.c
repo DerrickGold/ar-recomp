@@ -1,3 +1,5 @@
+#include "render/cloud_motion.h"
+#include "render/mist_rainbow.h"
 /* Pure authoring kernels. All storage belongs to the caller's retained batch;
  * no native actor allocation, simulation state, texture or extra GPU resolve. */
 #include "action_effect_render_internal.h"
@@ -5,6 +7,7 @@
 #include "action_exposure.h"
 #include "action_effect_masks.h"
 #include "action_light_kinds.h"
+#include "action_storm.h"
 
 typedef struct ExposureWriter {
   ActionEffectGeometryWriter *writer;
@@ -72,14 +75,55 @@ static void Twinkle(float strength, uint32_t seed, float age, float envelope, Ar
   color->b+=(1-color->b)*reflection;
   color->a+=fmaxf(0,envelope-color->a)*reflection;
 }
+static unsigned LightingWorldPlane(unsigned plane) {
+  /* Priority changes compositing order; BG2 has a different scrolling origin. */
+  if(plane==kActionEffectProjectionPlane_Obj||plane==kActionEffectProjectionPlane_Bg1High)
+    return kActionEffectProjectionPlane_Bg1;
+  if(plane==kActionEffectProjectionPlane_Bg2High)return kActionEffectProjectionPlane_Bg2;
+  return plane;
+}
+/* Direct sunlight only: ambient halos must not create water reflections in
+ * dark pockets. Cache the authored field once per batch. Samples remain in
+ * world coordinates, including the BG1/BG2 translation captured for mist. */
+static ArRenderColorF DirectSkyLight(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    float x,float y) {
+  ArRenderColorF incoming={0};
+  if(!w->frame||w->atmosphere_unlit)return incoming;
+  if(!w->cloud_light_ready) {
+    w->cloud_light=ActionCloudLight_PrepareWithSun(w->frame,0,0,0,0,w->sun_directions);
+    w->cloud_light_ready=true;
+  }
+  const bool foreground=LightingWorldPlane(e->projection_plane)==kActionEffectProjectionPlane_Bg1;
+  x+=e->world_x+(foreground?w->frame->bg1_to_bg2_x:0);
+  y+=e->world_y+(foreground?w->frame->bg1_to_bg2_y:0);
+  for(unsigned i=0;i<(unsigned)w->cloud_light.meta[0];++i) {
+    const DioramaCloudLightRegion *light=&w->cloud_light.regions[i];
+    const CloudLightSample s=DioramaCloudLight_Sample(light,x,y);
+    const float strength=s.streak*light->core[2]*light->color[3];
+    incoming.r+=(light->color[0]*.8f+light->spill[0]*.2f)*strength;
+    incoming.g+=(light->color[1]*.8f+light->spill[1]*.2f)*strength;
+    incoming.b+=(light->color[2]*.8f+light->spill[2]*.2f)*strength;
+    incoming.a+=strength;
+  }
+  return incoming;
+}
 /* Small reflective particles sample the same captured light transport as
  * terrain and mist. Dark pockets cannot sparkle merely because they are in
  * the viewport. This is opt-in for particle regions/paths. */
-static void ParticleCanopyTint(const ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
-    float x,float y,ArRenderColorF *tint) {
-  if(!w->frame||w->atmosphere_unlit||e->field_style.canopy_response<=0)return;
+static void ParticleLightTint(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    float x,float y,ArRenderColorF *tint,bool lighting) {
+  if(e->field_style.canopy_response<=0)return;
+  if(e->field_style.pattern==kActionParticle_WaterGlints&&!lighting) {
+    tint->a*=1-e->field_style.canopy_response;
+    return;
+  }
+  const bool foreground=LightingWorldPlane(e->projection_plane)==kActionEffectProjectionPlane_Bg1;
+  if(!w->frame||w->atmosphere_unlit) {
+    if(!foreground)tint->a*=1-e->field_style.canopy_response;
+    return;
+  }
   const ActionSceneEffectFrame *f=w->frame;float strength=0;ArRenderColorF incoming={0};
-  for(unsigned i=0;i<f->authored_count&&i<kActionAuthoredMaxInstances;++i) {
+  for(unsigned i=0;foreground&&i<f->authored_count&&i<kActionAuthoredMaxInstances;++i) {
     const ActionEffectInstance *light=&f->authored[i];
     if(light->kind!=kActionEffect_AuthoredCanopy||!(light->flags&kActionEffectFlag_Visible)||
         (light->flags&kActionEffectFlag_LightingOff))continue;
@@ -87,6 +131,8 @@ static void ParticleCanopyTint(const ActionEffectGeometryWriter *w,const ActionE
     const ArRenderColorF color=FieldColor(light->tuning.color);
     strength+=amount;incoming.r+=color.r*amount;incoming.g+=color.g*amount;incoming.b+=color.b*amount;
   }
+  const ArRenderColorF sky=DirectSkyLight(w,e,x,y);
+  strength+=sky.a;incoming.r+=sky.r;incoming.g+=sky.g;incoming.b+=sky.b;
   const float response=e->field_style.canopy_response;
   tint->a*=1-response+response*fminf(1,strength*3);
   if(strength>0) {
@@ -100,7 +146,7 @@ static void ParticleCanopyTint(const ActionEffectGeometryWriter *w,const ActionE
  * sparse stationary glints. All sources and trajectories are editable; no
  * collision queries, actors or persistent particle simulations are needed. */
 static bool ParticlePath(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
-    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context,bool lighting) {
   const ActionEffectFieldStyle *s=&e->field_style;
   if(s->point_count<2||s->point_count>kActionContourMaxPoints||!isfinite(s->activity)||s->activity<.05f||s->activity>1||s->pattern>=kActionParticle_Count)return false;
   float lengths[kActionContourMaxPoints]={0},total=0;
@@ -129,10 +175,12 @@ static bool ParticlePath(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     const float size=e->particle_style.size_min+(e->particle_style.size_max-e->particle_style.size_min)*HashUnit(clock.seed^27);
     if(x+size*2<clip->x0||x-size*2>clip->x1||y+size*2<clip->y0||y-size*2>clip->y1)continue;
     ArRenderColorF color=MixColor(FieldColor(e->tuning.color),FieldColor(e->particle_style.color_end),age);
-    float fade=fmaxf(0,sinf(age*3.1415927f));if(glint)fade=fade*fade*fade*fade;
+    float fade=fmaxf(0,sinf(age*3.1415927f));
+    if(glint||s->pattern==kActionParticle_WaterGlints)fade=fade*fade*fade*fade;
     color.a=fminf(1,e->tuning.intensity*.65f*fade*wind);
     Twinkle(s->twinkle,clock.seed,age,fade*wind*fminf(1,e->tuning.intensity),&color);
-    ParticleCanopyTint(w,e,x,y,&color);
+    ParticleLightTint(w,e,x,y,&color,lighting);
+    if(s->pattern==kActionParticle_WaterGlints&&color.a<=.001f)continue;
     if(!AppendSceneParticle(w,e,x,y,x-dx/length,y-dy/length,size*.65f,size*(glint?1.6f:1),color,project,context))return false;
   }
   return true;
@@ -141,7 +189,7 @@ static bool LeafParticle(ActionEffectGeometryWriter *,const ActionEffectInstance
     float,float,float,float,float,float,ArRenderColorF,ActionEffectProjectPointFn,void *);
 static bool FieldParticle(ActionEffectGeometryWriter *w, const ActionEffectInstance *e,
     const ActionEffectInstance *clock_source, unsigned index, uint32_t seed, float birth_x, float birth_y, const ActionEffectLocalRect *clip,
-    ActionEffectProjectPointFn project, void *context) {
+    ActionEffectProjectPointFn project, void *context, bool lighting) {
   const ActionEffectParticleStyle *s=&e->particle_style;
   const SceneParticleClock clock=SceneParticleClockAt(clock_source,e->pulse_ticks,index,
       (SceneParticleLifetime){e->particle_lifetime,0,0});
@@ -161,6 +209,7 @@ static bool FieldParticle(ActionEffectGeometryWriter *w, const ActionEffectInsta
       width=size*.6f;reach=size*1.4f;break;
     case kActionParticle_Sparks: y+=24*t*t;reach=size*(1+2*(1-t));break;
     case kActionParticle_Glints: x=birth_x;y=birth_y;dx=0;dy=1;reach=size*1.6f;break;
+    case kActionParticle_WaterGlints: dx=0;dy=1;width=size*1.5f;reach=size*.65f;break;
     default: break;
   }
   const bool leaf=e->field_style.textured&&e->field_style.pattern==kActionParticle_Leaves;
@@ -170,18 +219,19 @@ static bool FieldParticle(ActionEffectGeometryWriter *w, const ActionEffectInsta
   ArRenderColorF color=MixColor(FieldColor(e->tuning.color),FieldColor(s->color_end),t);
   const float fade=fmaxf(0,sinf(t*3.1415927f));
   color.a=fminf(1,e->tuning.intensity*.7f*fade);
-  if(e->field_style.pattern==kActionParticle_Glints) {
+  if(e->field_style.pattern==kActionParticle_Glints||e->field_style.pattern==kActionParticle_WaterGlints) {
     color.a=fminf(1,e->tuning.intensity*.7f*fade*fade*fade*fade);
   }
   if(e->field_style.pattern==kActionParticle_Insects)color.a*=.5f+.5f*sinf(t*25+phase)*sinf(t*25+phase);
   Twinkle(e->field_style.twinkle,clock.seed,t,fade*fminf(1,e->tuning.intensity),&color);
-  ParticleCanopyTint(w,e,x,y,&color);
+  ParticleLightTint(w,e,x,y,&color,lighting);
+  if(e->field_style.pattern==kActionParticle_WaterGlints&&color.a<=.001f)return true;
   if(e->field_style.textured&&e->field_style.pattern==kActionParticle_Leaves)
     return LeafParticle(w,e,clip,x,y,dx,dy,width,reach,color,project,context);
   return AppendSceneParticle(w,e,x,y,x-dx*.003f,y-dy*.003f,width,reach,color,project,context);
 }
 static bool ParticleArea(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
-    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context,bool lighting) {
   if(!ActionAuthoredParticles_Valid(&e->particle_style) || e->particle_count>16 ||
       e->field_style.pattern>=kActionParticle_Count)return false;
   const ActionEffectLocalRect *r=&e->geometry.data.rect;
@@ -206,7 +256,7 @@ static bool ParticleArea(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       const float x=(cx+.5f+(HashUnit(seed^i*71u)-.5f)*s->spread)*kActionParticleCellSize-e->world_x;
       const float y=(cy+HashUnit(seed^i*91u^51u))*kActionParticleCellSize-e->world_y;
       if(x<r->x0 || x>r->x1 || y<r->y0 || y>r->y1)continue;
-      if(!FieldParticle(w,e,&clock_source,i,seed,x,y,clip,project,context))return false;
+      if(!FieldParticle(w,e,&clock_source,i,seed,x,y,clip,project,context,lighting))return false;
     }
   }
   return true;
@@ -268,6 +318,13 @@ static bool LightFan(ActionEffectGeometryWriter *w,const ActionEffectInstance *e
   if(s->strands<1 || s->strands>32 || !isfinite(s->angle)||fabsf(s->angle)>180 ||
       !isfinite(s->fan)||s->fan<0||s->fan>120||!isfinite(s->softness)||s->softness<0||s->softness>1)return false;
   if(!isfinite(s->thickness)||s->thickness<0||s->thickness>1)return false;
+  if(!isfinite(s->fade_in)||s->fade_in<0||s->fade_in>.5f)return false;
+  /* Cloud openings vary transmission, not ray position. Keep the old static
+   * fan exactly unchanged at zero; seeded phases make adjacent fans breathe
+   * independently and remain deterministic when the editor seeks backward. */
+  if(s->twinkle>0 && !e->particle_lifetime)return false;
+  const float phase=s->twinkle>0 ? (e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime : 0;
+  const float opening=s->twinkle>0 ? 1-s->twinkle*(.5f+.5f*sinf(phase+HashUnit(e->generation^113)*6.2831853f)) : 1;
   ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
   const ArRenderColorF tint=FieldColor(e->tuning.color);
   for(unsigned i=0;i<s->strands;++i) {
@@ -279,20 +336,24 @@ static bool LightFan(ActionEffectGeometryWriter *w,const ActionEffectInstance *e
     const float origin=(u-.5f)*width+(fine?(HashUnit(seed^119)-.5f)*width/s->strands*.8f:0);
     const float reach=length*(fine?.55f+.45f*HashUnit(seed):.8f+.2f*HashUnit(seed));
     const float radius=fmaxf(fine?.1f:.4f,width/s->strands*(.2f+.2f*HashUnit(seed^71))*(s->thickness>0?s->thickness:1));
-    ArRenderVertex2D vertices[9];int mapped[9];
-    for(unsigned row=0;row<3;++row)for(unsigned col=0;col<3;++col) {
-      const unsigned n=row*3+col;const float t=row*.5f,side=(float)col-1;
+    const float transmission=opening*(s->twinkle>0 ? 1-s->twinkle*.35f*(.5f+.5f*sinf(phase+HashUnit(seed^151)*6.2831853f)) : 1);
+    const unsigned rows=s->fade_in>0?4:3;
+    const float distances[4]={0,s->fade_in,.65f,1},opacity[4]={0,1,.55f,0};
+    ArRenderVertex2D vertices[12];int mapped[12];
+    for(unsigned row=0;row<rows;++row)for(unsigned col=0;col<3;++col) {
+      const unsigned n=row*3+col;const float t=s->fade_in>0?distances[row]:row*.5f,side=(float)col-1;
+      const float fade=s->fade_in>0?opacity[row]:(row==2?0:row==0?.65f:1);
       vertices[n]=(ArRenderVertex2D){.position={origin+dx*reach*t+rx*side*radius*(1+2*t),
         dy*reach*t+ry*side*radius*(1+2*t)},.color=tint};
-      vertices[n].color.a=col==1?fminf(1,e->tuning.intensity*(.10f+.06f*HashUnit(seed^27))*(row==2?0:row==0?.65f:1)):0;
+      vertices[n].color.a=col==1?transmission*fminf(1,e->tuning.intensity*(.10f+.06f*HashUnit(seed^27))*fade):0;
       mapped[n]=-1;
     }
-    for(unsigned row=0;row<2;++row)for(unsigned col=0;col<2;++col) {
+    for(unsigned row=0;row+1<rows;++row)for(unsigned col=0;col<2;++col) {
       const int a=row*3+col,b=a+3,triangles[]={a,a+1,b,a+1,b+1,b};
       for(unsigned t=0;t<6;t+=3)if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,triangles+t,clip,project,context))return false;
     }
   }
-  ArRenderColorF backdrop=tint;backdrop.a=fminf(1,s->softness*e->tuning.intensity*.10f);
+  ArRenderColorF backdrop=tint;backdrop.a=opening*fminf(1,s->softness*e->tuning.intensity*.10f);
   const float angle=s->angle*.0174532925f;
   return !s->softness || AppendSceneSoftPatch(w,&mesh,clip,sinf(angle)*length*.4f,cosf(angle)*length*.4f,
       width*.5f+length*sinf(s->fan*.008726646f)*.4f,length*.48f,backdrop,sinf(angle)*length*.3f,project,context);
@@ -352,7 +413,7 @@ static bool FallingWater(ActionEffectGeometryWriter *w,const ActionEffectInstanc
           const float age=(t-.7f)/.3f;
           ArRenderColorF c=FieldColor(e->particle_style.color_end);
           c.a=fminf(1,e->tuning.intensity*.65f)*(1-age)*(1-age);
-          ParticleCanopyTint(w,e,birth,r->y1,&c);
+          ParticleLightTint(w,e,birth,r->y1,&c,true);
           if(!MaskPatch(w,e,clip,kActionMaskRipple,birth,r->y1,2+8*age,.35f+1.3f*age,c,project,context))return false;
           continue;
         }
@@ -370,7 +431,7 @@ static bool FallingWater(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     if(x+size<clip->x0||x-size>clip->x1||y+size*reach<clip->y0||y-size*reach>clip->y1)continue;
     ArRenderColorF c=MixColor(FieldColor(e->tuning.color),FieldColor(e->particle_style.color_end),t);
     c.a=fminf(1,e->tuning.intensity*.65f*sinf(t*3.1415927f));
-    if(e->kind==kActionEffect_AuthoredDrips)ParticleCanopyTint(w,e,x,y,&c);
+    if(e->kind==kActionEffect_AuthoredDrips)ParticleLightTint(w,e,x,y,&c,true);
     if(!AppendSceneParticle(w,e,x,y,x,y-dy,size,size*reach,c,project,context))return false;
   }
   return true;
@@ -595,6 +656,35 @@ static bool MaskQuad(ActionEffectGeometryWriter *w,const ActionEffectInstance *e
   for(unsigned i=0;i<4;++i) {
     vertices[i]=(ArRenderVertex2D){.position=p[i],.color=color,.tex_coord=uv[i]};
     if(opacity)vertices[i].color.a*=opacity[i];
+    if(e->kind==kActionEffect_AuthoredCloud&&e->projection_plane==kActionEffectProjectionPlane_Bg2&&w->frame) {
+      if(!w->cloud_light_ready) {
+        w->cloud_light=ActionCloudLight_PrepareWithSun(w->frame,0,0,0,0,w->sun_directions);
+        w->cloud_light_ready=true;
+      }
+      for(unsigned j=0;j<(unsigned)w->cloud_light.meta[0];++j) {
+        const DioramaCloudLightRegion *r=&w->cloud_light.regions[j];
+        const CloudLightSample light=DioramaCloudLight_Sample(r,p[i].x+e->world_x,p[i].y+e->world_y);
+        const float upper=light.edge*.25f+light.halo*r->core[1]+light.streak*r->core[2];
+        const float echo=light.echo*r->core[3];
+        const float weight=1-expf(-(upper+echo)*r->color[3]);
+        ArRenderColorF *c=&vertices[i].color;
+        if(e->field_style.volume>0) {
+          /* Incident sunlight tints the baked scattering. Replacing both
+           * colors with the sun color erases every shaded underside. */
+          c->r*=1+(r->color[0]*1.1f-1)*weight;
+          c->g*=1+(r->color[1]*1.1f-1)*weight;
+          c->b*=1+(r->color[2]*1.1f-1)*weight;
+          c->r=fminf(1,c->r);c->g=fminf(1,c->g);c->b=fminf(1,c->b);
+        } else {
+          c->r+=(r->color[0]-c->r)*weight;
+          c->g+=(r->color[1]-c->g)*weight;
+          c->b+=(r->color[2]-c->b)*weight;
+        }
+        /* The lit opening also transmits through the added cloud overlay;
+         * otherwise that later grey draw erases the sky's warm highlight. */
+        c->a*=1-.75f*(1-expf(-upper*r->color[3]));
+      }
+    }
   }
   return AppendSceneClippedQuad(w,&mesh,vertices,clip,project,context);
 }
@@ -906,6 +996,7 @@ enum { kRollingMistMaxStrands=24, kRollingMistMaxPatches=kRollingMistMaxStrands*
 typedef struct MistPatch {
   float x,y,rx,ry,crest;
   unsigned cell;
+  uint32_t seed; /* Stable lobe identity, independent of view clipping. */
   ArRenderColorF tint;
 } MistPatch;
 static void AddMistPatch(MistPatch *patches,unsigned *count,const ActionEffectLocalRect *clip,MistPatch patch) {
@@ -913,22 +1004,16 @@ static void AddMistPatch(MistPatch *patches,unsigned *count,const ActionEffectLo
       patch.y+patch.ry<clip->y0||patch.y-patch.ry>clip->y1)return;
   patches[(*count)++]=patch;
 }
-static unsigned LightingWorldPlane(unsigned plane) {
-  /* Actor-bound lights move in foreground world coordinates too. Priority
-   * changes compositing order, whereas BG2 has a different scrolling origin. */
-  if(plane==kActionEffectProjectionPlane_Obj||plane==kActionEffectProjectionPlane_Bg1High)
-    return kActionEffectProjectionPlane_Bg1;
-  if(plane==kActionEffectProjectionPlane_Bg2High)return kActionEffectProjectionPlane_Bg2;
-  return plane;
-}
 /* Evaluate each nearby glow once for all visible curls, rather than repeating
- * its seeded orbit/pulse for every curl. Canopy transport is already captured;
- * neither path needs a light-map pass, image readback or collision query. */
-static void TintMistPatches(const ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+ * its seeded orbit/pulse for every curl. Canopy and sky fields are captured;
+ * sampling them needs no light-map pass, readback or new collision query. */
+static void TintMistPatches(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
     MistPatch *patches,unsigned count) {
   for(unsigned i=0;i<count;++i) {
     const float alpha=patches[i].tint.a;
-    patches[i].tint=MixColor(FieldColor(e->particle_style.color_end),FieldColor(e->tuning.color),.35f+.65f*patches[i].crest);
+    const float ambient=.35f*(1-e->field_style.volume);
+    patches[i].tint=MixColor(FieldColor(e->particle_style.color_end),FieldColor(e->tuning.color),
+        ambient+(1-ambient)*patches[i].crest);
     patches[i].tint.a=alpha;
   }
   if(!count||!w->frame||w->atmosphere_unlit||e->field_style.canopy_response<=0)return;
@@ -970,6 +1055,27 @@ static void TintMistPatches(const ActionEffectGeometryWriter *w,const ActionEffe
       }
     }
   }
+  /* BG1 mist can catch the distant sunlight too. Translate its world samples
+   * into BG2 coordinates, just like its spectral response. Sample once per
+   * lobe; this only changes existing vertex colours, not geometry or passes. */
+  if(!w->cloud_light_ready) {
+    w->cloud_light=ActionCloudLight_PrepareWithSun(f,0,0,0,0,w->sun_directions);
+    w->cloud_light_ready=true;
+  }
+  for(unsigned j=0;j<(unsigned)w->cloud_light.meta[0];++j) {
+    const DioramaCloudLightRegion *light=&w->cloud_light.regions[j];
+    for(unsigned k=0;k<count;++k) {
+      const CloudLightSample sample=DioramaCloudLight_Sample(light,
+          e->world_x+patches[k].x+f->bg1_to_bg2_x,
+          e->world_y+patches[k].y+f->bg1_to_bg2_y);
+      const float illumination=sample.halo*light->core[1]+sample.streak*light->core[2]+
+          sample.echo*light->core[3];
+      const float amount=.6f*(1-expf(-illumination*light->color[3]));
+      incoming[k].r+=light->color[0]*amount;
+      incoming[k].g+=light->color[1]*amount;
+      incoming[k].b+=light->color[2]*amount;
+    }
+  }
   const float ambient=1-.35f*e->field_style.canopy_response;
   for(unsigned k=0;k<count;++k) {
     const float strength=e->field_style.canopy_response*(.55f+.65f*patches[k].crest);
@@ -979,32 +1085,175 @@ static void TintMistPatches(const ActionEffectGeometryWriter *w,const ActionEffe
     tint->b=fminf(1,tint->b*ambient+incoming[k].b*strength);
   }
 }
+/* The camera ray comes from the same projection that places the mist. Native
+ * source packets defer this calculation to the GPU, so changing the camera or
+ * interpolation phase never invalidates their immutable spray/light samples. */
+static RainbowDirection MistViewDirection(const ActionEffectInstance *e,float x,float y,
+    const ActionEffectProjectionContext *c) {
+  if(c&&c->diorama_projection) {
+    const DioramaProjection *p=c->diorama_projection;
+    ArRenderPointF pixel;
+    if(p->output_width<=0||p->output_height<=0||
+        !ActionEffectProjection_ProjectBillboardPoint((void *)c,e,x,y,&pixel))
+      return (RainbowDirection){0};
+    const float *m=p->matrix;
+    return RainbowViewDirection(2*(pixel.x-p->output_x)/p->output_width-1,
+        1-2*(pixel.y-p->output_y)/p->output_height,
+        (RainbowDirection){m[0],m[4],m[8]},(RainbowDirection){m[1],m[5],m[9]},
+        (RainbowDirection){m[3],m[7],m[11]});
+  }
+  /* Flat/custom projections retain a fixed virtual eye in native pixels;
+   * output resolution and emitter bounds do not change the optical scale. */
+  const ArRenderPointF origin=c?ActionEffectProjection_CaptureOrigin(c,e):
+      (ArRenderPointF){e->world_x,e->world_y};
+  const float rx=(origin.x+x-(c?c->ws_extra:0)-128)/512;
+  const float ry=(112+(c?c->ws_extra_top:0)-origin.y-y)/512;
+  return RainbowViewDirection(rx,ry,(RainbowDirection){1,0,0},
+      (RainbowDirection){0,1,0},(RainbowDirection){0,0,-1});
+}
+static bool MistRainbow(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const MistPatch *patches,unsigned count,const ActionEffectLocalRect *clip,
+    ActionEffectProjectPointFn project,void *context) {
+  if(e->field_style.rainbow<=0||!count||!w->frame||w->atmosphere_unlit)return true;
+  if(!w->cloud_light_ready) {
+    w->cloud_light=ActionCloudLight_PrepareWithSun(w->frame,0,0,0,0,w->sun_directions);
+    w->cloud_light_ready=true;
+  }
+  if(!DioramaCloudLight_Active(&w->cloud_light))return true;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float width=r->x1-r->x0,height=r->y1-r->y0;
+  const bool foreground=LightingWorldPlane(e->projection_plane)==kActionEffectProjectionPlane_Bg1;
+  const float dx=foreground?w->frame->bg1_to_bg2_x:0;
+  const float dy=foreground?w->frame->bg1_to_bg2_y:0;
+  enum { columns=kActionMistRainbowColumns+1, rows=kActionMistRainbowRows+1 };
+  ArRenderVertex2D vertices[columns*rows];int mapped[columns*rows];
+  bool lit[columns*rows];
+  const ActionEffectProjectionContext *camera=project==ActionEffectProjection_ProjectPoint?context:NULL;
+  ActionEffectProjectionContext output_camera;
+  DioramaProjection output_projection;
+  if(camera&&camera->diorama_projection&&camera->diorama_projection->bg2_skybox.to_texture) {
+    output_camera=*camera;output_projection=*camera->diorama_projection;
+    output_projection.bg2_skybox.to_texture=false;
+    output_camera.diorama_projection=&output_projection;camera=&output_camera;
+  }
+  bool illuminated=false;
+  for(unsigned row=0;row<rows;++row)for(unsigned col=0;col<columns;++col) {
+    const float x=r->x0+width*col/kActionMistRainbowColumns;
+    const float y=r->y0+height*row/kActionMistRainbowRows;
+    float density=0;
+    for(unsigned j=0;j<count;++j) {
+      const MistPatch *p=&patches[j];
+      /* Paired body/crest masks describe one volume; do not count it twice. */
+      if(p->crest>0||p->rx<=0||p->ry<=0)continue;
+      const float s=(x-p->x)/(2*p->rx)+.5f,t=(y-p->y)/(2*p->ry)+.5f;
+      if(s<=0||s>=1||t<=0||t>=1)continue;
+      const ArRenderPointF uv=ActionEffectMasks_Uv(p->cell,s,t);
+      density=fmaxf(density,p->tint.a*ActionEffectMasks_Sample(uv.x,uv.y));
+    }
+    /* Feather the spray volume's boundary, not a separately authored bow. */
+    density*=fminf(1,fminf(fminf(x-r->x0,r->x1-x),fminf(y-r->y0,r->y1-y))/8);
+    float weights[4]={0};
+    bool receives_light=false;
+    if(density>0)for(unsigned j=0;j<(unsigned)w->cloud_light.meta[0];++j) {
+      const DioramaCloudLightRegion *light=&w->cloud_light.regions[j];
+      const CloudLightSample sample=DioramaCloudLight_Sample(light,x+e->world_x+dx,y+e->world_y+dy);
+      /* Direct shafts alone produce spectral scattering. Ambient halo and
+       * reflected cloud light must not conjure rainbows in shadowed spray. */
+      const float luminance=.2126f*light->color[0]+.7152f*light->color[1]+.0722f*light->color[2];
+      weights[j]=e->field_style.rainbow*fminf(1,density*3)*
+          sample.streak*light->core[2]*light->color[3]*luminance;
+      receives_light|=weights[j]>.0001f;
+    }
+    ArRenderColorF color;
+    if(w->source)color=(ArRenderColorF){weights[0],weights[1],weights[2],weights[3]};
+    else {
+      const RainbowDirection ray=MistViewDirection(e,x,y,camera);
+      float red=0,green=0,blue=0;
+      for(unsigned j=0;j<4;++j)if(weights[j]>0) {
+        const float alignment=ray.x*w->sun_directions[0][j]+ray.y*w->sun_directions[1][j]+ray.z*w->sun_directions[2][j];
+        const RainbowDirection spectrum=RainbowSpectrum(alignment);
+        red+=weights[j]*spectrum.x;green+=weights[j]*spectrum.y;blue+=weights[j]*spectrum.z;
+      }
+      color=RainbowFinish(red,green,blue);
+    }
+    const unsigned at=row*columns+col;
+    lit[at]=receives_light;illuminated|=receives_light;
+    vertices[at]=(ArRenderVertex2D){.position={x,y},.color=color};
+    mapped[at]=-1;
+  }
+  if(!illuminated)return true;
+  ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
+  for(unsigned row=0;row<kActionMistRainbowRows;++row)for(unsigned col=0;col<kActionMistRainbowColumns;++col) {
+    const int a=(int)(row*columns+col),b=a+columns;
+    const int triangles[]={a,a+1,b+1,a,b+1,b};
+    for(unsigned t=0;t<6;t+=3) {
+      /* This depends only on captured droplets/illumination, never the view.
+       * Empty triangles can be omitted from retained packets altogether. */
+      if(!lit[triangles[t]]&&!lit[triangles[t+1]]&&!lit[triangles[t+2]])continue;
+      if(w->source) {
+        if(!ActionEffectSource_RainbowTriangle(w->source,&mesh,vertices,triangles+t,clip,w->sun_directions))return false;
+        w->vertex_count=(int)w->source->count;
+      } else if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,triangles+t,clip,project,context))return false;
+    }
+  }
+  return true;
+}
+/* A few droplets per body lobe, following its translation and density mask.
+ * Stable lobe seeds keep a partial view identical to a crop of the whole bank.
+ * The paired crest isn't another volume, so it must not double the sparkles. */
+static bool MistSparkles(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const MistPatch *patches,unsigned count,const ActionEffectLocalRect *clip,
+    ActionEffectProjectPointFn project,void *context) {
+  if(e->field_style.sparkle<=0||!w->frame||w->atmosphere_unlit)return true;
+  for(unsigned i=0;i<count;++i) {
+    const MistPatch *p=&patches[i];
+    if(p->crest>0||p->rx<=0||p->ry<=0||p->tint.a<=0)continue;
+    ActionEffectInstance source=*e;source.pulse_generation=p->seed;
+    for(unsigned j=0;j<kActionMistSparklesPerStrand;++j) {
+      const SceneParticleClock clock=SceneParticleClockAt(&source,e->pulse_ticks,j,
+          (SceneParticleLifetime){72,5,63});
+      const float t=clock.t;
+      const float u=.16f+.68f*HashUnit(clock.seed^17)+.06f*(t-.5f);
+      const float v=.16f+.68f*HashUnit(clock.seed^53)-.08f*t;
+      const float x=p->x+(u-.5f)*2*p->rx,y=p->y+(v-.5f)*2*p->ry;
+      const float size=.55f+.65f*HashUnit(clock.seed^97);
+      if(x+size*1.5f<clip->x0||x-size*1.5f>clip->x1||y+size<clip->y0||y-size>clip->y1)continue;
+      const ArRenderPointF uv=ActionEffectMasks_Uv(p->cell,u,v);
+      const float density=p->tint.a*ActionEffectMasks_Sample(uv.x,uv.y);
+      if(density<=.001f)continue;
+      const ArRenderColorF light=DirectSkyLight(w,e,x,y);
+      if(light.a<=.001f)continue;
+      const float pulse=sinf(t*3.14159265f),squared=pulse*pulse;
+      const float alpha=e->field_style.sparkle*fminf(1,density*4)*
+          fminf(1,light.a*3)*squared*squared;
+      if(alpha<=.002f)continue;
+      const ArRenderColorF color={.65f+.35f*light.r/light.a,
+          .65f+.35f*light.g/light.a,.65f+.35f*light.b/light.a,alpha};
+      if(!AppendSceneParticle(w,e,x,y,x,y-1,size*1.3f,size*.7f,color,project,context))return false;
+    }
+  }
+  return true;
+}
 static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
-    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context,bool lighting) {
   const ActionEffectFieldStyle *s=&e->field_style;
   const ActionEffectLocalRect *r=&e->geometry.data.rect;
-  const float width=r->x1-r->x0,height=r->y1-r->y0,spacing=width/s->strands;
   const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
+  const CloudBankMotion motion={.x=r->x0,.y=r->y0,.width=r->x1-r->x0,.height=r->y1-r->y0,
+    .drift=s->drift,.amplitude=s->amplitude,.rolling=s->rolling,.intensity=e->tuning.intensity,
+    .phase=phase,.wind_phase=sinf(phase),.strands=s->strands,.volume=s->volume>0};
   MistPatch patches[kRollingMistMaxPatches];unsigned count=0;
   for(unsigned i=0;i<s->strands;++i) {
     const uint32_t seed=e->particle_style.seed^(i+1)*0x9e3779b9u;
-    const float cycle=phase+HashUnit(seed)*6.2831853f;
-    const float rx=fminf(width*.45f,spacing*(.72f+.18f*HashUnit(seed^11)));
-    const float drift=fminf(fabsf(s->drift),fmaxf(0,(width-2*rx)*.15f))*(s->drift<0?-1:1);
-    const float inset=rx+fabsf(drift);
-    const float x=r->x0+inset+(width-2*inset)*(i+.35f+.3f*HashUnit(seed^43))/s->strands+sinf(cycle)*drift;
-    const float y=r->y0+height*(.55f+.14f*HashUnit(seed^91))+sinf(cycle*2)*s->amplitude;
-    const float roll=s->rolling*sinf(cycle);
-    const float ry=height*(.30f+.08f*HashUnit(seed^3));
+    CloudBankPatch pair[2];
+    CloudMotion_Bank(&motion,i,seed,pair);
     for(unsigned tier=0;tier<2;++tier) {
-      /* Two differently moving masks form a dense body and a thinner curl.
-       * The curl rises, stretches and settles; it is never a scaled smoke puff. */
-      const float px=x+(tier?rx*(.22f*roll+.14f*cosf(cycle*2)):0);
-      const float py=y-(tier?ry*(.70f+.40f*roll):0);
-      AddMistPatch(patches,&count,clip,(MistPatch){.x=px,.y=py,
-          .rx=rx*(tier?1.15f+.16f*roll:1),.ry=ry*(tier?.42f+.12f*roll:1),.crest=tier,
-          .cell=kActionMaskFogFirst+(seed+tier*3)%kActionMaskFogCount,
-          .tint={.a=fminf(.85f,e->tuning.intensity*(tier?.52f:.74f))}});
+      const CloudBankPatch *p=&pair[tier];
+      const unsigned cell=motion.volume?
+          (tier?kActionMaskCloudLightFirst:kActionMaskCloudBodyFirst)+DeterministicHash_Mix32(seed)%kActionMaskCloudCount:
+          kActionMaskFogFirst+(seed+tier*3)%kActionMaskFogCount;
+      AddMistPatch(patches,&count,clip,(MistPatch){.x=p->x,.y=p->y,.rx=p->rx,.ry=p->ry,
+          .crest=tier,.cell=cell,.seed=seed,.tint={.a=p->alpha}});
     }
   }
   /* A fixed allowance per bank; prefer the player and then the strongest
@@ -1036,11 +1285,121 @@ static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance
     const MistPatch *p=&patches[i];
     if(!MaskPatch(w,e,clip,p->cell,p->x,p->y,p->rx,p->ry,p->tint,project,context))return false;
   }
+  return !lighting||(MistRainbow(w,e,patches,count,clip,project,context)&&
+      MistSparkles(w,e,patches,count,clip,project,context));
+}
+
+/* Feathered source-space filaments retain their distant softness at every
+ * output resolution. All return strokes share this bounded geometry. */
+static bool StormRibbon(ActionEffectGeometryWriter *w, const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip, const ArRenderPointF *points, unsigned count,
+    float strength, float thickness, ActionEffectProjectPointFn project, void *context) {
+  if (strength <= 0) return true;
+  ActionEffectInstance mesh = *e;
+  mesh.flags |= kActionEffectFlag_ClippedMesh;
+  const float stroke_scale = fminf(1, fmaxf(.45f,
+      e->field_style.storm.ground_colors ?
+      (e->geometry.data.rect.x1 - e->geometry.data.rect.x0) / 320 :
+      (e->geometry.data.rect.y1 - e->geometry.data.rect.y0) / 112));
+  const float softness = e->field_style.softness;
+  const float radius = stroke_scale * thickness * (.75f + softness * 1.8f);
+  ArRenderColorF centre = MixColor(FieldColor(e->tuning.color),
+      (ArRenderColorF){1, 1, 1, 1}, .35f);
+  centre.a = fminf(1, strength * .88f * e->tuning.intensity / (1 + softness * .65f));
+  ArRenderColorF edge = FieldColor(e->tuning.color);
+  edge.a = 0;
+  for (unsigned i = 1; i < count; ++i) {
+    const ArRenderPointF a = points[i - 1], b = points[i];
+    const float length = hypotf(b.x - a.x, b.y - a.y);
+    if (length < .001f) continue;
+    const float nx = -(b.y - a.y) * radius / length;
+    const float ny = (b.x - a.x) * radius / length;
+    const float taper_a = 1 - .72f * (i - 1) / (count - 1.f);
+    const float taper_b = 1 - .72f * i / (count - 1.f);
+    for (unsigned side = 0; side < 2; ++side) {
+      const float sign = side ? 1.f : -1.f;
+      ArRenderVertex2D vertices[] = {
+        {{a.x, a.y}, centre, {0, 0}},
+        {{a.x + nx * sign * taper_a, a.y + ny * sign * taper_a}, edge, {0, 0}},
+        {{b.x + nx * sign * taper_b, b.y + ny * sign * taper_b}, edge, {0, 0}},
+        {{b.x, b.y}, centre, {0, 0}}
+      };
+      int mapped[] = {-1, -1, -1, -1};
+      const int triangles[] = {0, 1, 2, 0, 2, 3};
+      for (unsigned t = 0; t < 6; t += 3)
+        if (!AppendSceneClippedTriangle(w, &mesh, vertices, mapped, triangles + t,
+                clip, project, context)) return false;
+    }
+  }
+  return true;
+}
+
+/* Clip the cloud flash in source space like the channel. A screen billboard
+ * would be submitted whole for every intersecting sky band in the editor,
+ * while the resident weather path draws the union once. This compact fan also
+ * replaces 160 billboard primitives with 16 clipped source triangles. */
+static bool StormGlow(ActionEffectGeometryWriter *w, const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip, ArRenderPointF origin, float strength,
+    ActionEffectProjectPointFn project, void *context) {
+  ActionEffectInstance mesh = *e;
+  mesh.flags |= kActionEffectFlag_ClippedMesh;
+  const ActionEffectLocalRect *r = &e->geometry.data.rect;
+  const float rx = (r->x1 - r->x0) * .48f, ry = ActionStorm_GlowHeight(e);
+  /* Illuminate the emitting cloud around the channel root. Offsetting this
+   * below the root made the distant strikes look detached from their cloud. */
+  ArRenderColorF tint = FieldColor(e->tuning.color);
+  tint.a = fminf(1, .12f * strength * e->tuning.intensity);
+  ArRenderVertex2D vertices[kActionStormGlowSegments + 1] = {{origin, tint, {0, 0}}};
+  int mapped[kActionStormGlowSegments + 1];
+  mapped[0] = -1;
+  tint.a = 0;
+  for (unsigned i = 0; i < kActionStormGlowSegments; ++i) {
+    vertices[i + 1] = (ArRenderVertex2D){
+      {origin.x + kCircle32[i * 2][0] * rx, origin.y + kCircle32[i * 2][1] * ry},
+      tint, {0, 0}
+    };
+    mapped[i + 1] = -1;
+  }
+  for (unsigned i = 0; i < kActionStormGlowSegments; ++i) {
+    const int triangle[] = {0, (int)i + 1, (int)((i + 1) % kActionStormGlowSegments) + 1};
+    if (!AppendSceneClippedTriangle(w, &mesh, vertices, mapped, triangle,
+            clip, project, context)) return false;
+  }
+  return true;
+}
+
+static bool StormLightning(ActionEffectGeometryWriter *w, const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip, ActionEffectProjectPointFn project, void *context) {
+  const ActionEffectFieldStyle *s = &e->field_style;
+  if (e->particle_lifetime < 120 || s->strands < 1 || s->strands > kActionStormMaxForks + 1 ||
+      !isfinite(s->activity) || s->activity < .01f || s->activity > .2f) return false;
+  ActionStormFlash flash;
+  if (!ActionStorm_Flash(e, &flash)) return true;
+  ActionStormChannel channel;
+  ActionStorm_Path(e, flash.seed, &channel);
+  if (!StormGlow(w, e, clip, channel.main[0], flash.cloud, project, context) ||
+      !StormRibbon(w, e, clip, channel.main, kActionStormMainSegments + 1,
+          flash.channel, 1, project, context)) return false;
+  for (unsigned i = 0; i + 1 < s->strands; ++i)
+    if (!StormRibbon(w, e, clip, channel.forks[i], kActionStormForkSegments + 1,
+            flash.forks[i], .75f, project, context)) return false;
   return true;
 }
 
 bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,const ActionEffectFloorField *floor,bool lighting,bool particles,
     ActionEffectProjectPointFn project,ActionEffectClipBoundsFn clip_fn,void *context) {
+  ActionEffectInstance anchored;
+  if (e->kind == kActionEffect_AuthoredStorm &&
+      e->projection_plane == kActionEffectProjectionPlane_Bg2 && (e->flags & kActionEffectFlag_StaticAnchor)) {
+    anchored = *e;
+    const int row = (int)floorf(ActionStorm_SourceY(e));
+    anchored.world_y += row;
+    anchored.geometry.data.rect.y0 -= row;
+    anchored.geometry.data.rect.y1 -= row;
+    anchored.clip_rect.y0 -= row;
+    anchored.clip_rect.y1 -= row;
+    e = &anchored;
+  }
   ActionEffectInstance motion=*e;const ActionEffectLocalRect *r=&e->geometry.data.rect;
   const ActionEffectFieldStyle *s=&e->field_style;
   if((e->kind==kActionEffect_AuthoredFireflies || e->kind==kActionEffect_AuthoredParticlePath || e->kind==kActionEffect_AuthoredParticleArea || e->kind==kActionEffect_AuthoredWater ||
@@ -1049,7 +1408,12 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
   if(s->placement>2 || !isfinite(s->amplitude)||s->amplitude<0||s->amplitude>32 ||
       !isfinite(s->drift)||fabsf(s->drift)>128||!isfinite(s->gust)||s->gust<0||s->gust>1||
       !isfinite(s->twinkle)||s->twinkle<0||s->twinkle>1)return false;
-  if(e->kind==kActionEffect_AuthoredHeat)return true; /* Background texture sampling owns this effect. */
+  if(e->kind==kActionEffect_AuthoredHeat||e->kind==kActionEffect_AuthoredCloudLight)return true; /* Background texture sampling owns this effect. */
+  if(e->kind==kActionEffect_AuthoredStorm) {
+    /* The cloud halo extends past the strike region. Use its whole envelope
+     * for admission; an offscreen bolt may still illuminate visible cloud. */
+    motion.geometry.data.rect = ActionStorm_Bounds(e);
+  }
   if(e->kind==kActionEffect_AuthoredParticlePath) {
     const float pad=e->particle_style.wander+e->particle_style.size_max*2;
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-pad,r->x1+pad,r->y1+pad};
@@ -1089,6 +1453,7 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       (w->source || project==ActionEffectProjection_ProjectPoint)) &&
       clip_fn&&!clip_fn(context,&motion,&visible))return true;
   switch(e->kind) {
+    case kActionEffect_AuthoredStorm: return !lighting || StormLightning(w,e,&visible,project,context);
     case kActionEffect_AuthoredCanopy: return !lighting || CanopyLight(w,e,floor,&visible,project,context);
     case kActionEffect_AuthoredFoliage: return !particles || (s->textured?TexturedFoliage(w,e,floor,&visible,project,context):FoliageShadow(w,e,&visible,project,context));
     case kActionEffect_AuthoredFireflies: return Fireflies(w,e,&visible,lighting,particles,project,context);
@@ -1101,8 +1466,8 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     case kActionEffect_AuthoredHalo: return !lighting || Halo(w,e,&visible,project,context);
     case kActionEffect_AuthoredGradient: return !lighting || LightGradient(w,e,&visible,project,context);
     case kActionEffect_AuthoredContour: return !particles || WetContour(w,e,&visible,project,context);
-    case kActionEffect_AuthoredParticleArea: return !particles || ParticleArea(w,e,&visible,project,context);
-    case kActionEffect_AuthoredParticlePath: return !particles || ParticlePath(w,e,&visible,project,context);
+    case kActionEffect_AuthoredParticleArea: return !particles || ParticleArea(w,e,&visible,project,context,lighting);
+    case kActionEffect_AuthoredParticlePath: return !particles || ParticlePath(w,e,&visible,project,context,lighting);
     case kActionEffect_AuthoredFan: {
       if (!lighting) return true;
       const int first = w->vertex_count;
@@ -1122,9 +1487,15 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       if(!isfinite(s->carry)||s->carry<0||s->carry>512||(!s->point_count&&(s->carry>0||e->particle_count)))return false;
       if(!isfinite(s->rolling)||s->rolling<0||s->rolling>1||!isfinite(s->wake)||s->wake<0||s->wake>1||
           !isfinite(s->canopy_response)||s->canopy_response<0||s->canopy_response>1)return false;
+      if(!isfinite(s->volume)||s->volume<0||s->volume>1||
+          (s->volume>0&&(!s->textured||s->point_count||s->rolling<=0)))return false;
+      if(!isfinite(s->rainbow)||s->rainbow<0||s->rainbow>1||
+          (s->rainbow>0&&(!s->textured||s->point_count||s->rolling<=0)))return false;
+      if(!isfinite(s->sparkle)||s->sparkle<0||s->sparkle>1||
+          (s->sparkle>0&&(!s->textured||s->point_count||s->rolling<=0)))return false;
       if((s->rolling>0||s->wake>0||s->canopy_response>0)&&(!s->textured||s->point_count))return false;
       if(s->point_count)return GroundCloud(w,e,&visible,project,context);
-      if(s->rolling>0)return RollingMist(w,e,&visible,project,context);
+      if(s->rolling>0)return RollingMist(w,e,&visible,project,context,lighting);
       const float width=r->x1-r->x0,height=r->y1-r->y0;
       const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
       for(unsigned i=0;i<s->strands;++i) {

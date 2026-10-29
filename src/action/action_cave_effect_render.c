@@ -1,3 +1,4 @@
+#include "render/cloud_mesh.h"
 /* Fillmore's cave water, authored drips and stone-interior atmosphere.
  * All positions belong to decoded room layers; no native actors, live WRAM,
  * persistent particle state, or platform-specific rendering is used here.
@@ -258,12 +259,7 @@ static float TempleExposure(const ActionAtmosphereField *p, float x, float y) {
   }
   return light;
 }
-/* A borrowed style view shares one mesh kernel without coupling atmosphere
- * definitions to the water recipe or copying either complete field per draw. */
-typedef struct CaveMistStyle {
-  const float *MistVolume,*MistBillow,*MistDensity,*MistLighting,*MistColor,*MistGain;
-} CaveMistStyle;
-#define MIST_STYLE(p) ((CaveMistStyle){(p)->MistVolume,(p)->MistBillow,(p)->MistDensity,(p)->MistLighting,(p)->MistColor,(p)->MistGain})
+#define MIST_STYLE(p) ((CloudMistStyle){(p)->MistVolume,(p)->MistBillow,(p)->MistDensity,(p)->MistLighting,(p)->MistColor,(p)->MistGain})
 
 _Static_assert(kActionTempleMistMaxSpans*3*32*7 <= kActionSceneEffectRenderMaxVertices &&
                kActionTempleMistMaxSpans*3*32*15 <= kActionSceneEffectRenderMaxIndices,
@@ -274,38 +270,20 @@ _Static_assert(kActionTempleMistMaxSpans*3*32*7 <= kActionSceneEffectRenderMaxVe
  * Every vertex is projected in world space; no screen-sized cloud minimum or
  * perspective-dependent expansion. Shared by grounded fog and splash spray. */
 static bool CaveMistVolume(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    CaveMistStyle style,
+    CloudMistStyle style,
     const ActionEffectLocalRect *clip, float left, float right, float floor, float height,
     unsigned seed, float illumination, ActionEffectProjectPointFn project_point, void *userdata) {
   if (right <= clip->x0 || left >= clip->x1 || floor < clip->y0 || floor-height > clip->y1)
     return true;
   ActionEffectInstance mesh = *effect;
   mesh.flags |= kActionEffectFlag_ClippedMesh;
-  const float half = (right-left)*.5f;
-  for (unsigned slice = 0; slice < (unsigned)style.MistVolume[0]; slice++) {
-    const unsigned mask = ((unsigned)style.MistVolume[1]<<slice)-1;
+  for (unsigned slice = 0; slice < (unsigned)style.volume[0]; slice++) {
+    const unsigned mask = ((unsigned)style.volume[1]<<slice)-1;
     const float phase = ((effect->phase_ticks+seed)&mask)*(6.2831853f/(mask+1));
-    const float center = (left+right)*.5f + half*style.MistVolume[2]*sinf(phase+slice);
-    const float width = half*(style.MistVolume[3]-style.MistVolume[4]*slice);
-    ArRenderVertex2D vertices[25];
-    int mapped[25];
-    for (int col = 0; col < 5; col++) {
-      const float u = (col-2)*.5f;
-      const float billow = style.MistBillow[0]+style.MistBillow[1]*sinf(u*style.MistBillow[3]+phase+slice)+style.MistBillow[2]*cosf(u*style.MistBillow[4]-phase*style.MistBillow[5]);
-      const float top = height*(style.MistVolume[5]+style.MistVolume[6]*billow-style.MistVolume[7]*slice);
-      for (int row = 0; row < 5; row++) {
-        const float rise = 1-row*.25f;
-        const float across = 1-u*u*u*u;
-        const float density = (style.MistDensity[0]+style.MistDensity[1]*billow)*across*across*AmbientFalloff(rise);
-        const float light = style.MistLighting[0]+illumination+style.MistLighting[1]*rise+style.MistLighting[2]*billow;
-        const int at = row*5+col;
-        vertices[at] = (ArRenderVertex2D){
-          {center+u*width,floor-top*rise},
-          {fminf(1,style.MistColor[0]+style.MistGain[0]*light),fminf(1,style.MistColor[1]+style.MistGain[1]*light),fminf(1,style.MistColor[2]+style.MistGain[2]*light),fminf(1,density)},{0,0},
-        };
-        mapped[at] = -1;
-      }
-    }
+    ArRenderVertex2D vertices[kCloudMistVertices];
+    int mapped[kCloudMistVertices];
+    CloudMesh_MistSlice(vertices,style,left,right,floor,height,phase,slice,illumination);
+    for(unsigned i=0;i<kCloudMistVertices;++i)mapped[i]=-1;
     for (int row = 0; row < 4; row++) for (int col = 0; col < 4; col++) {
       const int a = row*5+col, b = a+5;
       const int triangles[] = {a,a+1,b,a+1,b+1,b};

@@ -1,49 +1,11 @@
 #include "sim/world_nav/sim_world_navigation_clouds.h"
 
+#include "render/cloud_noise.h"
 #include <math.h>
 #include <stddef.h>
 
 static const float kCloudPi = 3.14159265358979323846f;
 enum { kLongitudeBlock = 512, kCloudOctaves = 5 };
-
-static float Smooth(float t) { return t * t * (3.0f - 2.0f * t); }
-
-static float Hash(int x, int y, int z) {
-  uint32_t h = (uint32_t)x * 374761393u + (uint32_t)y * 668265263u +
-      (uint32_t)z * 2246822519u;
-  h = (h ^ (h >> 13)) * 1274126177u;
-  return (float)((h ^ (h >> 16)) & 65535u) / 65535.0f;
-}
-
-typedef struct CloudNoiseCell {
-  int x, z;
-  bool valid;
-  float start[2][2], delta[2][2];
-} CloudNoiseCell;
-
-static float Noise(float x, float z, int iy, float fy, CloudNoiseCell *cell) {
-  const int ix = (int)floorf(x), iz = (int)floorf(z);
-  const float fx = Smooth(x - ix), fz = Smooth(z - iz);
-  if (!cell->valid || cell->x != ix || cell->z != iz) {
-    for (int dz = 0; dz < 2; dz++)
-      for (int dy = 0; dy < 2; dy++) {
-        const float a = Hash(ix, iy + dy, iz + dz);
-        cell->start[dz][dy] = a;
-        cell->delta[dz][dy] = Hash(ix + 1, iy + dy, iz + dz) - a;
-      }
-    cell->x = ix;
-    cell->z = iz;
-    cell->valid = true;
-  }
-  float plane[2];
-  for (int dz = 0; dz < 2; dz++) {
-    float row[2];
-    for (int dy = 0; dy < 2; dy++)
-      row[dy] = cell->start[dz][dy] + cell->delta[dz][dy] * fx;
-    plane[dz] = row[0] + (row[1] - row[0]) * fy;
-  }
-  return plane[0] + (plane[1] - plane[0]) * fz;
-}
 
 static void BakeRow(uint32_t *out, int count, const float *cosine, const float *sine,
                     float radius, float y, float scale) {
@@ -56,11 +18,11 @@ static void BakeRow(uint32_t *out, int count, const float *cosine, const float *
   for (int octave = 0; octave < kCloudOctaves; octave++) {
     const float yy = y * frequency + 0.61f + octave * 0.29f;
     const int iy = (int)floorf(yy);
-    const float fy = Smooth(yy - iy);
+    const float fy = CloudNoise_Smooth(yy - iy);
     CloudNoiseCell cell = {0};
     for (int column = 0; column < count; column++) {
       const float x = radius * cosine[column], z = radius * sine[column];
-      total[column] += Noise(x * frequency + 0.37f + octave * 0.53f,
+      total[column] += CloudNoise_Scan3(x * frequency + 0.37f + octave * 0.53f,
           z * frequency + 0.23f + octave * 0.71f, iy, fy, &cell) * amplitude;
     }
     sum += amplitude;
@@ -69,11 +31,7 @@ static void BakeRow(uint32_t *out, int count, const float *cosine, const float *
   }
   /* Same density/tint language as the town shroud, extended into 3D. */
   for (int column = 0; column < count; column++) {
-    float density = (total[column] / sum - 0.42f) / 0.38f;
-    density = Smooth(fminf(1, fmaxf(0, density)));
-    const unsigned alpha = (unsigned)(density * 255 + 0.5f);
-    const unsigned tint = 236 + (unsigned)(density * 19);
-    out[column] = (alpha << 24) | (tint << 16) | (tint << 8) | 255u;
+    out[column] = CloudNoise_SheetColor(total[column] / sum);
   }
 }
 

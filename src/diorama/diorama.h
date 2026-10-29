@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "diorama_coverage.h"
 #include "diorama_heat.h"
+#include "diorama_cloud_light.h"
 #include "diorama_camera.h"
 #include "diorama_render_options.h"
 #include "diorama_planes.h"
@@ -167,6 +168,9 @@ typedef struct DioramaSkyboxBandProjection {
 } DioramaSkyboxBandProjection;
 
 typedef struct DioramaSkyboxProjection {
+  ArRenderPointF capture_offset; /* Generated capture motion, excluding the OBJ apron. */
+  ArRenderPointF texture_offset; /* Full source texture origin, including any apron. */
+  bool to_texture, weather_composited;
   /* A periodic native page may share the foreground's world projection. */
   DioramaPlaneProjection world_plane;
   unsigned count;
@@ -227,6 +231,10 @@ bool Diorama_PlaneCaptureBounds(const DioramaProjection *, const DioramaPlanePro
 
 bool Diorama_SkyboxCaptureBounds(const DioramaProjection *projection,
                                  float *x0, float *y0, float *x1, float *y1);
+
+/* Coalesce only equivalent adjacent mappings in a weather source pass.
+ * The final sky draw retains its original raster bands and depth policy. */
+void Diorama_MergeSkyWeatherBands(DioramaSkyboxProjection *sky);
 
 /* Airborne light inherits the mapping at its source, rather than bending with
  * each row band's independent texture stretch. Bounds still clip its drawing
@@ -396,16 +404,26 @@ typedef struct DioramaScene {
    * Borrowed only during Composite, like plane_effect; not snapshot state. */
   const struct SceneryShadingField *scenery_exposure;
   DioramaSceneryGrade scenery_grade;
+  DioramaNativeBloom native_bloom;
+  uint16_t native_bloom_clock; /* Paused gameplay clock, shared with environmental effects. */
+  float native_bloom_dimming; /* Captured master fade for added dust; native art is already faded. */
   /* Draw only incident BG1 light, at half strength, into the compositor's
    * current target. Prepared once per presentation after projection; never
    * read back. On success, attached effects omit that surface contribution. */
   bool (*scenery_light)(void *userdata, const DioramaProjection *projection);
   bool (*actor_light)(void *userdata, const DioramaProjection *, unsigned receiver);
+  /* Draw background weather into the current source-sized texture, before
+   * blur. Uses the published inverse sky mapping; no framebuffer readback. */
+  /* submit=false checks for intersecting geometry without drawing. This
+   * avoids copying/filtering the sky for an active but offscreen strike. */
+  bool (*sky_weather)(void *userdata, const DioramaProjection *, bool submit);
   /* 0 builds a map; 1 reuses scenery, 2 reuses player. */
   uint8_t actor_light_reuse[2];
   ArRenderTexture actor_lightmaps[2];
   ArRenderTexture scenery_lightmap; /* Compositor-owned, not snapshot state. */
+  DioramaCloudLight cloud_light;
   DioramaHeat background_heat; /* Displaces only background texture samples. */
+  DioramaHeat scenery_heat; /* BG1 low/high/far share a world-anchored warp. */
   /* Current effects retain projection on an intentionally empty plane. */
   uint8_t effect_obj_priority_mask;
   uint32_t effect_bg_plane_mask;

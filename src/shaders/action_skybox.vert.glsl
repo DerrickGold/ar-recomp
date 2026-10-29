@@ -5,6 +5,7 @@ layout(location=1) in vec4 color;
 layout(location=2) in vec2 uv;
 layout(location=0) out vec4 vertex_color;
 layout(location=1) out vec2 texture_uv;
+layout(location=2) flat out vec2 cloud_offset;
 layout(std430,set=0,binding=0) readonly buffer Motion { ivec4 values[]; } motion;
 layout(std140,set=1,binding=0) uniform Context {
     vec4 target; // target W/H, viewport origin X/Y
@@ -39,6 +40,9 @@ void main() {
         vec4 m=vec4(motion.values[slot*2]);float phase=settings.motion_info.y;
         offset=phase<.5?m.zw+m.xy*phase:m.zw*(1-phase);
     }
+    // Periodic UVs already include world-space motion. Subtracting it again
+    // in the material would slide light across the waterfall during interpolation.
+    cloud_offset=settings.motion_info.z!=0?vec2(0):offset;
     texture_uv=uv; vec2 pixel=position;
     if(settings.motion_info.z!=0) texture_uv-=offset/256.0;
     else if(settings.mapping.meta.x>0) {

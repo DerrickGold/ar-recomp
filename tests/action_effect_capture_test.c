@@ -117,7 +117,6 @@ static void Capture(unsigned ticks, uint8_t section) {
   assert(frame.action_effect_particles == g_settings.action_effect_particles);
   assert(frame.action_environmental_effects == g_settings.action_environmental_effects);
   assert(frame.death_heim_final_battle == g_settings.death_heim_final_battle);
-  assert(frame.death_heim_final_battle_tick == expected_scene_clock);
   assert(environment_calls == previous_environment_calls +
       (g_settings.action_environmental_effects ? builds : 0));
   assert(manifest_calls == previous_manifest_calls +

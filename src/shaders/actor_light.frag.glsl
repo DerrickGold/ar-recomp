@@ -41,16 +41,21 @@ vec4 art(out vec3 data) {
 void main() {
     vec3 data;
     vec4 c=art(data);
+    // Test filtered coverage: a transparent centre can still have a visible
+    // DOF fringe. Lighting and rim enhancement never add alpha to empty art.
+    if (c.a == 0.0) { o_color=vec4(0); return; }
     float ambient=data.r*(255.0/64.0);
     vec2 uv=gl_FragCoord.xy*light_info.xy+light_info.zw;
-    vec3 incoming=4.0*(texture(u_illumination,uv).rgb*data.g+
-        texture(u_enemy_light,uv).rgb*data.b);
+    // These single-level captures use explicit LOD after the varying early
+    // return, so texture sampling does not depend on divergent derivatives.
+    vec3 incoming=4.0*(textureLod(u_illumination,uv,0.0).rgb*data.g+
+        textureLod(u_enemy_light,uv,0.0).rgb*data.b);
     vec3 lit=c.rgb*clamp(vec3(ambient)+incoming,vec3(0),vec3(4));
     if(filter_info.w>0.0) {
-        float neighbor=min(min(texture(u_texture,v_uv+vec2(filter_info.x,0)).a,
-            texture(u_texture,v_uv-vec2(filter_info.x,0)).a),
-            min(texture(u_texture,v_uv+vec2(0,filter_info.y)).a,
-            texture(u_texture,v_uv-vec2(0,filter_info.y)).a));
+        float neighbor=min(min(textureLod(u_texture,v_uv+vec2(filter_info.x,0),0.0).a,
+            textureLod(u_texture,v_uv-vec2(filter_info.x,0),0.0).a),
+            min(textureLod(u_texture,v_uv+vec2(0,filter_info.y),0.0).a,
+            textureLod(u_texture,v_uv-vec2(0,filter_info.y),0.0).a));
         lit*=1.0+c.a*max(0.0,c.a-neighbor)*filter_info.w;
     }
     o_color=vec4(lit*v_color.rgb,c.a*v_color.a);

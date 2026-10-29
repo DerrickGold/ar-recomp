@@ -49,6 +49,7 @@ bool PresentActionEffects_DrawSceneryLight(void *userdata,
     const DioramaProjection *diorama_projection);
 void PresentActionEffects_DrawDioramaPlane(
     void *userdata, int plane, const DioramaProjection *diorama_projection);
+bool PresentActionEffects_DrawSkyWeather(void *userdata, const DioramaProjection *projection, bool submit);
 
 /* Bracket the world scene; resolve heat before drawing HUD/host overlays.
  * Every successful Begin requires End or Cancel. The scene viewport becomes

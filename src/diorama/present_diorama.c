@@ -1,4 +1,6 @@
+#include "action/action_cloud_light.h"
 #include "action/action_heat.h"
+#include "action/action_storm.h"
 #include "diorama/diorama_gpu_policy.h"
 #include "diorama/present_diorama.h"
 
@@ -288,19 +290,14 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     return;
   }
   bool skybox_changed = false;
-  /* Keep the PPU capture intact for native color math and fallback. Only
-   * discard presentation work once the replacement has all its resources. */
-  const uint32_t replaced_planes = DioramaAstralRift_ReplacedPlanes(device,
-      slot->death_heim_final_battle, slot->diorama_map_group,
-      slot->diorama_map_number, slot->diorama_layer_section);
   const uint32_t upload_mask = slot->diorama_plane_request_mask &
-                         slot->diorama_plane_content_mask & ~replaced_planes;
+                         slot->diorama_plane_content_mask;
   memcpy(s_resolved_textures, s_plane_textures, sizeof(s_resolved_textures));
   uint32_t gpu_changed = 0;
   const DioramaPerformanceScope gpu_capture_scope =
       DioramaPerformance_Begin(kDioramaPerformance_Upload);
   ArRenderTexture gpu_skybox = ArRenderTexture_Invalid();
-  const uint32_t gpu_mask = replaced_planes ? 0 : DioramaBgGpu_Resolve(device,
+  const uint32_t gpu_mask = DioramaBgGpu_Resolve(device,
       slot->background_packet, upload_mask, s_resolved_textures, &gpu_skybox, &gpu_changed);
   if (ArRenderTexture_IsValid(gpu_skybox)) {
     skybox_changed = (gpu_changed & (1u << kDioramaPlane_Count)) != 0;
@@ -312,9 +309,8 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   DioramaPerformance_End(gpu_capture_scope);
   for (unsigned plane = 0; plane < kDioramaPlane_Count; ++plane)
     if (!(gpu_mask & (1u << plane))) s_resolved_textures[plane] = s_plane_textures[plane];
-  SrPpuSurfaceView skybox_storage = replaced_planes
-      ? (SrPpuSurfaceView){0} : slot->diorama_skybox_surface;
-  const bool owned_skybox = !replaced_planes &&
+  SrPpuSurfaceView skybox_storage = slot->diorama_skybox_surface;
+  const bool owned_skybox =
       slot->background_packet && (slot->background_packet->owned_sources & 4u);
   const bool skybox_diagnostic = getenv("AR_DIORAMA_SNAPSHOT") || getenv("AR_PLANESTAT");
   if (owned_skybox && (!ArRenderTexture_IsValid(gpu_skybox) || skybox_diagnostic)) {
@@ -785,6 +781,8 @@ retry_projection:;
       .render = &render,
       .map_group = slot->diorama_map_group,
       .map_number = slot->diorama_map_number,
+      .native_bloom_clock = slot->action_scene_clock,
+      .native_bloom_dimming = (slot->inidisp&0x80)?1:1-(slot->inidisp&15)/15.f,
       .layer_section = slot->diorama_layer_section,
       .bg1_dimming = PresentActionEffects_Bg1Dimming(slot),
       .bg1_dimming_ramp = dimming_ramp,
@@ -796,12 +794,22 @@ retry_projection:;
           ActionEffectReceivers_HasSurfaceLights(&slot->action_scene_effects)
           ? PresentActionEffects_DrawSceneryLight : NULL,
       .actor_light = slot->action_environmental_effects ? PresentActionEffects_DrawActorLight : NULL,
+      .sky_weather = slot->action_environmental_effects && slot->action_effect_lighting &&
+          ActionStorm_HasSkyWeather(&slot->action_scene_effects) ? PresentActionEffects_DrawSkyWeather : NULL,
       .actor_light_reuse = {
         slot->action_effect_lighting&&ActionEffectReceivers_MapsMatch(&slot->action_scene_effects,1,2)?1:0,
         slot->action_effect_lighting&&ActionEffectReceivers_MapsMatch(&slot->action_scene_effects,1,4)?1:
           ActionEffectReceivers_MapsMatch(&slot->action_scene_effects,2,4)?2:0},
-      .background_heat = ActionHeat_Prepare(slot->action_environmental_effects&&slot->action_effect_particles?&slot->action_scene_effects:NULL,
+      .cloud_light = ActionCloudLight_Prepare(slot->action_environmental_effects&&slot->action_effect_lighting?&slot->action_scene_effects:NULL,
           slot->bg2_camera_x-slot->ws_extra-slot->obj_apron,slot->bg2_camera_y-slot->ws_extra_top,
+          kFrameSlotLayerTextureWidth,kFrameSlotLayerTextureHeight),
+      .background_heat = ActionHeat_Prepare(slot->action_environmental_effects&&slot->action_effect_particles?&slot->action_scene_effects:NULL,
+          kActionEffectProjectionPlane_Bg2,
+          slot->bg2_camera_x-slot->ws_extra-slot->obj_apron,slot->bg2_camera_y-slot->ws_extra_top,
+          kFrameSlotLayerTextureWidth,kFrameSlotLayerTextureHeight),
+      .scenery_heat = ActionHeat_Prepare(slot->action_environmental_effects&&slot->action_effect_particles?&slot->action_scene_effects:NULL,
+          kActionEffectProjectionPlane_Bg1,
+          slot->bg1_camera_x-slot->ws_extra-slot->obj_apron,slot->bg1_camera_y-slot->ws_extra_top,
           kFrameSlotLayerTextureWidth,kFrameSlotLayerTextureHeight),
       .additive_plane_mask =
           slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
@@ -812,12 +820,7 @@ retry_projection:;
       .backdrop = completion_world ? DrawCompletionBackdrop : NULL,
       .backdrop_userdata = &completion,
   };
-  DioramaAstralRiftFrame rift = {.device=device, .yaw=view.camera.tilt_y,
-      .pitch=view.camera.tilt_x, .tick=slot->death_heim_final_battle_tick,
-      .inidisp=slot->inidisp, .projection=&action_projection,
-      .floor_capture_x=128-slot->bg1_camera_x+slot->ws_extra,
-      .floor_capture_y=kDioramaAstralFloorWorldY-slot->bg1_camera_y+slot->ws_extra_top};
-  DioramaAstralRift_Attach(slot->death_heim_final_battle, &scene, &render, &rift);
+  DioramaAstralRift_Attach(slot->death_heim_final_battle, device, &scene);
   DioramaSnapshotCapture_Write(slot, &capture, &view, &scene);
   const PresentationOutcome diorama = Diorama_Composite(
       device, &capture, &view, &scene, &action_projection);

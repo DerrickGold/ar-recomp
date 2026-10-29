@@ -1,4 +1,6 @@
+#include "action/action_cloud_light.h"
 #include "action/action_heat.h"
+#include "action/action_storm.h"
 #include "action/action_floor_support.h"
 #include "action/action_effect_members.h"
 #include "action/action_effect_receivers.h"
@@ -27,6 +29,24 @@ uint8_t *DioramaPreview_Input(void);
 unsigned DioramaPreview_Capacity(void);
 void DioramaPreview_Reset(void);
 bool DioramaPreview_Begin(int width, int height);
+
+/* Map guides use the material's actual layout, without a second JS sampler.
+ * Results are borrowed through the existing synchronous transport buffer:
+ * centre, source half-width, power, edge offset, reach, landing half-width. */
+unsigned RoomPreview_CloudOpenings(uint32_t seed,unsigned count) {
+  if(count<1||count>5)return 0;
+  const float pattern=DioramaCloudLight_Seed(seed);
+  float values[30];
+  for(unsigned i=0;i<count;++i) {
+    const CloudLightOpening opening=CloudLightOpeningAt((uint32_t)pattern,(int)i);
+    const float row[]={opening.centre,CloudLightBeamWidth(opening.width,0),opening.power,
+        opening.offset+CloudLightEdge(opening.centre,pattern,0),opening.reach,
+        CloudLightBeamWidth(opening.width,opening.reach)};
+    memcpy(values+i*6,row,sizeof(row));
+  }
+  memcpy(DioramaPreview_Input(),values,count*6*sizeof(float));
+  return count*6;
+}
 
 static EditorRoomScene *s_room;
 static ArRenderTexture s_textures[kDioramaPlane_Count];
@@ -175,14 +195,15 @@ typedef struct RoomEffectPass {
   bool valid;
 } RoomEffectPass;
 static ArRenderTexture s_effect_masks;
-static bool DrawEffectLayer(RoomEffectPass *pass, uint8_t layer,
-    ArRenderBlendMode blend, bool lighting, bool particles) {
+static bool EffectLayer(RoomEffectPass *pass, uint8_t layer,
+    ArRenderBlendMode blend, bool lighting, bool particles, bool submit) {
   if (s_source_draw) {
     ActionEffectSourceBatch source = {.context=pass->projection,
         .primitives=s_source_primitives,.capacity=kActionSourceMaximumPrimitives,
         .lights=s_source_lights,.light_capacity=kActionSourceMaxLightJobs};
     if (!ActionSceneDecorationRender_Build(pass->frame,layer,lighting,particles,
         ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&s_effect_batch)) return false;
+    if (!submit)return source.count>0;
     s_effect_vertices += source.count;
     return s_source_draw(DioramaPreview_Device(),&source,pass->projection.diorama_projection,
         &pass->frame->scenery,blend,pass->projection.scenery_lighting_only?1.f/kActionReceiverMaxIllumination:1);
@@ -190,6 +211,7 @@ static bool DrawEffectLayer(RoomEffectPass *pass, uint8_t layer,
   if (!ActionSceneDecorationRender_Build(pass->frame, layer, lighting, particles,
           ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
           &pass->projection, &s_effect_batch)) return false;
+  if (!submit)return s_effect_batch.index_count>0;
   if (!s_effect_batch.index_count) return true;
   if (pass->projection.scenery_lighting_only)
     for (int i=0;i<s_effect_batch.vertex_count;++i) {
@@ -205,6 +227,10 @@ static bool DrawEffectLayer(RoomEffectPass *pass, uint8_t layer,
       textured?s_effect_masks:ArRenderTexture_Invalid(), s_effect_batch.vertices, s_effect_batch.vertex_count,
       s_effect_batch.indices, s_effect_batch.index_count, &state);
 }
+static bool DrawEffectLayer(RoomEffectPass *pass, uint8_t layer,
+    ArRenderBlendMode blend, bool lighting, bool particles) {
+  return EffectLayer(pass,layer,blend,lighting,particles,true);
+}
 static void DrawPlaneEffects(void *userdata, int plane, const DioramaProjection *projection) {
   RoomEffectPass *context = userdata;
   if (!context->valid) return;
@@ -212,12 +238,19 @@ static void DrawPlaneEffects(void *userdata, int plane, const DioramaProjection 
   if(!s_effects_enabled)return;
   for (unsigned i = 0; i < sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]); ++i) {
     const ActionDecorationPass *pass = &kDecorationPasses[i];
+    if (pass->layer==kActionEffectRenderLayer_Bg2Weather && projection->bg2_skybox.weather_composited) continue;
     if (pass->attachment != plane ||
         (pass->finite_plane_only && projection->bg2_skybox.count)) continue;
     if (!DrawEffectLayer(context, pass->layer, pass->blend, pass->diorama_lighting, true)) {
       context->valid = false; return;
     }
   }
+}
+
+static bool DrawSkyWeather(void *userdata, const DioramaProjection *projection, bool submit) {
+  RoomEffectPass *pass=userdata;
+  pass->projection.diorama_projection=projection;
+  return EffectLayer(pass,kActionEffectRenderLayer_Bg2Weather,kArRenderBlendMode_Add,true,true,submit);
 }
 
 static bool DrawSceneryLight(void *userdata, const DioramaProjection *projection) {
@@ -304,7 +337,6 @@ unsigned RoomPreview_Uploads(void) { return s_uploads; }
 void RoomPreview_Reset(void) {
   ArRenderDevice *device = DioramaPreview_Device();
   ArRenderDevice_DestroyTexture(device,s_effect_masks);s_effect_masks=ArRenderTexture_Invalid();
-  DioramaAstralRift_Reset(device);
   Diorama_ResetCompositorResources(device);
   for (unsigned i = 0; i < kDioramaPlane_Count; ++i) {
     ArRenderDevice_DestroyTexture(device, s_textures[i]);
@@ -329,7 +361,7 @@ int RoomPreview_Load(unsigned size) {
   return 1;
 }
 int RoomPreview_Configure(unsigned size) {
-  if (!s_room || size > 1024 * 1024 || memchr(DioramaPreview_Input(), 0, size)) return 0;
+  if (!s_room || size >= DioramaPreview_Capacity() || memchr(DioramaPreview_Input(), 0, size)) return 0;
   DioramaPreview_Input()[size] = 0;
   if (!EditorRoomScene_Configure(s_room, (char *)DioramaPreview_Input())) return 0;
   s_cached = false;
@@ -719,6 +751,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   if (skybox == kDioramaSky_Only && EditorRoomScene_Surfaces(s_room)->native_pages[1])
     capture.skybox = &page;
   DioramaScene scene = *EditorRoomScene_Scene(s_room);
+  scene.native_bloom_clock = (uint16_t)frame;
   DioramaRenderOptions options = *scene.render;
   options.rim_light=s_receiver_rim;
   options.resolve_skybox = ResolveSkybox;
@@ -745,12 +778,21 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   scene.scenery_exposure=exposure.count?&exposure.field:NULL;
   scene.scenery_grade=s_effects_enabled ? DioramaLayerOrder_SceneryGrade(options.layers,
       scene.map_group,scene.map_number,scene.layer_section) : (DioramaSceneryGrade){0};
-  scene.background_heat=ActionHeat_Prepare(s_effects_enabled?effects.frame:NULL,
+  scene.cloud_light=ActionCloudLight_Prepare(s_effects_enabled?effects.frame:NULL,
       environment->camera_x[1]-extra-capture.obj_apron,environment->camera_y[1]-capture.authentic_y0,
+      SR_PPU_SURFACE_MAX_WIDTH,SR_PPU_SURFACE_MAX_HEIGHT);
+  scene.background_heat=ActionHeat_Prepare(s_effects_enabled?effects.frame:NULL,
+      kActionEffectProjectionPlane_Bg2,
+      environment->camera_x[1]-extra-capture.obj_apron,environment->camera_y[1]-capture.authentic_y0,
+      SR_PPU_SURFACE_MAX_WIDTH,SR_PPU_SURFACE_MAX_HEIGHT);
+  scene.scenery_heat=ActionHeat_Prepare(s_effects_enabled?effects.frame:NULL,
+      kActionEffectProjectionPlane_Bg1,
+      environment->camera_x[0]-extra-capture.obj_apron,environment->camera_y[0]-capture.authentic_y0,
       SR_PPU_SURFACE_MAX_WIDTH,SR_PPU_SURFACE_MAX_HEIGHT);
   scene.effect_obj_priority_mask=EditorReceiverPreview_Ready()?1u<<2:0;
   if (s_effects_enabled) {
     scene.actor_light=DrawActorLight;
+    scene.sky_weather=ActionStorm_HasSkyWeather(effects.frame)?DrawSkyWeather:NULL;
     scene.actor_light_reuse[0]=ActionEffectReceivers_MapsMatch(effects.frame,1,2)?1:0;
     scene.actor_light_reuse[1]=ActionEffectReceivers_MapsMatch(effects.frame,1,4)?1:
         ActionEffectReceivers_MapsMatch(effects.frame,2,4)?2:0;
@@ -763,12 +805,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     scene.plane_effect = DrawPlaneEffects; scene.plane_effect_userdata = &effects;
   }
   DioramaProjection projection;
-  DioramaAstralRiftFrame rift = {.device=DioramaPreview_Device(),
-      .yaw=view.camera.tilt_y, .pitch=view.camera.tilt_x,
-      .tick=(uint16_t)frame, .inidisp=15, .projection=&projection,
-      .floor_capture_x=128-environment->camera_x[0]+extra,
-      .floor_capture_y=kDioramaAstralFloorWorldY-environment->camera_y[0]+capture.authentic_y0};
-  DioramaAstralRift_Attach(s_final_battle,&scene,&options,&rift);
+  DioramaAstralRift_Attach(s_final_battle, DioramaPreview_Device(), &scene);
   if (!PresentationOutcome_IsUsable(Diorama_Composite(
       DioramaPreview_Device(), &capture, &view, &scene, &projection)) || !effects.valid) return 0;
   s_receiver_projection=projection;

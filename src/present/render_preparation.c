@@ -47,8 +47,8 @@ static bool s_action_stage_prepared;
 static bool s_interpolation_prepared;
 
 static void PrepareActionStage(ArRenderDevice *device, bool interpolation) {
-  /* Astral Rift uses the built-in triangle pipelines warmed by FinishPreparation.
-   * Decode/upload its art here too, so enabling it or entering 07:08 is cheap. */
+  /* Compile and exercise native-nebula extraction/grading at boot, including
+   * when the preference is off. No generated artwork is decoded or uploaded. */
   DioramaAstralRift_Prepare(device);
   DioramaBgGpu_Prepare(device);
   DioramaEffectBackend_IsAvailable(device, kDioramaEffect_PrioritySurface);

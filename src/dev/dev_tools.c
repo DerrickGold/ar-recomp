@@ -149,17 +149,17 @@ void DevTools_TakeFullSnapshot(const DevToolsContext *context) {
   ActRaiser_FullSnapshot(prefix);
 
   char screenshot_path[344];
-  snprintf(screenshot_path, sizeof(screenshot_path), "%s.ppm", prefix);
+  snprintf(screenshot_path, sizeof(screenshot_path), "%s.png", prefix);
   FILE *screenshot = sr_fopen(screenshot_path, "wb");
   if (screenshot) {
-    DevToolsCaptureResult result = DevTools_WriteFramebufferPpm(screenshot, context, false);
+    DevToolsCaptureResult result = DevTools_WriteFramebufferPng(screenshot, context, false);
     if (fclose(screenshot) != 0) result.kind = kDevToolsCapture_Failed;
     fprintf(stderr, "[snap] capture=%s\n", DevToolsCaptureKind_Name(result.kind));
   } else {
     fprintf(stderr, "[snap] capture=failed cannot open %s\n", screenshot_path);
   }
   fprintf(stderr,
-          "[snap] -> %s.{wram,vram,cgram,oam,ppu.json,ppm} (gf=%u)\n",
+          "[snap] -> %s.{wram,vram,cgram,oam,ppu.json,png} (gf=%u)\n",
           prefix, game_frame);
 }
 

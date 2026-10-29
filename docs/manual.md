@@ -329,7 +329,7 @@ Keyboard only, not re-bindable:
 | `T` | turbo — fast-forward at 8 game frames per rendered frame (`AR_TURBO_MULT` to change) |
 | `F5` / `F7` | save / load state |
 | `F6` | level warp (see [Level warp](#level-warp)) |
-| `F2` or `C` | full diagnostic snapshot (WRAM/VRAM/CGRAM/OAM/high-OAM + screenshot). `C` is the one-hand alias and repeats while held — one snapshot per key repeat — for sweeping a glitch that only lasts a frame. Each is ~21 MB, so a long hold writes GBs; on a replay prefer `AR_SHOT_EVERY` / `AR_VRAMDUMP_GF` to capture exact frames instead |
+| `F2` or `C` | full diagnostic snapshot (WRAM/VRAM/CGRAM/OAM/high-OAM + screenshot). `C` is the one-hand alias and repeats while held — one snapshot per key repeat — for sweeping a glitch that only lasts a frame. Screenshots are lossless compressed PNGs; memory dumps remain binary. A long hold still creates many files; on a replay prefer `AR_SHOT_EVERY` / `AR_VRAMDUMP_GF` to capture exact frames instead |
 | `F3` | toggle scene inspector; left-click pauses/inspects, drag its panel to move it, right-click clears/resumes |
 | `F9` | cycle 4:3 authentic → widescreen raw → widescreen full (requires `ExtendedAspectRatio`; paused BG/crop changes redraw immediately, sprite/activation changes apply next game frame) |
 | `Shift`+`F9` | dump diagnostic state |
@@ -362,32 +362,28 @@ written atomically to `settings.ini`; action rows are not persisted.
 ### Death Heim final battle
 
 With **Action 3D → Scene → Diorama 3D** enabled, turn on **Death Heim final
-battle** to replace room `07:08`'s two native nebula planes with the Astral Rift.
-This optional backdrop adds detailed blue/violet/magenta nebula currents,
-distant ruined celestial arches, tumbling fragments and a cosmic stone floor.
-Independent cloud layers pass in front of the rotating ruins and debris;
-slow light blooms and traveling filaments illuminate small regions inside them.
-The main nebula ribbon flows through separate blue and magenta eddies, with
-faster billowing wisps in front and calmer distant space behind the fighters.
-Energy follows the floor's luminous cracks while the standing surface stays fixed.
-Rolling vapor skims the ledge, while moving clouds and drifting fragments show
-through the dark cavities underneath. A much larger, dim ruin slowly passes
-behind the cloud banks. These ambient cycles run independently of attacks,
-character movement and boss phases.
-The floor follows the player's projection and native standing height through
-camera tilt and zoom. The original sprites and projectiles remain intact.
+battle** to enhance room `07:08`'s original nebula artwork. The native blue and
+magenta ribbons, stars, black space, wave animation and layer geometry remain.
+Bright filaments receive a soft coloured glow and a modest colour/contrast
+adjustment. Their projected light also illuminates the player and enemies.
+Sprites, projectiles and the HUD retain their original artwork.
 
 The setting defaults to **Off** and saves as `death_heim_final_battle` in
-`settings.ini`. It follows native pause and brightness fades. Other rooms,
-flat mode, combat and the separate completion-scene preference are unchanged.
-The scene temporarily overrides skybox/shoebox drawing without changing their
-saved settings. If its textures cannot be prepared, the native backdrop remains.
+`settings.ini`. It follows the original animation, pause and room fades.
+Other rooms, flat mode, combat and the separate completion-scene preference
+are unchanged. Disabling it restores the ordinary native rendering. It uses
+the selected skybox, layer and camera settings; no generated backdrop or floor
+is loaded. Unsupported renderers retain the native scene.
 
 In the action editor, select **Death Heim · Room 8**, open **Shared renderer**
-and check **Astral Rift (07:08)**. The preview uses the same C renderer, including
-frame scrubbing and camera orbit. This checkbox previews the game preference;
-it does not add a tile/effect record to exported project INIs. Enable the game
-preference separately. The existing player-preview controls work here too.
+and check **Native nebula glow (07:08)**. Under **Settings → Native nebula glow**,
+adjust glow strength, spread, highlight threshold, saturation, contrast and
+fighter illumination. Player and enemy receivers can be enabled independently.
+Shift-click a value to restore its default, or reset the whole material.
+Save project includes the `native-bloom` definition in `diorama-layers.ini`.
+The preview checkbox is separate from those authored values: enable the game
+preference separately. The player preview, aspect ratios and camera orbit use
+the same renderer as the game.
 
 ### Death Heim completion scene
 

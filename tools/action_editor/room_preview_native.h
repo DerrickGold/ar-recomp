@@ -12,6 +12,10 @@ int RoomPreview_LoadSkybox(unsigned size);
 int RoomPreview_Load(unsigned size);
 int RoomPreview_LoadPlayer(unsigned size);
 int RoomPreview_SetReceivers(int mask, int player_x, int player_y, int enemy_x, int enemy_y);
+int RoomPreview_ReceiverStyle(unsigned flipped, unsigned rim);
+void RoomPreview_EnableEffects(int enabled);
+unsigned RoomPreview_EffectCount(void);
+unsigned RoomPreview_EffectVertices(void);
 int RoomPreview_Configure(unsigned size);
 int RoomPreview_ConfigureEffects(unsigned size);
 void RoomPreview_Reset(void);
@@ -20,6 +24,9 @@ unsigned RoomPreview_Height(void);
 int RoomPreview_CameraX(void);
 int RoomPreview_SetView(float distance, float yaw, float pitch, int aspect_mode, int dynamic_camera);
 void RoomPreview_FinalBattle(int enabled);
+/* Five floats per opening in DioramaPreview_Input(): centre, width, power,
+ * edge offset and reach, all relative to the authored region. */
+unsigned RoomPreview_CloudOpenings(uint32_t seed, unsigned count);
 unsigned RoomPreview_Measure(int x, int y, uint32_t frame, int extra, int vertical,
     int width, int height, float zoom, float yaw, float pitch, int skybox, int pixels, unsigned bg);
 int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,

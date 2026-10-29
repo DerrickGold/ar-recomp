@@ -50,7 +50,8 @@ const ActionReceiverLighting *ActionEffectManifest_PrepareReceivers(unsigned gro
   ActionEffectCapture_PeekScene(&s_receiver_frame);
   /* Test the resolved scene, not just INI overrides. Native ray defaults,
    * complete fields and individual members all participate in this decision. */
-  if(!ActionEffectReceivers_HasActors(&s_receiver_frame,g_settings.action_effect_lighting))return NULL;
+  const bool native_nebula=projected && g_settings.death_heim_final_battle && group==7 && room==8;
+  if(!native_nebula && !ActionEffectReceivers_HasActors(&s_receiver_frame,g_settings.action_effect_lighting))return NULL;
   return ActionEffectReceivers_Prepare(&s_receiver_frame,group,room,scene.camera_x[0],scene.camera_y[0],
       scene.camera_x[1],scene.camera_y[1],g_settings.action_effect_lighting&&!projected,&s_receiver_lighting)?&s_receiver_lighting:NULL;
 }

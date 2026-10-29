@@ -407,6 +407,7 @@ def run_target(args, target, rom_hash):
             "AR_VRAMDUMP_GF": ",".join(
                 str(frame) for frame in args.capture_frames),
             "AR_SHOT_AT_GF": str(args.capture_frames[0]),
+            "AR_SHOT_FORMAT": "ppm",
             "AR_QUIT_FRAMES": str(args.quit_frames),
         })
         environment.pop("AR_ACTION_BG_HLE", None)

@@ -27,7 +27,7 @@ def check(html, wasm, sanitize):
                    'src/action/action_scene_snapshot.c', 'src/action/action_room_scene.c',
                    'src/action/action_bg_world.c', 'src/action/action_bg_plan.c',
                    'src/action/action_camera_bounds.c',
-                   'src/diorama/diorama.c', 'src/diorama/diorama_capture_blend.c', 'src/diorama/diorama_layer_order.c',
+                   'src/diorama/diorama.c', 'src/diorama/diorama_astral_rift.c', 'src/diorama/diorama_capture_blend.c', 'src/diorama/diorama_layer_order.c',
                    'src/diorama/diorama_projection.c', 'src/diorama/diorama_skybox_uv.c',
                    'src/diorama/diorama_depth_shapes.c',
                    'src/render/scene3d_math.c', 'src/render/presentation_layout.c',

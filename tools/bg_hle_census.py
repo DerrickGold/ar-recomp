@@ -48,7 +48,7 @@ def sha256_bytes(data):
 def normalize_prefix(path):
     suffixes = (
         ".wram.bin", ".vram.bin", ".cgram.bin", ".oam.bin",
-        ".highoam.bin", ".ppu.json", ".ppm",
+        ".highoam.bin", ".ppu.json", ".ppm", ".png",
     )
     for suffix in suffixes:
         if path.endswith(suffix):

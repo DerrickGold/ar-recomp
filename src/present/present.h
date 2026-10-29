@@ -231,7 +231,7 @@ typedef struct FrameSlot {
   ActionEffectFrame action_effects;
   ActionSceneEffectFrame action_scene_effects;
   bool death_heim_final_battle;
-  uint16_t death_heim_final_battle_tick;
+  uint16_t action_scene_clock;
   bool action_effect_lighting;
   bool action_effect_particles;
   bool action_environmental_effects;

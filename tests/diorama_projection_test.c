@@ -1029,7 +1029,44 @@ static void TestCameraFitsCapturedColumns(void) {
   CHECK(memcmp(matrix, before, sizeof(matrix)) == 0);
 }
 
+static void TestSkyWeatherBandMerging(void) {
+  DioramaProjection original=Projection();
+  original.bg2_plane.valid=false;
+  original.bg2_skybox=(DioramaSkyboxProjection){.to_texture=true,.count=4,.active_band=-1,
+      .bands={{0,0,256,64,0,.25f},{0,64,256,128,.25f,.5f},
+              {12,128,268,192,.5f,.75f},{12,192,268,256,.75f,1}}};
+  DioramaProjection merged=original;
+  Diorama_MergeSkyWeatherBands(&merged.bg2_skybox);
+  CHECK(merged.bg2_skybox.count==2);
+  for(unsigned anchor=16;anchor<256;anchor+=32)for(unsigned y=0;y<=256;y+=8) {
+    ArRenderPointF before,after;
+    CHECK(Diorama_ProjectSkyboxAnchorPoint(&original,anchor,120,y,&before));
+    CHECK(Diorama_ProjectSkyboxAnchorPoint(&merged,anchor,120,y,&after));
+    CHECK(Near(before.x,after.x)&&Near(before.y,after.y));
+  }
+  merged=original;merged.bg2_skybox.to_texture=false;
+  Diorama_MergeSkyWeatherBands(&merged.bg2_skybox);
+  CHECK(merged.bg2_skybox.count==4); /* Ordinary sky/depth bands are untouched. */
+  merged=original;merged.bg2_skybox.bands[3].y0=200;
+  Diorama_MergeSkyWeatherBands(&merged.bg2_skybox);
+  CHECK(merged.bg2_skybox.count==3); /* Neither gaps nor different scales merge. */
+  merged=original;merged.bg2_skybox.bands[3].output_y1=.9f;
+  Diorama_MergeSkyWeatherBands(&merged.bg2_skybox);
+  CHECK(merged.bg2_skybox.count==3);
+  DioramaSkyboxProjection raw={.to_texture=true,.count=6,.resident={.meta={6,640,352,1},
+      .bands={{0,0,0,64},{.1f,.9f,64,128},{.1f,.9f,128,160},
+              {.12f,.92f,160,224},{.12f,.92f,224,288},{0,0,288,352}}}};
+  Diorama_MergeSkyWeatherBands(&raw);
+  CHECK(raw.count==2&&raw.resident.meta[0]==2);
+  CHECK(raw.resident.bands[0][2]==64&&raw.resident.bands[0][3]==160);
+  CHECK(raw.resident.bands[1][0]==.12f&&raw.resident.bands[1][2]==160&&raw.resident.bands[1][3]==288);
+  const DioramaSkyboxProjection saved=raw;
+  Diorama_MergeSkyWeatherBands(&raw);
+  CHECK(!memcmp(&raw,&saved,sizeof(raw)));
+}
+
 int main(void) {
+  TestSkyWeatherBandMerging();
   TestHorizontalCameraStopsFollowProjectedViewport();
   TestCameraFitsCapturedColumns();
   TestHorizontalBoundsRespectSceneryAndSmallRooms();

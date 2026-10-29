@@ -1117,7 +1117,11 @@ uint32_t EditorRoomScene_EffectHash(const EditorRoomScene *r) {
         e->clip_rect.x1,e->clip_rect.y1,e->tuning.intensity,e->tuning.reach,
         e->particle_style.size_min,e->particle_style.size_max,e->particle_style.travel_x,
         e->particle_style.travel_y,e->particle_style.wander,e->particle_style.spread,e->field_style.angle,e->field_style.fan,
-        e->field_style.softness,e->field_style.drift,e->field_style.amplitude};
+        e->field_style.softness,e->field_style.drift,e->field_style.amplitude,e->field_style.fade_in,e->field_style.twinkle,
+#define CLOUD_PROPERTY(member,key,value,low,high) e->field_style.cloud.member,
+#include "action/action_cloud_light_properties.inc"
+#undef CLOUD_PROPERTY
+        };
       for (unsigned j=0;j<sizeof(values)/sizeof(values[0]);++j) {
         uint32_t bits;memcpy(&bits,&values[j],sizeof(bits));h=DeterministicHash_Fnv1a32Word(h,bits);
       }

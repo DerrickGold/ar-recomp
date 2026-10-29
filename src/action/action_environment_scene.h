@@ -39,6 +39,12 @@ typedef struct ActionEnvironmentScene {
   /* Borrowed only while capturing. Render frames own opacity runs, not these
    * pointers. Edits describe visible artwork and never mutate collision. */
   const uint16_t *vram;
+  /* Optional native BG2 raster facts for terrain-bound weather. The editor
+   * already owns a resolved frame; live capture reconstructs only on a flash. */
+  const ActionRoomSceneFrameState *background_frame;
+  const ActionRoomScene *background_scene;
+  bool (*capture_background_frame)(const struct ActionEnvironmentScene *, ActionRoomSceneFrameState *);
+  bool (*capture_background_depth)(const struct ActionEnvironmentScene *, float [kActionRoomSceneFrameHeight]);
   uint16_t tile_base[2];
   ActionEnvironmentTileEditFn tile_edit;
   void *tile_edit_context;
@@ -75,6 +81,8 @@ static inline uint16_t ActionEnvironmentScene_Word(const ActionEnvironmentScene 
 }
 bool ActionEnvironmentScene_OpacityRow(const ActionEnvironmentScene *scene, unsigned bg, int x,
                                        int y, uint8_t *bits);
+bool ActionEnvironmentScene_PaletteIndex(const ActionEnvironmentScene *, unsigned bg,
+    int x, int y, unsigned *index);
 bool ActionEnvironmentScene_CaptureScenery(const ActionEnvironmentScene *scene,
                                            ActionMoonlightOcclusion *out);
 /* World-space directional canopy trace. Spans hold source X edges, first-hit

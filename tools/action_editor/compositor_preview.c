@@ -137,7 +137,12 @@ static const ArRenderBackendOps kOps = {
 
 bool DioramaEffectBackend_IsAvailable(ArRenderDevice *d, DioramaEffectKind k) {
   (void)d;
-  return WebAvailable(k) != 0;
+  return WebAvailable(k == kDioramaEffect_NativeBloom ? 6 : k) != 0;
+}
+bool DioramaEffectBackend_BindNativeBloom(ArRenderDevice *d, const DioramaNativeBloomEffectParams *p) {
+  (void)d;
+  const float a[8]={p->step_x,p->step_y,p->threshold,p->mode,p->saturation,p->contrast,p->gain,0};
+  return WebEffect(6,a,8)!=0;
 }
 bool DioramaEffectBackend_BindBlur(ArRenderDevice *d, const DioramaBlurEffectParams *p) {
   (void)d;
@@ -171,14 +176,19 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *d, const DioramaScene
         (float)p->attributes.value,(float)p->illumination.value,(float)p->enemy_illumination.value};
     return WebEffect(5,a,19)!=0;
   }
-  const float a[29]={p->texel_width,p->texel_height,p->blur_radius,p->lower_content_v_max,
+  const ArRenderRectF source=p->attributes_uv.w>0?p->attributes_uv:(ArRenderRectF){0,0,1,1};
+  float a[177]={p->texel_width,p->texel_height,p->blur_radius,p->lower_content_v_max,
       p->priority.width,p->priority.height,p->priority.high_band,p->priority.additive,
       uv.w/w,uv.h/h,uv.x,1-uv.y-uv.h,p->shade.r,p->shade.g,p->shade.b,p->mode,
       p->grade.strength,p->grade.saturation,0,0,
       ((p->grade.shadows>>16)&255)/255.f,((p->grade.shadows>>8)&255)/255.f,(p->grade.shadows&255)/255.f,0,
       ((p->grade.highlights>>16)&255)/255.f,((p->grade.highlights>>8)&255)/255.f,(p->grade.highlights&255)/255.f,0,
-      (float)p->illumination.value};
-  return WebEffect(4,a,29) != 0;
+      source.x,source.y,source.w,source.h};
+  _Static_assert(sizeof(DioramaHeat)==36*sizeof(float), "scenery heat std140 layout");
+  memcpy(a+32,&p->heat,sizeof(p->heat));
+  memcpy(a+68,&p->cloud_light,sizeof(p->cloud_light));
+  a[176]=(float)p->illumination.value;
+  return WebEffect(4,a,177) != 0;
 }
 bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *d) { (void)d; return WebAvailable(4) != 0; }
 bool DioramaEffectBackend_Unbind(ArRenderDevice *d) { (void)d; return WebEffect(-1,NULL,0) != 0; }

@@ -86,6 +86,54 @@ static void TestDioramaEffects(ArRenderDevice *device) {
   DioramaEffectBackend_Reset(device);
 }
 
+/* Bloom must use native RGB, keep empty space dark and leave source texels
+ * untouched when the grade is neutral. This executes the shipped GPU blob. */
+static void TestNativeBloom(ArRenderDevice *device, SDL_Renderer *renderer) {
+  ArRenderTexture texture={0};
+  const ArRenderTextureDesc desc={8,8,kArRenderPixelFormat_Argb8888,
+      kArRenderTextureUsage_Static,kArRenderFilter_Nearest,kArRenderBlendMode_Opaque};
+  uint32_t pixels[64];for(unsigned i=0;i<64;++i)pixels[i]=0xff000000u;
+  pixels[2*8+2]=0xff102030u;pixels[4*8+4]=0xff20a0ffu;
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&texture));
+  CHECK(ArRenderDevice_UpdateTexture(device,texture,NULL,pixels,8*4));
+  const ArRenderRectF dest={0,0,8,8};
+  for(unsigned mode=0;mode<3;++mode) {
+    const DioramaNativeBloomEffectParams p={.threshold=.5f,.mode=mode,.saturation=1,.contrast=1};
+    CHECK(DioramaEffectBackend_BindNativeBloom(device,&p));
+    CHECK(ArRenderDevice_DrawTexture(device,texture,NULL,&dest));
+    CHECK(DioramaEffectBackend_Unbind(device));
+    SDL_Surface *image=SDL_RenderReadPixels(renderer,NULL);CHECK(image!=NULL);
+    if(image) for(unsigned i=0;i<64;++i) {
+      Uint8 r,g,b,a;CHECK(SDL_ReadSurfacePixel(image,i%8,i/8,&r,&g,&b,&a));
+      const uint32_t expected=mode==0&&i==18?0xff000000u:pixels[i];
+      CHECK(abs((int)r-(int)((expected>>16)&255))<=1);
+      CHECK(abs((int)g-(int)((expected>>8)&255))<=1);
+      CHECK(abs((int)b-(int)(expected&255))<=1);
+    }
+    SDL_DestroySurface(image);
+  }
+  /* Authored intensity is 0..3. Gain belongs in the shader, since the render
+   * abstraction deliberately rejects vertex/texture tints above one. */
+  for(unsigned gain=0;gain<=3;++gain) {
+    const DioramaNativeBloomEffectParams p={.mode=3,.gain=(float)gain};
+    CHECK(DioramaEffectBackend_BindNativeBloom(device,&p));
+    CHECK(ArRenderDevice_DrawTexture(device,texture,NULL,&dest));
+    CHECK(DioramaEffectBackend_Unbind(device));
+    SDL_Surface *image=SDL_RenderReadPixels(renderer,NULL);CHECK(image!=NULL);
+    if(image) for(unsigned i=0;i<64;++i) {
+      Uint8 r,g,b,a;CHECK(SDL_ReadSurfacePixel(image,i%8,i/8,&r,&g,&b,&a));
+      const unsigned channels[3]={(pixels[i]>>16)&255,(pixels[i]>>8)&255,pixels[i]&255};
+      const unsigned actual[3]={r,g,b};
+      for(unsigned c=0;c<3;++c) {
+        const unsigned expected=channels[c]*gain>255?255:channels[c]*gain;
+        CHECK(abs((int)actual[c]-(int)expected)<=1);
+      }
+    }
+    SDL_DestroySurface(image);
+  }
+  ArRenderDevice_DestroyTexture(device,texture);
+}
+
 /* Receiver lighting is baked into OBJ pixels before the rim shader. Dimming
  * those pixels must dim the whole result, including its edge; colored light
  * must not acquire an unrelated yellow/white outline. Check the real shader
@@ -278,6 +326,157 @@ static void TestPreparedLightBindings(ArRenderDevice *device) {
   DioramaEffectBackend_Reset(device);
   for(unsigned i=0;i<10;++i)ArRenderDevice_DestroyTexture(device,textures[i]);
   puts("prepared lighting: changing material bindings performs no warm-up uploads");
+}
+
+/* Exercise the real material shader, including compact capture coordinates.
+ * A color ramp gives an independent pixel oracle for the CPU UV reference;
+ * pixels outside the plume must stay identical while the interior moves. */
+static void TestSceneryHeat(ArRenderDevice *device, SDL_Renderer *renderer) {
+  const ArRenderTextureDesc desc={32,32,kArRenderPixelFormat_Argb8888,
+      kArRenderTextureUsage_Static,kArRenderFilter_Nearest,kArRenderBlendMode_Alpha};
+  ArRenderTexture art=ArRenderTexture_Invalid(),light=ArRenderTexture_Invalid();
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&art));
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&light));
+  uint32_t pixels[32*32],black[32*32];
+  for(unsigned y=0;y<32;++y)for(unsigned x=0;x<32;++x) {
+    pixels[y*32+x]=0xff000032u|(x*7u<<16)|(y*7u<<8);
+    black[y*32+x]=0xff000000u;
+  }
+  CHECK(ArRenderDevice_UpdateTexture(device,art,NULL,pixels,32*sizeof(uint32_t)));
+  CHECK(ArRenderDevice_UpdateTexture(device,light,NULL,black,32*sizeof(uint32_t)));
+  for(unsigned compact=0;compact<2;++compact)for(unsigned tick=0;tick<3;++tick) {
+    const DioramaHeat reference={.source={1000,2000,32,32},
+        .bounds={{1004,2004,1028,2028}},.motion={{2.2f,.4f+tick*.7f,0,0}}};
+    DioramaSceneryLightEffectParams p={.illumination=light,.shade={1,1,1,1},
+        .heat=reference,.attributes_uv={0,0,1,1}};
+    if(compact) {
+      p.attributes_uv=(ArRenderRectF){.125f,.25f,.5f,.5f};
+      p.heat.source[0]=992;p.heat.source[1]=1984;
+      p.heat.source[2]=p.heat.source[3]=64;
+    }
+    CHECK(ArRenderDevice_Clear(device,(ArRenderColorF){0,0,0,0}));
+    CHECK(DioramaEffectBackend_BindSceneryLight(device,&p));
+    const ArRenderRectF dst={0,0,32,32};
+    CHECK(ArRenderDevice_DrawTexture(device,art,NULL,&dst));
+    CHECK(DioramaEffectBackend_Unbind(device));
+    SDL_Surface *image=SDL_RenderReadPixels(renderer,NULL);
+    CHECK(image!=NULL);
+    unsigned moved=0,unchanged=0;
+    if(image)for(unsigned y=0;y<32;++y)for(unsigned x=0;x<32;++x) {
+      const ArRenderPointF uv=DioramaHeat_Uv(&reference,(ArRenderPointF){(x+.5f)/32,(y+.5f)/32});
+      const float sx=uv.x*32,sy=uv.y*32;
+      Uint8 actual[4];
+      CHECK(SDL_ReadSurfacePixel(image,x,y,actual,actual+1,actual+2,actual+3));
+      if(x<4||x>=28||y<4||y>=28) {
+        CHECK(actual[0]==x*7&&actual[1]==y*7&&actual[2]==50);
+        ++unchanged;
+      } else if(fabsf(sx-roundf(sx))>.01f&&fabsf(sy-roundf(sy))>.01f) {
+        CHECK(abs(actual[0]-(int)sx*7)<=1&&abs(actual[1]-(int)sy*7)<=1);
+        if(actual[0]!=x*7||actual[1]!=y*7)++moved;
+      }
+    }
+    CHECK(moved>100&&unchanged>400);
+    SDL_DestroySurface(image);
+  }
+  DioramaEffectBackend_Reset(device);
+  ArRenderDevice_DestroyTexture(device,art);
+  ArRenderDevice_DestroyTexture(device,light);
+  puts("scenery heat: world coordinates, compact captures and bounded distortion passed");
+}
+
+static void TestCloudLighting(ArRenderDevice *device,SDL_Renderer *renderer) {
+  const ArRenderTextureDesc desc={32,32,kArRenderPixelFormat_Argb8888,
+      kArRenderTextureUsage_Static,kArRenderFilter_Nearest,kArRenderBlendMode_Alpha};
+  ArRenderTexture art=ArRenderTexture_Invalid(),black=ArRenderTexture_Invalid();
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&art));
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&black));
+  uint32_t pixels[1024],dark[1024];
+  for(unsigned i=0;i<1024;++i)dark[i]=0xff000000;
+  CHECK(ArRenderDevice_UpdateTexture(device,black,NULL,dark,128));
+  /* Grey clouds exercise every component; isolated rays must also scatter
+   * over the warm horizon and dark gaps that rejected the old material mask. */
+  const uint32_t backgrounds[]={0xff808080,0xff905025,0xff121c32};
+  for(unsigned background=0;background<3;++background) {
+    for(unsigned i=0;i<1024;++i)pixels[i]=backgrounds[background];
+    CHECK(ArRenderDevice_UpdateTexture(device,art,NULL,pixels,128));
+    float original[3];
+    for(unsigned c=0;c<3;++c)original[c]=((pixels[0]>>(16-c*8))&255)/255.f;
+    const float luma=original[0]*.2126f+original[1]*.7152f+original[2]*.0722f;
+    const float grey=1-CloudLightSmooth(.05f,.18f,original[0]-original[2]);
+    const float grain=.05f+.95f*CloudLightSmooth(.06f,.34f,luma);
+    unsigned changed=0;
+    for(unsigned compact=0;compact<2;++compact)for(unsigned phase=0;phase<3;++phase)
+        for(unsigned dim_mode=0;dim_mode<3;++dim_mode) {
+      DioramaCloudLight field={.source={1000,2000,32,32},.meta={1},.regions={{
+        .bounds={1004,2004,24,24},.core={9,1.3f,1.7f,.55f},
+        .shape={.65f,.55f,.15f,.8f},
+        .motion={-.62f,phase*.7f,DioramaCloudLight_Seed(512),4},
+        .color={1,.82f,.56f,1.35f},.spill={.93f,.54f,.24f,.5f}}}};
+      if(dim_mode) {
+        field.meta[1]=field.background_dim[0]=.28f;
+        if(dim_mode==2) {
+          field.meta[0]=2;
+          field.meta[1]=field.background_dim[1]=.5f;
+          field.regions[1]=field.regions[0];
+          field.regions[1].bounds[0]=1012;
+          field.regions[1].bounds[2]=12;
+          memset(field.regions[1].core,0,sizeof(field.regions[1].core));
+        }
+      }
+      if(background) {
+        field.regions[0].core[0]=0;
+        field.regions[0].core[1]=0;
+        field.regions[0].core[3]=0;
+      }
+      DioramaSceneryLightEffectParams p={
+          .illumination=black,.shade={1,1,1,1},.cloud_light=field};
+      if(compact) {
+        p.attributes_uv=(ArRenderRectF){.125f,.25f,.5f,.5f};
+        p.cloud_light.source[0]=992;
+        p.cloud_light.source[1]=1984;
+        p.cloud_light.source[2]=p.cloud_light.source[3]=64;
+      }
+      CHECK(DioramaEffectBackend_BindSceneryLight(device,&p));
+      const ArRenderRectF dst={0,0,32,32};
+      CHECK(ArRenderDevice_DrawTexture(device,art,NULL,&dst));
+      CHECK(DioramaEffectBackend_Unbind(device));
+      SDL_Surface *image=SDL_RenderReadPixels(renderer,NULL);
+      CHECK(image);
+      if(image)for(unsigned y=0;y<32;++y)for(unsigned x=0;x<32;++x) {
+        const DioramaCloudLightRegion *r=&field.regions[0];
+        const CloudLightSample sample=DioramaCloudLight_Sample(r,1000+x+.5f,2000+y+.5f);
+        const float halo=1-expf(-sample.halo*r->core[1]*(.62f+.38f*grain)*grey*r->color[3]);
+        const float streak=1-expf(-sample.streak*r->core[2]*r->color[3]);
+        const float rim=1-expf(-sample.edge*r->core[0]*grain*grey*r->color[3]);
+        const float echo=1-expf(-sample.echo*r->core[3]*
+            CloudLightSmooth(.34f,.70f,luma)*r->color[3]);
+        Uint8 actual[4];
+        CHECK(SDL_ReadSurfacePixel(image,x,y,actual,actual+1,actual+2,actual+3));
+        for(unsigned c=0;c<3;++c) {
+          float dim=0;
+          for(unsigned j=0;j<(unsigned)field.meta[0];++j) {
+            const float *bounds=field.regions[j].bounds;
+            dim=fmaxf(dim,CloudLightDimming((1000+x+.5f-bounds[0])/bounds[2],
+                (2000+y+.5f-bounds[1])/bounds[3],field.background_dim[j]));
+          }
+          float expected=original[c]*(1-dim);
+          expected+=(r->spill[c]-expected)*halo;
+          expected+=(r->spill[c]*.2f+r->color[c]*.8f-expected)*streak;
+          expected+=(r->color[c]-expected)*rim;
+          expected+=(r->spill[c]*.35f+r->color[c]*.65f-expected)*echo;
+          CHECK(abs((int)actual[c]-(int)lroundf(expected*255))<=1);
+        }
+        if(actual[0]>original[0]*255+12)++changed;
+        CHECK(actual[3]==255);
+      }
+      SDL_DestroySurface(image);
+    }
+    CHECK(changed>20);
+  }
+  DioramaEffectBackend_Reset(device);
+  ArRenderDevice_DestroyTexture(device,art);
+  ArRenderDevice_DestroyTexture(device,black);
+  puts("Cloud material: GPU/C parity, dim-before-light, feathered overlap, warm/dark scattering, compact mapping and alpha passed.");
 }
 
 static void TestSceneryIllumination(ArRenderDevice *device, SDL_Renderer *renderer) {
@@ -772,11 +971,14 @@ int main(void) {
   ArSdlRenderBackend backend = {0};
   CHECK(ArSdlRenderBackend_Bind(&device, &backend, renderer));
   TestDioramaEffects(&device);
+  TestNativeBloom(&device,renderer);
   TestRimExposure(&device, renderer);
   TestActorIllumination(&device,renderer);
   TestActorBlurExposure(&device,renderer);
   TestPreparedLightBindings(&device);
   TestSceneryIllumination(&device, renderer);
+  TestCloudLighting(&device,renderer);
+    TestSceneryHeat(&device, renderer);
   TestPrioritySurface(&device, renderer, false);
   TestPrioritySurface(&device, renderer, true);
   TestPrioritySurfaceAdditive(&device, renderer);
@@ -796,11 +998,14 @@ int main(void) {
   if (ArRenderDevice_IsReady(&device)) {
     renderer = ArSdlRenderBackend_Renderer(&device);
     TestDioramaEffects(&device);
+  TestNativeBloom(&device,renderer);
     TestRimExposure(&device, renderer);
     TestActorIllumination(&device,renderer);
     TestActorBlurExposure(&device,renderer);
     TestPreparedLightBindings(&device);
     TestSceneryIllumination(&device, renderer);
+  TestCloudLighting(&device,renderer);
+    TestSceneryHeat(&device, renderer);
     TestPrioritySurface(&device, renderer, false);
     TestPrioritySurface(&device, renderer, true);
     TestPrioritySurfaceAdditive(&device, renderer);

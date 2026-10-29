@@ -27,6 +27,7 @@ typedef struct Recorder {
   const DioramaProjection *projection;
   unsigned checked_object_meshes, exposure_samples;
   unsigned light_preparations;
+  unsigned periodic_cloud_bindings;
   unsigned batch_begins, batch_ends;
   bool baked_uploads;
   unsigned uploads, fail_create_at, fail_upload_at;
@@ -117,6 +118,15 @@ static bool Update(void *ctx, ArRenderTexture t, const ArRenderRectI *rect,
     assert(!rect && pixels && pitch==r->textures[t.value].width*4);
     ++r->uploads;
     return r->uploads != r->fail_upload_at;
+  }
+  if (t.value < 128 && r->textures[t.value].width == 1 &&
+      r->textures[t.value].height == 1) {
+    /* The cloud material reuses one immutable black illumination texel. */
+    assert(rect && rect->x == 0 && rect->y == 0 && rect->w == 1 && rect->h == 1);
+    assert(pixels && pitch == 4);
+    assert(*(const uint32_t *)pixels == UINT32_C(0xff000000));
+    ++r->uploads;
+    return true;
   }
   assert(!"the compositor must not upload captured pixels");
   return false;
@@ -277,6 +287,12 @@ static bool Bind(ArRenderDevice *device, int effect) {
   Record(effect);
   return true;
 }
+bool DioramaEffectBackend_BindNativeBloom(ArRenderDevice *d, const DioramaNativeBloomEffectParams *p) {
+  Bind(d,kDioramaEffect_NativeBloom);
+  Record(p->step_x);Record(p->step_y);Record(p->threshold);Record(p->mode);
+  Record(p->saturation);Record(p->contrast);Record(p->gain);
+  return true;
+}
 bool DioramaEffectBackend_BindBlur(ArRenderDevice *d, const DioramaBlurEffectParams *p) {
   Bind(d, kDioramaEffect_Blur);
   Record(p->texel_width);
@@ -324,6 +340,12 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *d,
   assert(p && p->illumination.value < 128 &&
       r->textures[p->illumination.value].width > 0);
   assert(p->illumination.value != r->state.target.value);
+  if (p->cloud_light.meta[0] > 0 && p->cloud_light.source[2] == 256 &&
+      p->cloud_light.source[3] == 256) {
+    assert(p->cloud_light.source[0] == 0 && p->cloud_light.source[1] == -1);
+    assert(p->cloud_light.regions[0].bounds[0] == 360);
+    ++r->periodic_cloud_bindings;
+  }
   Bind(d, kDioramaEffect_Count);
   Record(p->illumination.value);
   Record(p->mode);
@@ -414,93 +436,39 @@ static ArRenderTexture Skybox(void *data, ArRenderDevice *d, int source,
 
 static unsigned AstralFixture(unsigned scenario) {
   s_count=0;
-  const int widths[]={640,960,960,1280}, heights[]={480,540,600,360};
-  Recorder r={.width=widths[scenario%4],.height=heights[scenario%4],.bound_effect=-1,.baked_uploads=true};
+  Recorder r={.width=640,.height=360,.bound_effect=-1,.shaders=scenario!=13,.baked_uploads=true};
   ArRenderDevice device;
-  assert(ArRenderDevice_Init(&device,&kOps,&r,(ArRenderCapabilities){
-      .flags=UINT64_MAX,.maximum_texture_width=8192,.maximum_texture_height=8192}));
-  const DioramaRenderOptions original={.visible_planes=(1u<<kDioramaPlane_Count)-1,
-      .skybox=kDioramaSky_Both,.shoebox=true};
-  DioramaRenderOptions options=original;
+  assert(ArRenderDevice_Init(&device,&kOps,&r,(ArRenderCapabilities){.flags=UINT64_MAX}));
+  DioramaRenderOptions options={.visible_planes=(1u<<kDioramaPlane_Count)-1,.skybox=kDioramaSky_Both};
+  const DioramaRenderOptions before=options;
   DioramaScene scene={.render=&options,.map_group=7,.map_number=8};
-  static const uint16_t ticks[]={1800,1800,1800,1800,65535,65535,65535,65535,0,0,0,4096,32768,1};
-  DioramaAstralRiftFrame frame={.device=&device,.tick=ticks[scenario],
-      .yaw=scenario%2?.7f:0,.pitch=scenario%2?-.7f:0,
-      .inidisp=scenario==6?0x8f:scenario==7?0:scenario==5?7:15};
-  DioramaProjection projection={.valid=true,.texture_width=1024,.texture_height=512,
-      .aspect_x=3.5f,.height_scale=2.0f,.output_x=37,.output_y=23,
-      .output_width=r.width,.output_height=r.height};
-  projection.object_planes[2]=(DioramaPlaneProjection){.valid=true,
-      .u1=.5f,.v1=352.0f/512.0f};
-  const Scene3DCamera camera={.tilt_x=frame.pitch,.tilt_y=frame.yaw,
-      .distance=3.25f,.fov_y=.7853981634f};
-  Scene3D_BuildViewProjection(&camera,r.width,r.height,projection.matrix);
-  frame.projection=&projection;frame.floor_capture_x=256;
-  frame.floor_capture_y=kDioramaAstralFloorWorldY+64;
-  assert(!DioramaAstralRift_ReplacedPlanes(&device,false,7,8,kDioramaLayerSection_Room));
-  assert(!DioramaAstralRift_ReplacedPlanes(&device,true,7,7,kDioramaLayerSection_Room));
-  assert(!DioramaAstralRift_ReplacedPlanes(&device,true,7,8,kDioramaLayerSection_DeathHeimCompletion));
-  assert(!DioramaAstralRift_Attach(false,&scene,&options,&frame));
-  scene.map_number=7;
-  assert(!DioramaAstralRift_Attach(true,&scene,&options,&frame));
-  scene.map_number=8; scene.layer_section=kDioramaLayerSection_DeathHeimCompletion;
-  assert(!DioramaAstralRift_Attach(true,&scene,&options,&frame));
-  assert(!scene.backdrop && !r.creates && !memcmp(&options,&original,sizeof(options)));
+  assert(!DioramaAstralRift_Attach(false,&device,&scene));
+  scene.map_number=7;assert(!DioramaAstralRift_Attach(true,&device,&scene));
+  scene.map_number=8;scene.layer_section=kDioramaLayerSection_DeathHeimCompletion;
+  assert(!DioramaAstralRift_Attach(true,&device,&scene));
   scene.layer_section=kDioramaLayerSection_Room;
-  if (scenario==8 || scenario==9) {
-    /* Reject every allocation/upload stage, including the last texture:
-     * partial startup must release all preceding art and retain native BGs. */
-    for (unsigned failure=1;failure<=6;++failure) {
-      r.creates=r.uploads=0;
-      r.fail_create_at=scenario==8?failure:0;
-      r.fail_upload_at=scenario==9?failure:0;
-      assert(!DioramaAstralRift_Attach(true,&scene,&options,&frame));
-      assert(!scene.backdrop && !r.live && !memcmp(&options,&original,sizeof(options)));
-      assert(!DioramaAstralRift_ReplacedPlanes(&device,true,7,8,kDioramaLayerSection_Room));
-      const unsigned creates=r.creates, uploads=r.uploads;
-      assert(!DioramaAstralRift_Attach(true,&scene,&options,&frame));
-      assert(r.creates==creates && r.uploads==uploads); /* Retry only after reset. */
-      DioramaAstralRift_Reset(&device);
-    }
-    r.fail_create_at=r.fail_upload_at=0;
-    assert(DioramaAstralRift_Prepare(&device));
-    assert(r.live==6); /* Device reset permits recovery after a failed bake. */
-    DioramaAstralRift_Reset(&device);
-    assert(!r.live);
-    return s_count;
+  assert(DioramaAstralRift_Attach(true,&device,&scene)==r.shaders);
+  assert(scene.native_bloom.set==r.shaders);
+  assert(!memcmp(&options,&before,sizeof(options))); /* Native captures/skybox stay intact. */
+  assert(!scene.backdrop); /* Original backgrounds remain in their painter slots. */
+  assert(r.creates==(r.shaders?1:0)&&r.uploads==(r.shaders?1:0)); /* One retained procedural atlas. */
+  assert(DioramaAstralRift_Attach(true,&device,&scene)==r.shaders);
+  assert(r.creates==(r.shaders?1:0)&&r.uploads==(r.shaders?1:0));
+  if(r.shaders) {
+    assert(scene.native_bloom.receivers==6&&scene.native_bloom.light>0);
+    const DioramaCapture capture={.width=256,.height=224};
+    const DioramaProjection projection={.valid=true,.output_width=640,.output_height=360,
+      .bg2_skybox={.count=2,.active_band=-1,.resident={.meta={2}},
+        .bands={{0},{0,0,256,224,0,1}}}};
+    scene.native_bloom_dimming=1;
+    assert(DioramaAstralRift_DrawDust(&device,&scene,&capture,&projection)&&!r.draws);
+    scene.native_bloom_dimming=.5f;
+    assert(DioramaAstralRift_DrawDust(&device,&scene,&capture,&projection)&&r.draws==1);
+    scene.native_bloom.dust=0;
+    assert(DioramaAstralRift_DrawDust(&device,&scene,&capture,&projection)&&r.draws==1);
+    assert(r.creates==1&&r.uploads==1); /* No rebake during fades/toggles. */
   }
-  assert(DioramaAstralRift_Attach(true,&scene,&options,&frame));
-  const uint32_t replaced=DioramaAstralRift_ReplacedPlanes(&device,true,7,8,kDioramaLayerSection_Room);
-  assert(replaced && options.visible_planes==(original.visible_planes&~replaced));
-  assert(!DioramaAstralRift_ReplacedPlanes(&device,false,7,8,kDioramaLayerSection_Room));
-  assert(DioramaAstralRift_ReplacedPlanes(&device,true,7,8,kDioramaLayerSection_Room)==replaced);
-  assert(options.skybox==kDioramaSky_Off && !options.shoebox);
-  assert(!(options.visible_planes & (1u<<SR_PPU_OVERLAY_BG1)));
-  assert(!(options.visible_planes & (1u<<SR_PPU_OVERLAY_BG2)));
-  assert(options.visible_planes & (1u<<SR_PPU_OVERLAY_BG3));
-  for (unsigned priority=0;priority<4;++priority)
-    assert(options.visible_planes & (1u<<DioramaPlaneForObjectPriority(priority)));
-  assert(r.creates==6 && r.live==6);
-  size_t texture_bytes=0;
-  for (unsigned i=1;i<=r.next;++i)
-    texture_bytes+=(size_t)r.textures[i].width*r.textures[i].height*4;
-  assert(texture_bytes<24u*1024u*1024u); /* Original artwork occupied 30 MiB. */
-  const unsigned first=s_count;
-  unsigned length=0;
-  for (int draw=0;draw<2;++draw) {
-    const unsigned count=s_count, draws=r.draws;
-    assert(scene.backdrop(scene.backdrop_userdata,(ArRenderRectI){0,0,r.width,r.height})==kPresentationOutcome_Complete);
-    const unsigned commands=s_count-count;
-    if (draw) assert(commands==length && !memcmp(s_trace+first,s_trace+count,commands*sizeof(float)));
-    else length=commands; /* Retained/paused presentations must be identical. */
-    if (scenario==6 || scenario==7) assert(r.draws-draws==1);
-    else assert(r.draws-draws>=15 && r.draws-draws<=16);
-    assert(r.creates==6 && r.live==6 && r.uploads==6);
-  }
-  r.fail_draw=true;
-  assert(scene.backdrop(scene.backdrop_userdata,(ArRenderRectI){0,0,r.width,r.height})==kPresentationOutcome_CoreFailure);
-  DioramaAstralRift_Reset(&device);DioramaAstralRift_Reset(&device);
-  assert(!r.live);
+  DioramaAstralRift_Reset(&device);
   return s_count;
 }
 
@@ -608,6 +576,9 @@ unsigned DioramaFixture_Run(unsigned scenario) {
   const float exposure_cuts[]={.1f,.3f,.8f};
   const SceneryShadingField exposure={.x=exposure_cuts,.y=exposure_cuts,
       .nx=3,.ny=3,.sample=Exposure,.userdata=&r};
+  const bool periodic_lighting = !death_heim && capture.skybox &&
+      capture.skybox->periodic && sky != kDioramaSky_Off && scenario % 9 != 0;
+  if (periodic_lighting) r.shaders = true;
   DioramaScene scene = {.render = &options,
     .map_group = room->map_group, .map_number = room->map_number,
     .layer_section = room->section,
@@ -618,6 +589,12 @@ unsigned DioramaFixture_Run(unsigned scenario) {
     .scenery_light = r.shaders ? SceneryLight : NULL,
     .backdrop = completion ? Backdrop : NULL, .backdrop_userdata = &r};
   DioramaProjection projection;
+  if (periodic_lighting) {
+    scene.cloud_light = (DioramaCloudLight){.source = {64,96,640,352}, .meta = {1},
+        .regions = {{.bounds = {360,-80,800,900}, .core = {0,0,1,0},
+          .shape = {1,.4f,.12f,.9f}, .motion = {-.3f,0,17,3},
+          .color = {1,.9f,.8f,1}, .spill = {.8f,.8f,.7f,1}}}};
+  }
   r.capture = &capture;
   r.projection = &projection;
   const unsigned base_resources = r.live;
@@ -627,6 +604,8 @@ unsigned DioramaFixture_Run(unsigned scenario) {
         &device, &capture, &view, &scene, &projection);
     assert(PresentationOutcome_IsUsable(outcome));
     assert(projection.valid && r.draws && r.bound_effect == -1);
+    if (periodic_lighting)
+      assert(r.periodic_cloud_bindings == (unsigned)frame + 1);
     if (projection.bg1_plane.valid) {
       const unsigned before = r.draws;
       ArRenderRectF footprint;
@@ -808,7 +787,7 @@ int main(int argc, char **argv) {
     }
   }
   if (stream) assert(fclose(stream) == 0);
-  else puts("Diorama compositor: 134 scenarios passed, including Death Heim skies, water and Astral Rift");
+  else puts("Diorama compositor: 134 scenarios passed, including Death Heim skies, water and native nebula");
   return 0;
 }
 #endif

@@ -1,4 +1,5 @@
 #include "action_effect_receivers.h"
+#include "action_storm.h"
 #include "action_effect_masks.h"
 #include "action_environment_exposure.h"
 #include "action_exposure.h"
@@ -43,7 +44,8 @@ uint8_t ActionEffectReceivers_Layer(const ActionEffectInstance *e) {
      * BG1 winner mask; Diorama consumes it in the material map. */
     if(e->render_layer==kActionEffectRenderLayer_ForegroundLight)
       return kActionEffectRenderLayer_Bg1Light;
-    if(e->tuning.light_receivers_set && e->render_layer==kActionEffectRenderLayer_WorldOverlay)
+    if(e->render_layer==kActionEffectRenderLayer_WorldDust ||
+        (e->tuning.light_receivers_set && e->render_layer==kActionEffectRenderLayer_WorldOverlay))
       return kActionEffectRenderLayer_Bg1Plane;
   }
   return e->render_layer;
@@ -134,7 +136,8 @@ bool ActionEffectReceivers_ProjectPoint(void *context,const ActionEffectInstance
   const ReceiverProjection *p=context;
   const bool bg2=e->projection_plane==kActionEffectProjectionPlane_Bg2 || e->projection_plane==kActionEffectProjectionPlane_Bg2High;
   const bool between=e->projection_plane==kActionEffectProjectionPlane_BetweenBackgrounds;
-  const int camera_x=between?(p->x+p->bg2_x)/2:bg2?p->bg2_x:p->x;
+  const float camera_x=ActionStorm_CustomParallax(e)?p->x*e->field_style.storm.parallax_x:
+      between?(p->x+p->bg2_x)/2:bg2?p->bg2_x:p->x;
   const int camera_y=between?(p->y+p->bg2_y)/2:bg2?p->bg2_y:p->y;
   *point=(ArRenderPointF){e->world_x+x+p->x-camera_x,e->world_y+y+p->y-camera_y};
   return isfinite(point->x)&&isfinite(point->y);

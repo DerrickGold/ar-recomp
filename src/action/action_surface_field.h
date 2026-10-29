@@ -14,6 +14,7 @@ typedef struct ActionSurfaceField {
   uint64_t seen;uint32_t hash;
 } ActionSurfaceField;
 bool ActionSurfaceField_Set(ActionSurfaceField *,const char *,const char *);
+void ActionSurfaceField_Upgrade(ActionSurfaceField *);
 bool ActionSurfaceField_Valid(const ActionSurfaceField *);
 void ActionSurfaceField_Prepare(ActionSurfaceField *);
 size_t ActionSurfaceField_Write(const ActionSurfaceField *,char *,size_t);

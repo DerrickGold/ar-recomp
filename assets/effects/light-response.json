@@ -52,6 +52,13 @@
     "reason": "Small moving pools share the firefly positions and pulse; independent receiver flags keep the glow optional."
   },
   {
+    "kind": "storm-lightning",
+    "symbol": "AuthoredStorm",
+    "illumination": 1,
+    "receivers": 0,
+    "reason": "Distant cloud lightning stays behind the playfield by default. Optional material receivers share the bolt and flash geometry."
+  },
+  {
     "kind": "wall-torch",
     "symbol": "WallTorch",
     "illumination": 1,

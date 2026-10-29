@@ -2038,7 +2038,42 @@ static void TestSceneryGrade(void) {
   DioramaLayerOrder_ClearRoom(&room);DioramaLayerOrder_ClearRoom(&copy);
 }
 
+static void TestNativeBloom(void) {
+  DioramaRoomOverride room={.used=true,.map_group=7,.map_number=8};
+  const char *line="native-bloom = strength:0.8 radius:7 threshold:0.28 saturation:1.18 contrast:1.08 light:1.1 receivers:6";
+  CHECK(DioramaLayerOrder_ParseLine(&room,line,NULL));
+  CHECK(room.native_bloom.set && room.native_bloom.receivers==6);
+  CHECK(room.native_bloom.dust==DioramaNativeBloom_Default().dust);
+  const char *clouds="native-bloom = strength:0.8 radius:7 threshold:0.28 saturation:1.18 contrast:1.08 light:1.1 receivers:6 dust:0.45 dust-scale:1.7 dust-speed:3 dust-blue:123456 dust-rose:abcdef";
+  CHECK(DioramaLayerOrder_ParseLine(&room,clouds,NULL));
+  const DioramaNativeBloom before=room.native_bloom;
+  CHECK(!DioramaLayerOrder_ParseLine(&room,"native-bloom = strength:nan radius:7 threshold:0.28 saturation:1.18 contrast:1.08 light:1.1 receivers:6",NULL));
+  CHECK(!memcmp(&room.native_bloom,&before,sizeof(before)));
+  CHECK(!DioramaLayerOrder_ParseLine(&room,"native-bloom = strength:1 radius:7 threshold:0.28 saturation:1 contrast:1 light:1 receivers:7",NULL));
+  const char *invalid[]={"dust:2 dust-scale:1 dust-speed:1 dust-blue:123456 dust-rose:abcdef",
+    "dust:.3 dust-scale:.4 dust-speed:1 dust-blue:123456 dust-rose:abcdef",
+    "dust:.3 dust-scale:1 dust-speed:1.5 dust-blue:123456 dust-rose:abcdef",
+    "dust:.3 dust-scale:1 dust-speed:5 dust-blue:123456 dust-rose:abcdef",
+    "dust:.3 dust-scale:1 dust-speed:1 dust-blue:invalid dust-rose:abcdef",
+    "dust:.3 dust-scale:1 dust-speed:1 dust-blue:123456 dust-rose:abcdef junk"};
+  for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);++i) {
+    char bad[512];snprintf(bad,sizeof(bad),"%s %s",line,invalid[i]);
+    CHECK(!DioramaLayerOrder_ParseLine(&room,bad,NULL));
+    CHECK(!memcmp(&room.native_bloom,&before,sizeof(before)));
+  }
+  char text[512];CHECK(DioramaLayerOrder_FormatRoom(&room,text,sizeof(text))<sizeof(text));
+  DioramaRoomOverride copy={.used=true,.map_group=7,.map_number=8};
+  for(char *p=strtok(text,"\n");p;p=strtok(NULL,"\n"))
+    if(*p!='[')CHECK(DioramaLayerOrder_ParseLine(&copy,p,NULL));
+  CHECK(copy.native_bloom.set && copy.native_bloom.receivers==6 && copy.native_bloom.radius==7);
+  CHECK(fabsf(copy.native_bloom.strength-before.strength)<.0001f);
+  CHECK(copy.native_bloom.dust==before.dust && copy.native_bloom.dust_scale==before.dust_scale);
+  CHECK(copy.native_bloom.dust_speed==3 && copy.native_bloom.dust_blue==0x123456 && copy.native_bloom.dust_rose==0xabcdef);
+  CHECK(DioramaLayerOrder_RoomIsActive(&copy));
+}
+
 int main(void) {
+  TestNativeBloom();
   TestSceneryGrade();
   TestDeathHeimIndependentScenes();
   TestBackgroundPolicyPersistence();

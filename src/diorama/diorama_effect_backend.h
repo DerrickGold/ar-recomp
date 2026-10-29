@@ -5,6 +5,8 @@
 
 #include "render/render_device.h"
 #include "diorama_layer_order.h"
+#include "diorama_heat.h"
+#include "diorama_cloud_light.h"
 
 /* Optional compositor polish supplied by the active platform backend. The
  * game owns effect policy and semantic parameters; the backend owns shader
@@ -15,6 +17,7 @@ typedef enum DioramaEffectKind {
   kDioramaEffect_RimLight,
   kDioramaEffect_DofEdge,
   kDioramaEffect_PrioritySurface,
+  kDioramaEffect_NativeBloom,
   kDioramaEffect_Count,
 } DioramaEffectKind;
 
@@ -23,6 +26,13 @@ typedef struct DioramaBlurEffectParams {
   float texel_height;
   float radius;
 } DioramaBlurEffectParams;
+
+typedef struct DioramaNativeBloomEffectParams {
+  float step_x, step_y, threshold, mode; /* 0: extract, 1: blur, 2: grade, 3: glow gain */
+  float saturation, contrast, gain;
+} DioramaNativeBloomEffectParams;
+bool DioramaEffectBackend_BindNativeBloom(ArRenderDevice *device,
+    const DioramaNativeBloomEffectParams *params);
 
 typedef struct DioramaRimLightEffectParams {
   float texel_width;
@@ -69,6 +79,8 @@ typedef struct DioramaSceneryLightEffectParams {
   ArRenderColorF shade;
   DioramaSceneryGrade grade;
   ArRenderRectF light_uv; /* Region of the full-output map; zero means all. */
+  DioramaCloudLight cloud_light;
+  DioramaHeat heat; /* Optional world-space UV distortion before art filtering. */
   unsigned mode; /* 0: ordinary texture, 1: DOF, 2: priority pair */
 } DioramaSceneryLightEffectParams;
 bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *device,

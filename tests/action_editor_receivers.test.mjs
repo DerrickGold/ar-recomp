@@ -30,6 +30,21 @@ const wasi={fd_close:()=>0,fd_seek:()=>0,fd_write:()=>0,proc_exit:n=>{throw Erro
 ({instance:{exports:api}}=await WebAssembly.instantiate(fs.readFileSync(wasmFile),{ar,wasi_snapshot_preview1:wasi}));
 api._initialize?.();assert.equal(api.DioramaPreview_Init(16384),1);
 const send=(bytes,fn)=>{new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),bytes.length).set(bytes);return fn(bytes.length);};
+// Editor guides query the production layout; adding openings keeps existing
+// anchors/widths, and all unsigned seed bits survive the JS/WASM boundary.
+const openings=(seed,count)=>{
+  const n=api.RoomPreview_CloudOpenings(seed,count);
+  return [...new Float32Array(api.memory.buffer,api.DioramaPreview_Input(),n)];
+};
+const cluster=openings(512,4);
+assert.equal(cluster.length,24);
+assert.deepEqual(openings(512,2),cluster.slice(0,12));
+assert(cluster[1]>cluster[7]*1.5,'broad and narrow cloud openings');
+assert(Math.abs(cluster[6]-cluster[12])<.04,'clustered openings');
+assert(Math.abs(cluster[0]-cluster[18])>.3,'quiet gap');
+for(let i=0;i<cluster.length;i+=6)assert(cluster[i+5]>cluster[i+1], 'beam spreads beyond opening');
+assert.notDeepEqual(openings(0xffffffff,4),openings(4095,4));
+assert.deepEqual(openings(512,0),[]);assert.deepEqual(openings(512,6),[]);
 const art=Buffer.concat([data.player.characters,data.player.palette,data.player.picture].map(i=>Buffer.from(blobs[i])));
 assert.equal(send(art,api.RoomPreview_LoadPlayer),1);
 assert.equal(send(art.subarray(0,art.length-1),api.RoomPreview_LoadPlayer),0,'reject truncated picture atomically');
@@ -386,62 +401,57 @@ for (const view of [[800,600,1,0,0,0,0],[960,540,1,0,0,1,0],[960,600,1.4,.3,-.2,
   api.RoomPreview_FinalBattle(0);render(view);render(view);
   const native=structuredClone(draws);
   api.RoomPreview_FinalBattle(1);render(view);
-  assert(draws.some(d=>d.v.length>=600*8&&d.indices.length>d.v.length/2),
-    'shared preview draws indexed nebula geometry');
+  assert(draws.some(d=>d.effect===6&&d.params[3]===0),'extract light from native art');
+  assert(draws.some(d=>d.effect===6&&d.params[3]===1),'separable glow filter');
+  assert(draws.some(d=>d.effect===6&&d.params[3]===2),'original art gets its colour grade');
+  const filtered=draws.filter(d=>d.effect===6&&d.params[3]<2);
+  for(const d of filtered){const t=textures.get(d.target);assert(t.w<=640&&t.h<=360,'bounded radiance target');}
+  const uploadedArt=new Set(native.filter(d=>d.id&&textures.get(d.id)?.usage!==2).map(d=>d.id));
+  assert(draws.some(d=>uploadedArt.has(d.id)),'native artwork remains in use');
   const allocated=creates;render(view);
-  assert.equal(creates,allocated,'retained rift preview creates no resources');
-  assert.equal(uploads.length,0,'retained rift preview uploads no textures');
-  const background=structuredClone(draws.filter(d=>d.indices.length>100));
-  const nebula=structuredClone(draws.find(d=>d.indices.length===48*27*6));
-  assert(nebula,'main nebula has its own retained surface');
-  const uv=v=>v.filter((_,i)=>i%8>=6);
-  const nebulaUV=uv(nebula.v);
-  const floor=draws.find(d=>d.indices.length===48*10*6);
-  assert(floor,'floor is projected with the scene');
-  const floorArt=textures.get(floor.id);
-  assert.equal(floorArt.h,396,'only the sampled floor rows occupy GPU storage');
-  const alphaRow=fraction=>{
-    const row=Math.floor(941*fraction)-(941-floorArt.h);
-    return Array.from(floorArt.pixels.subarray(row*floorArt.w,(row+1)*floorArt.w),p=>p>>>24);
-  };
-  const firstSample=floor.v[7]*floorArt.h-.5;
-  assert(firstSample>=0&&firstSample<1,'linear filtering retains both first-row texels');
-  assert(alphaRow(.68).reduce((a,b)=>a+b,0)/floorArt.w>240,'walking ledge stays opaque');
-  assert(alphaRow(.78).filter(a=>a<128).length>floorArt.w/4,
-    'dark underside cavities reveal the moving space beneath the rock');
-  const position=v=>v.filter((_,i)=>i%8<2);
-  const standingSurface=position(floor.v);
-  render(view,157);
-  const movingNebula=draws.find(d=>d.id===nebula.id);
-  assert.deepEqual(position(movingNebula.v),position(nebula.v),
-    'nebula currents move inside a fixed screen surface');
-  const movedUV=uv(movingNebula.v);
-  assert(Math.max(...movedUV.map((v,i)=>Math.abs(v-nebulaUV[i])))>.004,
-    'main nebula must visibly flow within two seconds, not only its foreground wisps');
-  assert(movedUV.every(v=>v>0&&v<1),'currents retain artwork coverage at every edge');
-  render(view,600);
-  assert.notDeepEqual(draws.filter(d=>d.indices.length>100),background,'celestial geometry animates');
-  assert.deepEqual(position(draws.find(d=>d.id===floor.id).v),standingSurface,
-    'floor energy must never move the standing surface');
-  assert.equal(creates,allocated,'animation creates no resources');
-  const pause=structuredClone(draws);render(view,600);
-  assert.deepEqual(draws,pause,'same paused/scrubbed tick reproduces every draw');
-  assert.equal(uploads.length,0,'paused animation uploads no textures');
-  const environmentIds=new Set(draws.filter(d=>d.indices.length>=100&&d.effect===-1).map(d=>d.id));
-  const environment=structuredClone(draws.filter(d=>environmentIds.has(d.id)&&d.effect===-1));
-  assert.equal(api.RoomPreview_SetReceivers(1,192,144,0,0),1);render(view,600);
-  assert.deepEqual(draws.filter(d=>environmentIds.has(d.id)&&d.effect===-1),environment,
-    'ambient spectacle must run independently of character position');
-  assert.equal(api.RoomPreview_SetReceivers(1,96,200,0,0),1);render(view,600);
-  render(view,65535);
-  const endUV=uv(draws.find(d=>d.id===nebula.id).v);
-  render(view,0);
-  assert(Math.max(...uv(draws.find(d=>d.id===nebula.id).v)
-    .map((v,i)=>Math.abs(v-endUV[i])))<.001,'nebula remains continuous when its clock wraps');
+  assert.equal(creates,allocated,'retained nebula preview creates no resources');
+  assert.equal(uploads.length,0,'retained nebula preview uploads no textures');
+  const pause=structuredClone(draws);render(view);
+  assert.deepEqual(draws,pause,'same paused tick reproduces every draw');
   api.RoomPreview_FinalBattle(0);render(view);render(view);
   assert.deepEqual(draws,native,'disabling the rift restores identical native geometry and player');
 }
-console.log('Astral Rift: native fallback, player, aspect/orbit, and allocation/upload reuse passed.');
+console.log('Native nebula: original art, bounded filtering, native fallback, aspect/orbit and resource reuse passed.');
+// Cloud density is baked once; only a small shared mesh moves each tick. Its
+// pause/seek clock and independent disable must not alter native geometry.
+const dustDraw=()=>draws.filter(d=>textures.get(d.id)?.w===576&&textures.get(d.id)?.h===96);
+const dustConfig=(dust,speed=1)=>`[layers:07:08]\nnative-bloom = strength:.85 radius:13 threshold:.24 saturation:1.08 contrast:1.05 light:1.3 receivers:6 dust:${dust} dust-scale:1 dust-speed:${speed} dust-blue:467ccf dust-rose:bc438b\n`;
+const setDust=(density,speed)=>assert.equal(send(Buffer.from(dustConfig(density,speed)),api.RoomPreview_Configure),1);
+api.RoomPreview_FinalBattle(1);setDust(.3);
+render(undefined,1200);assert.equal(dustDraw().length,1,'six veils share one draw');
+const dustTexture=dustDraw()[0].id,dustMesh=structuredClone(dustDraw());
+assert.equal(dustMesh[0].v.length,210*8);
+const dustResources=creates;
+render(undefined,1500);assert.notDeepEqual(dustDraw(),dustMesh,'wisps drift and shear with game time');
+assert.equal(creates,dustResources);assert(!uploads.some(u=>u.id===dustTexture),'animated density stays resident');
+render(undefined,1200);assert.deepEqual(dustDraw(),dustMesh,'scrubbing backwards restores exact dust placement');
+render(undefined,1200);assert.deepEqual(dustDraw(),dustMesh,'pause freezes all dust motion');
+render(undefined,65535);const beforeWrap=dustDraw()[0].v.slice();
+render(undefined,65536);const afterWrap=dustDraw()[0].v;
+for(let i=0;i<beforeWrap.length;i+=8)for(const axis of [0,1])
+  assert(Math.abs(beforeWrap[i+axis]-afterWrap[i+axis])<1,'scene clock wrap remains a small animation step');
+setDust(.3,0);render(undefined,1200);const frozenDust=structuredClone(dustDraw());
+render(undefined,1500);assert.deepEqual(dustDraw(),frozenDust,'zero speed holds the mesh still');
+setDust(0);render();assert.equal(dustDraw().length,0);
+assert(draws.some(d=>d.effect===6),'dust disable preserves native bloom');
+console.log('Nebula dust: one retained batch, animated/paused/seeking clocks and independent controls passed.');
+// The full editor intensity range must keep the enhancement active. Its
+// output gain cannot be encoded in normalized texture/vertex colour.
+for(const strength of [0,.8,1.5,3]) {
+  assert.equal(send(Buffer.from(`[layers:07:08]\nnative-bloom = strength:${strength} radius:13 threshold:0.22 saturation:1.08 contrast:1.05 light:1.3 receivers:6\n`),api.RoomPreview_Configure),1);
+  api.RoomPreview_FinalBattle(1);render();
+  const glow=draws.find(d=>d.effect===6&&d.params[3]===3);
+  assert(glow,`native glow remains active at strength ${strength}`);
+  assert(Math.abs(glow.params[6]-strength)<.0001,'gain travels through the shared shader ABI');
+  for(let i=0;i<glow.v.length;i+=8) for(let c=2;c<6;c++)
+    assert(glow.v[i+c]>=0&&glow.v[i+c]<=1,'texture tint remains normalized');
+}
+api.RoomPreview_FinalBattle(0);
 // Palette-only scenery uses a retained black texel, not another full-screen
 // illumination pass. The same grade travels through the real WASM ABI.
 const gradeRoom=data.rooms.find(r=>r.group===5&&r.map===1);
@@ -454,10 +464,10 @@ render([960,540,1,0,0,0,0]);
 const gradeDraws=draws.filter(d=>d.effect===4);
 assert(gradeDraws.length>0,'palette-only scenery binds the material shader');
 for(const draw of gradeDraws) {
- assert.equal(draw.params.length,29);assert(Math.abs(draw.params[16]-.48)<.0001);
+ assert.equal(draw.params.length,177);assert(Math.abs(draw.params[16]-.48)<.0001);
  assert.equal(draw.params[17],1.25);
  assert(Math.abs(draw.params[20]-0x34/255)<.0001);
- const map=textures.get(draw.params[28]);assert(map&&map.w===1&&map.h===1,'palette-only map is one black texel');
+ const map=textures.get(draw.params[176]);assert(map&&map.w===1&&map.h===1,'palette-only map is one black texel');
  assert.equal(map.pixels[0],0xff000000);
 }
 const gradeAllocations=creates,gradeDrawCount=draws.length;
@@ -466,12 +476,35 @@ assert.equal(creates,gradeAllocations);assert.equal(uploads.length,0);assert.equ
 api.RoomPreview_EnableEffects(0);render([960,540,1,0,0,0,0]);
 assert(!draws.some(d=>d.effect===4),'environment toggle restores ungraded materials');
 console.log('Scenery palette: shader uniforms, single-texel reuse, no extra light-map draw, and disable passed.');
+// BG1 heat travels through the same material ABI for every scenery priority,
+// without adding a full-frame pass or changing actor UVs. Scrubbing the camera
+// preserves the region's world coordinates, including an offscreen centre.
+assert.equal(send(Buffer.from('[layers:05:01]\n'),api.RoomPreview_Configure),1);
+api.RoomPreview_EnableEffects(1);
+configure(noEffects+'[emitter:05:01:0:heat-haze:1]\nanchor=bg1\nx=300\ny=260\nwidth=140\nheight=100\namplitude=2\n');
+camera=[128,128];render([960,540,1,0,0,0,0]);
+const heatDraws=draws.filter(d=>d.effect===4&&d.params[34]>0);
+assert(heatDraws.length>0,'heat-only scenery binds its shared material');
+const heatDrawCount=draws.length,heatAllocations=creates;
+for(const d of heatDraws) {
+ assert.deepEqual([...d.params.slice(36,40)],[230,210,370,310]);
+ assert.equal(d.params[52],2);
+ const map=textures.get(d.params[176]);assert(map.w===1&&map.h===1,'heat-only room reuses one black texel');
+}
+camera=[160,144];render([960,540,1,0,0,0,0]);
+assert.equal(creates,heatAllocations);assert.equal(draws.length,heatDrawCount);
+for(const d of draws.filter(d=>d.effect===4&&d.params[34]>0))
+ assert.deepEqual([...d.params.slice(36,40)],[230,210,370,310]);
+api.RoomPreview_EnableEffects(0);render([960,540,1,0,0,0,0]);
+assert(!draws.some(d=>d.effect===4&&d.params[34]>0),'environment switch removes heat');
+configure(noEffects);
+console.log('Scenery heat: shared WASM material, world-stable regions, disable and no extra pass passed.');
 // The real player/enemy stand-ins feed the same bounded body-wake observer.
 api.RoomPreview_EnableEffects(1);
 configure('[effects]\nversion=1\n[emitter:05:01:0:cloud-bank:1]\nx=128\ny=224\nwidth=512\nheight=128\ntextured=1\nrolling=.8\nwake=.8\nstrands=3\ncolor=b9b0aa\ncolor-end=aaa4af\n');
 camera=[0,96];
 const mistCount=()=>draws.filter(d=>d.effect===-1&&textures.get(d.id)?.w===1024&&
-  textures.get(d.id)?.h===512&&textures.get(d.id)?.pixels[0]===0xffffffff).reduce((n,d)=>n+d.v.length/8,0);
+  textures.get(d.id)?.h===768&&textures.get(d.id)?.pixels[0]===0xffffffff).reduce((n,d)=>n+d.v.length/8,0);
 assert.equal(api.RoomPreview_SetReceivers(3,100,240,180,240),1);render(undefined,2000);
 const mistBase=mistCount();assert(mistBase>0,'rolling density masks submitted in the shared renderer');
 assert.equal(api.RoomPreview_SetReceivers(3,103,240,177,240),1);render(undefined,2001);
@@ -486,6 +519,18 @@ const highMist=mistCount();
 assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);render(undefined,2102);
 assert.equal(mistCount(),highMist,'bodies above the fog do not stir it');
 console.log('Rolling mist preview: player/enemy movement, pause, scrubbing and vertical exclusion passed.');
+// Volumetric cloud banks share the existing atlas/batch in the actual WASM
+// renderer, including background-only anchoring and deterministic scrubbing.
+configure('[effects]\nversion=1\n[emitter:05:01:0:cloud-bank:1]\nx=128\ny=128\nwidth=512\nheight=192\nanchor=bg2-point\nplacement=background\ntextured=1\nrolling=.8\nvolume=1\nstrands=6\ncolor=f4e7d1\ncolor-end=68748c\n');
+camera=[0,96];render(undefined,1200);
+const volumeDraws=()=>draws.filter(d=>textures.get(d.id)?.w===1024&&textures.get(d.id)?.h===768);
+assert(volumeDraws().length>0,'volume masks reach the shared background renderer');
+const volumeVertices=volumeDraws().map(d=>[...d.v]),volumeCreates=creates;
+render(undefined,1237);assert.equal(creates,volumeCreates);
+assert.notDeepEqual(volumeDraws().map(d=>[...d.v]),volumeVertices,'cloud billows drift');
+render(undefined,1200);assert.equal(creates,volumeCreates);
+assert.deepEqual(volumeDraws().map(d=>[...d.v]),volumeVertices,'seeking restores cloud shapes and shading');
+console.log('Cloud volumes: actual WASM BG2 drawing, motion, seek and texture reuse passed.');
 // The shipped native definitions must fit the real WASM budget too. Moving
 // through every Marahna room exercises all glow variants and sparse dew cycles.
 const shippedEffects=fs.readFileSync('action-effects.ini','utf8');
@@ -507,7 +552,7 @@ for(const id of [1,2,3]) for(const terrain of [0,1,2]) {
   const created=creates;
   for(const clock of [1201,1500,1900,1200]) {render(undefined,clock);assert.equal(creates,created,'glow/dew animation reuses textures');}
   camera=[128,id===3?0:224];render(undefined,1200);
-  assert(draws.some(d=>textures.get(d.id)?.w===1024&&textures.get(d.id)?.h===512));
+  assert(draws.some(d=>textures.get(d.id)?.w===1024&&textures.get(d.id)?.h===768));
 }
 assert.equal(send(encode(data,blobs,data.rooms.find(r=>r.group===5&&r.map===1)),api.RoomPreview_Load),1);
 console.log('Marahna swamp life: shipped room budgets, shared render, timeline scrubbing and texture reuse passed.');
@@ -606,6 +651,157 @@ for(const id of [4,5,6,7,8]) for(const terrain of [0,1,2]) {
   }
 }
 console.log('Marahna temple: regional window capture, both light receivers, editable catalogue, wet ledges, drip paths and texture reuse passed.');
+// Grounded lightning must reach the real Aitos BG2 palette in every regional
+// profile. An absent terrain selection must remove the active strike, not
+// silently fall back to the previous short airborne channel.
+for (const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===4&&r.map===1);
+  const stormRoom={...base,terrainProfile:terrain,
+    bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,stormRoom),api.RoomPreview_Load),1);
+  assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);
+  const storm=noEffects+shippedBlocks.filter(b=>b.startsWith(`[emitter:04:01:${terrain}:storm-lightning:`)).join('');
+  camera=[1940,712];baselineDistance=3.25;
+  // Storm ribbons/glows are untextured meshes. Fullscreen cache-copy quads
+  // legitimately differ between a freshly configured and retained frame.
+  const isWeather=d=>d.target>0&&d.id===0&&d.effect===-1&&d.v.length>32&&
+    draws.some(sample=>sample.id===d.target&&sample.effect===0);
+  const weatherGeometry=()=>draws.filter(isWeather).map(d=>[...d.v]);
+  for (const view of [[640,360,1,0,0,1,0],[640,400,1,0,0,1,0]]) {
+    configure(storm);render(view,1057);
+    const lit=api.RoomPreview_EffectVertices();
+    const geometry=weatherGeometry(),allocated=creates;
+    assert(geometry.length>0,'storm channels submit visible geometry');
+    const weather=draws.filter(isWeather);
+    const weatherTarget=weather[0].target;
+    assert(weatherTarget>0&&weather.every(d=>d.target===weatherTarget),
+      'lightning is composed into one sky source before its blur');
+    const lastWeather=draws.findLastIndex(d=>weather.includes(d));
+    assert(draws.some((d,i)=>i>lastWeather&&d.id===weatherTarget&&d.effect===0),
+      'the existing sky blur samples the combined backdrop and lightning');
+    render(view,1063);render(view,1057);
+    assert.equal(creates,allocated,'terrain contacts allocate no new textures');
+    assert.deepEqual(weatherGeometry(),geometry,'grounded strikes seek deterministically');
+    configure(storm.replaceAll('ground-palette=1','ground-palette=7'));render(view,1057);
+    assert(api.RoomPreview_EffectVertices()<lit,'the visible bolt requires actual mountain contact');
+    assert(!weatherGeometry().length,'absent grounded lightning adds no weather composition');
+    configure(storm.replace(/^x=.*$/gm,'x=8000'));render(view,1057);
+    assert(!weatherGeometry().length,'offscreen strikes add no sky composition pass');
+  }
+}
+console.log('Aitos lightning: real regional BG2 contacts, 16:9/16:10, missing-ground suppression, reverse seeking and texture reuse passed.');
+// Periodic waterfall art repeats its page, but the sky light belongs to the
+// unwrapped world. Exercise the real WASM material path used by the editor.
+for (const map of [2,3]) {
+  const waterfall=data.rooms.find(r=>r.group===4&&r.map===map);
+  assert.equal(send(encode(data,blobs,waterfall),api.RoomPreview_Load),1);
+  const scope=`[emitter:04:0${map}:0:`;
+  configure(noEffects+shippedBlocks.filter(b=>b.startsWith(scope)&&
+    (b.includes(':cloud-light:')||b.includes(':light-gradient:'))).join(''));
+  const skyMaterials=()=>draws.filter(d=>d.effect===4&&d.params?.[72]>0&&
+    d.params[70]===256&&d.params[71]===256);
+  camera=map===2?[1000,460]:[128,0];baselineDistance=3.25;
+  render([640,360,1,0,0,1,0],320);
+  const materials=skyMaterials();assert(materials.length>0,'periodic sky receives cloud lighting');
+  const field=[...materials[0].params.slice(68,176)],allocated=creates;
+  assert.deepEqual(field.slice(0,4),[0,-1,256,256],'native row offset maps back to world coordinates');
+  const firstUv=materials[0].v[6];
+  camera[0]+=32;
+  render([640,360,1,0,0,1,0],320);
+  assert.deepEqual([...skyMaterials()[0].params.slice(68,176)],field,
+    'scrolling changes sampled positions, not the authored light field');
+  assert.notEqual(skyMaterials()[0].v[6],firstUv,'unwrapped waterfall UVs scroll with the camera');
+  assert.equal(creates,allocated,'moving the sky light needs no new textures');
+  api.RoomPreview_EnableEffects(0);render([640,360,1,0,0,1,0],320);
+  assert.equal(skyMaterials().length,0,'environmental setting disables waterfall lighting');
+  api.RoomPreview_EnableEffects(1);
+}
+console.log('Aitos waterfall sky light: periodic material, world anchoring, camera movement, toggle and texture reuse passed.');
+// Background exposure travels with the same world region and uniform block in
+// the browser, without introducing another draw or render target.
+const dimSky=noEffects+shippedBlocks.filter(b=>b.startsWith('[emitter:04:03:0:cloud-light:'))
+  .map(b=>b.replace(/^background-brightness=.*\n/gm,'').trimEnd()+'\nbackground-brightness=0.72\n').join('');
+camera=[128,0];
+for(const height of [360,400]) {
+  configure(dimSky);render([640,height,1,0,0,1,0],320);
+  const lit=draws.filter(d=>d.effect===4&&d.params?.[72]>0);
+  assert(lit.length>0);
+  for(const draw of lit) {
+    assert(Math.abs(draw.params[73]-.28)<.0001,'dimming guard is uploaded');
+    assert(Math.abs(draw.params[172]-.28)<.0001,'per-region brightness reaches the shader');
+  }
+  const allocated=creates,drawCount=draws.length;
+  configure(dimSky.replace('background-brightness=0.72','background-brightness=1'));
+  render([640,height,1,0,0,1,0],320);
+  assert.equal(draws.length,drawCount,'dimming stays in the existing sky material');
+  assert.equal(creates,allocated,'background brightness allocates no textures');
+  for(const draw of draws.filter(d=>d.effect===4&&d.params?.[72]>0)) {
+    assert.equal(draw.params[73],0);assert.equal(draw.params[172],0);
+  }
+}
+console.log('Waterfall background brightness: 16:9/16:10, saved controls, neutral reset and pass/texture reuse passed.');
+// Rainbow color is part of the existing mist batch, gated by actual sky light
+// and density. The saved strength must survive the real C/WASM parser.
+const rainbowScene=noEffects+shippedBlocks.filter(b=>b.startsWith('[emitter:04:03:0:')&&
+  (b.includes(':cloud-light:')||b.includes(':cloud-bank:0a400331]'))).join('');
+configure(rainbowScene);camera=[128,0];
+render([640,360,1,0,0,1,0],320);
+const rainbowCount=api.RoomPreview_EffectVertices(),rainbowAllocations=creates;
+configure(rainbowScene.replace(/^rainbow=.*$/gm,'rainbow=0'));render([640,360,1,0,0,1,0],320);
+assert(api.RoomPreview_EffectVertices()<rainbowCount,'sunlit spray adds a small spectrum mesh');
+configure(rainbowScene);render([640,360,1,0,0,1,0],320);
+assert.equal(api.RoomPreview_EffectVertices(),rainbowCount);
+assert.equal(creates,rainbowAllocations,'rainbow strength toggles allocate no textures');
+render([640,360,1,0,0,1,0],357);render([640,360,1,0,0,1,0],320);
+assert.equal(api.RoomPreview_EffectVertices(),rainbowCount,'seeking restores the spray spectrum');
+console.log('Waterfall mist rainbow: saved controls, light-dependent geometry, seek and texture reuse passed.');
+const floodBlocks=shippedBlocks.filter(b=>b.startsWith('[emitter:04:03:0:')&&
+  (b.includes(':cloud-light:')||b.includes(':cloud-bank:0a400103]')))
+  .map(b=>b.replace(/^rainbow=.*$/gm,'rainbow=0'));
+for(const height of [360,400]) {
+  configure(noEffects+floodBlocks.join(''));render([640,height,1,0,0,1,0],320);
+  const lit=volumeDraws().map(d=>[...d.v]),allocated=creates;
+  assert(lit.length>0,'lower mist reaches the shared renderer');
+  configure(noEffects+floodBlocks.map(b=>b.includes(':cloud-light:')?
+    b.replace(/^intensity=.*$/gm,'intensity=0'):b).join(''));
+  render([640,height,1,0,0,1,0],320);
+  const dark=volumeDraws().map(d=>[...d.v]);
+  assert.equal(lit.length,dark.length);
+  let catchesLight=false;
+  lit.forEach((vertices,draw)=>vertices.forEach((value,i)=>{
+    if(i%8>=2&&i%8<=4)catchesLight ||= value>dark[draw][i]+.001;
+    else assert.equal(value,dark[draw][i],'lighting preserves mist shape, opacity and UVs');
+  }));
+  assert(catchesLight,'lower BG1 mist catches the BG2 flood independently of rainbow colour');
+  assert.equal(creates,allocated,'mist lighting adds no texture');
+}
+console.log('Boss flood mist: shared sky-light response, 16:9/16:10, unchanged geometry/alpha and texture reuse passed.');
+for(const map of [2,3]) {
+  const room=data.rooms.find(r=>r.group===4&&r.map===map);
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);
+  const blocks=shippedBlocks.filter(b=>b.startsWith(`[emitter:04:0${map}:0:`));
+  const sun=blocks.find(b=>b.includes(':cloud-light:'));
+  const water=noEffects+sun+blocks.filter(b=>b.includes('pattern=water-glints')).join('');
+  const mist=noEffects+sun+blocks.filter(b=>b.includes(':cloud-bank:')&&/^sparkle=/m.test(b))
+    .map(b=>b.replace(/^rainbow=.*$/gm,'rainbow=0')).join('');
+  camera=map===2?[1000,460]:[128,0];baselineDistance=3.25;
+  for(const height of [360,400])for(const mode of [0,1,2]) {
+    const view=[640,height,1,0,0,mode,0];
+    configure(water);render(view,320);
+    const wetCount=api.RoomPreview_EffectVertices();
+    configure(water.replace(sun,sun.replace(/^intensity=.*$/m,'intensity=0')));render(view,320);
+    assert(api.RoomPreview_EffectVertices()<wetCount,'water glints need direct sky light');
+    configure(mist);render(view,320);
+    const sprayCount=api.RoomPreview_EffectVertices(),allocated=creates;
+    configure(mist.replace(/^sparkle=.*$/gm,'sparkle=0'));render(view,320);
+    assert(api.RoomPreview_EffectVertices()<sprayCount,'mist sparkle control adds density-bound droplets');
+    configure(mist);render(view,343);render(view,320);
+    assert.equal(api.RoomPreview_EffectVertices(),sprayCount,'mist sparkle seeking is deterministic');
+    assert.equal(creates,allocated,'sparkle toggles and animation reuse existing textures');
+  }
+}
+console.log('Water/mist sparkles: both rooms, 16:9/16:10, all background modes, light gating, seek and texture reuse passed.');
 assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);api.RoomPreview_Reset();
 assert.equal(textures.size,0,'room reset releases all preview textures');
 console.log('Shared player preview: native art, receiver masks, dimming/torch/rim, picking, mirroring and upload reuse passed.');

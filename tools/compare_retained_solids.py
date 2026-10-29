@@ -127,7 +127,8 @@ def main():
                    "run_dir": str(run_dir), "seconds": time.monotonic() - start,
                    "final_wram_sha256": digest(run_dir / "dump_wram.bin")}
             if args.verify_only:
-                images = {p.name: digest(p) for p in run_dir.glob("shot_*.ppm")}
+                images = {p.name: digest(p) for p in run_dir.glob("shot_*.*")
+                          if p.suffix in (".png", ".ppm")}
                 expected = 14 if view == "palace" else 19
                 if len(images) != expected:
                     raise RuntimeError(f"{name}: expected {expected} composite captures, found {len(images)}")

@@ -3,8 +3,8 @@
 #include "render/render_device.h"
 #include <math.h>
 
-/* Background-only texture displacement, shared by the portable mesh and the
- * resident skybox shader. std140 vec4 layout; no intermediate scene capture.
+/* Scenery texture displacement, shared by the portable mesh, scenery material
+ * and resident skybox shader. std140 vec4 layout; no intermediate scene capture.
  * Overlaps take the strongest envelope rather than stacking distortion. */
 enum { kDioramaHeatRegions=4, kDioramaHeatColumns=32, kDioramaHeatRows=16 };
 typedef struct DioramaHeat {

@@ -145,6 +145,24 @@ class PipelinePerformanceTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.capture_evidence(path, 20, 20, 0)
 
+    @unittest.skipUnless(importlib.util.find_spec('PIL'), 'PNG tooling needs Pillow')
+    def test_png_captures_validate_pixels_and_schedule(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root / 'shot_20.png'
+            Image.new('RGB', (16, 8), (18, 52, 86)).save(image)
+            self.assertEqual(set(module.capture_evidence(root, 20, 20, 10)), {'shot_20.png'})
+            with self.assertRaises(ValueError):
+                module.capture_evidence(root, 20, 30, 10)
+            image.write_bytes(image.read_bytes()[:40])
+            with self.assertRaises(ValueError):
+                module.capture_evidence(root, 20, 20, 10)
+            ppm = root / 'legacy.ppm'
+            ppm.write_bytes(b'P6\n16 8\n255\n'+bytes([18, 52, 86])*128)
+            Image.new('RGB', (16, 8), (18, 52, 86)).save(image)
+            self.assertEqual(module.read_capture_rgb(image), module.read_capture_rgb(ppm))
+
     def test_text_replays_release_buttons_and_reject_overlapping_pulses(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "inputs.json"

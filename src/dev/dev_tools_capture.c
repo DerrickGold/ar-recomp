@@ -6,8 +6,20 @@
 #include "app/settings.h"
 #include "host/host_display.h"
 #include "present/presentation_frame_generation.h"
+#include "render/image_write.h"
 
 enum { kArgbBytesPerPixel = 4 };
+static DevToolsCaptureResult WriteFramebuffer(FILE *file,const DevToolsContext *context,
+    bool require_composite,float phase,const FrameSlot *uploaded_frame,bool png);
+
+DevToolsCaptureResult DevTools_WriteFramebufferPng(
+    FILE *file,const DevToolsContext *context,bool require_composite) {
+  return WriteFramebuffer(file,context,require_composite,kPresentationFrameGenerationPhaseNone,NULL,true);
+}
+DevToolsCaptureResult DevTools_WriteFramebufferPngAtPhase(FILE *file,const DevToolsContext *context,
+    bool require_composite,float phase,const FrameSlot *uploaded_frame) {
+  return WriteFramebuffer(file,context,require_composite,phase,uploaded_frame,true);
+}
 
 /* Write the live framebuffer to an open PPM, cropped to the active display
  * rectangle. When a host readback provider exists, capture the actual
@@ -21,6 +33,10 @@ DevToolsCaptureResult DevTools_WriteFramebufferPpm(
 DevToolsCaptureResult DevTools_WriteFramebufferPpmAtPhase(
     FILE *file, const DevToolsContext *context, bool require_composite, float phase,
     const FrameSlot *uploaded_frame) {
+  return WriteFramebuffer(file,context,require_composite,phase,uploaded_frame,false);
+}
+static DevToolsCaptureResult WriteFramebuffer(FILE *file,const DevToolsContext *context,
+    bool require_composite,float phase,const FrameSlot *uploaded_frame,bool png) {
   if (!file || !context || SessionFatal_Requested())
     return (DevToolsCaptureResult){0};
 
@@ -60,6 +76,13 @@ DevToolsCaptureResult DevTools_WriteFramebufferPpmAtPhase(
       capture.pitch_bytes >= capture.width * 3) {
     const int output_width = capture.width;
     const int output_height = capture.height;
+    if(png) {
+      const bool ok=ArImage_WritePng(file,capture.pixels,output_width,output_height,
+          capture.pitch_bytes,kArImageRgb24);
+      if(capture.release)capture.release(capture.owner);
+      return ok?(DevToolsCaptureResult){output_width,output_height,kDevToolsCapture_Composite}:
+          (DevToolsCaptureResult){0};
+    }
     fprintf(file, "P6\n%d %d\n255\n", output_width, output_height);
     for (int y = 0; y < output_height; y++) {
       const uint8_t *row =
@@ -79,6 +102,12 @@ DevToolsCaptureResult DevTools_WriteFramebufferPpmAtPhase(
       visible_x < 0 || visible_width <= 0 ||
       (int64_t)(visible_x + (int64_t)visible_width) * 4 > context->framebuffer_pitch)
     return (DevToolsCaptureResult){0};
+  if(png) {
+    const bool ok=ArImage_WritePng(file,context->framebuffer_pixels+(size_t)visible_x*kArgbBytesPerPixel,
+        visible_width,context->snes_height,context->framebuffer_pitch,kArImageXrgb8888);
+    return ok?(DevToolsCaptureResult){visible_width,context->snes_height,kDevToolsCapture_NativeFramebuffer}:
+        (DevToolsCaptureResult){0};
+  }
   fprintf(file, "P6\n%d %d\n255\n", visible_width, context->snes_height);
   for (int y = 0; y < context->snes_height; y++) {
     const uint8_t *row = context->framebuffer_pixels +

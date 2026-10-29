@@ -16,6 +16,16 @@ case kActionEffect_AitosLavaPit:return 0;case kActionEffect_AitosLavaReservoir:r
 case kActionEffect_AitosWaterSplash:return 2;case kActionEffect_AitosWaterfall:return 3;
 case kActionEffect_AitosWaterfallMist:return 4;default:return -1;}}
 bool ActionSurfaceField_Set(ActionSurfaceField *f,const char *key,const char *value){return f&&ActionEffectVectors_Set(f,&f->seen,properties,kProperties,key,value);}
+void ActionSurfaceField_Upgrade(ActionSurfaceField *f){
+  /* Saved complete definitions keep their original appearance. Only the
+   * bundled pit opts in; export exposes these controls for subsequent edits. */
+  if(!f)return;
+  const char *names[]={"molten-surface","molten-bursts","molten-color"};
+  const char *values[]={"0 8 240 6 3 0.25","0 240 0.3 18 3","1 0.28 0.015 0.8"};
+  for(unsigned n=0;n<3;++n)for(unsigned i=0;i<kProperties;++i)
+    if(!strcmp(properties[i].name,names[n])&&!(f->seen&(UINT64_C(1)<<i)))
+      (void)ActionSurfaceField_Set(f,names[n],values[n]);
+}
 void ActionSurfaceField_Prepare(ActionSurfaceField *f){
   const float *values[]={f->Spill,f->Body};
   for(unsigned i=0;i<2;++i){const float *v=values[i];f->styles[i]=(ActionEffectGlowStyle){
@@ -34,6 +44,10 @@ bool ActionSurfaceField_Valid(const ActionSurfaceField *f){
   if(!f||!ActionEffectVectors_Valid(f,&f->seen,properties,kProperties)||!Integer(f->Kind[0],0,4)||!Integer(f->Components[0],0,3)||!Integer(f->Receivers[0],0,8)||!Integer(f->Mode[0],0,1))return false;
   if(!Integer(f->Heat[0],0,1)||f->HeatAmplitude[0]>f->HeatAmplitude[2]||f->HeatWave[2]<0||f->HeatWave[2]>1||f->HeatCross[2]<0||f->HeatCross[2]>1)return false;
   const unsigned kind=(unsigned)f->Kind[0];const unsigned max_particles[]={12,32,12,128,32};
+  const float *m=f->MoltenSurface,*b=f->MoltenBursts;
+  if(m[0]>1||!Integer(m[1],1,16)||!Integer(m[2],120,4096)||m[3]<1||m[3]>16||m[4]>12||m[5]>1||
+      !Integer(b[0],0,4)||!Integer(b[1],90,4096)||b[2]<.1f||b[2]>.6f||b[3]>40||b[4]<.5f||b[4]>6||
+      ((m[0]>0||b[0]>0)&&(kind!=0||f->Projection[1]!=kActionEffectRenderLayer_WorldDust)))return false;
   const unsigned max_sources[]={16,4,14,1,1};
   if(!Integer(f->SourceCount[0],0,max_sources[kind])||!Integer(f->Projection[0],0,kActionEffectProjectionPlane_BetweenBackgrounds)||!Integer(f->Projection[1],0,kActionEffectRenderLayer_Count-1))return false;
   for(unsigned i=0;i<16;++i)if(!Integer(f->MapRule[i],0,255))return false;
@@ -89,6 +103,7 @@ const ActionSurfaceField *ActionSurfaceField_Bundled(unsigned index){
       for(const char *at=definitions[i];*at&&ok;){const char *end=strchr(at,'\n');if(!end){ok=false;break;}
         size_t n=(size_t)(end-at);char line[1024];if(n>=sizeof(line)){ok=false;break;}memcpy(line,at,n);line[n]=0;
         char *eq=strchr(line,'=');if(!eq){ok=false;break;}*eq=0;ok=ActionSurfaceField_Set(&fields[i],line,eq+1);at=end+1;}
+      ActionSurfaceField_Upgrade(&fields[i]);
       ok=ok&&ActionSurfaceField_Valid(&fields[i]);if(ok)ActionSurfaceField_Prepare(&fields[i]);
     }
     atomic_store_explicit(&state,ok?2:3,memory_order_release);

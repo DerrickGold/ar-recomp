@@ -1,3 +1,4 @@
+#include "render/cloud_mesh.h"
 #include "action/action_effect_receivers.h"
 #include "action/action_exposure.h"
 #include "action/action_light_kinds.h"
@@ -15,6 +16,7 @@
  * Soft lights, gradients and torch spill only belong to the material. */
 static bool HasLightVolume(unsigned kind) {
   switch (kind) {
+    case kActionEffect_AuthoredStorm:
     case kActionEffect_AuthoredFan:
     case kActionEffect_AuthoredCanopy:
     case kActionEffect_ForestCanopyLight:
@@ -92,19 +94,6 @@ static ActionEffectGlowStyle SurfaceStyle(const ActionSurfaceField *f,unsigned i
   style.radius_x=fmaxf(v[0],width*v[2]+v[4]);style.radius_y=fmaxf(v[1],height*v[3]+v[5]);style.seed=seed;return style;
 }
 
-/* Mist is a mass of overlapping puffs rather than a precision light halo.
- * Twelve segments keep each silhouette round at SNES presentation scale while
- * making a dense 24-puff volume cheaper than six generic 32-segment glows. */
-static const float
-kMistCircle12[kActionSceneEffectWaterfallMistCloudSegments][2] = {
-  { 1.000000f, 0.000000f }, { 0.866025f, 0.500000f },
-  { 0.500000f, 0.866025f }, { 0.000000f, 1.000000f },
-  {-0.500000f, 0.866025f }, {-0.866025f, 0.500000f },
-  {-1.000000f, 0.000000f }, {-0.866025f,-0.500000f },
-  {-0.500000f,-0.866025f }, { 0.000000f,-1.000000f },
-  { 0.500000f,-0.866025f }, { 0.866025f,-0.500000f },
-};
-
 /* One source-alpha cloud puff. Unlike AppendGlow this is not a light and is
  * never submitted additively: its opaque-ish core actually conceals the hard
  * BG2/skybox seam, while two soft rings feather it into neighbouring puffs.
@@ -116,26 +105,14 @@ bool AppendSceneSoftCloud(
     float local_x, float local_y, float local_radius_x, float local_radius_y,
     ArRenderColorF tint, float opacity, unsigned seed,
     ActionEffectProjectPointFn project_point, void *userdata) {
-  enum {
-    kSegments = kActionSceneEffectWaterfallMistCloudSegments,
-    kRings = kActionEffectGlowRings,
-  };
-  float corners[kActionSceneEffectWaterfallMistCloudVertices][4] = {{0}};
-  const ArRenderColorF white = {1, 1, 1, opacity};
-  ArRenderColorF colors[4] = {MixColor(tint, white, .42f),
-      MixColor(tint, white, .24f), tint, tint};
-  colors[0].a = opacity; colors[1].a = opacity * .84f;
-  colors[2].a = opacity * .34f; colors[3].a = 0;
-  const float scales[3] = {.24f, .70f, 1};
-  const unsigned ticks = EffectVisualTicks(effect, (unsigned)effect->pulse_ticks) / 4u;
-  for (int r = 0; r < kRings; ++r) for (int s = 0; s < kSegments; ++s) {
-    const float shape = 1 + (.035f + .055f * r) *
-        FlameSilhouette(seed, ticks, s * kActionEffectGlowSegments / kSegments);
-    corners[1 + r * kSegments + s][0] = kMistCircle12[s][0] * scales[r] * shape;
-    corners[1 + r * kSegments + s][3] = kMistCircle12[s][1] * scales[r] * shape;
-  }
-  return AppendBillboard(writer, effect, local_x, local_y,
-      local_radius_x, local_radius_y, 4, 3, kSegments, corners, colors, project_point, userdata);
+  _Static_assert(kActionSceneEffectWaterfallMistCloudVertices==kCloudPuffVertices&&
+      kActionEffectGlowRings==kCloudPuffRings,"cloud puff batch capacity");
+  float corners[kCloudPuffVertices][4];
+  ArRenderColorF colors[4];
+  const unsigned ticks=EffectVisualTicks(effect,(unsigned)effect->pulse_ticks)/4u;
+  CloudMesh_Puff(corners,colors,&kCloudSoftPuff,kCircle32,tint,opacity,seed,ticks);
+  return AppendBillboard(writer,effect,local_x,local_y,local_radius_x,local_radius_y,
+      4,3,kCloudPuffSegments,corners,colors,project_point,userdata);
 }
 
 static bool AppendWaterfallMistCloudVolume(
@@ -385,11 +362,113 @@ ArRenderColorF SceneParticleColor(ArRenderColorF hot,
   return color;
 }
 
+/* Molten detail stays attached to the captured pit, never to the viewport.
+ * Eight-sided, feathered rings expose the original animated lava between hot
+ * seams. No particle simulation, textures, or additional render pass. */
+static bool AppendMoltenRing(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect,float x,float y,float rx,float ry,
+    ArRenderColorF color,float fill,bool crust,unsigned seed,unsigned ticks,
+    ActionEffectProjectPointFn project,void *context) {
+  enum {kSegments=8};
+  float corners[1+3*kSegments][4]={{0}};
+  const float radii[]={.48f,.76f,1};
+  ArRenderColorF colors[]={color,color,color,color};
+  colors[0].a*=fill;colors[1].a*=.4f;colors[3].a=0;
+  /* Complete definitions require alpha placement for molten detail. Older
+   * fields retain their glow/embers and draw layer through the codec upgrade. */
+  if(crust&&effect->render_layer==kActionEffectRenderLayer_WorldDust) {
+    colors[0]=(ArRenderColorF){.12f,.028f,.009f,color.a*.9f};
+    colors[1]=(ArRenderColorF){.23f,.046f,.012f,color.a*.8f};
+  }
+  for (unsigned s = 0; s < kSegments; ++s) {
+    /* All three rings share one silhouette; only their radii differ. */
+    const float shape = 1 + .12f * FlameSilhouette(seed, ticks, (int)s * 4);
+    for (unsigned r = 0; r < 3; ++r) {
+      const unsigned at = 1 + r * kSegments + s;
+      const float radius = radii[r] * shape;
+      corners[at][0] = kCircle32[s * 4][0] * radius;
+      corners[at][3] = kCircle32[s * 4][1] * radius;
+    }
+  }
+  return AppendBillboard(writer,effect,x,y,rx,ry,0,0,kSegments,corners,colors,project,context);
+}
+
+static bool AppendMoltenPit(ActionEffectGeometryWriter *w,
+    const ActionEffectInstance *e,const ActionSurfaceField *f,
+    ActionEffectProjectPointFn project,void *context) {
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float *m=f->MoltenSurface,*b=f->MoltenBursts;
+  const float width=r->x1-r->x0,height=r->y1-r->y0;
+  const float surface=(r->y0+r->y1)*.5f-height*m[5];
+  const unsigned ticks=e->pulse_ticks;
+  const ArRenderColorF molten={f->MoltenColor[0],f->MoltenColor[1],f->MoltenColor[2],f->MoltenColor[3]};
+  if(m[0]>0)for(unsigned i=0;i<(unsigned)m[1];++i) {
+    const unsigned seed=e->pulse_generation^(i+1)*0x9e3779b9u;
+    const unsigned period=(unsigned)m[2]+(unsigned)(HashUnit(seed^71)*m[2]*.43f);
+    const float t=((ticks+seed%period)%period)/(float)period;
+    const float phase=t*6.2831853f;
+    const float wave=sinf(phase);
+    const float lane=width/m[1];
+    const float rx=fminf(width*.12f,3+4*HashUnit(seed^53))*(.78f+.22f*wave);
+    const float margin=rx*1.15f;
+    const float drift=sinf(phase+HashUnit(seed^197)*6.2831853f)*fminf(m[4],lane*.4f);
+    const float x=fmaxf(r->x0+margin,fminf(r->x1-margin,r->x0+lane*(i+.5f)+drift));
+    const float depth=fminf(m[3],height*.3f);
+    const float y=surface+(HashUnit(seed^163)-.5f)*depth;
+    ArRenderColorF tint=molten;
+    tint.a*=m[0]*(.5f+.5f*wave*wave);
+    tint.g+=(1-tint.g)*.2f*TriangleWave(ticks+seed,period);
+    /* Shape deformation follows the editable flow period too; slowing the
+     * drift must not leave a fast, independently writhing luminous edge. */
+    const unsigned flow_ticks=ticks*64u/period;
+    if(!AppendMoltenRing(w,e,x,y,rx,.8f+HashUnit(seed^257)*1.5f,tint,.08f,true,seed,flow_ticks,project,context))return false;
+  }
+  for(unsigned i=0;i<(unsigned)b[0];++i) {
+    const unsigned identity=e->pulse_generation^(i+17)*0x85ebca6bu;
+    const unsigned period=(unsigned)b[1]+identity%((unsigned)b[1]/3+1);
+    const unsigned clock=ticks+identity%period,cycle=clock/period;
+    const float age=(clock%period)/(period*b[2]);
+    if(age>=1)continue;
+    const unsigned seed=identity^(cycle+1)*0xc2b2ae35u;
+    const float radius=fminf(b[4]*(.7f+.3f*HashUnit(seed^101)),width*.1f);
+    const float inset=radius*2.5f;
+    const float x=r->x0+inset+HashUnit(seed^47)*fmaxf(0,width-2*inset);
+    const float y=surface+(HashUnit(seed^11)-.5f)*fminf(m[3],height*.3f);
+    if(age<.34f) {
+      const float swell=sinf(age/.34f*3.14159265f);
+      ArRenderColorF tint=molten;tint.a*=swell;
+      if(!AppendMoltenRing(w,e,x,y-radius*.3f*swell,radius*(.5f+swell*.5f),
+          radius*(.25f+.65f*swell),tint,.25f,false,seed,ticks/5,project,context))return false;
+    }
+    if(age>=.24f) {
+      const float t=(age-.24f)/.76f;
+      /* Every droplet falls back inside the pit. The launch and landing
+       * envelopes keep cycle/seed changes invisible when seeking or scrolling. */
+      for(unsigned drop=0;drop<5;++drop) {
+        const unsigned s=seed^(drop+1)*97;
+        const float reach=b[3]*(.45f+.55f*HashUnit(s^23));
+        const float spread=(HashUnit(s^17)*2-1)*fminf(radius*2,fmaxf(0,fminf(x-r->x0,r->x1-x)-3));
+        const float px=x+spread*t,py=y-4*reach*t*(1-t);
+        const float previous=fmaxf(0,t-.025f);
+        ArRenderColorF tint=MixColor((ArRenderColorF){1,.72f,.18f,.95f},molten,t);
+        tint.a*=fminf(1,t*18)*fminf(1,(1-t)*6);
+        const float size=fminf(width*.05f,.55f+.65f*HashUnit(s^41))*(1-.4f*t);
+        if(!AppendSceneParticle(w,e,px,py,x+spread*previous,y-4*reach*previous*(1-previous),
+            size,size*1.8f,tint,project,context))return false;
+      }
+      ArRenderColorF tint=molten;tint.a*=sinf(t*3.14159265f)*.65f;
+      if(!AppendMoltenRing(w,e,x,y,radius*(1+t),.5f+t,tint,0,false,seed,ticks/5,project,context))return false;
+    }
+  }
+  return true;
+}
+
 static bool AppendLavaPitParticles(ActionEffectGeometryWriter *writer,
                                    const ActionEffectInstance *effect, const ActionSurfaceField *f,
                                    ActionEffectProjectPointFn project_point,
                                    void *userdata) {
   if(!((unsigned)f->Components[0]&2))return true;
+  if(!AppendMoltenPit(writer,effect,f,project_point,userdata))return false;
   const unsigned count=(unsigned)f->Particles[0];
   const ArRenderColorF hot={f->Hot[0],f->Hot[1],f->Hot[2],f->Hot[3]};
   const ArRenderColorF cool={f->Cool[0],f->Cool[1],f->Cool[2],f->Cool[3]};
@@ -2107,6 +2186,7 @@ bool ActionSceneDecorationRender_Build(
   if (project_point == ActionEffectSource_ProjectPoint) writer.source = project_userdata;
   writer.vertex_count=batch->vertex_count;writer.index_count=batch->index_count;
   writer.frame=frame;
+  writer.cloud_light_ready=!lighting_enabled;
   const int base_vertices=writer.vertex_count, base_indices=writer.index_count;
   ActionSceneryShadow shadow = {0};
   bool shadow_prepared = false;

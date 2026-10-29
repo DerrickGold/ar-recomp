@@ -1,6 +1,7 @@
 #include "actraiser/actraiser_room_profiles.h"
 
 #include "diorama.h"
+#include "diorama_astral_rift.h"
 #include "constants.h"
 #include "diorama_effect_backend.h"
 #include "diorama_aperture.h"
@@ -185,7 +186,9 @@ static bool s_diorama_ss_unavailable;
 static ArRenderTexture s_diorama_priority_texture;
 static int s_diorama_priority_w, s_diorama_priority_h;
 static DioramaScratchPool s_diorama_dof_source;
+static DioramaScratchPool s_diorama_sky_weather;
 static DioramaScratchPool s_diorama_lightmap;
+static DioramaScratchPool s_diorama_bloom[3];
 static ArRenderTexture s_diorama_unlit_map;
 static DioramaScratchPool s_diorama_actor_lightmaps[2];
 static bool s_diorama_dof_source_unavailable;
@@ -1424,6 +1427,42 @@ static void HeatQuad(ArRenderVertex2D *vertices,int32_t *indices,
   int count;
   TriangulateGrid(kDioramaHeatColumns,kDioramaHeatRows,indices,&count);
 }
+static ArRenderTexture CompositeSkyWeather(ArRenderDevice *device, ArRenderTexture source,
+    int width, int height, const DioramaScene *scene, DioramaProjection *projection,
+    bool *composited, PresentationOutcome *outcome) {
+  *composited=false;
+  bool visible=false;
+  for (unsigned i=0;!visible&&i<projection->bg2_skybox.count;++i) {
+    projection->bg2_skybox.active_band=(int)i;
+    visible=scene->sky_weather(scene->plane_effect_userdata,projection,false);
+  }
+  if (!visible)return source;
+  const ArRenderTexture target=EnsureDioramaScratchTarget(device,&s_diorama_sky_weather,
+      width,height,kArRenderFilter_Nearest);
+  ArRenderTargetState saved;
+  if (!ArRenderTexture_IsValid(target) ||
+      ArRenderDevice_BeginTarget(device,target,&saved)!=kArRenderTargetBegin_Ready) {
+    *outcome=kPresentationOutcome_CoreFailure;return ArRenderTexture_Invalid();
+  }
+  const ArRenderDrawState state={.flags=kArRenderDrawState_Blend,.blend=kArRenderBlendMode_Opaque};
+  const ArRenderRectF rect={0,0,width,height};
+  bool ok=ArRenderDevice_DrawTextureWithState(device,source,&rect,&rect,&state);
+  const DioramaSourceEffectBatch batch=scene->render->source_effect_batch;
+  const bool began=ok&&(!batch||batch(device,true));
+  ok=began;
+  for (unsigned i=0;ok&&i<projection->bg2_skybox.count;++i) {
+    projection->bg2_skybox.active_band=(int)i;
+    ok=scene->sky_weather(scene->plane_effect_userdata,projection,true);
+  }
+  if (began&&batch)ok=batch(device,false)&&ok;
+  const bool restored=ArRenderDevice_EndTarget(device,&saved);
+  if (!ok||!restored) {
+    *outcome=kPresentationOutcome_CoreFailure;return ArRenderTexture_Invalid();
+  }
+  *composited=true;
+  return target;
+}
+
 static PresentationOutcome DrawDioramaSkybox(
     ArRenderDevice *device, ArRenderTexture skybox_texture,
     int obj_apron, int snes_width, int snes_height,
@@ -1437,7 +1476,8 @@ static PresentationOutcome DrawDioramaSkybox(
     int authentic_y0, float camera_delta, float pixel_aspect,
     float face_bottom_y, float foreground_top_y,
     DioramaSkyboxProjection *projection, const DioramaRenderOptions *options, const DioramaHeat *heat,
-    const DioramaSceneryGrade *grade) {
+    const DioramaCloudLight *cloud_light, const DioramaSceneryGrade *grade,
+    const DioramaScene *scene, DioramaProjection *effect_projection) {
   if (!ArRenderTexture_IsValid(skybox_texture) || snes_height <= 0)
     return kPresentationOutcome_CoreFailure;
   PresentationOutcome outcome = kPresentationOutcome_Complete;
@@ -1481,34 +1521,6 @@ static PresentationOutcome DrawDioramaSkybox(
       ? kDioramaRomBackdropPixels : SR_PPU_SURFACE_MAX_WIDTH;
   const int source_height = rom_source
       ? kDioramaRomBackdropPixels : SR_PPU_SURFACE_MAX_HEIGHT;
-  if ((blur_requested && options->skybox_prefilter) || grade->strength > 0) {
-    PresentationOutcome prefilter_outcome;
-    const ArRenderTexture prefiltered = BuildDioramaSkyboxPrefilter(
-        device, skybox_texture, source_width, source_height,
-        out_w, out_h, tint, blur_requested ? blur_radius : 0, rom_source,
-        source_revision, source_dynamic, grade, &prefilter_outcome);
-    outcome = PresentationOutcome_Combine(outcome, prefilter_outcome);
-    if (!PresentationOutcome_IsUsable(prefilter_outcome))
-      return prefilter_outcome;
-    if (ArRenderTexture_IsValid(prefiltered)) {
-      skybox_texture = prefiltered;
-      tint = kSkyboxFull;
-      prefiltered_skybox = true;
-    }
-  }
-  if (blur_requested && !prefiltered_skybox) {
-    const DioramaBlurEffectParams params = {
-      .texel_width = 1.0f / (float)source_width,
-      .texel_height = 1.0f / (float)source_height,
-      .radius = blur_radius,
-    };
-    blur_bound = DioramaEffectBackend_BindBlur(device, &params);
-    if (!blur_bound) {
-      outcome = kPresentationOutcome_OptionalOmitted;
-      if (!DioramaEffectBackend_Unbind(device))
-        return kPresentationOutcome_CoreFailure;
-    }
-  }
 
   /* Fix B/BH6: render each row band over its own actually-valid U span. This
    * is the distinction the former scalar lost in Death Heim: the clamped upper
@@ -1605,29 +1617,108 @@ static PresentationOutcome DrawDioramaSkybox(
     raw_vertical.texture_v0 += shift / source_height;
     raw_vertical.texture_v1 += shift / source_height;
   }
-  if (projection) projection->motion_source = rom_source ? 1 : motion_source;
+  if (projection) {
+    projection->motion_source = rom_source ? 1 : motion_source;
+    projection->capture_offset = rom_source ? (ArRenderPointF){0} :
+        (ArRenderPointF){capture_offset.x - obj_apron, capture_offset.y};
+  }
+  DioramaSkyboxSourceMapping resident_mapping={0};
+  if (options->draw_resident_skybox && !rom_source) {
+    resident_mapping=(DioramaSkyboxSourceMapping){
+        .meta={span_count,source_width,source_height,pixel_aspect},
+        .output={out_w,out_h,capture_offset.x,capture_offset.y},
+        .vertical={raw_vertical.capture_y0,raw_vertical.capture_y1,
+                   raw_vertical.texture_v0,raw_vertical.texture_v1},
+        .follow={motion_follow[0],motion_follow[1],motion_follow[2],motion_follow[3]},
+        .fit={motion_follow[7]}};
+    for (unsigned i=0;i<span_count;++i) {
+      float *band=resident_mapping.bands[i];
+      DioramaSkyboxUvRange(source_width,spans[i].x0,spans[i].x1,blur_radius,&band[0],&band[1]);
+      const float shift=subpixel_u+(span_shift_texels?span_shift_texels[i]/source_width:0);
+      band[0]+=shift;band[1]+=shift;
+      if (spans[i].x1<=spans[i].x0)band[0]=band[1]=0;
+      band[2]=spans[i].y0;band[3]=spans[i].y1;
+    }
+  }
+  /* Resolve the same sky window before filtering. The weather renderer
+   * projects its rigid cloud anchor, then inverts each destination strip into
+   * this source texture. Raster seams and generated motion are applied once. */
+  if (!rom_source && scene->sky_weather && effect_projection &&
+      !effect_projection->bg2_plane.valid && vertical_valid && fitted_width>0) {
+    DioramaProjection weather=*effect_projection;
+    weather.bg2_plane=(DioramaPlaneProjection){0};
+    weather.bg2_skybox=(DioramaSkyboxProjection){.active_band=-1,.to_texture=true,
+        .capture_offset={capture_offset.x-obj_apron,capture_offset.y},
+        .texture_offset=capture_offset,.motion_source=motion_source};
+    DioramaSkyboxProjection *sky=&weather.bg2_skybox;
+    memcpy(sky->motion_follow,motion_follow,sizeof(motion_follow));
+    for (unsigned i=0;i<span_count;++i) {
+      const float y0=fmaxf(spans[i].y0,vertical.capture_y0);
+      const float y1=fminf(spans[i].y1,vertical.capture_y1);
+      if (y1<=y0 || spans[i].x1<=spans[i].x0)continue;
+      const float centre=.5f*(band_u0[i]+band_u1[i])+subpixel_u+
+          (span_shift_texels?span_shift_texels[i]/source_width:0);
+      const float half=.5f*fitted_width/source_width;
+      const float t0=DioramaSkyboxVerticalMapping_Fraction(&vertical,y0);
+      const float t1=DioramaSkyboxVerticalMapping_Fraction(&vertical,y1);
+      const float v0=vertical.texture_v0+(vertical.texture_v1-vertical.texture_v0)*t0;
+      const float v1=vertical.texture_v0+(vertical.texture_v1-vertical.texture_v0)*t1;
+      sky->bands[sky->count++]=(DioramaSkyboxBandProjection){
+          (centre-half)*source_width-capture_offset.x,v0*source_height-capture_offset.y,
+          (centre+half)*source_width-capture_offset.x,v1*source_height-capture_offset.y,t0,t1};
+    }
+    if (options->draw_resident_skybox) {
+      sky->resident=resident_mapping;
+      sky->count=span_count;
+    }
+    Diorama_MergeSkyWeatherBands(sky);
+    if (sky->count) {
+      bool composited;
+      skybox_texture=CompositeSkyWeather(device,skybox_texture,source_width,source_height,scene,&weather,&composited,&outcome);
+      if (!ArRenderTexture_IsValid(skybox_texture))return outcome;
+      if (composited) {
+        source_dynamic=true; /* Animated weather must never reuse a stale blur. */
+        effect_projection->bg2_skybox.weather_composited=true;
+      }
+    }
+  }
+  if ((blur_requested && options->skybox_prefilter) || grade->strength > 0) {
+    PresentationOutcome prefilter_outcome;
+    const ArRenderTexture prefiltered = BuildDioramaSkyboxPrefilter(
+        device, skybox_texture, source_width, source_height,
+        out_w, out_h, tint, blur_requested ? blur_radius : 0, rom_source,
+        source_revision, source_dynamic, grade, &prefilter_outcome);
+    outcome = PresentationOutcome_Combine(outcome, prefilter_outcome);
+    if (!PresentationOutcome_IsUsable(prefilter_outcome))
+      return prefilter_outcome;
+    if (ArRenderTexture_IsValid(prefiltered)) {
+      skybox_texture = prefiltered;
+      tint = kSkyboxFull;
+      prefiltered_skybox = true;
+    }
+  }
+  if (blur_requested && !prefiltered_skybox) {
+    const DioramaBlurEffectParams params = {
+      .texel_width = 1.0f / (float)source_width,
+      .texel_height = 1.0f / (float)source_height,
+      .radius = blur_radius,
+    };
+    blur_bound = DioramaEffectBackend_BindBlur(device, &params);
+    if (!blur_bound) {
+      outcome = kPresentationOutcome_OptionalOmitted;
+      if (!DioramaEffectBackend_Unbind(device))
+        return kPresentationOutcome_CoreFailure;
+    }
+  }
+
   if (options->draw_resident_skybox && !rom_source) {
     DioramaSkyboxSourceDraw draw = {
       .indices = indices, .vertex_count = 4, .index_count = 6, .blend = draw_state.blend,
       .texture_width = source_width, .texture_height = source_height,
       .radius = blur_bound ? blur_radius : 0, .linear = true,
+      .cloud_light = *cloud_light,
       .motion_slot = motion_source == 4 ? 5 : motion_source == 3 ? 3 : 6,
-      .mapping = {.meta = {span_count, source_width, source_height, pixel_aspect},
-        .output = {out_w, out_h, capture_offset.x, capture_offset.y},
-        .vertical = {raw_vertical.capture_y0, raw_vertical.capture_y1,
-                     raw_vertical.texture_v0, raw_vertical.texture_v1},
-        .follow = {motion_follow[0], motion_follow[1], motion_follow[2], motion_follow[3]},
-        .fit = {motion_follow[7]}}};
-    for (unsigned i = 0; i < span_count; ++i) {
-      float *band = draw.mapping.bands[i];
-      DioramaSkyboxUvRange(source_width, spans[i].x0, spans[i].x1, blur_radius, &band[0], &band[1]);
-      const float span_u = span_shift_texels ? span_shift_texels[i] / source_width : 0.0f;
-      band[0] += subpixel_u + span_u;
-      band[1] += subpixel_u + span_u;
-      if (spans[i].x1 <= spans[i].x0) band[0] = band[1] = 0;
-      band[2] = spans[i].y0;
-      band[3] = spans[i].y1;
-    }
+      .mapping = resident_mapping};
     if (vertical_valid) {
       const ArRenderVertex2D verts[] = {
         {{0,0},tint,{0,0}}, {{out_w,0},tint,{1,0}},
@@ -1659,10 +1750,38 @@ static PresentationOutcome DrawDioramaSkybox(
         projection->resident = draw.mapping;
         projection->count = span_count;
         projection->active_band = -1;
+        /* Retain the captured-frame projection for small CPU-authored details
+         * too. Resident effects still apply generated motion on the GPU. The
+         * fit above already resolved these values; no readback is required. */
+        for(unsigned i=0;i<span_count;++i) {
+          const float y0=fmaxf(spans[i].y0,vertical.capture_y0);
+          const float y1=fminf(spans[i].y1,vertical.capture_y1);
+          if(y1<=y0||spans[i].x1<=spans[i].x0||fitted_width<=0)continue;
+          const float center=.5f*(band_u0[i]+band_u1[i])+subpixel_u+
+              (span_shift_texels?span_shift_texels[i]/source_width:0);
+          const float half=.5f*fitted_width/source_width;
+          const float t0=DioramaSkyboxVerticalMapping_Fraction(&vertical,y0);
+          const float t1=DioramaSkyboxVerticalMapping_Fraction(&vertical,y1);
+          const float v0=vertical.texture_v0+(vertical.texture_v1-vertical.texture_v0)*t0;
+          const float v1=vertical.texture_v0+(vertical.texture_v1-vertical.texture_v0)*t1;
+          projection->bands[i]=(DioramaSkyboxBandProjection){
+              (center-half)*source_width-capture_offset.x,v0*source_height-capture_offset.y,
+              (center+half)*source_width-capture_offset.x,v1*source_height-capture_offset.y,t0,t1};
+        }
       }
     }
     if (blur_bound && !DioramaEffectBackend_Unbind(device)) return kPresentationOutcome_CoreFailure;
     return outcome;
+  }
+  if(!rom_source&&DioramaCloudLight_Active(cloud_light)) {
+    const DioramaSceneryLightEffectParams material={.illumination=UnlitSceneryMap(device),
+      .texel_width=1.f/source_width,.texel_height=1.f/source_height,
+      .blur_radius=blur_bound?blur_radius:0,.mode=blur_bound?1:0,.shade={1,1,1,1},
+      .cloud_light=*cloud_light};
+    if(!DioramaEffectBackend_BindSceneryLight(device,&material)) {
+      (void)DioramaEffectBackend_Unbind(device);return kPresentationOutcome_CoreFailure;
+    }
+    blur_bound=true; /* The final material now owns blur and cloud illumination. */
   }
   for (unsigned i = 0; i < span_count; i++) {
     /* The layer capture may contain unavailable top/bottom rows when another
@@ -1997,7 +2116,7 @@ int Diorama_ResolveSceneLayers(const DioramaScene *scene,
 static PresentationOutcome DrawPeriodicDioramaSkybox(
     ArRenderDevice *device, const DioramaCapture *capture,
     const DioramaViewGeometry *geometry, float reference_z,
-    DioramaProjection *projection) {
+    const DioramaCloudLight *cloud_light, DioramaProjection *projection) {
   ArRenderVertex2D vertices[DIORAMA_VERTS_PER_LAYER];
   int32_t indices[DIORAMA_INDICES_PER_LAYER];
   ArRenderPointF motion = {0};
@@ -2037,14 +2156,34 @@ static PresentationOutcome DrawPeriodicDioramaSkybox(
     .address_u = kArRenderTextureAddressMode_Wrap,
     .address_v = kArRenderTextureAddressMode_Wrap,
   };
+  /* UVs already contain unwrapped world coordinates. Only the artwork
+   * repeats every page; an authored light must not repeat with it. Undo the
+   * native one-row sampling offset when evaluating the lighting field. */
+  DioramaCloudLight light = *cloud_light;
+  light.source[0] = 0;
+  light.source[1] = -1;
+  light.source[2] = light.source[3] = 256;
   const DioramaSkyboxSourceDraw source = {.vertices = vertices, .indices = indices,
       .vertex_count = count, .index_count = index_count, .blend = state.blend,
-      .texture_width = 256, .texture_height = 256, .motion_slot = 0, .periodic = true};
+      .texture_width = 256, .texture_height = 256, .motion_slot = 0, .periodic = true,
+      .cloud_light = light};
+  const bool material = !geometry->options->draw_resident_skybox &&
+      DioramaCloudLight_Active(&light);
+  if (material) {
+    const DioramaSceneryLightEffectParams params = {
+        .illumination = UnlitSceneryMap(device), .shade = {1,1,1,1},
+        .texel_width = 1.f / 256, .texel_height = 1.f / 256, .cloud_light = light};
+    if (!DioramaEffectBackend_BindSceneryLight(device, &params)) {
+      (void)DioramaEffectBackend_Unbind(device);
+      return kPresentationOutcome_CoreFailure;
+    }
+  }
   const bool submitted = geometry->options->draw_resident_skybox
       ? geometry->options->draw_resident_skybox(device, capture->skybox->texture, &source)
       : SubmitDioramaGeometry(device, capture->skybox->texture,
           vertices, count, indices, index_count, &state);
-  if (!submitted)
+  const bool restored = !material || DioramaEffectBackend_Unbind(device);
+  if (!submitted || !restored)
     return kPresentationOutcome_CoreFailure;
   if (projection) {
     projection->bg2_skybox = (DioramaSkyboxProjection){
@@ -2152,7 +2291,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
         if (resolved[i].plane == SR_PPU_OVERLAY_BG1)
           reference_z = resolved[i].z - 0.5f;
       const PresentationOutcome periodic = DrawPeriodicDioramaSkybox(
-          device, capture, geometry, reference_z, projection);
+          device, capture, geometry, reference_z, &scene->cloud_light, projection);
       if (periodic != kPresentationOutcome_OptionalOmitted) return periodic;
       /* A camera looking past the plane's horizon uses the ordinary captured
        * skybox. Never submit partially initialized inverse-projection data. */
@@ -2236,6 +2375,12 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
         span_shift = held_shift;
         if (held_rows.active) row_shift = &held_rows;
       }
+      DioramaCloudLight sky_light=scene->cloud_light;
+      /* The private sky capture can have a different origin from BG2's plane.
+       * Use the same capture mapping as fixed BG2 effect anchors, including
+       * the OBJ apron and interpolated private-source offset. */
+      sky_light.source[0]+=capture->obj_apron-capture_offset.x;
+      sky_light.source[1]-=capture_offset.y;
       const PresentationOutcome skybox = DrawDioramaSkybox(
           device, skybox_texture, skybox_apron, skybox_width, capture->height,
           geometry->width, geometry->height, both,
@@ -2250,7 +2395,8 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
           face_skybox ? capture->authentic_y0 + kDeathHeimFaceRows : 0,
           face_skybox ? DeathHeimCloudTop(capture, geometry, resolved, resolved_count) : NAN,
           projection && (face_skybox || !projection->bg2_plane.valid)
-              ? &projection->bg2_skybox : NULL, &skybox_options, &scene->background_heat, &skybox_grade);
+              ? &projection->bg2_skybox : NULL, &skybox_options, &scene->background_heat, &sky_light, &skybox_grade,
+          scene,projection);
       outcome = PresentationOutcome_Combine(outcome, skybox);
       if (!PresentationOutcome_IsUsable(skybox)) {
         return kPresentationOutcome_CoreFailure;
@@ -3483,8 +3629,10 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       geometry->options->depth_shade;
   const bool scenery = description->plane == SR_PPU_OVERLAY_BG1 ||
       description->plane == kDioramaPlane_Bg1Hi || description->plane == kDioramaPlane_Bg1Far;
+  const bool cloud_background=DioramaCloudLight_Active(&scene->cloud_light)&&
+      (description->plane==SR_PPU_OVERLAY_BG2||description->plane==kDioramaPlane_Bg2Hi||description->plane==kDioramaPlane_Bg2Far);
   const int priority=DioramaPlaneObjectPriority(description->plane);
-  const bool actor=priority>=0 && scene->actor_light &&
+  const bool actor=priority>=0 && (scene->actor_light || scene->native_bloom.set) &&
       capture->pixels[kDioramaPlane_ObjAttributes0+priority] &&
       ArRenderTexture_IsValid(textures[kDioramaPlane_ObjAttributes0+priority]);
   const float dimming = scenery ? fminf(1, fmaxf(0, scene->bg1_dimming)) : 0;
@@ -3507,7 +3655,9 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       .dimming = dimming,
       .dimming_ramp = scene->bg1_dimming_ramp,
       .exposure = scenery ? scene->scenery_exposure : NULL,
-      .lighting = {.illumination = scenery ? scene->scenery_lightmap : actor ? scene->actor_lightmaps[0] : ArRenderTexture_Invalid(),
+      .lighting = {.illumination = cloud_background ? UnlitSceneryMap(device) : scenery ? scene->scenery_lightmap : actor ? scene->actor_lightmaps[0] : ArRenderTexture_Invalid(),
+          .cloud_light = cloud_background ? scene->cloud_light : (DioramaCloudLight){0},
+          .heat = scenery && DioramaHeat_Active(&scene->scenery_heat) ? scene->scenery_heat : (DioramaHeat){0},
           .grade = scenery ? scene->scenery_grade : (DioramaSceneryGrade){0},
           .attributes = actor ? textures[kDioramaPlane_ObjAttributes0+priority] : ArRenderTexture_Invalid(),
           .enemy_illumination = scene->actor_lightmaps[1],
@@ -3560,6 +3710,143 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       output_frame, scene->plane_effect, scene->plane_effect_userdata,
       description->plane, out_projection, scene->render->source_effect_batch);
   return PresentationOutcome_Combine(outcome, effect);
+}
+
+static bool PrepareSceneryLightmap(ArRenderDevice *device, DioramaScene *scene,
+    const DioramaProjection *projection) {
+  if (ArRenderTexture_IsValid(scene->scenery_lightmap)) return true;
+  if (scene->scenery_light && projection &&
+      ArRenderCapabilities_Has(ArRenderDevice_Capabilities(device),
+          kArRenderCapability_CustomShaders | kArRenderCapability_ScopedRenderTargets)) {
+    int width, height;
+    if (!ArRenderDevice_GetOutputSize(device, &width, &height))
+      return false;
+    const ArRenderTexture lightmap = EnsureDioramaScratchTarget(
+        device, &s_diorama_lightmap, width, height, kArRenderFilter_Linear);
+    ArRenderTargetState saved;
+    if (!ArRenderTexture_IsValid(lightmap) ||
+        ArRenderDevice_BeginTarget(device, lightmap, &saved) != kArRenderTargetBegin_Ready)
+      return false;
+    const DioramaSourceEffectBatch batch = scene->render->source_effect_batch;
+    bool drawn = ArRenderDevice_Clear(device, (ArRenderColorF){0,0,0,1}) &&
+        (!batch || batch(device, true));
+    if (drawn) {
+      drawn = scene->scenery_light(scene->plane_effect_userdata, projection);
+      if (batch) drawn = batch(device, false) && drawn;
+    }
+    const bool restored = ArRenderDevice_EndTarget(device, &saved);
+    if (!drawn || !restored) return false;
+    scene->scenery_lightmap = lightmap;
+  }
+  return true;
+}
+
+/* The original projected backgrounds are drawn once. Filtering only their
+ * small radiance map preserves native texels, raster animation and depth.
+ * Foreground priority bands, actors and HUD retain their normal draw slots. */
+static bool NativeBloomBackgroundPlane(int plane) {
+  return plane == kDioramaPlane_Backdrop || LayerGetsEdgeAA(plane);
+}
+
+static bool NativeBloomDraw(ArRenderDevice *device, ArRenderTexture texture,
+    const ArRenderRectF *source, const ArRenderRectF *destination,
+    float strength, ArRenderBlendMode blend) {
+  const ArRenderDrawState state = {.flags=kArRenderDrawState_Blend|kArRenderDrawState_Tint,
+      .blend=blend, .tint={strength,strength,strength,1}};
+  return ArRenderDevice_DrawTextureWithState(device,texture,source,destination,&state);
+}
+
+static bool PrepareNativeBloom(ArRenderDevice *device, const DioramaCapture *capture,
+    DioramaScene *scene, DioramaViewGeometry *geometry,
+    ArRenderTexture *textures, const DioramaResolvedLayer *resolved, int resolved_count,
+    ArRenderOutputFrame *output, DioramaProjection *projection,
+    uint32_t *consumed, ArRenderTexture *radiance) {
+  *consumed=0; *radiance=ArRenderTexture_Invalid();
+  if (!scene->native_bloom.set ||
+      !ArRenderCapabilities_Has(ArRenderDevice_Capabilities(device),
+          kArRenderCapability_CustomShaders|kArRenderCapability_ScopedRenderTargets) ||
+      !DioramaEffectBackend_IsAvailable(device,kDioramaEffect_NativeBloom)) return false;
+  const DioramaNativeBloom *style=&scene->native_bloom;
+  const int w=output->output_width,h=output->output_height;
+  const float reduction=fminf(1,fminf(640.0f/w,360.0f/h));
+  const int bw=(int)ceilf(w*reduction),bh=(int)ceilf(h*reduction);
+  const ArRenderTexture art=EnsureDioramaScratchTarget(device,&s_diorama_bloom[0],w,h,kArRenderFilter_Linear);
+  const ArRenderTexture horizontal=EnsureDioramaScratchTarget(device,&s_diorama_bloom[1],bw,bh,kArRenderFilter_Linear);
+  const ArRenderTexture glow=EnsureDioramaScratchTarget(device,&s_diorama_bloom[2],bw,bh,kArRenderFilter_Linear);
+  if (!ArRenderTexture_IsValid(art)||!ArRenderTexture_IsValid(horizontal)||!ArRenderTexture_IsValid(glow)) return false;
+  ArRenderTargetState saved;
+  if (ArRenderDevice_BeginTarget(device,art,&saved)!=kArRenderTargetBegin_Ready) return false;
+  DioramaScene background=*scene;
+  background.plane_effect=NULL; background.scenery_light=NULL; background.actor_light=NULL;
+  background.native_bloom=(DioramaNativeBloom){0};
+  ArRenderOutputFrame frame;
+  bool ok=ArRenderOutputFrame_Begin(device,output->viewport,
+      (ArRenderColorF){0,0,0,1},(ArRenderColorF){0,0,0,1},&frame);
+  if (ok) ok=PresentationOutcome_IsUsable(DrawResolvedDioramaSkybox(device,capture,
+      &background,geometry,textures,resolved,resolved_count,projection));
+  /* Build authored illumination after the sky publishes its UV mapping,
+   * before extracting radiance. User-added lights and dimming still work. */
+  if (ok) ok=PrepareSceneryLightmap(device,scene,projection);
+  background.scenery_lightmap=scene->scenery_lightmap;
+  DioramaFocalAperture aperture;
+  DioramaCapture focal_capture=*capture;
+  DioramaViewGeometry focal_geometry=*geometry;
+  if (DioramaUsesCaptureApron(capture,SR_PPU_OVERLAY_BG1))
+    DioramaExpandCaptureApron(&focal_capture,&focal_geometry,SR_PPU_OVERLAY_BG1);
+  PrepareDioramaAperture(&focal_capture,&background,&focal_geometry,textures,resolved,resolved_count,&aperture);
+  PresentationOutcome priority_outcome;
+  const ArRenderTexture priority=BuildDioramaPrioritySurface(device,&focal_capture,&background,
+      textures,resolved,resolved_count,&priority_outcome);
+  ok=ok && PresentationOutcome_IsUsable(priority_outcome);
+  int order[kDioramaLayerCount];
+  const int count=ResolveDioramaDrawOrder(&background,resolved,resolved_count,order);
+  uint32_t mask=0;
+  for (int i=0;ok && i<count;++i) {
+    const DioramaResolvedLayer *layer=&resolved[order[i]];
+    const DioramaLayerDesc *description=DioramaDescForPlane(layer->plane);
+    if (!description) continue;
+    if (!NativeBloomBackgroundPlane(layer->plane)) {
+      if (DioramaLayerIsDrawable(description,textures,capture->pixels,&background)) break;
+      continue;
+    }
+    ok=PresentationOutcome_IsUsable(DrawResolvedDioramaLayer(device,capture,&background,
+        geometry,&aperture,textures,priority,layer,&frame,projection));
+    mask|=1u<<layer->plane;
+  }
+  if(ok)ok=DioramaAstralRift_DrawDust(device,scene,capture,projection);
+  const bool restored=ArRenderDevice_EndTarget(device,&saved);
+  if (!ok||!restored) return false;
+  /* Radius follows native image pixels, not monitor pixels. Five bilinear
+   * taps per axis approximate a nine-tap Gaussian, with no CPU readback. */
+  const float radius=style->radius*geometry->height/capture->height/3.230769f;
+  for (unsigned pass=0;pass<2;++pass) {
+    if (ArRenderDevice_BeginTarget(device,pass?glow:horizontal,&saved)!=kArRenderTargetBegin_Ready) return false;
+    const DioramaNativeBloomEffectParams params={
+        .step_x=pass?0:radius/w,.step_y=pass?radius/h:0,
+        .threshold=style->threshold,.mode=(float)pass,
+        .saturation=style->saturation,.contrast=style->contrast};
+    const ArRenderRectF dst={0,0,bw,bh};
+    ok=DioramaEffectBackend_BindNativeBloom(device,&params) &&
+        NativeBloomDraw(device,pass?horizontal:art,NULL,&dst,1,kArRenderBlendMode_Opaque);
+    ok=DioramaEffectBackend_Unbind(device)&&ok;
+    const bool ended=ArRenderDevice_EndTarget(device,&saved);
+    if (!ok||!ended) return false;
+  }
+  if (!ArRenderOutputFrame_RestoreViewport(output)) return false;
+  const ArRenderRectF source={output->viewport.x,output->viewport.y,geometry->width,geometry->height};
+  const ArRenderRectF dest={0,0,geometry->width,geometry->height};
+  const DioramaNativeBloomEffectParams grade={.mode=2,.saturation=style->saturation,.contrast=style->contrast};
+  ok=DioramaEffectBackend_BindNativeBloom(device,&grade)&&
+      NativeBloomDraw(device,art,&source,&dest,1,kArRenderBlendMode_Opaque);
+  ok=DioramaEffectBackend_Unbind(device)&&ok;
+  const ArRenderRectF glow_source={source.x*bw/w,source.y*bh/h,source.w*bw/w,source.h*bh/h};
+  const DioramaNativeBloomEffectParams gain={.mode=3,.gain=style->strength};
+  ok=ok&&DioramaEffectBackend_BindNativeBloom(device,&gain)&&
+      NativeBloomDraw(device,glow,&glow_source,&dest,1,kArRenderBlendMode_Add);
+  ok=DioramaEffectBackend_Unbind(device)&&ok;
+  if (!ok) return false;
+  *consumed=mask; *radiance=glow;
+  return true;
 }
 
 PresentationOutcome Diorama_Composite(ArRenderDevice *device,
@@ -3618,7 +3905,13 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   if (!PresentationOutcome_IsUsable(outcome) ||
       (scene->backdrop && !ArRenderOutputFrame_RestoreViewport(&output_frame)))
     goto failed;
-  const PresentationOutcome skybox = DrawResolvedDioramaSkybox(
+  DioramaScene illuminated = *scene;
+  illuminated.scenery_lightmap = ArRenderTexture_Invalid();
+  uint32_t bloom_planes=0;
+  ArRenderTexture bloom_light=ArRenderTexture_Invalid();
+  const bool bloom=PrepareNativeBloom(device,capture,&illuminated,&geometry,textures,resolved,
+      resolved_count,&output_frame,out_projection,&bloom_planes,&bloom_light);
+  const PresentationOutcome skybox = bloom ? kPresentationOutcome_Complete : DrawResolvedDioramaSkybox(
       device, capture, scene, &geometry, textures, resolved, resolved_count, out_projection);
   outcome = PresentationOutcome_Combine(outcome, skybox);
   if (!PresentationOutcome_IsUsable(outcome))
@@ -3626,35 +3919,13 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
 
   /* Skybox-anchored lights need the exact UV-band projection published by
    * the skybox draw, including aspect fit and raster scroll. Build their
-   * material map now, before any foreground surfaces or volume callbacks. */
-  DioramaScene illuminated = *scene;
-  illuminated.scenery_lightmap = ArRenderTexture_Invalid();
-  if (scene->scenery_light && out_projection &&
-      ArRenderCapabilities_Has(ArRenderDevice_Capabilities(device),
-          kArRenderCapability_CustomShaders | kArRenderCapability_ScopedRenderTargets)) {
-    int width, height;
-    if (!ArRenderDevice_GetOutputSize(device, &width, &height))
-      goto failed;
-    const ArRenderTexture lightmap = EnsureDioramaScratchTarget(
-        device, &s_diorama_lightmap, width, height, kArRenderFilter_Linear);
-    ArRenderTargetState saved;
-    if (!ArRenderTexture_IsValid(lightmap) ||
-        ArRenderDevice_BeginTarget(device, lightmap, &saved) != kArRenderTargetBegin_Ready)
-      goto failed;
-    const DioramaSourceEffectBatch batch = scene->render->source_effect_batch;
-    bool drawn = ArRenderDevice_Clear(device, (ArRenderColorF){0,0,0,1}) &&
-        (!batch || batch(device, true));
-    if (drawn) {
-      drawn = scene->scenery_light(scene->plane_effect_userdata, out_projection);
-      if (batch) drawn = batch(device, false) && drawn;
-    }
-    const bool restored = ArRenderDevice_EndTarget(device, &saved);
-    if (!drawn || !restored) goto failed;
-    illuminated.scenery_lightmap = lightmap;
-  }
-  /* Palette-only rooms need no full-screen light-map pass. A retained black
+   * material map now, before any foreground surfaces or volume callbacks.
+   * PrepareSceneryLightmap reuses the map if native bloom already built it. */
+  if (!PrepareSceneryLightmap(device,&illuminated,out_projection)) goto failed;
+  /* Palette/heat-only rooms need no full-screen light-map pass. A retained black
    * texel lets the same material shade their existing geometry in one draw. */
-  if (!ArRenderTexture_IsValid(illuminated.scenery_lightmap) && scene->scenery_grade.strength > 0 &&
+  if (!ArRenderTexture_IsValid(illuminated.scenery_lightmap) &&
+      (scene->scenery_grade.strength > 0 || DioramaHeat_Active(&scene->scenery_heat)) &&
       ArRenderCapabilities_Has(ArRenderDevice_Capabilities(device),kArRenderCapability_CustomShaders)) {
     illuminated.scenery_lightmap=UnlitSceneryMap(device);
     if (!ArRenderTexture_IsValid(illuminated.scenery_lightmap)) goto failed;
@@ -3662,14 +3933,18 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   memset(illuminated.actor_lightmaps,0,sizeof(illuminated.actor_lightmaps));
   bool actor_attributes=false;
   for(unsigned p=0;p<4;++p)actor_attributes |= capture->pixels[kDioramaPlane_ObjAttributes0+p]!=NULL;
-  if(scene->actor_light && actor_attributes && out_projection &&
+  if((scene->actor_light || bloom) && actor_attributes && out_projection &&
       ArRenderCapabilities_Has(ArRenderDevice_Capabilities(device),
           kArRenderCapability_CustomShaders | kArRenderCapability_ScopedRenderTargets)) {
     int width,height;
     if(!ArRenderDevice_GetOutputSize(device,&width,&height))goto failed;
     for(unsigned role=0;role<2;++role) {
-      ArRenderTexture reuse=scene->actor_light_reuse[role]==1 ? illuminated.scenery_lightmap :
-          role && scene->actor_light_reuse[role]==2 ? illuminated.actor_lightmaps[0] : ArRenderTexture_Invalid();
+      const bool receives_bloom=bloom && (scene->native_bloom.receivers & (2u<<role));
+      const bool same_bloom=!bloom || ((scene->native_bloom.receivers&6u)==0 || (scene->native_bloom.receivers&6u)==6);
+      ArRenderTexture reuse=!receives_bloom && scene->actor_light_reuse[role]==1 ? illuminated.scenery_lightmap :
+          role && same_bloom && (scene->actor_light_reuse[role]==2 ||
+              (scene->actor_light_reuse[role]==1 && scene->actor_light_reuse[0]==1) ||
+              !scene->actor_light) ? illuminated.actor_lightmaps[0] : ArRenderTexture_Invalid();
       if(ArRenderTexture_IsValid(reuse)) { illuminated.actor_lightmaps[role]=reuse;continue; }
       const ArRenderTexture map=EnsureDioramaScratchTarget(device,&s_diorama_actor_lightmaps[role],width,height,kArRenderFilter_Linear);
       ArRenderTargetState saved;
@@ -3678,8 +3953,12 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
       bool drawn=ArRenderDevice_Clear(device,(ArRenderColorF){0,0,0,1})&&
           (!batch || batch(device, true));
       if (drawn) {
-        drawn=scene->actor_light(scene->plane_effect_userdata,out_projection,2u<<role);
+        drawn=!scene->actor_light || scene->actor_light(scene->plane_effect_userdata,out_projection,2u<<role);
         if (batch) drawn = batch(device, false) && drawn;
+      }
+      if (drawn && receives_bloom) {
+        const ArRenderRectF dst={0,0,width,height};
+        drawn=NativeBloomDraw(device,bloom_light,NULL,&dst,scene->native_bloom.light*.25f,kArRenderBlendMode_Add);
       }
       const bool restored=ArRenderDevice_EndTarget(device,&saved);
       if(!drawn||!restored)goto failed;
@@ -3730,6 +4009,21 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   outcome = PresentationOutcome_Combine(outcome, priority_outcome);
   if (!PresentationOutcome_IsUsable(priority_outcome)) goto failed;
   for (int draw = 0; draw < draw_count; ++draw) {
+    const DioramaResolvedLayer *resolved_layer = &resolved[draw_order[draw]];
+    if (bloom_planes & (1u << resolved_layer->plane)) {
+      /* The native face is already composited. Authored atmosphere still
+       * belongs in its normal painter slot, outside the bloom extraction. */
+      const DioramaLayerDesc *description = DioramaDescForPlane(resolved_layer->plane);
+      if (resolved_layer->alpha && description &&
+          DioramaLayerIsProjectable(description, textures, capture->pixels, scene)) {
+        const PresentationOutcome effect = DioramaSubmitPlaneEffect(
+            &output_frame, scene->plane_effect, scene->plane_effect_userdata,
+            description->plane, out_projection, scene->render->source_effect_batch);
+        outcome = PresentationOutcome_Combine(outcome, effect);
+        if (!PresentationOutcome_IsUsable(effect)) goto failed;
+      }
+      continue;
+    }
     const PresentationOutcome layer = DrawResolvedDioramaLayer(
         device, capture, scene, &geometry, &aperture, textures,
         priority_surface, &resolved[draw_order[draw]], &output_frame, out_projection);
@@ -3748,15 +4042,18 @@ failed:
 }
 
 void Diorama_ResetCompositorResources(ArRenderDevice *device) {
+  DioramaAstralRift_Reset(device);
   /* Materials borrow the map's native handle, so release their states first. */
   DioramaEffectBackend_Reset(device);
   ArRenderDevice_DestroyTexture(device,s_diorama_unlit_map);
   s_diorama_unlit_map=ArRenderTexture_Invalid();
   ResetDioramaScratchPool(device, &s_diorama_lightmap);
+  for (unsigned i=0;i<3;++i) ResetDioramaScratchPool(device,&s_diorama_bloom[i]);
   for(unsigned role=0;role<2;++role)ResetDioramaScratchPool(device, &s_diorama_actor_lightmaps[role]);
   ResetDioramaSupersample(device);
   ResetDioramaPrioritySurface(device);
   ResetDioramaDofSource(device);
+  ResetDioramaScratchPool(device,&s_diorama_sky_weather);
   ResetDioramaStackGroup(device);
   ResetDioramaSkyboxPrefilter(device);
 }

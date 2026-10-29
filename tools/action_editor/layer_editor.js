@@ -154,6 +154,10 @@ function loadIniText(text, name) {
     const values = iniWords(line.slice(eq+1));
     if(region!==undefined)values.terrain=region;
     if(!terrainMask(values.terrain))continue;
+    if(token==='native-bloom') {
+      if(region!==undefined)throw Error('Native bloom belongs to the room.');
+      roomConfig(active).nativeBloom=parseNativeBloom(values);continue;
+    }
     if(token==='scenery-grade') {
       if(region!==undefined)throw Error('Scenery palette belongs to the room, not a terrain suffix.');
       roomConfig(active).grade=parseSceneryGrade(values);
@@ -324,7 +328,7 @@ function virtualIniLines(r) {
   }
   return lines;
 }
-const roomIniLines = r => [...bgPolicyIniLines(r),...sceneryGradeIniLines(r),...framingIniLines(r),...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r)];
+const roomIniLines = r => [...bgPolicyIniLines(r),...sceneryGradeIniLines(r),...nativeBloomIniLines(r),...framingIniLines(r),...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r)];
 function ownedIniLine(line) {
   const match=stripIniComment(line).match(/^([^=\s]+)\s*=/);
   if(!match)return false;
@@ -332,7 +336,7 @@ function ownedIniLine(line) {
   if(!key)return false;
   const [token,region]=key;
   return /^bg[12]-policy(-band)?$/.test(token)&&region===undefined||
-    token==='scenery-grade'&&region===undefined||
+    (token==='scenery-grade'||token==='native-bloom')&&region===undefined||
     EDITABLE_PLANE_TOKENS.has(token)&&region===undefined||
     token==='framing'&&!!terrainMask(region)||
     /^bg[12]-(virtual|pixels|stamp|map)$/.test(token)&&!!terrainMask(region);

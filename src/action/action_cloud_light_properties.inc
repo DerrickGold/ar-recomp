@@ -1,0 +1,11 @@
+/* member, INI key, default, minimum, maximum */
+CLOUD_PROPERTY(edge, "edge-strength", 9, 0, 16)
+CLOUD_PROPERTY(halo, "halo-strength", 1.3f, 0, 4)
+CLOUD_PROPERTY(streak, "streak-strength", 1.7f, 0, 4)
+CLOUD_PROPERTY(echo, "echo-strength", .55f, 0, 2)
+CLOUD_PROPERTY(falloff, "falloff", .42f, .05f, 1)
+CLOUD_PROPERTY(cover, "cloud-cover", .55f, 0, 1)
+CLOUD_PROPERTY(edge_position, "edge-position", .15f, .05f, .4f)
+CLOUD_PROPERTY(echo_position, "echo-position", .8f, .4f, .95f)
+CLOUD_PROPERTY(sun_depth, "sun-depth", 48, -85, 85)
+CLOUD_PROPERTY(background_brightness, "background-brightness", 1, 0, 1)

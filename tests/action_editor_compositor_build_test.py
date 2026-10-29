@@ -38,17 +38,21 @@ class CompositorBuildTest(unittest.TestCase):
 
     def test_generated_shaders(self):
         sources = shader_variants()
-        self.assertEqual(len(sources), 6)
+        self.assertEqual(len(sources), 7)
         for name, source in zip(SHADERS, sources):
             self.assertTrue(source.startswith('#version 300 es\nprecision highp float;'))
             self.assertNotIn('layout(set', source)
             self.assertNotRegex(source, r'layout\(location = \d+\) in')
             self.assertIn('layout(std140) uniform Context', source)
+            self.assertLess(source.index('uniform sampler2D u_texture'),
+                            source.index('vec4 sample_source('))
+            self.assertNotIn('#include', source)
             original = (ROOT / f'src/shaders/{name}.frag.glsl').read_text()
             # The adaptation only adds a coordinate shim; production shader
             # math after the first function is unchanged.
             first = re.search(r'^(?:void|vec[234]|float)\s+\w+\s*\(', original, re.M).start()
             body = original[first:].replace('texture(u_texture,', 'sample_source(')
+            body = body.replace('textureLod(u_texture,', 'sample_source_lod(')
             self.assertTrue(source.endswith(body))
 
     def test_optional_viewer_link_is_escaped_and_independent(self):

@@ -10,7 +10,7 @@ import re
 import subprocess
 from build_preview import ROOT, compiler_environment
 
-SHADERS = ('blur', 'rim', 'dof_edge', 'priority_surface', 'scenery_light', 'actor_light')
+SHADERS = ('blur', 'rim', 'dof_edge', 'priority_surface', 'scenery_light', 'actor_light', 'native_bloom')
 # Matches the semantic parameter bridge in compositor_preview.c. Refuse a
 # silent uniform-layout drift if production shader interfaces change.
 UNIFORMS = (
@@ -19,17 +19,25 @@ UNIFORMS = (
     [('float', name) for name in ('texel_w', 'texel_h', 'blur_radius', 'u_min',
                                   'u_max', 'v_min', 'v_max', 'edge_feather', 'lower_content_v_max')],
     [('vec2', 'size'), ('float', 'high_band'), ('float', 'additive')],
-    [('vec4', name) for name in ('filter_info', 'priority_info', 'light_info', 'shade', 'grade', 'grade_shadows', 'grade_highlights')],
+    [('vec4', name) for name in ('filter_info', 'priority_info', 'light_info', 'shade', 'grade', 'grade_shadows', 'grade_highlights',
+                               'heat_capture', 'heat_source', 'heat_bounds[4]', 'heat_motion[4]',
+                               'cloud_source', 'cloud_meta', 'cloud_regions[24]', 'cloud_background_dim')],
     [('vec4', name) for name in ('filter_info', 'light_info', 'attribute_info', 'bounds')],
+    [('vec4', name) for name in ('filter_info', 'grade_info')],
 )
+
+
+def shader_source(path):
+    text = path.read_text()
+    return re.sub(r'^#include "([^"\n]+)"', lambda m: shader_source(path.parent / m[1]), text, flags=re.M)
 
 
 def shader_variants():
     result = []
     for name, expected in zip(SHADERS, UNIFORMS):
-        text = (ROOT / f'src/shaders/{name}.frag.glsl').read_text()
+        text = shader_source(ROOT / f'src/shaders/{name}.frag.glsl')
         block = re.search(r'uniform Context \{(.*?)\};', text, re.S)
-        if not block or re.findall(r'(vec[24]|float)\s+(\w+)\s*;', block[1]) != expected:
+        if not block or re.findall(r'(vec[24]|float)\s+(\w+(?:\[\d+\])?)\s*;', block[1]) != expected:
             raise ValueError(f'Update the WASM uniform bridge for {name}')
         text = text.replace('#version 450', '#version 300 es\nprecision highp float;')
         text = re.sub(r'layout\(location = \d+\) in ', 'in ', text)
@@ -41,12 +49,18 @@ def shader_variants():
         # Same shader math, with a sampling shim for GL render-target orientation.
         # Uploaded pixels have v=0 at the top; FBOs have v=0 at the bottom.
         text = text.replace('texture(u_texture,', 'sample_source(')
+        text = text.replace('textureLod(u_texture,', 'sample_source_lod(')
         # The material's light map and GL fragment coordinates are both bottom
         # up, so their screen-space lookup needs no uploaded-image flip.
-        pos = re.search(r'^(?:void|vec[234]|float)\s+\w+\s*\(', text, re.M).start()
+        # Shared math may precede the shader declarations. The sampling shim
+        # must follow its sampler declaration, not simply the first helper.
+        pos = re.search(r'uniform sampler2D u_texture\s*;', text).end()
         text = text[:pos] + '''uniform bool u_flip_source;
 vec4 sample_source(vec2 uv) {
     return texture(u_texture, vec2(uv.x, u_flip_source ? 1.0-uv.y : uv.y));
+}
+vec4 sample_source_lod(vec2 uv, float lod) {
+    return textureLod(u_texture, vec2(uv.x, u_flip_source ? 1.0-uv.y : uv.y), lod);
 }
 ''' + text[pos:]
         result.append(text)
@@ -80,7 +94,7 @@ def build(output, compiler='emcc', scene=None):
                '-sSTACK_SIZE=1048576', '-sINITIAL_MEMORY=100663296', '-sALLOW_MEMORY_GROWTH=0',
                *['-Wl,--export=DioramaPreview_' + x for x in exports],
                *['-Wl,--export=RoomPreview_' + x for x in
-                 ('Load', 'Configure', 'Policy', 'SetView', 'Measure', 'Render', 'Reset', 'Width', 'Height', 'CameraX', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'FinalBattle', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'RecipeError', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'LoadPlayer', 'ReceiverStyle', 'PickReceiver', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],
+                 ('Load', 'Configure', 'CloudOpenings', 'Policy', 'SetView', 'Measure', 'Render', 'Reset', 'Width', 'Height', 'CameraX', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'FinalBattle', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'RecipeError', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'LoadPlayer', 'ReceiverStyle', 'PickReceiver', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],
                '-o', str(wasm)]
     subprocess.run(command, cwd=ROOT, env=compiler_environment(compiler), check=True)
     template = (ROOT / 'tools/action_editor/compositor_preview.html').read_text()

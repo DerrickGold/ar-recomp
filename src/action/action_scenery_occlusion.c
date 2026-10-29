@@ -32,7 +32,7 @@ void ActionEnvironmentScene_CaptureCanopy(const ActionEnvironmentScene *s,
       fabsf(e->field_style.angle)>70)return;
   const ActionEffectLocalRect *r=&e->geometry.data.rect;
   const float width=r->x1-r->x0,length=r->y1-r->y0;
-  if(!isfinite(width)||!isfinite(length)||!isfinite(e->world_x)||!isfinite(e->world_y)||
+  if(!isfinite(width)||!isfinite(length)||
       width<=0||width>16384||length<=0||length>16384)return;
   const unsigned columns=(unsigned)fminf(kActionCanopyMaxSpans,ceilf(width/16));
   const float top=e->world_y+r->y0,lean=tanf(e->field_style.angle*.01745329252f);
@@ -50,14 +50,14 @@ static unsigned Reverse(unsigned b) {
   b = ((b & 0x33) << 2) | ((b >> 2) & 0x33);
   return ((b << 4) | (b >> 4)) & 255;
 }
-static bool Tile(const ActionEnvironmentScene *s, unsigned bg, int x, int y,
+static bool Tile(const ActionEnvironmentScene *s, unsigned bg, int x, int y, bool all_bands,
                  ActionEnvironmentTileEdit *out) {
   ActionEnvironmentTileEdit edit;
   const bool edited = s->tile_edit &&
       s->tile_edit(s->tile_edit_context, bg, x / 8, y / 8, &edit);
-  /* A resolved replacement already owns its tile word. Empty/other-depth
-   * tiles cannot cast here, so neither needs a second metatile lookup. */
-  if (edited && (edit.replace || edit.blank || edit.band != 1)) {
+  /* A resolved replacement already owns its tile word. Occlusion can skip
+   * other depths; palette queries also resolve those tiles' native words. */
+  if (edited && (edit.replace || edit.blank || (!all_bands && edit.band != 1))) {
     *out = edit;
     return !out->blank && out->band == 1;
   }
@@ -92,8 +92,25 @@ bool ActionEnvironmentScene_OpacityRow(const ActionEnvironmentScene *s, unsigned
                                        uint8_t *bits) {
   if (!s || !s->vram || bg > 1 || !bits || (x & 7)) return false;
   ActionEnvironmentTileEdit tile;
-  Tile(s, bg, x, y, &tile);
+  Tile(s, bg, x, y, false, &tile);
   *bits = (uint8_t)Opacity(s, bg, &tile, (unsigned)y & 7);
+  return true;
+}
+bool ActionEnvironmentScene_PaletteIndex(const ActionEnvironmentScene *s, unsigned bg,
+    int x, int y, unsigned *index) {
+  if (!s || !s->vram || bg > 1 || !index || x < 0 || y < 0) return false;
+  ActionEnvironmentTileEdit tile;
+  (void)Tile(s, bg, x, y, true, &tile);
+  const unsigned row = (unsigned)y & 7, bit = 7 - ((unsigned)x & 7);
+  if (tile.blank || !tile.band || (tile.transparent[row] & (1u << bit))) return false;
+  const unsigned native_row = (tile.entry & 0x8000) ? 7 - row : row;
+  const unsigned native_bit = (tile.entry & 0x4000) ? 7 - bit : bit;
+  const unsigned at = (s->tile_base[bg] + (tile.entry & 0x3ff) * 16 + native_row) & 32767;
+  const unsigned lo = s->vram[at], hi = s->vram[(at + 8) & 32767];
+  const unsigned color = ((lo >> native_bit) & 1) | (((lo >> (native_bit + 8)) & 1) << 1) |
+      (((hi >> native_bit) & 1) << 2) | (((hi >> (native_bit + 8)) & 1) << 3);
+  if (!color || (tile.black[row] & (1u << bit))) return false;
+  *index = ((tile.entry >> 10) & 7) * 16 + color;
   return true;
 }
 static bool CaptureRuns(const ActionEnvironmentScene *s, ActionMoonlightOcclusion *out,
@@ -111,7 +128,7 @@ static bool CaptureRuns(const ActionEnvironmentScene *s, ActionMoonlightOcclusio
   for (int y = y0; y < y1; ++y) {
     if (!opacity && (y == y0 || !(y & 7)))
       for (int x = x0; x < x1; x += 8)
-        Tile(s, 0, x, y, &tiles[(x - x0) / 8]);
+        Tile(s, 0, x, y, false, &tiles[(x - x0) / 8]);
     uint16_t *previous = runs[(y - y0) & 1], *current = runs[(y - y0 + 1) & 1];
     unsigned count = 0, match = 0;
     int start = -1;
@@ -165,7 +182,7 @@ bool ActionEnvironmentScene_CaptureScenery(const ActionEnvironmentScene *s,
   for (unsigned y = 0; y < kActionSceneryRows; y += 8) {
     for (unsigned x = 0; x < kActionSceneryTileColumns; ++x) {
       ActionEnvironmentTileEdit tile;
-      Tile(s, 0, x0 + (int)x*8, y0 + (int)y, &tile);
+      Tile(s, 0, x0 + (int)x*8, y0 + (int)y, false, &tile);
       for (unsigned row = 0; row < 8; ++row)
         cache->current[y+row][x] = (uint8_t)Opacity(s, 0, &tile, row);
     }

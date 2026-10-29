@@ -6,7 +6,11 @@
 #include "action/action_effect_preview.h"
 #include "action/action_environment_exposure.h"
 #include "action/action_exposure.h"
+#include "action/action_storm.h"
+#include "action/action_storm_ground.h"
 #include "render/scenery_dimming.h"
+#include "render/mist_rainbow.h"
+#include "render/scene3d_math.h"
 #include "action/action_effect_projection.h"
 #include "action/action_effect_source.h"
 #include "action/action_effect_render_internal.h"
@@ -62,7 +66,7 @@ static void Geometry(void) {
 }
 static void HeatAndParticlePaths(void) {
   Parse("[effects]\nversion=1\n[emitter:01:02:0:heat-haze:1]\nx=256\ny=128\nwidth=512\nheight=256\namplitude=1.5\n");
-  const DioramaHeat heat=ActionHeat_Prepare(&frame,0,0,512,256);
+  const DioramaHeat heat=ActionHeat_Prepare(&frame,kActionEffectProjectionPlane_Bg2,0,0,512,256);
   assert(DioramaHeat_Active(&heat));
   const ArRenderPointF centre={.5f,.5f},edge={0,.5f};
   const ArRenderPointF moved=DioramaHeat_Uv(&heat,centre),still=DioramaHeat_Uv(&heat,edge);
@@ -71,8 +75,25 @@ static void HeatAndParticlePaths(void) {
   DioramaHeat overlap=heat;memcpy(overlap.bounds[1],heat.bounds[0],sizeof(heat.bounds[0]));memcpy(overlap.motion[1],heat.motion[0],sizeof(heat.motion[0]));
   const ArRenderPointF combined=DioramaHeat_Uv(&overlap,centre);
   assert(combined.x==moved.x&&combined.y==moved.y);
-  const DioramaHeat disabled=ActionHeat_Prepare(NULL,0,0,512,256);assert(!DioramaHeat_Active(&disabled));
-  unsigned line;const char *invalid="[effects]\nversion=1\n[emitter:01:02:0:heat-haze:1]\nanchor=bg1\n";
+  const DioramaHeat disabled=ActionHeat_Prepare(NULL,kActionEffectProjectionPlane_Bg2,0,0,512,256);assert(!DioramaHeat_Active(&disabled));
+  /* BG1 regions must not leak into BG2; scrolling changes only the capture
+   * coordinates, not the phase or the world-space displacement. */
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:heat-haze:1]\nanchor=bg1\nx=256\ny=128\nwidth=512\nheight=256\namplitude=1.5\n");
+  const DioramaHeat terrain=ActionHeat_Prepare(&frame,kActionEffectProjectionPlane_Bg1,0,0,512,256);
+  const DioramaHeat background=ActionHeat_Prepare(&frame,kActionEffectProjectionPlane_Bg2,0,0,512,256);
+  assert(DioramaHeat_Active(&terrain)&&!DioramaHeat_Active(&background));
+  assert(!ActionEffectRecipes_NeedsBgMask(&recipes,1,2,0,0));
+  assert(!ActionEffectRecipes_NeedsBgMask(&recipes,1,2,0,1));
+  const DioramaHeat scrolled=ActionHeat_Prepare(&frame,kActionEffectProjectionPlane_Bg1,64,32,512,256);
+  const ArRenderPointF shifted=DioramaHeat_Uv(&scrolled,(ArRenderPointF){.375f,.375f});
+  assert(fabsf(shifted.x*512+64-moved.x*512)<.0001f);
+  assert(fabsf(shifted.y*256+32-moved.y*256)<.0001f);
+  const DioramaHeat outside=ActionHeat_Prepare(&frame,kActionEffectProjectionPlane_Bg1,512,0,512,256);
+  assert(!DioramaHeat_Active(&outside));
+  /* The source centre may be offscreen while its softened edge is visible. */
+  const DioramaHeat edge_visible=ActionHeat_Prepare(&frame,kActionEffectProjectionPlane_Bg1,384,0,512,256);
+  assert(DioramaHeat_Active(&edge_visible));
+  unsigned line;const char *invalid="[effects]\nversion=1\n[emitter:01:02:0:heat-haze:1]\nanchor=bg2-raster\n";
   assert(!ActionEffectRecipes_Parse(&recipes,invalid,strlen(invalid),&line));
   invalid="[effects]\nversion=1\n[emitter:01:02:0:particle-path:1]\npoints=0,0 0,0\n";
   assert(!ActionEffectRecipes_Parse(&recipes,invalid,strlen(invalid),&line));
@@ -302,7 +323,7 @@ static void BillboardExtents(void) {
 }
 static void DeferredAuthored(void) {
   static const struct {const char *kind,*extra;} cases[]={
-    {"soft-light",""},{"motes",""},{"free-mist",""},{"ground-mist","mist-height=26\n"},
+    {"storm-lightning","lifetime=120\nactivity=.2\nseed=7\n"},{"soft-light",""},{"motes",""},{"free-mist",""},{"ground-mist","mist-height=26\n"},
     {"particle-area","particles=8\npattern=snow\n"},{"light-fan",""},{"water-surface",""},
     {"fireflies","particles=6\n"},{"drips",""},{"waterfall-spray",""},{"cloud-bank",""},{"foliage-shadow","angle=23\nseed=1234\n"},{"canopy-light","angle=23\nseed=1234\n"},
     {"cloud-bank","points=-96,24 -48,-8 0,0 48,-24 96,16\namplitude=17\ndrift=110\n"},
@@ -321,6 +342,13 @@ static void DeferredAuthored(void) {
         "[effects]\nversion=1\n[emitter:01:02:0:%s:123]\nx=128\ny=160\nwidth=192\nheight=128\n%s",
         cases[k].kind,cases[k].extra);Parse(text);
     assert(frame.authored_count==1);
+    if(frame.authored[0].kind==kActionEffect_AuthoredStorm) {
+      for(unsigned tick=0;tick<120;++tick) {
+        frame.authored[0].pulse_ticks=tick;
+        assert(ActionSceneDecorationRender_Build(&frame,frame.authored[0].render_layer,true,true,Project,NULL,NULL,&a));
+        if(a.vertex_count)break;
+      }
+    }
     covered[frame.authored[0].kind]=true;
     frame.authored_floor[0]=(ActionEffectFloorField){.count=2,.spans={{64,128,176,26},{128,192,192,26}}};
     frame.authored[0].flags|=kActionEffectFlag_Visible;
@@ -339,7 +367,7 @@ static void DeferredAuthored(void) {
     assert(total && cpu_total);
   }
   for(unsigned kind=0;kind<kActionEffect_KindCount;++kind) {
-    if(ActionEffectRecipes_IsEmitter(kind) && kind!=kActionEffect_AuthoredHeat && !covered[kind]) {
+    if(ActionEffectRecipes_IsEmitter(kind) && kind!=kActionEffect_AuthoredHeat && kind!=kActionEffect_AuthoredCloudLight && !covered[kind]) {
       fprintf(stderr,"Missing deferred emitter fixture: %s\n",ActionEffectRecipes_KindName(kind));
       assert(covered[kind]);
     }
@@ -507,11 +535,12 @@ static void TexturedCanopy(void) {
     if(!seed)b=a;
     assert(a.vertex_count==b.vertex_count&&a.index_count==b.index_count);
     uint64_t hash=UINT64_C(14695981039346656037);
-    const int column=(int)(a.vertices[0].tex_coord.x*kActionMaskAtlasColumns),row=(int)(a.vertices[0].tex_coord.y*4);
+    const int column=(int)(a.vertices[0].tex_coord.x*kActionMaskAtlasColumns),row=(int)(a.vertices[0].tex_coord.y*kActionMaskAtlasHeight/kActionMaskCellSize);
     for(int i=0;i<a.vertex_count;++i) {
       assert(!memcmp(&a.vertices[i].position,&b.vertices[i].position,sizeof(ArRenderPointF)));
       const ArRenderPointF uv=a.vertices[i].tex_coord;
-      assert((int)(uv.x*kActionMaskAtlasColumns)==column&&(int)(uv.y*4)==row&&row==1);
+      assert((int)(uv.x*kActionMaskAtlasColumns)==column&&
+          (int)(uv.y*kActionMaskAtlasHeight/kActionMaskCellSize)==row&&row==1);
       const uint8_t *bytes=(const uint8_t *)&a.vertices[i].tex_coord;
       for(size_t j=0;j<sizeof(ArRenderPointF);++j){hash^=bytes[j];hash*=UINT64_C(1099511628211);}
     }
@@ -1041,6 +1070,20 @@ static void EditedOcclusion(void) {
   test_tile.band = 1;
   test_tile.blank = 1;
   assert(ActionEnvironmentScene_OpacityRow(&scene, 0, 0, 0, &bits) && !bits);
+  unsigned index;
+  test_tile = (ActionEnvironmentTileEdit){.entry=0x0401,.replace=1,.band=2};
+  assert(ActionEnvironmentScene_PaletteIndex(&scene,0,0,0,&index) && index==17);
+  assert(!ActionEnvironmentScene_PaletteIndex(&scene,0,7,0,&index));
+  test_tile.entry |= 0x4000;
+  assert(ActionEnvironmentScene_PaletteIndex(&scene,0,7,0,&index) && index==17);
+  test_tile.entry = 0x8401;
+  assert(ActionEnvironmentScene_PaletteIndex(&scene,0,7,0,&index) && index==17);
+  test_tile.transparent[0] = 1;
+  assert(!ActionEnvironmentScene_PaletteIndex(&scene,0,7,0,&index));
+  test_tile.transparent[0] = 0; test_tile.black[0] = 1;
+  assert(!ActionEnvironmentScene_PaletteIndex(&scene,0,7,0,&index));
+  test_tile.black[0] = 0; test_tile.band = 0;
+  assert(!ActionEnvironmentScene_PaletteIndex(&scene,0,7,0,&index));
   test_tile = (ActionEnvironmentTileEdit){.entry = 1, .replace = 1, .band = 1};
   memset(vram + 16, 255, 32); /* Full tile, independent of flips. */
   assert(ActionEnvironmentScene_CaptureScenery(&scene, &frame.scenery));
@@ -1287,6 +1330,21 @@ static void LayerAnchors(void) {
         p.bg2_skybox.active_band=1;
         assert(ActionEffectProjection_ProjectPoint(&c,e,17,130,&second));
         assert(first.x==second.x&&first.y==second.y);
+        if(mode==2) {
+          /* Weather is rasterized into each destination source strip before
+           * sky blur. Sampling that strip must restore the same rigid ray. */
+          p.bg2_skybox.texture_offset=(ArRenderPointF){137,64};
+          for(unsigned band=0;band<p.bg2_skybox.count;++band) {
+            p.bg2_skybox.active_band=(int)band;
+            p.bg2_skybox.to_texture=true;
+            assert(ActionEffectProjection_ProjectPoint(&c,e,17,130,&second));
+            const DioramaSkyboxBandProjection *b=&p.bg2_skybox.bands[band];
+            const float x=(second.x-137-b->x0)/(b->x1-b->x0)*p.output_width+p.output_x;
+            const float y=((second.y-64-b->y0)/(b->y1-b->y0)*(b->output_y1-b->output_y0)+b->output_y0)*p.output_height+p.output_y;
+            assert(fabsf(x-first.x)<.001f&&fabsf(y-first.y)<.001f);
+          }
+          p.bg2_skybox.to_texture=false;
+        }
         e->flags&=(uint8_t)~kActionEffectFlag_StaticAnchor;
         assert(ActionEffectProjection_ProjectPoint(&c,e,17,130,&second));
         assert(fabsf(first.x-second.x)>.1f);
@@ -1602,6 +1660,294 @@ static void NativeMemberReceivers(void) {
   }
   puts("Native rays/windows: all eight member receiver masks override/inherit parent routing on CPU and GPU.");
 }
+static void CloudVolumes(void) {
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:123]\nx=128\ny=120\n"
+        "width=256\nheight=96\ntextured=1\nrolling=.8\nvolume=1\nstrands=4\n"
+        "color=f4e7d1\ncolor-end=68748c\ndrift=-32\namplitude=6\nlifetime=1200\n");
+  const unsigned layer=frame.authored[0].render_layer;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&a));
+  assert(a.vertex_count==32); /* Same two masks per lobe as ordinary rolling mist. */
+  for(unsigned clock=0;clock<2400;clock+=37) {
+    frame.authored[0].pulse_ticks=clock;
+    assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+    Valid(&b);
+    assert(a.vertex_count==b.vertex_count);
+    for(int i=0;i<b.vertex_count;i+=8) {
+      const ArRenderPointF *origin=&b.vertices[i].position;
+      for(int j=0;j<4;++j) {
+        const ArRenderVertex2D *v=&b.vertices[i+j];
+        assert(v->position.x>=0&&v->position.x<=256&&v->position.y>=72&&v->position.y<=168);
+        assert(!memcmp(&v->position,&b.vertices[i+j+4].position,sizeof(v->position)));
+        assert(fabsf((v->position.x-origin->x)-
+            (a.vertices[i+j].position.x-a.vertices[i].position.x))<.0001f);
+        assert(fabsf((v->position.y-origin->y)-
+            (a.vertices[i+j].position.y-a.vertices[i].position.y))<.0001f);
+        assert(ActionEffectMasks_Sample(v->tex_coord.x,v->tex_coord.y)<.0001f);
+      }
+    }
+  }
+  frame.authored[0].pulse_ticks=37+1200;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  assert(!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  frame.authored[0].pulse_ticks=37;
+  const ActionEffectLocalRect crop={0,72,110,168}; /* The emitter centre is outside. */
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,Clip,(void*)&crop,&b));
+  assert(b.vertex_count);
+  for(int i=0;i<a.vertex_count;++i) {
+    const ArRenderVertex2D *v=&a.vertices[i];
+    if(v->position.x>=crop.x1)continue;
+    bool found=false;
+    for(int j=0;j<b.vertex_count;++j)if(!memcmp(v,&b.vertices[j],sizeof(*v)))found=true;
+    assert(found); /* A crop cannot restart motion or change the density mapping. */
+  }
+  for(unsigned variant=0;variant<kActionMaskCloudCount;++variant) {
+    float upper=0,lower=0;unsigned occupied=0;
+    for(unsigned y=0;y<128;++y)for(unsigned x=0;x<128;++x) {
+      const unsigned column=variant*kActionMaskCellSize+x;
+      const unsigned body=ActionEffectMasks_Pixel(column,
+          kActionMaskCloudBodyFirst/kActionMaskAtlasColumns*kActionMaskCellSize+y)>>24;
+      const unsigned light=ActionEffectMasks_Pixel(column,
+          kActionMaskCloudLightFirst/kActionMaskAtlasColumns*kActionMaskCellSize+y)>>24;
+      if(x==0||y==0||x==127||y==127)assert(!body&&!light);
+      if(body+light-body*light/255>192) {++occupied;if(y<64)upper+=light;else lower+=light;}
+    }
+    assert(occupied>1500&&upper>lower); /* Solid volume and a distinct shaded underside. */
+  }
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\nx=128\ny=120\n"
+      "width=256\nheight=96\ntextured=1\nrolling=.8\nvolume=1\nstrands=4\n"
+      "color=f4e7d1\ncolor-end=68748c\nanchor=bg2-point\nplacement=background\n"
+      "[emitter:01:02:0:cloud-light:2]\nx=128\ny=120\nwidth=512\nheight=512\nintensity=4\n");
+  assert(ActionSceneDecorationRender_Build(&frame,frame.authored[0].render_layer,
+      false,true,Project,NULL,NULL,&a));
+  assert(a.vertex_count==32);
+  for(int i=0;i<a.vertex_count;i+=8)for(int j=0;j<4;++j)
+    assert(a.vertices[i+j].color.r<.5f&&
+        a.vertices[i+j+4].color.r>a.vertices[i+j].color.r*1.5f);
+  puts("Cloud volumes: immutable shapes, aligned shading, bounded drift, repeat/seek and offscreen-centre crops passed.");
+}
+static void MistRainbows(void) {
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\nx=128\ny=128\n"
+      "width=256\nheight=128\ntextured=1\nrolling=.8\nvolume=1\nrainbow=.8\nstrands=3\n"
+      "[emitter:01:02:0:cloud-light:2]\nx=128\ny=200\nwidth=512\nheight=600\n"
+      "angle=0\nstrands=5\nintensity=4\nfalloff=1\ncloud-cover=0\nseed=123\n");
+  ActionEffectInstance *mist=&frame.authored[0],*sun=&frame.authored[1];
+  const unsigned layer=mist->render_layer;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&a));Valid(&a);
+  assert(a.vertex_count>24&&a.vertex_count<=24+(kActionMistRainbowColumns+1)*(kActionMistRainbowRows+1));
+  float strongest=0;
+  for(int i=24;i<a.vertex_count;++i)strongest=fmaxf(strongest,a.vertices[i].color.a);
+  assert(strongest>.01f&&strongest<.45f);
+  /* Different foreground/background scroll must still sample the same light
+   * when their relative world coordinates are translated together. */
+  const ActionEnvironmentScene cameras={.camera_x={128,192},.camera_y={64,96}};
+  ActionEffectRecipes_Apply(&recipes,1,2,0,37,&cameras,&frame);
+  assert(frame.bg1_to_bg2_x==64&&frame.bg1_to_bg2_y==32);
+  sun->world_x+=64;sun->world_y+=32;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  sun->tuning.intensity=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(b.vertex_count==24); /* No sunlight, no spectrum or extra geometry. */
+  sun->tuning.intensity=.5f;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  float weaker=0;
+  for(int i=24;i<b.vertex_count;++i) {
+    weaker=fmaxf(weaker,b.vertices[i].color.a);
+    assert(b.vertices[i].position.x==a.vertices[i].position.x&&b.vertices[i].position.y==a.vertices[i].position.y);
+  }
+  assert(weaker>0&&weaker<strongest);
+  sun->tuning.intensity=4;
+  sun->field_style.cloud.sun_depth=-48;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  for(int i=24;i<b.vertex_count;++i)assert(b.vertices[i].color.a==0); /* Sun facing viewer: wrong scattering angle. */
+  sun->field_style.cloud.sun_depth=48;
+  const float streak=sun->field_style.cloud.streak;
+  sun->field_style.cloud.streak=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(b.vertex_count==24); /* Ambient halo/reflected light cannot make a bow. */
+  sun->field_style.cloud.streak=streak;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));assert(b.vertex_count==24);
+  mist->field_style.rainbow=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));assert(b.vertex_count==24);
+  assert(!memcmp(a.vertices,b.vertices,24*sizeof(*a.vertices))); /* Original mist is untouched. */
+  mist->field_style.rainbow=.8f;
+  const ActionEffectLocalRect crop={0,64,100,192};
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,Clip,(void*)&crop,&b));Valid(&b);
+  for(int i=24;i<a.vertex_count;++i) {
+    const ArRenderVertex2D *v=&a.vertices[i];if(v->position.x>=100)continue;
+    bool found=false;
+    for(int j=0;j<b.vertex_count;++j)if(!memcmp(v,&b.vertices[j],sizeof(*v)))found=true;
+    assert(found); /* Cropping never shifts the spectrum or changes its light. */
+  }
+  mist->tuning.intensity=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(b.vertex_count==24); /* No droplets, no detached rainbow. */
+  frame.bg1_to_bg2_x=frame.bg1_to_bg2_y=0;
+  const RainbowDirection red=RainbowSpectrum(cosf(42*.01745329252f));
+  const RainbowDirection blue=RainbowSpectrum(cosf(40*.01745329252f));
+  assert(red.x>red.y&&red.y>red.z&&blue.z>blue.y&&blue.y>blue.x);
+  assert(RainbowSpectrum(1).x==0&&RainbowSpectrum(-1).z==0);
+  /* Camera/output changes alter optical colour, never the retained packet's
+   * droplets or incident-light weights. GPU projection supplies the view. */
+  mist->tuning.intensity=1;
+  DioramaProjection view={.valid=true,.output_width=640,.output_height=360,
+      .texture_width=512,.texture_height=352,.aspect_x=2,.height_scale=1.5f,
+      .bg1_plane={.valid=true,.u1=1,.v1=1}};
+  ActionEffectProjectionContext camera={.diorama_projection=&view,.ws_extra=128,.ws_extra_top=64};
+  Scene3DCamera orbit={.distance=3.25f,.fov_y=45};
+  Scene3D_BuildViewProjection(&orbit,640,360,view.matrix);
+  unsigned packet_count=SourceBuild(layer,true,true,&camera);
+  assert(packet_count>12&&packet_count<=128);
+  ActionEffectSourcePrimitive saved[128];memcpy(saved,primitives,packet_count*sizeof(*saved));
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&camera,&a));
+  orbit.tilt_x=20;
+  Scene3D_BuildViewProjection(&orbit,640,360,view.matrix);
+  assert(SourceBuild(layer,true,true,&camera)==packet_count);
+  assert(!memcmp(saved,primitives,packet_count*sizeof(*saved)));
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&camera,&b));
+  assert(a.vertex_count==b.vertex_count);
+  bool color_changed=false;
+  for(int i=24;i<a.vertex_count;++i)
+    color_changed|=fabsf(a.vertices[i].color.a-b.vertices[i].color.a)>.001f;
+  assert(color_changed);
+  view.output_width=1280;view.output_height=720;
+  Scene3D_BuildViewProjection(&orbit,1280,720,view.matrix);
+  assert(SourceBuild(layer,true,true,&camera)==packet_count);
+  assert(!memcmp(saved,primitives,packet_count*sizeof(*saved)));
+  puts("Mist rainbows: direct light/density/angle gating, intensity response, spectral ordering, background scrolling and crops passed.");
+}
+static void MistSkyLighting(void) {
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\nx=128\ny=128\n"
+      "width=256\nheight=128\ntextured=1\nrolling=.8\nvolume=1\nstrands=3\n"
+      "color=8090a0\ncolor-end=304050\ncanopy-response=.8\n"
+      "[emitter:01:02:0:cloud-light:2]\nx=128\ny=200\nwidth=512\nheight=600\n"
+      "color=ffb070\nangle=0\nstrands=5\nintensity=4\nfalloff=1\ncloud-cover=0\nseed=123\n");
+  ActionEffectInstance *mist=&frame.authored[0],*sun=&frame.authored[1];
+  const unsigned layer=mist->render_layer;
+  frame.bg1_to_bg2_x=frame.bg1_to_bg2_y=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&a));Valid(&a);
+  assert(a.vertex_count==24);
+  sun->tuning.intensity=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&a.index_count==b.index_count);
+  float red_gain=0,blue_gain=0;
+  for(int i=0;i<a.vertex_count;++i) {
+    assert(!memcmp(&a.vertices[i].position,&b.vertices[i].position,sizeof(a.vertices[i].position)));
+    assert(a.vertices[i].color.a==b.vertices[i].color.a);
+    red_gain+=a.vertices[i].color.r-b.vertices[i].color.r;
+    blue_gain+=a.vertices[i].color.b-b.vertices[i].color.b;
+  }
+  assert(red_gain>.1f&&blue_gain>0&&red_gain>blue_gain);
+  sun->tuning.intensity=4;
+  frame.bg1_to_bg2_x=64;frame.bg1_to_bg2_y=32;
+  sun->world_x+=64;sun->world_y+=32;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  const ActionEffectLocalRect crop={64,64,192,192};
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,Clip,(void*)&crop,&b));Valid(&b);
+  unsigned matched=0;
+  for(int i=0;i<a.vertex_count;++i) {
+    const ArRenderVertex2D *v=&a.vertices[i];
+    if(v->position.x<=crop.x0||v->position.x>=crop.x1||v->position.y<=crop.y0||v->position.y>=crop.y1)continue;
+    bool found=false;for(int j=0;j<b.vertex_count;++j)if(!memcmp(v,&b.vertices[j],sizeof(*v)))found=true;
+    assert(found);++matched;
+  }
+  assert(matched>0);
+  /* Opting out or disabling lighting restores unchanged mist, including alpha. */
+  mist->field_style.canopy_response=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&a));
+  sun->tuning.intensity=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  mist->field_style.canopy_response=.8f;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&a));
+  sun->tuning.intensity=4;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  ActionEffectProjectionContext unlit={.atmosphere_unlit=true};
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,ActionEffectProjection_ProjectPoint,NULL,&unlit,&a));
+  mist->field_style.canopy_response=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,ActionEffectProjection_ProjectPoint,NULL,&unlit,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  frame.bg1_to_bg2_x=frame.bg1_to_bg2_y=0;
+  puts("Mist sky lighting: opt-in warm scattering, stable alpha/geometry, BG1/BG2 translation, crops and disable passed.");
+}
+static void WaterSparkles(void) {
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-area:1]\nx=128\ny=128\n"
+      "width=256\nheight=256\nanchor=bg2-point\nplacement=background\npattern=water-glints\n"
+      "particles=16\ncanopy-response=1\ntravel-y=96\nwander=0\nlifetime=120\n"
+      "[emitter:01:02:0:cloud-light:2]\nx=128\ny=200\nwidth=512\nheight=600\n"
+      "color=ffb070\nangle=0\nstrands=5\nintensity=4\nfalloff=1\ncloud-cover=0\nseed=123\n");
+  ActionEffectInstance *water=&frame.authored[0],*sun=&frame.authored[1];
+  const unsigned layer=water->render_layer;
+  assert(layer==kActionEffectRenderLayer_Bg2Plane);
+  frame.bg1_to_bg2_x=frame.bg1_to_bg2_y=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));assert(b.vertex_count==0);
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&a));Valid(&a);
+  assert(a.vertex_count>0);
+  for(int i=0;i<a.vertex_count;++i)assert(a.vertices[i].color.r>a.vertices[i].color.b);
+  sun->tuning.intensity=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));assert(b.vertex_count==0);
+  sun->tuning.intensity=4;sun->field_style.cloud.streak=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));assert(b.vertex_count==0);
+  sun->field_style.cloud.streak=1.7f;
+  frame.bg1_to_bg2_x=1000;frame.bg1_to_bg2_y=700;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  water->projection_plane=kActionEffectProjectionPlane_Bg1;
+  frame.bg1_to_bg2_x=64;frame.bg1_to_bg2_y=32;sun->world_x+=64;sun->world_y+=32;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  water->pulse_ticks+=20;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));Valid(&b);
+  assert(a.vertex_count!=b.vertex_count||memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  water->pulse_ticks-=20;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  frame.bg1_to_bg2_x=frame.bg1_to_bg2_y=0;
+  water->kind=kActionEffect_AuthoredParticlePath;
+  water->field_style.point_count=2;water->field_style.activity=1;
+  water->field_style.points[0].x=0;water->field_style.points[0].y=-64;
+  water->field_style.points[1].x=0;water->field_style.points[1].y=64;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(b.vertex_count>0);
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  assert(b.vertex_count==0);
+
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\nx=128\ny=128\n"
+      "width=256\nheight=128\ntextured=1\nrolling=.8\nvolume=1\nstrands=4\nsparkle=1\n"
+      "[emitter:01:02:0:cloud-light:2]\nx=128\ny=200\nwidth=512\nheight=600\n"
+      "color=ffb070\nangle=0\nstrands=5\nintensity=4\nfalloff=1\ncloud-cover=0\nseed=123\n");
+  ActionEffectInstance *mist=&frame.authored[0];sun=&frame.authored[1];
+  const unsigned mist_layer=mist->render_layer;
+  assert(ActionSceneDecorationRender_Build(&frame,mist_layer,true,true,Project,NULL,NULL,&a));Valid(&a);
+  assert(a.vertex_count>32&&a.vertex_count<=32+4*4*kActionMistSparklesPerStrand);
+  sun->tuning.intensity=0;
+  assert(ActionSceneDecorationRender_Build(&frame,mist_layer,true,true,Project,NULL,NULL,&b));assert(b.vertex_count==32);
+  sun->tuning.intensity=4;sun->world_x+=64;sun->world_y+=32;
+  frame.bg1_to_bg2_x=64;frame.bg1_to_bg2_y=32;
+  assert(ActionSceneDecorationRender_Build(&frame,mist_layer,true,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  const ActionEffectLocalRect crop={96,64,192,192};
+  assert(ActionSceneDecorationRender_Build(&frame,mist_layer,true,true,Project,Clip,(void*)&crop,&b));Valid(&b);
+  unsigned matched=0;
+  for(int i=32;i<a.vertex_count;++i) {
+    const ArRenderVertex2D *v=&a.vertices[i];
+    if(v->position.x<=crop.x0||v->position.x>=crop.x1||v->position.y<=crop.y0||v->position.y>=crop.y1)continue;
+    bool found=false;for(int j=0;j<b.vertex_count;++j)if(!memcmp(v,&b.vertices[j],sizeof(*v)))found=true;
+    assert(found);++matched;
+  }
+  assert(matched>0);
+  assert(ActionSceneDecorationRender_Build(&frame,mist_layer,false,true,Project,NULL,NULL,&b));assert(b.vertex_count==32);
+  mist->field_style.sparkle=0;
+  assert(ActionSceneDecorationRender_Build(&frame,mist_layer,true,true,Project,NULL,NULL,&b));assert(b.vertex_count==32);
+  mist->field_style.sparkle=1;mist->tuning.intensity=0;
+  assert(ActionSceneDecorationRender_Build(&frame,mist_layer,true,true,Project,NULL,NULL,&b));assert(b.vertex_count<=32);
+  frame.bg1_to_bg2_x=frame.bg1_to_bg2_y=0;
+  puts("Water sparkles: sunlight and mist-density gating, warm tint, layer anchoring, crops, clock seeking and disable passed.");
+}
 static void RollingMistFields(void) {
   Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:123]\nx=128\ny=120\n"
         "width=256\nheight=96\ntextured=1\nrolling=.8\nwake=.8\ncanopy-response=.8\nstrands=4\n");
@@ -1805,7 +2151,413 @@ static void MagicalSwampFields(void) {
   puts("Magical swamp: bounded glowing clusters, all receiver masks, world-stable crops, terrain-clipped vines and light-dependent glints passed.");
 }
 
+static void CloudBreakFans(void) {
+  frame=(ActionSceneEffectFrame){0};
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:light-fan:123]\nx=128\ny=48\n"
+      "width=64\nheight=96\nanchor=bg2-point\nplacement=background\nshadows=0\n"
+      "lifetime=600\ntwinkle=.8\nlight-scenery=0\nlight-player=0\nlight-enemies=0\n");
+  ActionEffectInstance *e=&frame.authored[0];
+  const unsigned layer=e->render_layer;
+  assert(layer==kActionEffectRenderLayer_Bg2Alpha);
+  e->pulse_ticks=100;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&a));Valid(&a);
+  e->pulse_ticks=400;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));Valid(&b);
+  assert(a.vertex_count&&a.vertex_count==b.vertex_count&&a.index_count==b.index_count);
+  bool changed=false;
+  for(unsigned i=0;i<(unsigned)a.vertex_count;++i) {
+    assert(!memcmp(&a.vertices[i].position,&b.vertices[i].position,sizeof(ArRenderPointF)));
+    changed|=fabsf(a.vertices[i].color.a-b.vertices[i].color.a)>.01f;
+  }
+  assert(changed); /* Brightness varies without sliding/rotating the fan. */
+  e->pulse_ticks=100;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  e->field_style.twinkle=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&a));
+  e->pulse_ticks=400;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  ActionEffectProjectionContext view={.visible_width=512,.snes_height=256,.capture_height=256,.viewport={0,0,512,256}};
+  assert(SourceBuild(layer,true,true,&view)>0);
+  e->world_x=900;
+  assert(!SourceBuild(layer,true,true,&view));
+  e->world_x=128;e->field_style.strands=1;e->field_style.fan=0;e->field_style.softness=0;
+  e->field_style.fade_in=.25f;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&a));
+  bool source=false,interior=false;
+  for(unsigned i=0;i<(unsigned)a.vertex_count;++i) {
+    if(a.vertices[i].position.y==e->world_y) {source=true;assert(a.vertices[i].color.a==0);}
+    interior|=a.vertices[i].color.a>0;
+  }
+  assert(source&&interior);
+  e->field_style.fade_in=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  source=false;
+  for(unsigned i=0;i<(unsigned)b.vertex_count;++i)
+    source|=b.vertices[i].position.y==e->world_y&&b.vertices[i].color.a>0;
+  assert(source); /* Window-style sources retain their sharp attachment. */
+  puts("Cloud-break fans: animated transmission, fixed geometry, reverse seeking, source feathering, legacy steady fans and culling passed.");
+}
+
+static void StormGround(void) {
+  uint16_t vram[32768] = {0};
+  uint8_t map[256] = {0}, definitions[2048] = {0};
+  for (unsigned i = 6 * 16; i < sizeof(map); ++i) map[i] = 1;
+  for (unsigned q = 0; q < 4; ++q) {
+    definitions[8 + q * 2] = 1;
+    definitions[9 + q * 2] = 0x24; /* Palette 1, high priority: still terrain. */
+  }
+  for (unsigned row = 0; row < 8; ++row) vram[16 + row] = 255;
+  ActionRoomSceneFrameState raster = {0};
+  float depth[224];for (unsigned i=0;i<224;++i)depth[i]=.25f;
+  ActionEnvironmentScene scene = {.vram = vram, .metatiles = {NULL, definitions},
+      .word_mask = {65535,65535}, .background_frame = &raster,
+      .maps = {{0},{map,sizeof(map),256,256,1}}};
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:storm-lightning:123]\nx=128\ny=80\n"
+      "width=128\nheight=128\nlifetime=600\nactivity=.07\nstrands=4\namplitude=15\n"
+      "seed=2027\nanchor=bg2-point\nparallax-x=.25\nground-palette=1\nground-colors=1\n");
+  ActionEffectInstance *e = &frame.authored[0];
+  const clock_t capture_start = clock();
+  for (unsigned seed = 0; seed < 256; ++seed) {
+    e->storm_contact.valid = 0;
+    e->flags |= kActionEffectFlag_Visible;
+    ActionStorm_CaptureGround(&scene, &raster, depth, e, seed);
+    assert(e->storm_contact.valid && (e->flags & kActionEffectFlag_Visible));
+    ActionStormChannel path;
+    ActionStorm_Path(e, seed, &path);
+    const ArRenderPointF hit = path.main[kActionStormMainSegments];
+    assert(e->world_y + hit.y >= 96 && e->world_y + hit.y <= 96.5f);
+    for (unsigned strand = 0; strand < 4; ++strand) {
+      const ArRenderPointF *points = strand ? path.forks[strand-1] : path.main;
+      const unsigned segments = strand ? kActionStormForkSegments : kActionStormMainSegments;
+      if (!memcmp(&points[0], &points[segments], sizeof(*points))) continue;
+      for (unsigned j = 0; j <= segments; ++j) assert(e->world_y + points[j].y <= 96.5f);
+    }
+  }
+  printf("Storm terrain capture + path validation: %.4f ms/strike.\n",
+      1000.0*(clock()-capture_start)/CLOCKS_PER_SEC/256);
+  /* A visible ridge at another parallax depth cannot terminate this strike.
+   * The source and receiving mountain must both match the cloud's rate. */
+  for (unsigned row=96;row<112;++row) depth[row]=.125f;
+  ActionStorm_CaptureGround(&scene,&raster,depth,e,31);
+  ActionStormChannel matched;
+  ActionStorm_Path(e,31,&matched);
+  assert(e->storm_contact.valid);
+  assert(e->world_y+matched.main[kActionStormMainSegments].y>=112);
+  assert(e->world_y+matched.main[kActionStormMainSegments].y<=112.5f);
+  const unsigned root=(unsigned)floorf(e->world_y+ActionStorm_SourceY(e));
+  depth[root]=.125f;
+  ActionStorm_CaptureGround(&scene,&raster,depth,e,31);
+  assert(!e->storm_contact.valid && !(e->flags&kActionEffectFlag_Visible));
+  e->flags|=kActionEffectFlag_Visible;
+  ActionStorm_CaptureGround(&scene,&raster,NULL,e,31);
+  assert(!e->storm_contact.valid && !(e->flags&kActionEffectFlag_Visible));
+  for(unsigned row=0;row<224;++row)depth[row]=.25f;
+  e->flags|=kActionEffectFlag_Visible;
+  /* The same artwork at a different native raster offset moves the contact,
+   * not the source, and a ray without a receiver stays hidden. */
+  for (unsigned row = 0; row < 224; ++row) raster.bg_vscroll[1][row] = 16;
+  e->storm_contact.valid = 0;
+  ActionStorm_CaptureGround(&scene, &raster, depth, e, 31);
+  ActionStormChannel path;
+  ActionStorm_Path(e, 31, &path);
+  assert(e->world_y + path.main[kActionStormMainSegments].y >= 80);
+  assert(e->world_y + path.main[kActionStormMainSegments].y <= 80.5f);
+  memset(map,0,sizeof(map));
+  e->storm_contact.valid = 0;
+  ActionStorm_CaptureGround(&scene, &raster, depth, e, 31);
+  assert(!(e->flags & kActionEffectFlag_Visible));
+  /* Explicit depth is fractional BG1 travel, independent of BG2's base scroll.
+   * Presentation interpolation replaces only X, leaving vertical anchoring. */
+  ActionEffectProjectionContext view = {.bg1_camera_x=128,.bg2_camera_x=64};
+  ArRenderPointF start = ActionEffectProjection_CaptureOrigin(&view,e);
+  view.bg1_camera_x += 32; view.bg2_camera_x += 16;
+  ArRenderPointF end = ActionEffectProjection_CaptureOrigin(&view,e);
+  assert(start.x-end.x == 8 && start.y == end.y);
+  ++view.bg1_camera_x;
+  assert(end.x-ActionEffectProjection_CaptureOrigin(&view,e).x == .25f);
+  DioramaProjection p = {.bg1_plane={.valid=true,.capture_offset={3,0}},
+      .bg2_plane={.valid=true,.capture_offset={9,0}}};
+  view.diorama_projection = &p;
+  assert(fabsf(ActionEffectProjection_CaptureOrigin(&view,e).x + 9 - (end.x-.25f+.75f)) < .001f);
+  puts("Storm terrain: matched cloud/mountain depths, clipped forks, raster offsets, missing receivers and fractional parallax passed.");
+}
+
+static void StormChannels(void) {
+  frame = (ActionSceneEffectFrame){0};
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:storm-lightning:123]\nx=128\ny=80\n"
+      "width=256\nheight=128\nlifetime=600\nactivity=.07\nstrands=4\namplitude=15\n"
+      "seed=2027\nanchor=bg2-point\n");
+  ActionEffectInstance *e = &frame.authored[0];
+  ActionStormFlash flash, initial = {0};
+  unsigned first = 0, returning = 0;
+  float trough = 1;
+  bool started = false;
+  for (unsigned tick = 0; tick < 600 && !returning; ++tick) {
+    e->pulse_ticks = tick;
+    if (!ActionStorm_Flash(e, &flash)) continue;
+    if (!started) {
+      started = true;
+      initial = flash;
+      first = tick;
+    } else {
+      assert(flash.seed == initial.seed);
+      if (flash.forks[1] > .2f) returning = tick;
+      trough = fminf(trough, flash.channel);
+    }
+  }
+  assert(started && returning - first >= 12 && returning - first <= 16);
+  assert(initial.channel > .8f && initial.forks[1] < .04f);
+  assert(trough > .12f && trough < .4f); /* Still visible between discharges. */
+  assert(flash.channel > trough * 3 && flash.forks[1] > .2f);
+  unsigned readable = 0;
+  float ending = 1;
+  for (unsigned age = 0; age < 42; ++age) {
+    e->pulse_ticks = first + age;
+    assert(ActionStorm_Flash(e, &flash));
+    if (age < 3) assert(flash.channel > .8f); /* A held peak, not a one-frame spark. */
+    if (flash.channel > .2f) ++readable;
+    if (age == 41) ending = flash.channel;
+  }
+  assert(readable >= 28 && ending < .01f);
+  e->pulse_ticks = first;
+  assert(ActionSceneDecorationRender_Build(&frame, e->render_layer,
+      true, true, Project, NULL, NULL, &a));
+  ActionStormChannel initial_path;
+  ActionStorm_Path(e, initial.seed, &initial_path);
+  /* The cloud flash must surround the channel's actual point of emergence,
+   * not make a disconnected pool of light underneath the cloud. */
+  assert(a.vertices[0].position.x == e->world_x + initial_path.main[0].x);
+  assert(a.vertices[0].position.y == e->world_y + initial_path.main[0].y);
+  e->pulse_ticks = returning;
+  assert(ActionSceneDecorationRender_Build(&frame, e->render_layer,
+      true, true, Project, NULL, NULL, &b));
+  assert(a.vertex_count == b.vertex_count && a.vertex_count > 0);
+  for (int i = 0; i < a.vertex_count; ++i)
+    assert(a.vertices[i].position.x == b.vertices[i].position.x &&
+        a.vertices[i].position.y == b.vertices[i].position.y);
+
+  /* Skybox bands partition the frame. The cloud glow must be clipped too;
+   * otherwise every intersecting band draws its entire billboard again. */
+  for (unsigned part = 0; part < 4; ++part) {
+    const ActionEffectLocalRect clip = {0, 32.f * part, 256, 32.f * (part + 1)};
+    assert(ActionSceneDecorationRender_Build(&frame, e->render_layer,
+        true, true, Project, Clip, (void *)&clip, &a));
+    for (int i = 0; i < a.vertex_count; ++i) {
+      const ArRenderPointF point = a.vertices[i].position;
+      assert(point.x >= clip.x0 && point.x <= clip.x1);
+      assert(point.y >= clip.y0 && point.y <= clip.y1);
+    }
+  }
+
+  /* Every fork is attached, source coordinates survive return strokes, and
+   * the admission envelope contains even small regions with maximum bends. */
+  const float sizes[][2] = {{96, 28}, {144, 42}, {256, 128}, {1, 1}, {1, 256}, {256, 1}};
+  unsigned upturns = 0;
+  for (unsigned size = 0; size < sizeof(sizes) / sizeof(sizes[0]); ++size) {
+    e->geometry.data.rect = (ActionEffectLocalRect){0, 0, sizes[size][0], sizes[size][1]};
+    e->field_style.amplitude = 32;
+    const ActionEffectLocalRect bounds = ActionStorm_Bounds(e);
+    for (uint32_t seed = 0; seed < 256; ++seed) {
+      ActionStormChannel path;
+      ActionStorm_Path(e, seed, &path);
+      const float rx = sizes[size][0] * .48f, ry = sizes[size][1] * .48f;
+      assert(path.main[0].x - rx >= bounds.x0 && path.main[0].x + rx <= bounds.x1);
+      assert(path.main[0].y - ry >= bounds.y0 && path.main[0].y + ry <= bounds.y1);
+      for (unsigned strand = 0; strand < 4; ++strand) {
+        const ArRenderPointF *points = strand ? path.forks[strand - 1] : path.main;
+        const unsigned segments = strand ? kActionStormForkSegments : kActionStormMainSegments;
+        for (unsigned i = 0; i <= segments; ++i) {
+          assert(isfinite(points[i].x) && isfinite(points[i].y));
+          assert(points[i].x >= bounds.x0 && points[i].x <= bounds.x1);
+          assert(points[i].y >= bounds.y0 && points[i].y <= bounds.y1);
+          if (i && points[i].y < points[i - 1].y) ++upturns;
+        }
+        if (strand) {
+          bool attached = false;
+          for (unsigned i = 0; i <= kActionStormMainSegments; ++i)
+            attached |= points[0].x == path.main[i].x && points[0].y == path.main[i].y;
+          assert(attached);
+        }
+      }
+    }
+  }
+  assert(upturns > 0);
+  puts("Storm channels: held discharge, lingering channel, same-path return and bounded forks.");
+}
+
+static void StormWeather(void) {
+  frame=(ActionSceneEffectFrame){0};
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:storm-lightning:123]\nx=128\ny=80\n"
+      "width=256\nheight=128\nlifetime=600\nactivity=.07\nstrands=4\namplitude=15\nseed=2027\nanchor=bg2-point\n");
+  const unsigned layer=frame.authored[0].render_layer;
+  assert(layer==kActionEffectRenderLayer_Bg2Weather);
+  assert(frame.authored[0].projection_plane==kActionEffectProjectionPlane_Bg2);
+  assert(!ActionEffectReceivers_HasActors(&frame,true));
+  unsigned lit=0,first=0;
+  for(unsigned tick=0;tick<1800;++tick) {
+    frame.authored[0].pulse_ticks=tick;
+    assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&a));Valid(&a);
+    if(a.vertex_count) { if(!lit)first=tick;++lit; }
+    assert((unsigned)a.vertex_count <= ActionStorm_VertexBudget(4));
+  }
+  assert(lit>60&&lit<150); /* Long quiet gaps; no camera-dependent trigger. */
+  frame.authored[0].pulse_ticks=first+2;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&a));assert(a.vertex_count);
+  frame.authored[0].pulse_ticks=1500;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  frame.authored[0].pulse_ticks=first+2;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));assert(!b.vertex_count);
+  frame.authored[0].tuning.light_receivers_set=1;
+  for(unsigned mask=0;mask<8;++mask) {
+    frame.authored[0].tuning.light_receivers=mask;
+    assert(ActionEffectReceivers_Prepare(&frame,1,2,0,0,0,0,true,&receiver));
+    assert(!!receiver.player.vertex_count==!!(mask&2));
+    assert(!!receiver.enemies.vertex_count==!!(mask&4));
+    assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+    assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  }
+  /* Changing the pattern produces different bolt geometry, not actor state. */
+  frame.authored[0].particle_style.seed++;
+  bool changed=false;
+  for(unsigned tick=0;tick<600&&!changed;++tick) {
+    frame.authored[0].pulse_ticks=tick;
+    assert(ActionSceneDecorationRender_Build(&frame,layer,true,true,Project,NULL,NULL,&b));
+    changed=b.vertex_count&& (a.vertex_count!=b.vertex_count||memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(*a.vertices)));
+  }
+  assert(changed);
+  /* Pure sky clouds can roll on BG2; body wakes still require BG1. */
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\nanchor=bg2-point\ntextured=1\nrolling=.8\n");
+  assert(ActionSceneDecorationRender_Build(&frame,frame.authored[0].render_layer,false,true,Project,NULL,NULL,&a));assert(a.vertex_count);
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\nx=4096\ny=128\nwidth=8192\nheight=160\n"
+      "anchor=bg2-point\nplacement=background\ntextured=1\nrolling=.8\nstrands=24\n");
+  ActionEffectProjectionContext view={.bg2_camera_x=1536,.visible_width=512,.snes_height=256,
+      .capture_height=256,.viewport={0,0,512,256}};
+  const unsigned cloud_layer=frame.authored[0].render_layer;
+  const unsigned nearby=SourceBuild(cloud_layer,false,true,&view);
+  assert(nearby>0&&nearby<32); /* Centre is offscreen; intersecting billows survive. */
+  view.bg2_camera_x=0;view.visible_width=8192;view.viewport.w=8192;
+  assert(SourceBuild(cloud_layer,false,true,&view)>nearby*3);
+  DioramaProjection sky={.valid=true,.bg2_skybox={.count=2,.active_band=0,
+      .bands={{.x0=0,.x1=512,.y0=0,.y1=128,.output_y0=0,.output_y1=.5f},
+              {.x0=0,.x1=512,.y0=128,.y1=256,.output_y0=.5f,.output_y1=1}}}};
+  view.diorama_projection=&sky;view.bg2_camera_x=1536;
+  ActionEffectSourceBatch source={.context=view};ActionEffectLocalRect first_band,second_band;
+  assert(ActionEffectSource_ClipBounds(&source,&frame.authored[0],&first_band));
+  sky.bg2_skybox.active_band=1;
+  assert(ActionEffectSource_ClipBounds(&source,&frame.authored[0],&second_band));
+  assert(!memcmp(&first_band,&second_band,sizeof(first_band)));
+  /* The resident sky publishes raw mapping inputs, not resolved CPU bands. */
+  memset(sky.bg2_skybox.bands,0,sizeof(sky.bg2_skybox.bands));
+  sky.bg2_skybox.resident=(DioramaSkyboxSourceMapping){.meta={2,512,256,1},
+      .output={1920,1080,10,20},.vertical={0,256,0,1},.follow={-32,192,0,0},.fit={64},
+      .bands={{0,1,0,128},{.1f,.9f,128,256}}};
+  assert(ActionEffectSource_ParticleViewBounds(&view,&frame.authored[0],&first_band));
+  assert(first_band.x0==-2586&&first_band.x1==-2042);
+  assert(first_band.y0==-196&&first_band.y1==124);
+  assert(SourceBuild(cloud_layer,false,true,&view)>0);
+  puts("Storm weather: bounded bolts, quiet intervals, reverse seeking, background anchoring and BG2 rolling clouds passed.");
+}
+
+static void CloudLighting(void) {
+  /* Real shipped seeds must produce unequal widths and gaps, not another
+   * evenly spaced template with small jitter. Positions do not use count. */
+  const uint32_t pattern=(uint32_t)DioramaCloudLight_Seed(512);
+  CloudLightOpening opening[4];
+  float left=1,right=0,narrow=1,wide=0,dim=2,bright=0;
+  for(int i=0;i<4;++i) {
+    opening[i]=CloudLightOpeningAt(pattern,i);
+    left=fminf(left,opening[i].centre);right=fmaxf(right,opening[i].centre);
+    narrow=fminf(narrow,opening[i].width);wide=fmaxf(wide,opening[i].width);
+    dim=fminf(dim,opening[i].power);bright=fmaxf(bright,opening[i].power);
+  }
+  assert(right-left>.4f&&wide>narrow*1.5f&&bright>dim*2);
+  assert(fabsf(opening[1].centre-opening[2].centre)<.04f); /* A cluster. */
+  assert(fabsf(opening[0].centre-opening[3].centre)>.3f); /* A dark gap. */
+  assert(DioramaCloudLight_Seed(104)!=DioramaCloudLight_Seed(104+4096));
+  /* A shaft fills its opening without periodic dark gaps, and stays broad
+   * beyond the surface halo. Animation changes transmission, not its axis. */
+  const float ray_seed=DioramaCloudLight_Seed(2027);
+  const CloudLightOpening ray=CloudLightOpeningAt((uint32_t)ray_seed,0);
+  const float ray_top=CloudLightEdge(ray.centre,ray_seed,.15f)+ray.offset;
+  for(int phase=0;phase<3;++phase)for(int depth=1;depth<=3;++depth) {
+    const float dy=depth*.08f;
+    const float width=CloudLightBeamWidth(ray.width,dy);
+    const float x=ray.centre-dy*.62f*.68f;
+    const CloudLightSample centre=CloudLightWeights(x,ray_top+dy,.68f,-.62f,
+        phase*.7f,ray_seed,1,.5f,.85f,.55f,.15f,.8f);
+    float minimum=1,maximum=0;
+    for(int column=-8;column<=8;++column) {
+      const CloudLightSample lit=CloudLightWeights(x+column*width/16,ray_top+dy,
+          .68f,-.62f,phase*.7f,ray_seed,1,.5f,.85f,.55f,.15f,.8f);
+      minimum=fminf(minimum,lit.streak);
+      maximum=fmaxf(maximum,lit.streak);
+    }
+    const CloudLightSample outside=CloudLightWeights(x+width*3,ray_top+dy,
+        .68f,-.62f,phase*.7f,ray_seed,1,.5f,.85f,.55f,.15f,.8f);
+    assert(minimum>.05f&&minimum>maximum*.55f);
+    assert(outside.streak<centre.streak*.015f);
+    if(depth==3)assert(centre.streak>centre.halo*10);
+  }
+  const CloudLightSample above=CloudLightWeights(ray.centre,ray_top-.02f,
+      .68f,-.62f,0,ray_seed,1,.5f,.65f,.55f,.15f,.8f);
+  const CloudLightSample below=CloudLightWeights(ray.centre,ray_top+ray.reach,
+      .68f,-.62f,0,ray_seed,1,.5f,.65f,.55f,.15f,.8f);
+  assert(above.streak==0&&below.streak==0);
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-light:123]\nx=664\ny=134\nseed=104\n");
+  assert(frame.authored_count==1);
+  DioramaCloudLight light=ActionCloudLight_Prepare(&frame,100,200,640,352);
+  assert(light.meta[0]==1&&light.source[0]==100&&light.source[1]==200);
+  assert(light.meta[1]==0&&light.background_dim[0]==0); /* Existing rooms retain their base. */
+  const DioramaCloudLightRegion saved=light.regions[0];
+  assert(saved.bounds[0]==528&&saved.bounds[1]==42&&saved.core[0]==9);
+  float sum=0,change=0;
+  frame.authored[0].pulse_ticks+=360;
+  DioramaCloudLight later=ActionCloudLight_Prepare(&frame,0,0,640,352);
+  for(int y=0;y<184;y+=2)for(int x=0;x<272;x+=2) {
+    const CloudLightSample a=DioramaCloudLight_Sample(&saved,528+x,42+y);
+    const CloudLightSample b=DioramaCloudLight_Sample(&later.regions[0],528+x,42+y);
+    sum+=a.edge+a.halo+a.streak+a.echo;
+    change+=fabsf(a.edge-b.edge)+fabsf(a.echo-b.echo);
+    assert(isfinite(a.streak)&&a.streak>=0);
+  }
+  assert(sum>100&&change>1);
+  frame.authored[0].pulse_ticks-=360;
+  light=ActionCloudLight_Prepare(&frame,-700,64,512,256);
+  assert(!memcmp(&light.regions[0],&saved,sizeof(saved))); /* Camera never changes the field. */
+  const CloudLightSample outside=DioramaCloudLight_Sample(&saved,527,134);
+  assert(outside.edge==0&&outside.halo==0&&outside.streak==0&&outside.echo==0);
+  frame.authored[0].world_x+=1000;frame.authored[0].world_y+=500;
+  light=ActionCloudLight_Prepare(&frame,0,0,640,352);
+  const CloudLightSample a=DioramaCloudLight_Sample(&saved,664,180);
+  const CloudLightSample b=DioramaCloudLight_Sample(&light.regions[0],1664,680);
+  assert(!memcmp(&a,&b,sizeof(a)));
+  frame.authored[0].field_style.cloud.background_brightness=.72f;
+  light=ActionCloudLight_Prepare(&frame,0,0,640,352);
+  assert(fabsf(light.background_dim[0]-.28f)<.0001f&&light.meta[1]==light.background_dim[0]);
+  assert(CloudLightDimming(.5f,.5f,.28f)==.28f);
+  assert(CloudLightDimming(-.1f,.5f,.28f)==0&&CloudLightDimming(.5f,1.1f,.28f)==0);
+  assert(fabsf(CloudLightDimming(.05f,.5f,.28f)-.14f)<.0001f);
+  assert(fabsf(CloudLightDimming(.5f,.95f,.28f)-.14f)<.0001f);
+  frame.authored[0].flags=0;
+  light=ActionCloudLight_Prepare(&frame,0,0,640,352);assert(!DioramaCloudLight_Active(&light));
+  light=ActionCloudLight_Prepare(NULL,0,0,640,352);assert(!DioramaCloudLight_Active(&light));
+  puts("Cloud light: shared transmission, replay, world translation, camera independence and disable passed.");
+}
+
 int main(int argc, char **argv) {
+  MistSkyLighting();
+  WaterSparkles();
+  MistRainbows();
+  CloudVolumes();
+  CloudLighting();
+  CloudBreakFans();
+  StormGround();
+  StormChannels();
+  StormWeather();
   MistLightingBounds();
   DropletEdges();
   SwampLifeFields();
@@ -1828,7 +2580,7 @@ int main(int argc, char **argv) {
   MovingLightReceivers();
   NativeMembers();
   EditedOcclusion();
-  puts("Authored fields: 16 CPU/source families, clipping, bounded areas, viewport-stable particles, reverse seeking, "
+  puts("Authored fields: CPU/source families, clipping, bounded areas, viewport-stable particles, reverse seeking, "
        "receiver separation, moving lights, glow centre and 19 preview families passed.");
   if (argc == 2 && !strcmp(argv[1], "--benchmark")) {BenchmarkReceivers();BenchmarkExposureMesh();BenchmarkSwampLighting();}
   return 0;
