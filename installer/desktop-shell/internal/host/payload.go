@@ -60,13 +60,14 @@ func WriteManifest(root, goos, arch string) error {
 			return fmt.Errorf("macOS transfer metadata in payload: %s; restage without extended attributes", rel)
 		}
 		lower := strings.ToLower(rel)
-		for _, prohibited := range []string{"utils/src/gen", "utils/saves", "utils/config.ini", "utils/settings.ini", "utils/diorama-layers.ini", "utils/action-effects.ini", "utils/game-assets/manifest.ini", "utils/build"} {
-			if rel == prohibited || strings.HasPrefix(rel, prohibited+"/") {
+		for _, prohibited := range []string{"utils/src/gen", "utils/src/generated", "utils/saves", "utils/config.ini", "utils/settings.ini", "utils/diorama-layers.ini", "utils/action-effects.ini", "utils/game-assets/manifest.ini", "utils/game-assets/imports", "utils/game-assets/workshop", "utils/build"} {
+			if lower == prohibited || strings.HasPrefix(lower, prohibited+"/") {
 				return fmt.Errorf("mutable/private payload input %s", rel)
 			}
 		}
-		if strings.HasSuffix(lower, ".sfc") || strings.HasSuffix(lower, ".smc") {
-			return fmt.Errorf("ROM must not enter Builder payload: %s", rel)
+		switch filepath.Ext(lower) {
+		case ".sfc", ".smc", ".argame", ".armaster", ".armedia", ".archeckpoint":
+			return fmt.Errorf("ROM or extracted game data must not enter Builder payload: %s", rel)
 		}
 		if d.IsDir() || rel == manifestName {
 			return nil

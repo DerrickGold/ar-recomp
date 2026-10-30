@@ -481,6 +481,7 @@ install(DIRECTORY ${GAME_ROOT}/recomp/ DESTINATION utils/recomp FILES_MATCHING
     PATTERN "*.cfg" PATTERN "module.ini")
 install(DIRECTORY ${GAME_ROOT}/src/ DESTINATION utils/src
     PATTERN "gen" EXCLUDE
+    PATTERN "generated" EXCLUDE
     PATTERN ".DS_Store" EXCLUDE)
 install(DIRECTORY ${GAME_ROOT}/third_party/stb/ DESTINATION utils/third_party/stb
     PATTERN ".DS_Store" EXCLUDE)

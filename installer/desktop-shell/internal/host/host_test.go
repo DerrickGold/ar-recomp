@@ -32,7 +32,15 @@ func fixture(t testing.TB) string {
 	return root
 }
 func TestRejectPrivateFilesAndEscapingPaths(t *testing.T) {
-	for _, leaf := range []string{"utils/user-rom.sfc", "utils/ar.smc", "utils/settings.ini", "utils/src/gen/bank00.c", "utils/game-assets/manifest.ini", "._utils", "utils/.DS_Store"} {
+	for _, leaf := range []string{
+		"utils/user-rom.sfc", "utils/ar.smc", "utils/ar2.SFC",
+		"utils/private.argame", "utils/private.ARGAME", "utils/private.armaster",
+		"utils/private.armedia", "utils/private.archeckpoint",
+		"utils/settings.ini", "utils/src/gen/bank00.c", "utils/src/generated/bank00.c",
+		"utils/game-assets/manifest.ini", "utils/game-assets/imports/private.dat",
+		"utils/GAME-ASSETS/IMPORTS/private.dat", "utils/src/GENERATED/bank01.c",
+		"utils/game-assets/workshop/scene-atlas.png", "._utils", "utils/.DS_Store",
+	} {
 		t.Run(leaf, func(t *testing.T) {
 			root := fixture(t)
 			path := filepath.Join(root, leaf)

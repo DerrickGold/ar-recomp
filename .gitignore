@@ -38,8 +38,8 @@ game-assets/fonts/noto/*
 game-assets/manifest.ini
 
 # ROM files (user must supply their own)
-*.sfc
-*.smc
+*.[sS][fF][cC]
+*.[sS][mM][cC]
 *.srm
 *.srm.bak
 # Save checkpoint companions embed private native SRAM images.
@@ -62,6 +62,8 @@ game-assets/manifest.ini
 # Private, validated regional graphics extracted from the player's own ROMs.
 *.armedia
 *.armaster
+# Imported game packs retain the player's complete normalized ROM.
+*.argame
 # Two independently authored demo messages, validated against the source
 # example. All user publications and ROM-derived backups remain ignored.
 !examples/example.fr-ca.arlang
