@@ -44,8 +44,9 @@ def preview_settings(settings_path: Path):
         "cameraMode": "dynamic" if dynamic else "free",
         "rimLight": values.get("gpu_fx_rim", "On") == "On",
         "environmentalEffects": values.get("action_environmental_effects", "On") == "On",
+        "showBackdrop": values.get("diorama_layer_backdrop", "Off") == "On",
         "vertical": max(0, min(64, int(number("diorama_vertical_extend", 64, 1)))),
-        "skybox": {"Plane only": 0, "Skybox only": 1, "Both": 2}.get(values.get("diorama_skybox"), 1),
+        "skybox": {"Off": 0, "Plane only": 0, "Skybox only": 1, "Plane + skybox": 2, "Both": 2}.get(values.get("diorama_skybox"), 1),
         "source": settings_path.name if settings_path.exists() else "defaults",
     }
 

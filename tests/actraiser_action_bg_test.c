@@ -14,6 +14,7 @@
 #include "snes/ppu.h"
 
 static int failures;
+uint8_t g_ram[kActRaiserWramSize];
 #define CHECK(e) do { if (!(e)) { \
   fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #e); failures++; \
 } } while (0)
@@ -291,7 +292,7 @@ static const SnesRunnerApi s_fake_api = {
   .capabilities = SR_RUNNER_CAP_PPU_STATE |
       SR_RUNNER_CAP_BORROWED_U16_SPANS | SR_RUNNER_CAP_DMA_STATE |
       SR_RUNNER_CAP_PPU_BACKGROUND_POLICY | SR_RUNNER_CAP_PPU_CAPTURE_TILES |
-      SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY,
+      SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY | SR_RUNNER_CAP_PPU_CAPTURE_TILE_POLICY,
   .query_ppu_state = FakeQueryPpuState,
   .borrow_u16_memory = FakeBorrowU16,
   .query_dma_state = FakeQueryDmaState,
@@ -1949,7 +1950,77 @@ static void TestDeathHeimRematchCaptureEdits(void) {
   free(wram);
 }
 
+static void TestNativePixelEditScrollAndPolicy(void) {
+  uint8_t *wram = BuildWram();
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(wram && ppu);
+  if (!wram || !ppu) { free(wram); free(ppu); return; }
+  ActRaiserActionBg_Shutdown();
+  CHECK(Test_SetEnv("AR_ACTION_BG_HLE", "0", 1) == 0);
+  wram[kActRaiserWram_MapGroup] = 2;
+  wram[kActRaiserWram_CurrentMap] = 1;
+  Write16(wram, kActRaiserWram_Bg2Width, 256);
+  Write16(wram, kActRaiserWram_Bg2Height, 256);
+  Write16(wram, kActRaiserWram_Bg2CameraX, 0);
+  Write16(wram, kActRaiserWram_Bg2CameraY, 0);
+  ppu->bgmode = 1; ppu->screenEnabled[0] = 3;
+  ppu->bgXsc[0] = 0x63; ppu->bgXsc[1] = 0x70;
+  DioramaRoomOverride room = {.used = true, .map_group = 2, .map_number = 1};
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-pixels = cell:4,5 black:8000000000000000000000000000000000000000000000000000000000000000", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-stamp = cell:-1,0 metatile:00 words:0001,0002,0003,0004 bands:1,1,1,1", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-stamp = cell:4,16 metatile:18 words:0011,0012,0013,0014 bands:1,1,1,1", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-pixels = cell:4,16 black:8000000000000000000000000000000000000000000000000000000000000000", NULL));
+  const unsigned scrolls[] = {0, 131, 387, 1023};
+  for (unsigned i = 0; i < sizeof(scrolls)/sizeof(*scrolls); ++i) {
+    ppu->hScroll[1] = (uint16_t)scrolls[i];
+    ppu->vScroll[1] = (uint16_t)scrolls[i];
+    ActionBgPlan plan; ActionBgPresentationPolicy policy;
+    CHECK(ActRaiserActionBg_BuildPlan(wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+    CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(wram, kActRaiserWramSize, &plan, &room, ppu));
+    CHECK(ActRaiserActionBg_BindCaptureTiles(3, 0));
+    const PpuVirtualTilemapBinding *binding = &ppu->virtualTilemap[1];
+    /* A native page is addressed by live scroll, not by the WRAM camera's
+     * displacement from whichever raster row happened to end last frame. */
+    CHECK(((binding->camera_x + ppu->hScroll[1] - binding->hscroll_anchor) & 255) == (int)(scrolls[i] & 255));
+    CHECK(((binding->camera_y + ppu->vScroll[1] - binding->vscroll_anchor) & 255) == (int)(scrolls[i] & 255));
+    const SrPpuCaptureTileBinding *edits = &ppu->captureTiles[1];
+    CHECK(edits->lookup);
+    if (!edits->lookup) continue;
+    SrPpuCaptureTile tile;
+    CHECK(edits->lookup(edits->user_data, 8, 10, &tile));
+    CHECK(tile.flags == 0 && tile.black_rows[0] == 0x80); /* mask, not scenery */
+    CHECK(edits->lookup(edits->user_data, 40, 42, &tile));
+    CHECK(tile.flags == 0 && tile.black_rows[0] == 0x80); /* native page wraps both axes */
+    CHECK(edits->lookup(edits->user_data, -2, 0, &tile));
+    CHECK(tile.flags == SR_PPU_CAPTURE_TILE_REPLACE && tile.entry == 1);
+    CHECK(edits->lookup(edits->user_data, 72, 32, &tile));
+    CHECK(tile.flags == SR_PPU_CAPTURE_TILE_REPLACE && tile.entry == 0x11 && tile.black_rows[0] == 0x80);
+    CHECK(edits->lookup(edits->user_data, -24, 32, &tile));
+    CHECK(tile.entry == 0x11 && tile.black_rows[0] == 0x80);
+    CHECK(edits->lookup(edits->user_data, 73, 33, &tile));
+    CHECK(tile.entry == 0x14 && !tile.black_rows[0]);
+  }
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg2-virtual = cells:4,5-4,5 band:0", NULL));
+  ActionBgPlan plan; ActionBgPresentationPolicy policy;
+  CHECK(ActRaiserActionBg_BuildPlan(wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(wram, kActRaiserWramSize, &plan, &room, ppu));
+  CHECK(ActRaiserActionBg_BindCaptureTiles(3, 0));
+  SrPpuCaptureTile tile;
+  const SrPpuCaptureTileBinding *edits = &ppu->captureTiles[1];
+  CHECK(edits->lookup(edits->user_data, 40, 42, &tile));
+  CHECK(tile.band == 0 && tile.flags == (SR_PPU_CAPTURE_TILE_REPLACE | SR_PPU_CAPTURE_TILE_FOLLOW_POLICY));
+  DioramaLayerOrder_ClearRoom(&room);
+  ActRaiserActionBg_Shutdown();
+  CHECK(Test_UnsetEnv("AR_ACTION_BG_HLE") == 0);
+  free(ppu); free(wram);
+}
+
 int main(void) {
+  TestNativePixelEditScrollAndPolicy();
   TestDeathHeimNativeCaptureEdits();
   TestDeathHeimRematchCaptureEdits();
   TestCapture();

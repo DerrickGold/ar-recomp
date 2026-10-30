@@ -937,6 +937,10 @@ typedef struct SrPpuVirtualTilemapRequest {
  * Callbacks and context are borrowed until replacement or frame reset. */
 #define SR_PPU_CAPTURE_TILE_REPLACE UINT32_C(1)
 #define SR_PPU_CAPTURE_TILE_BLANK UINT32_C(2)
+/* With REPLACE, resample existing artwork/bands after edge mapping and native
+ * extent clipping. Unlike an explicit scenery stamp this cannot extend the
+ * visible source. Requires SR_RUNNER_CAP_PPU_CAPTURE_TILE_POLICY. */
+#define SR_PPU_CAPTURE_TILE_FOLLOW_POLICY UINT32_C(4)
 typedef struct SrPpuCaptureTile {
     uint16_t entry;
     uint8_t band;

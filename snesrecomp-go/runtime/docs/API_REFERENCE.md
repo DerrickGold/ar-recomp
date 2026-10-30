@@ -502,6 +502,13 @@ before writing the appended `transparent_rows` callback field. Its bits cut
 holes in all captured bands, taking precedence over black and replacement art.
 They also suppress opaque transparent-fill backing at those pixels. Older
 callbacks remain compatible and retain their black-only edits.
+Pixel masks follow the mapped background source and its horizontal/vertical
+extents. Explicit `SR_PPU_CAPTURE_TILE_REPLACE` scenery stamps take precedence
+at their unreflected world coordinates and may extend the original source.
+To replace existing pixels only (for example to reclassify their depth), check
+`SR_RUNNER_CAP_PPU_CAPTURE_TILE_POLICY` and combine `REPLACE` with
+`SR_PPU_CAPTURE_TILE_FOLLOW_POLICY`. This keeps those pixels subject to edge
+mapping and source extents; it does not paint new scenery beyond the bounds.
 In full-add captures, edited BG pixels participate in the captured main/sub
 priority decision, including outside the original virtual tilemap. Only the
 winning subscreen addend is retained; painted backgrounds cannot duplicate it

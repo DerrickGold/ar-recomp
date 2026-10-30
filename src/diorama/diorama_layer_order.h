@@ -311,6 +311,13 @@ bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
 /* Lookup a coordinate in a terrain-resolved stamp layer. */
 const DioramaTileStamp *DioramaLayerOrder_StampAt(
     const DioramaStampLayerOverride *layer, int x, int y);
+/* Extra rows of a horizontally cycling native page retain its X period.
+ * Exact authored cells (including blanks) win; only missing cells above/below
+ * the page may repeat. Zero dimensions disable this fallback. All units are
+ * 16px metatiles; use the returned stamp's coordinates for pixel-mask lookup. */
+const DioramaTileStamp *DioramaLayerOrder_ExtendedRowStampAt(
+    const DioramaStampLayerOverride *layer, int x, int y,
+    int native_width, int native_height);
 
 const uint16_t *DioramaLayerOrder_PixelMask(
     const DioramaRoomOverride *room, unsigned bg, int cell_x,

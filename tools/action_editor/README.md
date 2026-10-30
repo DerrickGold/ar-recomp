@@ -105,10 +105,27 @@ This selects Live world and Available extents, and removes row-band fills so you
 can supply the scenery with tiles. **Reset to room defaults** removes all authored
 policy overrides and restores the room's built-in mirror policy.
 
+**Reset background to native**, under **Room, terrain & background**, clears
+the selected BG in the current room across all terrain variants. It restores
+the ROM tiles, removing pasted/deleted tiles, pixel masks, added edge space,
+depth/shape settings and background-policy overrides, including camera-local
+overrides. For BG1 it also clears framing and scenery palette grading. The
+other BG, other rooms, backdrop/skybox preferences and environmental effects
+stay intact. The whole reset is one Undo step; Save project keeps the result.
+
 Explicit painted tiles (including blank stamps) always take precedence at their
 actual map coordinates, before mirror/repeat/clamp filling. The policy still
 controls unpainted gaps. Use **Live world / painted scenery** when those gaps
 should remain empty instead of being filled from the original room.
+
+Pixel transparency/black masks and depth edits to existing artwork follow that
+artwork's scrolling, edge fill and extent limits. They do not add tiles beyond
+the room. This also applies to animated resident backgrounds such as Bloodpool's
+sky and water, whose raster scroll differs from the room camera.
+Rows painted above or below a cycling native page keep its horizontal repeat:
+when scrolling leaves the painted columns, the renderer looks up that same new
+row within the native page's X period. Explicit outer-column stamps and blanks
+take precedence. It never wraps the new row vertically back into the sky.
 
 Screen bands use half-open rows within 0–224. World bands use this BG's world
 rows and move with its camera. The native planner rejects overlapping bands,
@@ -161,8 +178,13 @@ camera to the new gameplay limits. Pixel aspect and capture margins remain
 independent controls.
 
 The view bar also controls square/CRT pixel aspect,
-inspection zoom/tilt, capture width margin, 0/32/64 row budget, and all three backdrop
-modes. Camera/clock/coverage changes regenerate visible art from the complete
+inspection zoom/tilt, capture width margin, 0/32/64 row budget, and all three
+**Background mode** choices (Plane only, Skybox only, Both). **Show backdrop**
+separately toggles the solid SNES backing behind the tile planes. It reads
+`diorama_layer_backdrop` from the game settings at build time, defaulting to off,
+and is disabled in Skybox only mode, which always hides that backing.
+This preview preference does not modify exported scenery or game settings.
+Camera/clock/coverage changes regenerate visible art from the complete
 room; orbit-only changes reuse rasterized surfaces. Existing tile, pixel, depth,
 alpha, scenery and framing edits feed the production INI resolver.
 

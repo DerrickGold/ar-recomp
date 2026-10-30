@@ -1,6 +1,8 @@
 /* Selection, authored data and export state are separate. These controls
  * inspect the same buckets as rendering; choosing a tile never authors a rule. */
 let editorRevision=0,feedbackRevision=-1,feedbackRooms=new Map(),exportBaseline=new Map(),savepointKind='loaded';
+// Whole-BG resets can also remove camera-local records outside roomIniLines.
+let sourceIniBaseline=sourceIniText;
 let compareOriginal=false,changeCache=null,highlightMode='modified',highlightCache=null;
 const pixelInspector=$('#pixelInspector');
 pixelInspector.hidden=true;
@@ -21,14 +23,14 @@ function currentEditorRooms() {
 }
 function captureEditorSavepoint(kind='loaded') {
   editorRevision++;feedbackRevision=-1;changeCache=null;
-  exportBaseline=new Map(currentEditorRooms());savepointKind=kind;configDirty=false;
+  exportBaseline=new Map(currentEditorRooms());sourceIniBaseline=sourceIniText;savepointKind=kind;configDirty=false;
   if(kind==='exported')refreshEditorFeedback();
 }
 function captureRoomSavepoint(key,canonical) {
   exportBaseline.set(key,canonical);savepointKind='copied';refreshEditorFeedback();
 }
 function editorHasUnexportedChanges() {
-  try {configDirty=[...currentEditorRooms()].some(([key,text])=>text!==exportBaseline.get(key));}
+  try {configDirty=sourceIniText!==sourceIniBaseline||[...currentEditorRooms()].some(([key,text])=>text!==exportBaseline.get(key));}
   catch {configDirty=true;}
   return configDirty;
 }

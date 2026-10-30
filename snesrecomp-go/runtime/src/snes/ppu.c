@@ -4859,11 +4859,18 @@ static bool native_capture_tile_lookup(Ppu *ppu, unsigned layer,
     }
     *tile = (SrPpuCaptureTile){0};
     bool found = binding->lookup && binding->lookup(binding->user_data, x, y, tile);
-    if (tile->band > 2 || (tile->flags & ~3u)) found = false;
+    if (tile->band > 2 || (tile->flags & ~7u) ||
+        ((tile->flags & SR_PPU_CAPTURE_TILE_FOLLOW_POLICY) &&
+         !(tile->flags & SR_PPU_CAPTURE_TILE_REPLACE))) found = false;
     if (cache) *cache = (PpuCaptureTileCacheEntry){
         .tile = *tile, .x = x, .y = y, .valid = true, .found = found,
     };
     return found;
+}
+
+static bool native_capture_tile_extends_source(const SrPpuCaptureTile *tile) {
+    return (tile->flags & SR_PPU_CAPTURE_TILE_REPLACE) &&
+        !(tile->flags & SR_PPU_CAPTURE_TILE_FOLLOW_POLICY);
 }
 
 static void native_capture_tiles_line(Ppu *ppu, int layer, int screen_y,
@@ -4917,6 +4924,13 @@ static void native_capture_tiles_line(Ppu *ppu, int layer, int screen_y,
     const uint32_t backing = PpuOverlayTransparentFillColor(ppu, layer);
     const int left = capture->x0 - (int)edits->apron;
     const int right = capture->x1 + (int)edits->apron;
+    const int extent_row = clamp_int(screen_y, 0, kPpuYPixels - 1);
+    const unsigned extent_left = ppu->wsLayerExtentLeft[layer][extent_row];
+    const unsigned extent_right = ppu->wsLayerExtentRight[layer][extent_row];
+    const int native_left = extent_left == kPpuWidescreenExtentAvailable ?
+        left : -(int)extent_left;
+    const int native_right = extent_right == kPpuWidescreenExtentAvailable ?
+        right : kPpuXPixels + (int)extent_right;
     /* Bindings are checked at the ABI boundary, but also defend against a
      * later surface rebind or component-level caller shrinking storage. */
     const int width = (int)(ppu->overlayRenderPitch[layer] / sizeof(uint32_t));
@@ -4929,9 +4943,12 @@ static void native_capture_tiles_line(Ppu *ppu, int layer, int screen_y,
             x < capture->x1 ? capture->x1 : right;
         if (x < 0 && end > 0) end = 0;
         if (x < kPpuXPixels && end > kPpuXPixels) end = kPpuXPixels;
+        if (x < native_left && end > native_left) end = native_left;
+        if (x < native_right && end > native_right) end = native_right;
         int fetch_x = x - ((x % mosaic) + mosaic) % mosaic;
         int source_x = fetch_x;
-        const bool mapped = PpuMapWidescreenLayerXWithPolicy(ppu, (uint8_t)layer,
+        const bool mapped = x >= native_left && x < native_right &&
+            PpuMapWidescreenLayerXWithPolicy(ppu, (uint8_t)layer,
                 fetch_x, &source_x, &policy);
         bool authored_replace = false;
         int authored_run = INT_MAX;
@@ -4948,7 +4965,7 @@ static void native_capture_tiles_line(Ppu *ppu, int layer, int screen_y,
                 authored_found = native_capture_tile_lookup(ppu, (unsigned)layer, tx, ty, &authored);
                 last_authored_tx = tx;
             }
-            authored_replace = authored_found && (authored.flags & SR_PPU_CAPTURE_TILE_REPLACE);
+            authored_replace = authored_found && native_capture_tile_extends_source(&authored);
             if (authored_replace) source_x = fetch_x;
         }
         if (!mapped && !authored_replace) {
@@ -4970,7 +4987,8 @@ static void native_capture_tiles_line(Ppu *ppu, int layer, int screen_y,
             last_tx = tx; last_ty = ty;
         }
         SrPpuCaptureTile tile = authored_replace ? authored : cached;
-        bool draw = authored_replace || found;
+        bool draw = (authored_replace || found) &&
+            (native_visible || native_capture_tile_extends_source(&tile));
         if (native_visible && (!draw || !(tile.flags & SR_PPU_CAPTURE_TILE_REPLACE)) &&
             (x < capture->x0 || x >= capture->x1)) {
             if (!draw) tile = (SrPpuCaptureTile){0};

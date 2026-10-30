@@ -1014,6 +1014,104 @@ static void TestNativeBg2OpaqueBlackCover(void) {
   free(packet); ppu_free(ppu);
 }
 
+static uint32_t policy_capture_tile(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile) {
+  const bool classified = *(const bool *)context;
+  const unsigned index = ((x ^ y) & 1) ? 3 : 2;
+  *tile = (SrPpuCaptureTile){.entry = (uint16_t)(index | (index << 10)),
+      .band = classified ? 0 : 1,
+      .flags = classified ? SR_PPU_CAPTURE_TILE_REPLACE | SR_PPU_CAPTURE_TILE_FOLLOW_POLICY : 0};
+  for (unsigned row = 0; row < 8; ++row) {
+    tile->black_rows[row] = (uint8_t)(0x80u >> row);
+    tile->transparent_rows[row] = (uint8_t)(1u << row);
+  }
+  return 1;
+}
+
+static void TestNativeCaptureEditsRespectPolicy(void) {
+  enum { width = 320, margin = 16, apron = 16, extra_y = 8, height = kH + 2 * extra_y };
+  Ppu *ppu = ppu_init(); CHECK(ppu);
+  SrPpuBgPacket *packet = calloc(1, sizeof(*packet)); CHECK(packet);
+  static uint32_t fb[width * height], bands[3][width * height];
+  const unsigned fills[] = {kPpuWidescreenBandFill_Mirror, kPpuWidescreenBandFill_Repeat,
+      kPpuWidescreenBandFill_Clamp};
+  const unsigned scrolls[] = {0, 387, 1023};
+  const unsigned motions[] = {kPpuWidescreenMotion_FillRelative, kPpuWidescreenMotion_NormalScroll};
+  for (unsigned fill = 0; fill < sizeof(fills)/sizeof(*fills); ++fill)
+  for (unsigned scroll = 0; scroll < sizeof(scrolls)/sizeof(*scrolls); ++scroll)
+  for (unsigned motion = 0; motion < sizeof(motions)/sizeof(*motions); ++motion)
+  for (unsigned mode = 0; mode < 2; ++mode)
+  for (unsigned renderer = 0; renderer < 3; ++renderer) {
+    const bool classified = mode != 0;
+    setup_virtual_bg(ppu, margin, (uint8_t *)fb, width * 4);
+    PpuSetExtraVerticalSpace(ppu, extra_y, extra_y);
+    CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, height,
+        renderer == 0 ? kPpuRenderFlags_ReferencePixelRenderer : 0));
+    ppu->screenEnabled[0] = 2; ppu->bgXsc[1] = 0x30;
+    ppu->hScroll[1] = (uint16_t)scrolls[scroll];
+    ppu->vScroll[1] = (uint16_t)scrolls[scroll];
+    for (unsigned i = 0; i < 1024; ++i) ppu->vram[0x3000 + i] = 2 | (2 << 10);
+    VirtualTilemapFixture map = {.min_x = -256, .max_x = 256, .min_y = -256, .max_y = 256,
+        .even_entry = 2 | (2 << 10), .odd_entry = 2 | (2 << 10)};
+    PpuVirtualTilemapBinding binding = {.lookup = lookup_virtual_tile, .context = &map};
+    CHECK(PpuSetVirtualTilemap(ppu, 1, &binding));
+    CHECK(PpuBindOverlaySurfaceSized(ppu, 1, (uint8_t *)bands[0], width * 4, height));
+    for (unsigned band = 1; band < 3; ++band)
+      CHECK(PpuBindOverlayPrioSurface(ppu, 1, band, (uint8_t *)bands[band]));
+    CHECK(PpuSetOverlayCapture(ppu, 1, -margin, -extra_y, 256 + 2 * margin, height,
+        kPpuOverlayFlag_RemoveFromGame));
+    PpuSetWidescreenLayerBand(ppu, 1, 0, kH, (PpuWidescreenBandFill)fills[fill],
+        (PpuWidescreenMotion)motions[motion]);
+    PpuSetWidescreenLayerExtent(ppu, 1, 8, 12, 0, 0);
+    PpuSetVerticalMarginLayerClip(ppu, 1, 0, 0);
+    ppu->captureTiles[1] = (SrPpuCaptureTileBinding){
+        .lookup = policy_capture_tile, .user_data = (void *)&classified, .apron = apron};
+    if (renderer == 2) {
+      packet->request_flags = SR_PPU_BG_PACKET_TILES | SR_PPU_BG_PACKET_VALIDATE_TILES;
+      SrPpuBgPacket_Begin(packet, width, height); ppu->backgroundPacket = packet;
+    }
+    memset(bands, 0xa5, sizeof(bands));
+    ppu_runLine(ppu, 0);
+    for (int y = -extra_y; y < kH + extra_y; ++y) {
+      if (y < 0 || y >= kH) ppu_runMarginLine(ppu, y + 1);
+      else ppu_runLine(ppu, y + 1);
+    }
+    /* Pixel edits and depth reclassification follow the very same mapped
+     * source as the native artwork, and never expand its clipped rectangle.
+     * Explicit scenery beyond that rectangle is covered by the next test. */
+    for (int y = -extra_y; y < kH + extra_y; ++y) {
+      const PpuWidescreenLayerPolicy policy = PpuResolveWidescreenLayerPolicy(ppu, 1, y);
+      for (int x = -margin - apron; x < 256 + margin + apron; ++x) {
+        int source_x;
+        const bool visible = y >= 0 && y < kH && x >= -8 && x < 256 + 12 &&
+            PpuMapWidescreenLayerXWithPolicy(ppu, 1, x, &source_x, &policy);
+        uint32_t expected = 0;
+        if (visible) {
+          const unsigned wx = (unsigned)(source_x + (int)scrolls[scroll]) & 255u;
+          const unsigned wy = (unsigned)(y + 1 + (int)scrolls[scroll]) & 255u;
+          expected = (wx & 7) == 7 - (wy & 7) ? 0u :
+              (wx & 7) == (wy & 7) ? 0xff000000u :
+              classified && (((wx / 8) ^ (wy / 8)) & 1) ? 0xff00ff00u : 0xff0000ffu;
+        }
+        const unsigned at = (y + extra_y) * width + x + margin + apron;
+        for (unsigned band = 0; band < 3; ++band) {
+          const uint32_t want = band == (classified ? 2u : 0u) ? expected : 0;
+          const uint32_t actual = bands[band][at];
+          const uint32_t gpu = renderer == 2 ? SrPpuBgPacket_Color(packet, 1, band,
+              x + margin + apron, y + extra_y) : actual;
+          if (actual != want || gpu != want) {
+            fprintf(stderr, "native edit policy fill=%u scroll=%u motion=%u class=%u renderer=%u band=%u at %d,%d: %08x/%08x != %08x\n",
+                fills[fill], scrolls[scroll], motions[motion], mode, renderer, band, x, y, actual, gpu, want);
+            CHECK(false);
+            ppu->backgroundPacket = NULL; free(packet); ppu_free(ppu); return;
+          }
+        }
+      }
+    }
+    ppu->backgroundPacket = NULL;
+  }
+  free(packet); ppu_free(ppu);
+}
+
 static void TestAuthoredTilesBeyondNativeVerticalClip(void) {
   enum { width = 320, extra = 8, height = kH + extra * 2 };
   Ppu *ppu = ppu_init(); CHECK(ppu);
@@ -4048,6 +4146,7 @@ int main(void) {
   TestBackgroundPacketAuthenticCameraIsolation();
   TestVramBackgroundPacketOwnership();
   TestNativeBg2OpaqueBlackCover();
+  TestNativeCaptureEditsRespectPolicy();
   TestAuthoredTilesBeyondNativeVerticalClip();
   TestObjReceiverTransforms();
   TestWorldNavigationPartialBrightnessCapture();

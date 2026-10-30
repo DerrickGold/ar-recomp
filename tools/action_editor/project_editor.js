@@ -54,7 +54,7 @@ const ProjectEditor=(()=>{
     // with its previous buckets retained for rollback if a capacity check fails.
     const previous={text:sourceIniText,name:sourceIniName,policyDrafts:BackgroundPolicyEditor.captureDrafts(),
       stores:[store,pixelStore,stampStore,configRooms].map(target=>({...target})),
-      baseline:exportBaseline,kind:savepointKind,revision:editorRevision,
+      baseline:exportBaseline,sourceBaseline:sourceIniBaseline,kind:savepointKind,revision:editorRevision,
       feedbackRevision,feedbackRooms,changeCache,configDirty,selectionAnchor};
     SharedRoomPreview.validateEffects(files['action-effects.ini']);
     try {
@@ -65,7 +65,7 @@ const ProjectEditor=(()=>{
       resetLoadedConfig();
       [store,pixelStore,stampStore,configRooms].forEach((target,index)=>Object.assign(target,previous.stores[index]));
       sourceIniText=previous.text;sourceIniName=previous.name;
-      exportBaseline=previous.baseline;savepointKind=previous.kind;editorRevision=previous.revision;
+      exportBaseline=previous.baseline;sourceIniBaseline=previous.sourceBaseline;savepointKind=previous.kind;editorRevision=previous.revision;
       feedbackRevision=previous.feedbackRevision;feedbackRooms=previous.feedbackRooms;
       changeCache=previous.changeCache;configDirty=previous.configDirty;
       selectionAnchor=previous.selectionAnchor;BackgroundPolicyEditor.restoreDrafts(previous.policyDrafts);

@@ -288,6 +288,15 @@ const BackgroundPolicyEditor=(()=>{
     });ctx.restore();
   }
   return {refresh,apply,restore,drawGuides,pendingTargets,reviewPending,pending:()=>editing||drafts.size>0,
+    captureDraft:(r,bg)=>{
+      const key=roomKey(r)+':'+bg,value=key===scope?(editing?{saved,draft}:undefined):drafts.get(key);
+      return value?cloneBgPolicy(value):undefined;
+    },
+    restoreDraft:(r,bg,value)=>{
+      const key=roomKey(r)+':'+bg;
+      if(value)drafts.set(key,cloneBgPolicy(value));else drafts.delete(key);
+      if(scope===key){editing=false;saved='';}
+    },
     clearDrafts:()=>{drafts.clear();editing=false;saved='';scope='';},
     captureDrafts:()=>cloneBgPolicy({scope,saved,draft,editing,drafts:[...drafts]}),
     restoreDrafts:state=>{

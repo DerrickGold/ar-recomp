@@ -614,6 +614,7 @@ function setLayer(i) {
   refreshNativeCameraControls();
   refreshTilePalette();
   BackgroundPolicyEditor.refresh();
+  BackgroundReset.refresh();
   fitView(); tally(); draw();
 }
 const sel = $('#room');

@@ -297,6 +297,20 @@ run(`$('#bgPolicyReset').onclick()`);assert.equal(run('roomIniLines(room).some(l
 run(`ProjectEditor.load(${JSON.stringify(documents)},'policies.zip')`);
 assert.equal(run('mergeDioramaIni()'),documents['diorama-layers.ini']);
 assert.equal(run('EffectEditor.text()'),effectsBefore);
+// Whole-BG reset clears that BG's pending policy draft and restores it on
+// undo, while the other BG's unapplied controls remain available for review.
+run(`setLayer(1);$('#bgPolicyEdge').value='mirror';$('#bgPolicyEdge').onchange();
+  setLayer(0);$('#bgPolicyEdge').value='transparent';$('#bgPolicyEdge').onchange();
+  const beforeBackgroundReset=mergeDioramaIni(),backgroundResetHistory=undoStack.length;
+  $('#resetBackground').onclick();`);
+assert.equal(run('undoStack.length'),run('backgroundResetHistory')+1);
+assert.equal(run('BackgroundPolicyEditor.pendingTargets().map(t=>t.bg).join(",")'),'1');
+run('undo();');
+assert.equal(run('mergeDioramaIni()'),run('beforeBackgroundReset'));
+assert.equal(policy.elements.get('#bgPolicyEdge').value,'transparent');
+assert.equal(run('BackgroundPolicyEditor.pendingTargets().map(t=>t.bg).sort().join(",")'),'0,1');
+run('redo();setLayer(1);');
+assert.equal(policy.elements.get('#bgPolicyEdge').value,'mirror');
 console.log('Background policy controls: defaults, drafts, fill removal, caps/bands, native rejection, guides, undo, terrain sharing and project persistence passed');
 }
 
@@ -2362,6 +2376,82 @@ assert.equal(mixedReload.run('displayedCell(room,0,L,0,0).black'),'0'.repeat(64)
 mixedReload.run("$('#terrain').value='0';$('#terrain').onchange();");
 assert.equal(mixedReload.run('Object.keys(stampBucket(room,0).cells).length'),0);
 console.log('Bulk/single default reset restores original art/bands/pixels, removes additions/masks, preserves other tiles, clipboard and native art, survives regional reload, and undoes in one step');
+
+/* Whole-BG reset must clear loaded and unsaved edits across terrain families,
+ * including camera refinements, without touching the other BG or effects. */
+{
+const data=fixture();data.rooms.push({...data.rooms[0],section:'completion'});
+const ini=[
+  '# Preserve unrelated configuration', '[layers:01:01]',
+  'bg1 = z:0.4 bow:0.2', 'bg1hi = alpha:190', 'bg2 = z:0.7 transparent:black',
+  'bg2hi = order:8', 'bg1-virtual = z:0.1', 'bg2-virtual = alpha:160',
+  'bg1-policy = edge:world', 'bg2-policy = edge:repeat',
+  'scenery-grade = strength:0.3 saturation:1.2 shadows:445566 highlights:ffeebb',
+  'framing:us+jp+eu = x:2 y:3', 'backdrop = source:rom-02-01-bg2', 'obj2 = z:0.9',
+  '[layers:01:01:camera:0]', '# Camera comment stays',
+  'bg1 = z:0.6', 'bg2 = z:0.8', 'bg2-virtual = z:0.2', 'obj2 = z:0.8',
+  '[layers:01:02]', 'bg2 = z:0.5', '[layers:01:01:completion]', 'bg2 = z:0.3', ''
+].join('\r\n');
+const fullReset=editor(data,{ini}),br=fullReset.run;
+br(`for(const bg of [0,1])for(const family of editFamilies(room,bg)) {
+    const r=family.room,layer=decodeLayer(r,bg),s=stampBucket(r,bg),p=pixelBucket(r,bg);
+    s.cells['-2,-1']=paletteTile(layer,0);s.cells['0,0']=blankTile();
+    s.bounds={x0:-2,y0:-1,x1:34,y1:18};
+    bucket(r,bg).byId[0]=0;bucket(r,bg).byCell[1]=2;
+    p.byId[0]='F'.repeat(64);p.byCell[1]='F'.repeat(64);
+    p.byCoord={'-1,0':'F'.repeat(64)};p.transparent.byCell[2]='F'.repeat(64);
+    p.transparent.byId[1]='F'.repeat(64);p.transparent.byCoord['-1,1']='F'.repeat(64);
+  }
+  markEditorChanged();captureEditorSavepoint();setLayer(1);
+  const bg1Before=JSON.stringify(editFamilies(room,0).map(f=>{
+    const key=keyOf(f.room,0);return [store[key],pixelStore[key],stampStore[key]];
+  }));
+  const resetAllBefore=mergeDioramaIni(),resetSourceBefore=sourceIniText,resetEffects=EffectEditor.text();
+  const otherRoomBefore=roomSectionIni(DATA.rooms[1]),completionBefore=roomSectionIni(DATA.rooms[2]);`);
+assert.equal(br('ProjectEditor.dirty()'),false);
+assert.equal(br("$('#resetBackground').onclick()"),true);
+assert.equal(br('undoStack.length'),1);
+assert.equal(br('roomIniLines(room).some(line=>/^bg2(?:hi|[- :=])/.test(line))'),false);
+assert.equal(br('sourceIniText.includes("bg2 = z:0.8")'),false,'camera-local geometry is cleared');
+assert.equal(br('sourceIniText.includes("bg1 = z:0.6")'),true);
+assert.equal(br('JSON.stringify(mapBounds(room,1,L))'),'{"x0":0,"y0":0,"x1":32,"y1":16}');
+assert.equal(br('JSON.stringify(editFamilies(room,0).map(f=>{const key=keyOf(f.room,0);return [store[key],pixelStore[key],stampStore[key]];}))'),br('bg1Before'));
+assert.equal(br('roomSectionIni(DATA.rooms[1])'),br('otherRoomBefore'));
+assert.equal(br('roomSectionIni(DATA.rooms[2])'),br('completionBefore'));
+assert.equal(br('EffectEditor.text()'),br('resetEffects'));
+assert.equal(br('ProjectEditor.dirty()'),true);
+br('const bg2ResetIni=mergeDioramaIni();');
+assert.equal(br("$('#resetBackground').onclick()"),false,'repeating reset is a no-op');
+assert.equal(br('undoStack.length'),1);
+br("setLayer(0);$('#resetBackground').onclick();");
+assert.equal(br('undoStack.length'),2,'resetting a second BG is independent');
+assert.equal(br('roomIniLines(room).length'),0);
+assert.equal(br('editFamilies(room,0).every(f=>Object.keys(stampBucket(f.room,0).cells).length===0)'),true);
+assert.equal(br('roomConfig(room).grade'),undefined);
+assert.equal(br('Object.keys(pixelBucket(room,0).transparent.byCoord).length'),0);
+br('const nativeIni=mergeDioramaIni();');
+const resetReload=editor(data,{ini:br('nativeIni')});
+assert.equal(resetReload.run('roomIniLines(room).length'),0,'export/reload cannot resurrect edits');
+assert.equal(resetReload.run('EffectEditor.text()'),br('resetEffects'));
+br("$('#room').value='1';$('#room').onchange();undo();");
+assert.equal(br('room.map'),1);
+assert.equal(br('bgIndex'),0);
+assert.equal(br('mergeDioramaIni()'),br('bg2ResetIni'));
+br('undo();');
+assert.equal(br('bgIndex'),1);
+assert.equal(br('mergeDioramaIni()'),br('resetAllBefore'));
+assert.equal(br('sourceIniText'),br('resetSourceBefore'),'undo restores CRLF and exact scoped records');
+assert.equal(br('ProjectEditor.dirty()'),false);
+br('redo();redo();');
+assert.equal(br('mergeDioramaIni()'),br('nativeIni'));
+
+// A reset limited to a camera refinement must still mark the project dirty.
+const scoped=editor(fixture(),{ini:'[layers:01:01:camera:0]\nbg2 = z:0.7\n'});
+scoped.run("setLayer(1);$('#resetBackground').onclick();");
+assert.equal(scoped.run('ProjectEditor.dirty()'),true);
+scoped.run('undo();');assert.equal(scoped.run('ProjectEditor.dirty()'),false);
+console.log('Whole-background reset: regions, masks, geometry/policy, scoped INI, save/reload, independent BGs and undo/redo passed');
+}
 
 /* Explicit Mirror buttons/menu reverse tile order AND artwork, while Flip
  * stays in-place. A signed 3x3 selection also catches row/column confusion. */

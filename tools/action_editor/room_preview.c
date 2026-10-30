@@ -138,6 +138,8 @@ void RoomPreview_SetProjectionOffsets(const ArRenderPointF *planes, ArRenderPoin
   s_projection_offsets=planes;s_skybox_offset=skybox;
 }
 static bool s_effects_enabled = true;
+/* Presentation preference: keep the game's default and retain it across room loads. */
+static bool s_show_backdrop;
 static unsigned s_effect_vertices;
 static EditorReceiverPreviewSettings s_receivers;
 static bool s_receiver_rim;
@@ -182,6 +184,7 @@ int RoomPreview_SetEvent(unsigned index,int x,int y,int vx,int vy,unsigned start
   EditorRoomScene_SetEvent(s_room,&event);s_cached=false;return 1;
 }
 void RoomPreview_EnableEffects(int enabled) { s_effects_enabled = enabled != 0; }
+void RoomPreview_ShowBackdrop(int enabled) { s_show_backdrop = enabled != 0; }
 unsigned RoomPreview_EffectCount(void) {
   return s_room && s_effects_enabled ? EditorRoomScene_Effects(s_room)->decoration_count + EditorRoomScene_Effects(s_room)->authored_count + EditorRoomScene_Effects(s_room)->effect_count : 0;
 }
@@ -778,6 +781,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   DioramaScene scene = *EditorRoomScene_Scene(s_room);
   scene.native_bloom_clock = (uint16_t)frame;
   DioramaRenderOptions options = *scene.render;
+  if (!s_show_backdrop) options.visible_planes &= ~(UINT32_C(1) << kDioramaPlane_Backdrop);
   options.rim_light=s_receiver_rim;
   options.resolve_skybox = ResolveSkybox;
   options.draw_resident_skybox = s_skybox_draw;

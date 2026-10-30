@@ -14,6 +14,8 @@ int RoomPreview_LoadPlayer(unsigned size);
 int RoomPreview_SetReceivers(int mask, int player_x, int player_y, int enemy_x, int enemy_y);
 int RoomPreview_ReceiverStyle(unsigned flipped, unsigned rim);
 void RoomPreview_EnableEffects(int enabled);
+/* Toggle the solid SNES backdrop independently of the BG2/skybox mode. */
+void RoomPreview_ShowBackdrop(int enabled);
 unsigned RoomPreview_EffectCount(void);
 unsigned RoomPreview_EffectVertices(void);
 int RoomPreview_Configure(unsigned size);

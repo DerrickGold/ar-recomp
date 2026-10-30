@@ -460,10 +460,14 @@ static uint32_t Edit(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile
   RoomLayer *l = context;
   const DioramaRoomOverride *r = l->edits;
   int cx = x >= 0 ? x / 2 : (x - 1) / 2, cy = y >= 0 ? y / 2 : (y - 1) / 2;
-  const DioramaTileStamp *stamp = DioramaLayerOrder_StampAt(&r->stamp_layers[l->bg], cx, cy);
+  const bool native_page = l->plan.source != kActionBgSource_WorldMap && !l->page_cycle &&
+      ActionBgWorld_TileWidth(l->world) == 32 && ActionBgWorld_TileHeight(l->world) == 32;
+  const DioramaTileStamp *stamp = DioramaLayerOrder_ExtendedRowStampAt(
+      &r->stamp_layers[l->bg], cx, cy, native_page ? 16 : 0, native_page ? 16 : 0);
   int metatile = -1;
   *tile = (SrPpuCaptureTile){0};
   if (stamp) {
+    cx = stamp->x; cy = stamp->y;
     unsigned q = (y & 1) * 2 + (x & 1);
     tile->entry = stamp->words[q];
     tile->band = (stamp->bands >> (q * 2)) & 3;

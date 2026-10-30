@@ -21,6 +21,9 @@
     <button id="bg1" class="on" style="flex:1">BG1</button>
     <button id="bg2" style="flex:1">BG2</button>
   </div>
+  <p><button id="resetBackground">Reset background to native</button></p>
+  <p class="hint" id="resetBackgroundScope"></p>
+  <p class="hint" id="resetBackgroundStatus" role="status"></p>
   </details>
 
   <details class="side-section bg-policy" data-settings="policy"><summary>Background policy</summary>
@@ -459,7 +462,8 @@
     <label title="Captured pixels per side, independent of the display crop. Game default: 120.">Capture width margin <input id="sharedExtra" type="number" min="0" max="128" step="8" value="120" style="width:55px"></label>
     <label>Capture row budget <select id="sharedVertical"><option value="0">0</option><option value="32">32</option><option value="64" selected>64</option></select></label>
     <label><input id="sharedEffects" type="checkbox" checked> Environmental effects</label>
-    <label>Backdrop <select id="sharedSky"><option value="0">Plane only</option><option value="1" selected>Skybox only</option><option value="2">Both</option></select></label>
+    <label>Background mode <select id="sharedSky"><option value="0">Plane only</option><option value="1" selected>Skybox only</option><option value="2">Both</option></select></label>
+    <label title="Solid color behind the tile planes, matching the game's Show backdrop setting. Hidden in Skybox only mode."><input id="sharedBackdrop" type="checkbox"> Show backdrop</label>
     <label title="Multiplier relative to the saved game camera baseline. 1 matches normal gameplay.">Inspect zoom <input id="sharedDistance" type="range" min="0.5" max="2.5" step="0.01" value="1" style="width:80px"></label>
     <label>Yaw <input id="sharedYaw" type="range" min="-0.7" max="0.7" step="0.01" value="0" style="width:65px"></label>
     <label>Pitch <input id="sharedPitch" type="range" min="-0.7" max="0.7" step="0.01" value="0" style="width:65px"></label>
@@ -804,6 +808,7 @@
 <script src="shared_room_preview.js"></script>
 <script src="bg_policy_editor.js"></script>
 <script src="palette_editor.js"></script>
+<script src="background_reset.js"></script>
 <script src="project_archive.js"></script>
 <script src="project_editor.js"></script>
 <script src="editor_layout.js"></script>

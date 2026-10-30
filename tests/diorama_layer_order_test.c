@@ -1940,6 +1940,24 @@ static void TestRegionalTileKeys(void) {
   free(table);
 }
 
+static void TestCyclicPageExtendedRows(void) {
+  DioramaTileStamp cells[] = {
+    {.x = 3, .y = 0}, {.x = 3, .y = -1}, {.x = 3, .y = 16},
+    {.x = 19, .y = 16, .blank = true}, {.x = -1, .y = 16},
+  };
+  DioramaStampLayerOverride layer = {.cells = cells, .count = 5};
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 3, 0, 16, 16) == &cells[0]);
+  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 19, 0, 16, 16));
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, -1, 16, 16) == &cells[1]);
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, 16, 16, 16) == &cells[2]);
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, -13, 16, 16, 16) == &cells[2]);
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 19, 16, 16, 16) == &cells[3]);
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, -1, 16, 16, 16) == &cells[4]);
+  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, 16, 0, 0));
+  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, 32, 16, 16));
+  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 36, 16, 16, 16));
+}
+
 static void TestBackgroundPolicyPersistence(void) {
   DioramaRoomOverride room = {.used = true, .map_group = 7, .map_number = 3};
   CHECK(DioramaLayerOrder_ParseLine(&room,
@@ -2076,6 +2094,7 @@ int main(void) {
   TestNativeBloom();
   TestSceneryGrade();
   TestDeathHeimIndependentScenes();
+  TestCyclicPageExtendedRows();
   TestBackgroundPolicyPersistence();
   TestBlankTilesAndFraming();
   TestRegionalTileKeys();

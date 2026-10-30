@@ -384,6 +384,17 @@ const DioramaTileStamp *DioramaLayerOrder_StampAt(
   return index && index <= layer->count ? &layer->cells[index - 1] : NULL;
 }
 
+const DioramaTileStamp *DioramaLayerOrder_ExtendedRowStampAt(
+    const DioramaStampLayerOverride *layer, int x, int y,
+    int native_width, int native_height) {
+  const DioramaTileStamp *stamp = DioramaLayerOrder_StampAt(layer, x, y);
+  if (stamp || !layer || !layer->count || native_width <= 0 || native_height <= 0 ||
+      (y >= 0 && y < native_height)) return stamp;
+  int wrapped_x = x % native_width;
+  if (wrapped_x < 0) wrapped_x += native_width;
+  return wrapped_x == x ? NULL : DioramaLayerOrder_StampAt(layer, wrapped_x, y);
+}
+
 void DioramaLayerOrder_ClearRoom(DioramaRoomOverride *room) {
   if (!room) return;
   for (unsigned bg = 0; bg < 2; bg++) {

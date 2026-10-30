@@ -1467,6 +1467,8 @@ bool ActRaiserActionBg_RoomSceneFrameObserverActive(void) {
 static uint32_t ProviderLookup(void *context, int32_t tile_x,
                                int32_t tile_y, uint16_t *entry) {
   const ActRaiserActionBgProvider *provider = context;
+  if (provider && provider->capture_native_tiles)
+    tile_y = WrapWorldTile(tile_y, ActionBgWorld_TileHeight(provider->world));
   s_observer.diagnostics.provider_lookups++;
   const ActionBgLookupResult result = LookupWorldTile(
       provider ? provider->world : NULL,
@@ -1668,6 +1670,8 @@ static uint32_t ProviderBandLookup(void *context, int32_t tile_x,
     return false;
   if (provider->wrap_world_x)
     tile_x = WrapWorldTile(tile_x, provider->tile_band_width);
+  if (provider->capture_native_tiles)
+    tile_y = WrapWorldTile(tile_y, provider->tile_band_height);
   if ((unsigned)tile_x >= provider->tile_band_width ||
       (unsigned)tile_y >= provider->tile_band_height)
     return false;
@@ -1693,11 +1697,14 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
   const unsigned bg = provider->layer;
   int cx = tile_x >= 0 ? tile_x / 2 : (tile_x - 1) / 2;
   int cy = tile_y >= 0 ? tile_y / 2 : (tile_y - 1) / 2;
-  const DioramaTileStamp *stamp = DioramaLayerOrder_StampAt(
-      &room->stamp_layers[bg], cx, cy);
+  const DioramaTileStamp *stamp = DioramaLayerOrder_ExtendedRowStampAt(
+      &room->stamp_layers[bg], cx, cy,
+      provider->capture_native_tiles ? (int)ActionBgWorld_TileWidth(provider->world) / 2 : 0,
+      provider->capture_native_tiles ? (int)ActionBgWorld_TileHeight(provider->world) / 2 : 0);
   int metatile = -1;
   *tile = (SrPpuCaptureTile){0};
   if (stamp) {
+    cx = stamp->x; cy = stamp->y;
     unsigned quadrant = ((tile_y & 1) * 2) + (tile_x & 1);
     tile->entry = stamp->words[quadrant];
     tile->band = (stamp->bands >> (quadrant * 2)) & 3u;
@@ -1708,20 +1715,26 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
     if (!room->pixel_layers[bg].count && !provider->pixel_band_cache_active) return 0;
     if (provider->wrap_world_x)
       tile_x = WrapWorldTile(tile_x, ActionBgWorld_TileWidth(provider->world));
+    if (provider->capture_native_tiles)
+      tile_y = WrapWorldTile(tile_y, ActionBgWorld_TileHeight(provider->world));
     uint8_t id;
     if (ActionBgWorld_Lookup(provider->world, tile_x, tile_y, &tile->entry) !=
             kActionBgLookup_Tile ||
         !ActionBgWorld_LookupMetatile(provider->world, tile_x, tile_y, &id)) return 0;
     cx = tile_x / 2;
+    cy = tile_y / 2;
     metatile = id;
     tile->band = (tile->entry & 0x2000u) ? 2u : 1u;
     if (provider->pixel_band_cache_active)
       (void)ProviderBandLookup(context, tile_x, tile_y, tile->entry, &tile->band);
-    /* The native $0701 page has no authentic virtual-band classifier. Export
-     * its live tile through the capture callback to apply the authored band;
-     * the renderer keeps the original source for ordinary output/color math. */
-    if (provider->capture_native_tiles)
+    /* Native pages need replacement pixels only to move a depth band. Pixel
+     * masks alone must leave the live artwork in place. Neither is new scenery
+     * allowed to override edge filling or extend the native vertical bounds. */
+    if (provider->capture_native_tiles && provider->pixel_band_cache_active) {
       tile->flags = SR_PPU_CAPTURE_TILE_REPLACE;
+      if (s_runner_api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILE_POLICY)
+        tile->flags |= SR_PPU_CAPTURE_TILE_FOLLOW_POLICY;
+    }
   }
   const DioramaPixelEdit *edit = room->pixel_layers[bg].count
       ? DioramaLayerOrder_PixelEditAt(room, bg, cx, cy, metatile) : NULL;
@@ -1873,8 +1886,10 @@ bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
   /* Floor division is required for scenery extending left or above zero. */
   const int cx = x >= 0 ? x / 16 : (x - 15) / 16;
   const int cy = y >= 0 ? y / 16 : (y - 15) / 16;
-  const DioramaTileStamp *cell = DioramaLayerOrder_StampAt(
-      &provider->virtual_room->stamp_layers[bg], cx, cy);
+  const DioramaTileStamp *cell = DioramaLayerOrder_ExtendedRowStampAt(
+      &provider->virtual_room->stamp_layers[bg], cx, cy,
+      provider->capture_native_tiles ? (int)ActionBgWorld_TileWidth(provider->world) / 2 : 0,
+      provider->capture_native_tiles ? (int)ActionBgWorld_TileHeight(provider->world) / 2 : 0);
   if (!cell) return false;
   *local_x = (uint8_t)(x & 15);
   *local_y = (uint8_t)(y & 15);
@@ -1883,7 +1898,7 @@ bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
   *band = (cell->bands >> (quadrant * 2)) & 3u;
   *blank = cell->blank;
   const DioramaPixelEdit *edit = DioramaLayerOrder_PixelEditAt(
-      provider->virtual_room, bg, cx, cy, cell->blank ? -1 : cell->metatile);
+      provider->virtual_room, bg, cell->x, cell->y, cell->blank ? -1 : cell->metatile);
   const unsigned bit = 1u << (15 - *local_x);
   const bool transparent = edit && (edit->transparent[*local_y] & bit);
   *blank |= transparent;
@@ -2056,8 +2071,11 @@ static void PrepareNativeCaptureEdits(const uint8_t *wram, size_t wram_size,
     provider->wrap_world_x = true;
     provider->camera_x = snapshot.camera_x;
     provider->camera_y = snapshot.camera_y;
-    provider->hscroll_anchor = ppu->backgrounds[bg].h_scroll & 0x3ff;
-    provider->vscroll_anchor = ppu->backgrounds[bg].v_scroll & 0x3ff;
+    /* A resident page's map origin is fixed; its live scroll may already
+     * include HDMA motion (Bloodpool's last row is not its WRAM camera).
+     * Anchor to the canonical camera so each row retains that displacement. */
+    provider->hscroll_anchor = snapshot.camera_x & 0x3ff;
+    provider->vscroll_anchor = snapshot.camera_y & 0x3ff;
     provider->pixel_cell_x = provider->pixel_cell_y = -1;
     provider->pixel_band_cache_active = classified && CompileTileBandCache(provider);
     provider->pixel_edits_active = true;

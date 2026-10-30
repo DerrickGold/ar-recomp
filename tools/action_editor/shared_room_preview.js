@@ -38,6 +38,12 @@ const SharedRoomPreview = (() => {
   $('#sharedPixels').value=savedView.pixelAspect==='crt'?'1':'0';
   $('#sharedVertical').value=String(savedView.vertical??64);
   $('#sharedSky').value=String(savedView.skybox??1);
+  $('#sharedBackdrop').checked=savedView.showBackdrop??false;
+  function updateBackdropControl() {
+    $('#sharedBackdrop').disabled=setting('Sky')===1;
+  }
+  updateBackdropControl();
+  $('#sharedSky').addEventListener('input',updateBackdropControl);
   $('#sharedEffects').checked=savedView.environmentalEffects??true;
   function viewArguments(choice=$('#sharedAspect').value) {
     const auto=choice==='auto'||choice==='stretch';
@@ -138,6 +144,7 @@ const SharedRoomPreview = (() => {
       backend.stats.creates=backend.stats.draws=0;
       const start=performance.now();
       api.RoomPreview_EnableEffects($('#sharedEffects').checked ? 1 : 0);
+      api.RoomPreview_ShowBackdrop($('#sharedBackdrop').checked ? 1 : 0);
       const renderFrame=()=>api.RoomPreview_Render(...args);
       let ok=renderFrame();
       let uploads=api.RoomPreview_Uploads();

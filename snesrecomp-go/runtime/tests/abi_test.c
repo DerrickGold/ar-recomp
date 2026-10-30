@@ -4579,6 +4579,8 @@ int main(void) {
                         "capture tile binding failed");
         failed |= check((api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILE_CACHE) != 0,
                         "capture tile cache capability missing");
+        failed |= check((api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILE_POLICY) != 0,
+                        "capture tile policy capability missing");
         edits.stable_layer_mask = 1;
         failed |= check(api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_OK &&
                         snes->ppu->captureTileStableMask == 1,

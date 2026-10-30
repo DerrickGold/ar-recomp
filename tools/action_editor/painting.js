@@ -89,6 +89,7 @@ function setKey(target, k, value) {
   if (value === undefined) delete target[k]; else target[k] = value;
 }
 function applySide(op, which) {
+  if(op.backgroundReset)return BackgroundReset.restore(op.backgroundReset,which);
   if(op.palette)return PaletteEditor.restore(op.palette,which);
   if(op.nativeBloom)return NativeBloomEditor.restore(op.nativeBloom,which);
   if(op.policy)return BackgroundPolicyEditor.restore(op.policy,which);
