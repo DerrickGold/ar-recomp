@@ -14,6 +14,7 @@ static bool s_grounded = true;
 static unsigned s_vram_writes, s_palette_writes;
 static uint8_t s_cgram[512];
 static unsigned s_palette_cursor;
+static uint8_t s_overlay_composition[19];
 void (*g_cpu_cop_hook)(CpuState *cpu);
 void (*g_cpu_brk_hook)(CpuState *cpu);
 static uint32_t s_sound_site;
@@ -40,6 +41,8 @@ static void BlockSound(CpuState *cpu) {
 
 uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 at) {
   (void)cpu;
+  if (bank == 6 && at >= 0x9000 && at < 0x9000 + sizeof(s_overlay_composition))
+    return s_overlay_composition[at - 0x9000];
   return bank == 0 ? g_ram[at] : (uint8)(at ^ bank);
 }
 uint16 cpu_read16(CpuState *cpu, uint8 bank, uint16 at) {
@@ -299,6 +302,110 @@ static void TestNativePoses(CpuState *cpu) {
   }
 }
 
+static void TestStageClearHandoff(CpuState *cpu) {
+  const uint16_t player = kActRaiserWram_PlayerObject;
+  /* Native $A64F swaps the Master into the defeated boss's slot, updates
+   * camera subject $8A, and leaves the old player slot free for the orb. */
+  const uint16_t statue = player + 12 * kActRaiserActionObjectStride;
+  ++g_ram[kActRaiserWram_CurrentMap];
+  memset(g_ram + player, 0, kActRaiserActionObjectStride);
+  Put(player + kActRaiserActionObject_Handler, 0xA1CE);
+  Put(player + kActRaiserActionObject_AnimationAddress, 0x8000);
+  g_ram[player + kActRaiserActionObject_AnimationBank] = 6;
+  Put(player + kActRaiserActionObject_AnimationState, 0x11);
+  Put(player + kActRaiserActionObject_LeftExtent, 16);
+  Put(player + kActRaiserActionObject_TopExtent, 40);
+  Put(player + kActRaiserActionObject_BottomExtent, 24);
+  memcpy(g_ram + statue, g_ram + player, kActRaiserActionObjectStride);
+  Put(kActRaiserWram_ActionCameraSubject, statue);
+  Put(player + kActRaiserActionObject_Status, kActRaiserObjectStatus_Inactive);
+  Put(player + kActRaiserActionObject_Handler, 0xA633); /* retired boss record */
+  g_settings.ar2_master = true;
+
+  ActRaiserAr2MasterDraw draw;
+  for (unsigned step = 8; step-- > 0;) {
+    Put(statue + kActRaiserActionObject_Handler, step == 7 ? 0xA1CE : 0xA2E5);
+    Tick();
+    ActRaiserAr2Master_UpdatePresentation(cpu);
+    assert(ActRaiserAr2Master_DrawObject(cpu, statue, &draw));
+    assert(draw.count == 1 && draw.parts[0].x[0] == 8 && draw.parts[0].y[0] == 16);
+    assert(!ActRaiserAr2Master_DrawObject(cpu, player, &draw));
+    RequestFade(step);
+    ActRaiserAr2Master_UploadVideo(cpu);
+    assert(g_ram[0x00CF] == 0);
+    ExpectPalette(cpu, step, true);
+  }
+
+  /* $A315/$8657 temporarily draws the same composite as arrival: a native
+   * orb ring over a Master body. Keep only the ring over the relocated statue. */
+  Put(statue + kActRaiserActionObject_Handler, 0xA314);
+  memcpy(g_ram + player, g_ram + statue, kActRaiserActionObjectStride);
+  Put(player + kActRaiserActionObject_Handler, 0x8661);
+  Put(player + kActRaiserActionObject_ResumeAddress, 0xA31D);
+  Put(player + kActRaiserActionObject_SpawnerBacklink, statue);
+  Put(player + kActRaiserActionObject_AnimationState, 0x10);
+  Put(player + kActRaiserActionObject_Composition, 0x9000);
+  Put(player + kActRaiserActionObject_LeftExtent, 3); /* not the statue's origin */
+  s_overlay_composition[4] = 2;
+  ByteOrder_WriteLe16(s_overlay_composition + 10, 0x0080); /* native Master body */
+  s_overlay_composition[12] = 1;
+  s_overlay_composition[13] = 5;
+  s_overlay_composition[14] = 6;
+  s_overlay_composition[15] = 7;
+  s_overlay_composition[16] = 8;
+  ByteOrder_WriteLe16(s_overlay_composition + 17, 0x0288); /* orb palette */
+  Tick();
+  ActRaiserAr2Master_UpdatePresentation(cpu);
+  assert(ActRaiserAr2Master_DrawObject(cpu, statue, &draw));
+  assert(draw.count == 1 && draw.parts[0].x[0] == 8);
+  assert(ActRaiserAr2Master_DrawObject(cpu, player, &draw));
+  assert(draw.count == 1 && draw.parts[0].attributes == 0x0288);
+  assert(draw.parts[0].large && draw.parts[0].x[0] == 5 && draw.parts[0].y[1] == 8);
+  /* Shared animation helpers/art are also used by unrelated effects. */
+  Put(player + kActRaiserActionObject_SpawnerBacklink, statue + kActRaiserActionObjectStride);
+  assert(!ActRaiserAr2Master_DrawObject(cpu, player, &draw));
+  Put(player + kActRaiserActionObject_SpawnerBacklink, statue);
+  Put(player + kActRaiserActionObject_ResumeAddress, 0xA100);
+  assert(!ActRaiserAr2Master_DrawObject(cpu, player, &draw));
+  Put(player + kActRaiserActionObject_ResumeAddress, 0xA31D);
+
+  /* The free-flying orb must retain its entire original composition. */
+  Put(player + kActRaiserActionObject_Handler, 0xA32A);
+  Put(player + kActRaiserActionObject_AnimationState, 0x12);
+  Tick();
+  ActRaiserAr2Master_UpdatePresentation(cpu);
+  assert(!ActRaiserAr2Master_DrawObject(cpu, player, &draw));
+  assert(ActRaiserAr2Master_DrawObject(cpu, statue, &draw));
+  ActRaiserAr2Master_UploadVideo(cpu);
+  ExpectPalette(cpu, 0, true);
+
+  /* Switching characters during departure changes the statue and its atlas,
+   * while the native orb, lifecycle handlers and positions stay untouched. */
+  uint8_t before[kActRaiserWramSize];
+  memcpy(before, g_ram, sizeof(before));
+  g_settings.ar2_master = false;
+  ActRaiserAr2Master_UpdatePresentation(cpu);
+  assert(!ActRaiserAr2Master_DrawObject(cpu, statue, &draw));
+  assert(!ActRaiserAr2Master_DrawObject(cpu, player, &draw));
+  ActRaiserAr2Master_UploadVideo(cpu);
+  ExpectPalette(cpu, 0, false);
+  g_settings.ar2_master = true;
+  ActRaiserAr2Master_UpdatePresentation(cpu);
+  assert(ActRaiserAr2Master_DrawObject(cpu, statue, &draw));
+  assert(!ActRaiserAr2Master_DrawObject(cpu, player, &draw));
+  ActRaiserAr2Master_UploadVideo(cpu);
+  ExpectPalette(cpu, 0, true);
+  assert(memcmp(before, g_ram, sizeof(before)) == 0);
+
+  /* Retired/stale camera subjects must not keep replacing other actors. */
+  Put(statue + kActRaiserActionObject_Status, kActRaiserObjectStatus_Inactive);
+  Tick();
+  ActRaiserAr2Master_UpdatePresentation(cpu);
+  assert(!ActRaiserAr2Master_DrawObject(cpu, statue, &draw));
+  assert(!ActRaiserAr2Master_DrawObject(cpu, player, &draw));
+  Put(kActRaiserWram_ActionCameraSubject, 0);
+}
+
 static void TestHitReaction(CpuState *cpu) {
   s_grounded = true;
   Put(cpu->X + kActRaiserActionObject_AnimationState, 0);
@@ -517,6 +624,7 @@ int main(void) {
   TestFadeSwitches(&cpu);
   TestPresentationUpdates(&cpu);
   TestNativePoses(&cpu);
+  TestStageClearHandoff(&cpu);
   TestHitReaction(&cpu);
   TestSwingSounds(&cpu);
   TestBlockSounds(&cpu);

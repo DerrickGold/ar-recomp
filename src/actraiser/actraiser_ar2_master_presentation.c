@@ -12,7 +12,14 @@ enum {
   kCastLast = 0x9F12,
   kStageClearFirst = 0xA1CE,
   kStageClearLast = 0xA314,
+  kDepartureFirst = 0xA315,
+  kDepartureLast = 0xA343,
+  kAnimationWait = 0x8661,
+  kDepartureAnimationReturn = 0xA31D,
+  kAr1AnimOrbRing = 0x10,
   kAr1AnimDeath = 0x0E,
+  kAr1AnimationBank = 0x06,
+  kAr1AnimationAddress = 0x8000,
   kObjTileWordBase = 0x2000,
   kAr1AtlasBank = 0x07,
   kAr1AtlasAddress = 0x8000,
@@ -71,7 +78,7 @@ typedef struct Ar2Presentation {
   Ar2Pose pose;
   ActRaiserAr2MasterDraw draw;
   bool enabled;
-  uint16_t map, game_frame;
+  uint16_t map, game_frame, object;
   int frame;
   bool vram_owned;
   uint8_t fade_step;
@@ -89,6 +96,40 @@ static uint16_t Field(const CpuState *cpu, uint16_t object, unsigned offset) {
 }
 static bool InActionStage(const CpuState *cpu) {
   return ActRaiser_IsActionMapGroup(cpu_read8((CpuState *)cpu, 0, kActRaiserWram_MapGroup));
+}
+
+static bool StageClearHandler(uint16_t handler) {
+  return handler >= kStageClearFirst && handler <= kStageClearLast;
+}
+
+static bool NativeMasterAnimations(const CpuState *cpu, uint16_t object) {
+  return Field(cpu, object, kActRaiserActionObject_AnimationAddress) == kAr1AnimationAddress &&
+         cpu_read8((CpuState *)cpu, 0, object + kActRaiserActionObject_AnimationBank) ==
+             kAr1AnimationBank;
+}
+
+static bool DepartureOrb(const CpuState *cpu, uint16_t object) {
+  const uint16_t handler = Field(cpu, object, kActRaiserActionObject_Handler);
+  return (handler >= kDepartureFirst && handler <= kDepartureLast) ||
+         (handler == kAnimationWait &&
+          Field(cpu, object, kActRaiserActionObject_ResumeAddress) == kDepartureAnimationReturn);
+}
+
+/* $A64F swaps the player and defeated boss records; $A652 publishes the new
+ * Master slot in camera subject $8A. $A2FE later allocates the departing orb,
+ * usually reusing the freed $08A0. Follow the clear owner, not that old slot.
+ * Before arrival has assigned $8A, the statue still lives at $08A0. */
+static uint16_t MasterObject(const CpuState *cpu) {
+  const uint16_t subject = Read16(cpu, kActRaiserWram_ActionCameraSubject);
+  if (subject >= kActRaiserWram_PlayerObject &&
+      subject < kActRaiserWram_ActionObjectTable +
+                    kActRaiserActionObjectCount * kActRaiserActionObjectStride &&
+      (subject - kActRaiserWram_ActionObjectTable) % kActRaiserActionObjectStride == 0 &&
+      !(Field(cpu, subject, kActRaiserActionObject_Status) & kActRaiserObjectStatus_InactiveMask) &&
+      NativeMasterAnimations(cpu, subject) &&
+      StageClearHandler(Field(cpu, subject, kActRaiserActionObject_Handler)))
+    return subject;
+  return DepartureOrb(cpu, kActRaiserWram_PlayerObject) ? 0 : kActRaiserWram_PlayerObject;
 }
 
 void Ar2MasterPresentation_Reset(void) {
@@ -137,8 +178,7 @@ static int PoseFrame(uint8_t anim, uint16_t game_frame) {
 }
 
 static int NativePoseFrame(uint16_t handler, uint8_t ar1_anim, uint16_t game_frame) {
-  if (ActRaiser_PlayerArrivalAnimationActive(handler) ||
-      (handler >= kStageClearFirst && handler <= kStageClearLast)) {
+  if (ActRaiser_PlayerArrivalAnimationActive(handler) || StageClearHandler(handler)) {
     s_present.pose.started = false;
     /* Hold the opening arrival frame, whose one-tick ROM duration would
      * otherwise immediately lower the sword. Casting uses a different pose. */
@@ -154,8 +194,8 @@ static int NativePoseFrame(uint16_t handler, uint8_t ar1_anim, uint16_t game_fra
   return PoseFrame(anim, game_frame);
 }
 
-/* The orb ring the arrival draws over the statue lives in the player's own
- * composition, in the orb's palette; it is kept in front of the AR2 statue.
+/* The orb ring drawn over the statue lives in a shared native composition,
+ * in the orb's palette; it is kept in front of the AR2 statue.
  * The master's own parts are the ones in palette 0 of the composition. */
 static void KeepNativeOverlay(const CpuState *cpu, uint16_t object, ActRaiserAr2MasterDraw *out) {
   CpuState *bus = (CpuState *)cpu;
@@ -175,8 +215,8 @@ static void KeepNativeOverlay(const CpuState *cpu, uint16_t object, ActRaiserAr2
   }
 }
 
-static void BuildDraw(const CpuState *cpu, int frame, ActRaiserAr2MasterDraw *out) {
-  const uint16_t object = kActRaiserWram_PlayerObject;
+static void BuildDraw(const CpuState *cpu, uint16_t object, int frame,
+                      ActRaiserAr2MasterDraw *out) {
   const uint16_t handler = Field(cpu, object, kActRaiserActionObject_Handler);
   if (ActRaiser_PlayerArrivalAnimationActive(handler)) KeepNativeOverlay(cpu, object, out);
   /* AR2 parts sit on the feet: the native origin is the object minus its
@@ -199,27 +239,31 @@ static void BuildDraw(const CpuState *cpu, int frame, ActRaiserAr2MasterDraw *ou
 void Ar2MasterPresentation_Update(const CpuState *cpu, bool enabled, int controlled_frame) {
   if (!s_present.assets || !cpu) return;
   enabled = enabled && InActionStage(cpu);
+  const uint16_t object = enabled ? MasterObject(cpu) : 0;
+  enabled = enabled && object != 0;
   const uint16_t map = Read16(cpu, kActRaiserWram_MapGroup);
-  if (map != s_present.map || enabled != s_present.enabled) s_present.pose.started = false;
+  if (map != s_present.map || enabled != s_present.enabled || object != s_present.object)
+    s_present.pose.started = false;
   s_present.map = map;
+  s_present.object = object;
   s_present.enabled = enabled;
   s_present.frame = -1;
   s_present.draw = (ActRaiserAr2MasterDraw){0};
   if (!enabled) return;
 
   const uint16_t game_frame = Read16(cpu, kActRaiserWram_GameFrame);
-  int frame = controlled_frame;
+  int frame = object == kActRaiserWram_PlayerObject ? controlled_frame : -1;
   if (frame >= 0) {
     s_present.pose.started = false;
     s_present.fade_step = kFadeSteps - 1;
   } else {
     frame = NativePoseFrame(
-        Read16(cpu, kActRaiserWram_PlayerHandler),
-        (uint8_t)Field(cpu, kActRaiserWram_PlayerObject, kActRaiserActionObject_AnimationState),
+        Field(cpu, object, kActRaiserActionObject_Handler),
+        (uint8_t)Field(cpu, object, kActRaiserActionObject_AnimationState),
         game_frame);
   }
   if (frame < 0 || frame >= s_present.assets->frame_count) return;
-  BuildDraw(cpu, frame, &s_present.draw);
+  BuildDraw(cpu, object, frame, &s_present.draw);
   s_present.frame = frame;
   s_present.game_frame = game_frame;
 }
@@ -229,11 +273,24 @@ bool ActRaiserAr2Master_DrawObject(const CpuState *cpu, uint16_t object,
   if (!out) return false;
   out->count = 0;
   if (!cpu || !s_present.assets || !s_present.enabled || s_present.frame < 0 ||
-      object != kActRaiserWram_PlayerObject || !InActionStage(cpu) ||
+      !InActionStage(cpu) ||
       Read16(cpu, kActRaiserWram_MapGroup) != s_present.map)
     return false;
-  *out = s_present.draw;
-  return true;
+  if (object == s_present.object) {
+    *out = s_present.draw;
+    return true;
+  }
+  /* $A315 runs arrival's composite in reverse on the orb child before $A321
+   * selects the free-flying orb. Its palette-0 body would draw AR1 tiles over
+   * our statue. Preserve only the native ring; the clear owner draws the body.
+   * Other orb animations and unrelated children retain their native OAM. */
+  if (DepartureOrb(cpu, object) && NativeMasterAnimations(cpu, object) &&
+      Field(cpu, object, kActRaiserActionObject_SpawnerBacklink) == s_present.object &&
+      Field(cpu, object, kActRaiserActionObject_AnimationState) == kAr1AnimOrbRing) {
+    KeepNativeOverlay(cpu, object, out);
+    return true;
+  }
+  return false;
 }
 
 static void WriteVramWords(CpuState *cpu, uint16_t word_address, const uint8_t *bytes,

@@ -48,9 +48,10 @@ RecompReturn ActRaiser_Ar2MasterContact(CpuState *cpu);
  * Advance native-owned animations even when the player is culled. */
 void ActRaiserAr2Master_UpdatePresentation(const CpuState *cpu);
 
-/* Sprite builder: read the prepared parts without advancing animation or
- * changing controller state. These replace this action object's
- * native composition, if it is the player and the AR2 master owns it. Offsets
+/* Sprite builder: read the prepared Master parts or the native orb overlay
+ * without advancing animation or changing controller state. The Master can
+ * move out of the player slot during stage clear; its departing orb keeps
+ * its own graphics. These replace the corresponding native composition. Offsets
  * are from the native draw origin (object position minus its live +0A/+0C
  * extents); attributes are taken before the object's own +28 XOR. */
 enum { kActRaiserAr2MasterMaxDrawParts = 40 };
