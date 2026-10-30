@@ -836,6 +836,12 @@ Overlay section **System → Game**.
 
 The menu separates repairs for original-game bugs from intentional quality-of-life changes.
 
+**ActRaiser 2 Master** appears under **Quality-of-life improvements** after importing the
+character from your own ActRaiser 2 (USA) ROM in the Workshop. It starts off;
+enable it to use the winged Master's movement and sword moves in ActRaiser.
+You can switch back during the same level. See the
+[Workshop import instructions](builder-workshop.md#actraiser-2-master).
+
 | Type | Key | Effect |
 |---|---|---|
 | Original bug fix | `AR_FIX_AITOS_EVENT_QUEUE=1` | prevents Aitos's northeast-mountain discovery from repeating the earlier “all monsters defeated” message when those events overlap. The repair is live and save-neutral; turning it off preserves the original-ROM behavior |

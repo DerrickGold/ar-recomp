@@ -2,6 +2,7 @@ package builder
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,14 +10,41 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DerrickGold/ar-recomp/installer/internal/ar2master"
 	"github.com/DerrickGold/ar-recomp/installer/internal/workshopart"
 )
 
 type scenerySession struct {
-	mu      sync.Mutex
-	assets  *workshopart.Assets
-	checked time.Time
-	message string
+	mu           sync.Mutex
+	assets       *workshopart.Assets
+	checked      time.Time
+	message      string
+	master       *workshopart.Assets
+	masterDigest [32]byte
+}
+
+// Read the bounded installed pack on metadata requests, not animation frames.
+// Reuse the rendered atlas until its content changes; removal/corruption also
+// removes the theme. The existing AR1 scenery cache is independent.
+func (app *application) loadMasterScenery() *workshopart.Assets {
+	s := &app.scenery
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pack, err := ar2master.Read(app.options.ProjectRoot)
+	if err != nil {
+		s.master = nil
+		return nil
+	}
+	digest := sha256.Sum256(pack)
+	if s.master == nil || digest != s.masterDigest {
+		s.master, _ = workshopart.ExtractAR2Master(pack)
+		s.masterDigest = digest
+	}
+	return s.master
+}
+
+func sceneryVersion(a *workshopart.Assets) string {
+	return fmt.Sprintf("%d-%s", a.Catalog.Version, a.Catalog.ImageSHA256)
 }
 
 // Scenery is independent of build/localization locks, selection, saves, and
@@ -73,13 +101,33 @@ func (app *application) loadScenery() (*workshopart.Assets, string) {
 
 func (app *application) serveScenery(w http.ResponseWriter, r *http.Request, atlas bool) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	a, message := app.loadScenery()
+	var a *workshopart.Assets
+	var message string
+	switch r.URL.Query().Get("content") {
+	case "":
+		a, message = app.loadScenery()
+	case "ar2-master":
+		if !atlas {
+			http.NotFound(w, r)
+			return
+		}
+		a = app.loadMasterScenery()
+	default:
+		http.NotFound(w, r)
+		return
+	}
 	if !atlas {
 		w.Header().Set("Cache-Control", "no-store")
 		result := map[string]any{"available": a != nil, "message": message}
 		if a != nil {
 			result["catalog"] = a.Catalog
-			result["atlasURL"] = fmt.Sprintf("scene-atlas.png?v=%d-%s", workshopart.Version, a.Catalog.ImageSHA256)
+			result["atlasURL"] = "scene-atlas.png?v=" + sceneryVersion(a)
+		}
+		if master := app.loadMasterScenery(); master != nil {
+			result["imports"] = map[string]any{"ar2-master": map[string]any{
+				"catalog":  master.Catalog,
+				"atlasURL": "scene-atlas.png?content=ar2-master&v=" + sceneryVersion(master),
+			}}
 		}
 		writeJSON(w, 200, result)
 		return
@@ -88,7 +136,7 @@ func (app *application) serveScenery(w http.ResponseWriter, r *http.Request, atl
 		http.NotFound(w, r)
 		return
 	}
-	if r.URL.Query().Get("v") != fmt.Sprintf("%d-%s", workshopart.Version, a.Catalog.ImageSHA256) {
+	if r.URL.Query().Get("v") != sceneryVersion(a) {
 		http.NotFound(w, r)
 		return
 	}

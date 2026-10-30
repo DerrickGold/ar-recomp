@@ -21,7 +21,7 @@ func buildImportedGames(values guiFlags, root, dataRoot, scratch, driver, binary
 	if err != nil {
 		return fmt.Errorf("read imported AR2 content: %w", err)
 	}
-	fmt.Fprintln(output, "Building imported ActRaiser 2 world and prototype levels")
+	fmt.Fprintln(output, "Building optional imported game support")
 	directory := filepath.Join(scratch, "ar2")
 	if err := os.MkdirAll(filepath.Join(directory, "include"), 0700); err != nil {
 		return err

@@ -24,7 +24,7 @@ type Item struct {
 type importer struct {
 	item            Item
 	maximumROMBytes int64
-	preview         bool
+	developerOnly   bool
 	extract         func([]byte) ([]byte, error)
 	install         func(string, []byte) (bool, error)
 	status          func(string) string
@@ -34,7 +34,7 @@ var importers = []importer{
 	{
 		item:            Item{ID: "ar2-world", LabelKey: "builder.imports.ar2_world.label", HelpKey: "builder.imports.ar2_world.help", NextKey: "builder.imports.ar2_world.next"},
 		maximumROMBytes: ar2master.ROMBytes + 512,
-		preview:         true,
+		developerOnly:   true,
 		extract:         ar2game.Extract,
 		install:         ar2game.Install,
 		status:          ar2game.Status,
@@ -42,7 +42,6 @@ var importers = []importer{
 	{
 		item:            Item{ID: "ar2-master", LabelKey: "builder.imports.ar2_master.label", HelpKey: "builder.imports.ar2_master.help", NextKey: "builder.imports.ar2_master.next"},
 		maximumROMBytes: ar2master.ROMBytes + 512,
-		preview:         true,
 		extract:         ar2master.Extract,
 		install:         ar2master.Install,
 		status:          ar2master.Status,
@@ -53,21 +52,20 @@ func List(root string) []Item {
 	return list(root, true)
 }
 
-// WorkshopList does not promote unfinished imports to a fresh installation.
-// An existing pack remains visible for prototype users to inspect or repair;
-// explicit ROM selection and the developer CLI can still install previews.
+// WorkshopList exposes public content only, even when a developer import is
+// already installed. Explicit ROM selection and the CLI retain those imports.
 func WorkshopList(root string) []Item {
 	return list(root, false)
 }
 
-func list(root string, includePreviews bool) []Item {
+func list(root string, includeDeveloper bool) []Item {
 	items := make([]Item, 0, len(importers))
 	for _, entry := range importers {
-		item := entry.item
-		item.Status = entry.status(root)
-		if entry.preview && !includePreviews && item.Status == "missing" {
+		if entry.developerOnly && !includeDeveloper {
 			continue
 		}
+		item := entry.item
+		item.Status = entry.status(root)
 		items = append(items, item)
 	}
 	return items

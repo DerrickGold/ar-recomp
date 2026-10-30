@@ -98,10 +98,34 @@ func extract(rom []byte) ([]byte, error) {
 	return data, nil
 }
 
-// Validate bounds every variable-length record before it can reach the game.
+// Graphics borrows validated palette, sprite and animation data from a pack.
+// Keep the pack alive and unchanged while using these slices.
+type Graphics struct {
+	Palette    []byte
+	Animations [AnimationCount][]Step
+	Frames     []Frame
+}
+
+type Step struct {
+	Frame int
+	Ticks int // Native duration + 1, in 60 Hz game ticks.
+}
+
+type Frame struct {
+	Left, Right, Top byte
+	Parts, Tiles     []byte
+}
+
+// Validate and the Workshop renderer share one parser for the pack format.
 func Validate(data []byte) error {
-	bad := func() error {
-		return fmt.Errorf("character assets are incomplete, modified or unsupported; import the AR2 ROM again")
+	_, err := ParseGraphics(data)
+	return err
+}
+
+// ParseGraphics bounds every variable-length record before exposing its data.
+func ParseGraphics(data []byte) (*Graphics, error) {
+	bad := func() (*Graphics, error) {
+		return nil, fmt.Errorf("character assets are incomplete, modified or unsupported; import the AR2 ROM again")
 	}
 	if len(data) < HeaderBytes+32+MotionBytes+2 || len(data) > MaximumBytes || string(data[:8]) != "AR2MASTR" || binary.LittleEndian.Uint32(data[8:]) != 1 || int(binary.LittleEndian.Uint32(data[12:])) != len(data)-HeaderBytes {
 		return bad()
@@ -116,6 +140,7 @@ func Validate(data []byte) error {
 	if frames == 0 || frames > 96 {
 		return bad()
 	}
+	graphics := &Graphics{Palette: data[HeaderBytes : HeaderBytes+32]}
 	for anim := 0; anim < AnimationCount; anim++ {
 		if at >= len(data) {
 			return bad()
@@ -129,14 +154,18 @@ func Validate(data []byte) error {
 			if data[at+1]&0x80 != 0 || int(data[at+2]) >= frames {
 				return bad()
 			}
+			graphics.Animations[anim] = append(graphics.Animations[anim], Step{
+				Frame: int(data[at+2]), Ticks: int(binary.LittleEndian.Uint16(data[at:])) + 1,
+			})
 			at += 3
 		}
 	}
-	for frame := 0; frame < frames; frame++ {
+	for i := 0; i < frames; i++ {
 		if at+15 > len(data) {
 			return bad()
 		}
 		parts := int(data[at+14])
+		frame := Frame{Left: data[at], Right: data[at+1], Top: data[at+2]}
 		at += 15
 		end := at + parts*7
 		if parts > 24 || end+2 > len(data) {
@@ -146,6 +175,7 @@ func Validate(data []byte) error {
 		if size == 0 || size > 2048 || size%32 != 0 || end+2+size > len(data) {
 			return bad()
 		}
+		frame.Parts, frame.Tiles = data[at:end], data[end+2:end+2+size]
 		for ; at < end; at += 7 {
 			last := int(data[at+5])
 			if data[at]&1 != 0 {
@@ -156,9 +186,10 @@ func Validate(data []byte) error {
 			}
 		}
 		at = end + 2 + size
+		graphics.Frames = append(graphics.Frames, frame)
 	}
 	if at != len(data) {
 		return bad()
 	}
-	return nil
+	return graphics, nil
 }

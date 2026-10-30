@@ -16,7 +16,7 @@ func TestEncounterTimeline(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if output, err := exec.CommandContext(ctx, node, "--test", "testdata/encounters.test.mjs").CombinedOutput(); err != nil {
+	if output, err := exec.CommandContext(ctx, node, "--test", "testdata/encounters.test.mjs", "testdata/ar2_scenery.test.mjs").CombinedOutput(); err != nil {
 		t.Fatalf("encounter timeline: %v\n%s", err, output)
 	}
 }

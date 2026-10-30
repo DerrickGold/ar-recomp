@@ -99,18 +99,41 @@ results, reference text, font order, coverage results and unsaved credit notices
 
 ## Import game content
 
-Optional content is not required to build or play ActRaiser. When supported
-content is available, **Sights & sounds → Game imports** lets you inspect or
-reimport it from its source ROM. Each importer validates its supported release
+Optional content is not required to build or play ActRaiser.
+**Sights & sounds → Game imports** lets you import supported content from
+a ROM you provide. Each importer validates its supported release
 before saving anything. Imports are stored with your local game and travel
 with packaged builds and installation transfers.
 
-Uninstalled prototypes are hidden from this menu. If no content is listed,
-the **Game imports** category is hidden as well.
+### ActRaiser 2 Master
+
+1. Choose **ActRaiser 2 / Master character** under **Game imports**.
+2. Select an unmodified **ActRaiser 2 (USA)** ROM (`.sfc` or `.smc`, with or
+   without a copier header), then press **Extract & install**.
+3. Restart the game, or build it first if you have not already done so.
+4. Open **System → Game → ActRaiser 2 Master** in the game.
+   Turn it on or off during a level to switch characters.
+
+The imported Master includes gliding, diving and sword moves while playing
+ActRaiser's stages. The setting starts off and only appears when valid character
+assets are installed. A current game build needs only a restart after importing.
+The character import saves `game-assets/imports/ar2-master.armaster`; it does not
+replace your ActRaiser ROM. Keep this pack with your game when moving it.
+
+Importing also adds **ActRaiser 2 · above the clouds** to **Scenery** in the
+Workshop sidebar. **ActRaiser 2 · Fillmore patrol** appears when the Workshop
+also has the original ActRaiser scenery, extracted from your US build ROM.
+These scenes use your imported character graphics and animations. They appear
+without reopening the Workshop and remain available without the AR2 source ROM.
+Choose a scene yourself; importing preserves your current selection. The existing
+**A little atmosphere** controls and reduced-motion preference apply to both.
+
+### Adding content importers
 
 The catalog is designed to accept additional content sets. Developers register each importer in
 `installer/internal/gameimports`, with its own validation, extraction,
-installation and status functions and translated instructions. The shared
+installation and status functions and translated instructions. Only public
+importers appear in the Workshop catalog. The shared
 Workshop upload route and UI discover the catalog. Imported content belongs
 under `game-assets/imports/`, which game packaging carries automatically.
 

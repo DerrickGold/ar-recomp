@@ -55,21 +55,21 @@ func TestAdditionalContentUsesItsOwnImporter(t *testing.T) {
 	}
 }
 
-func TestWorkshopDoesNotPromoteUninstalledPreviews(t *testing.T) {
-	if items := WorkshopList(t.TempDir()); len(items) != 0 {
-		t.Fatalf("fresh installation promotes previews: %+v", items)
+func TestWorkshopOffersMasterAndHidesDeveloperImports(t *testing.T) {
+	if items := WorkshopList(t.TempDir()); len(items) != 1 || items[0].ID != "ar2-master" || items[0].Status != "missing" {
+		t.Fatalf("fresh installation must offer the character import: %+v", items)
 	}
 	previous := importers
 	t.Cleanup(func() { importers = previous })
 	importers = []importer{
 		{item: Item{ID: "released"}, status: func(string) string { return "missing" }},
-		{item: Item{ID: "preview"}, preview: true, status: func(string) string { return "missing" }},
-		{item: Item{ID: "installed-preview"}, preview: true, status: func(string) string { return "installed" }},
-		{item: Item{ID: "damaged-preview"}, preview: true, status: func(string) string { return "invalid" }},
+		{item: Item{ID: "preview"}, developerOnly: true, status: func(string) string { return "missing" }},
+		{item: Item{ID: "installed-preview"}, developerOnly: true, status: func(string) string { return "installed" }},
+		{item: Item{ID: "damaged-preview"}, developerOnly: true, status: func(string) string { return "invalid" }},
 	}
 	items := WorkshopList(t.TempDir())
-	if len(items) != 3 || items[0].ID != "released" || items[1].ID != "installed-preview" || items[2].ID != "damaged-preview" {
-		t.Fatalf("released content or existing preview became inaccessible: %+v", items)
+	if len(items) != 1 || items[0].ID != "released" {
+		t.Fatalf("developer imports must stay out of the public catalog: %+v", items)
 	}
 	if len(List(t.TempDir())) != 4 {
 		t.Fatal("developer catalog lost explicit preview imports")

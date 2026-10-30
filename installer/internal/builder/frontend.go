@@ -32,6 +32,8 @@ func serveFrontend(w http.ResponseWriter, r *http.Request, endpoint string) {
 		"builder/i18n.js":           "web/i18n.js",
 		"builder/scene.js":          "web/scene.js",
 		"builder/encounters.mjs":    "web/encounters.mjs",
+		"builder/scene-assets.mjs":  "web/scene-assets.mjs",
+		"builder/ar2-scenes.mjs":    "web/ar2-scenes.mjs",
 	}
 	path, ok := files[endpoint]
 	if !ok || r.Method != http.MethodGet {

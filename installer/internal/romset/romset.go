@@ -40,7 +40,7 @@ func Prepare(inputs []Input) (*Plan, error) {
 				continue
 			}
 			seen["ar2-us"] = true
-			plan.Releases = append(plan.Releases, "ActRaiser 2 (USA): Master, continent and prototype levels")
+			plan.Releases = append(plan.Releases, "ActRaiser 2 (USA): optional content")
 			plan.master, err = ar2master.Extract(normalized)
 			if err != nil {
 				return nil, err

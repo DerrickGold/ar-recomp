@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/ar2master"
+	"github.com/DerrickGold/ar-recomp/installer/internal/gameimports"
 )
 
 func uploadGameContent(t *testing.T, app *application, target string, data []byte) *httptest.ResponseRecorder {
@@ -48,10 +49,10 @@ func TestGameImportsHTTP(t *testing.T) {
 		}
 		if code == 200 {
 			var catalog struct {
-				Imports []json.RawMessage `json:"imports"`
+				Imports []gameimports.Item `json:"imports"`
 			}
-			if err := json.Unmarshal(w.Body.Bytes(), &catalog); err != nil || len(catalog.Imports) != 0 {
-				t.Fatal("fresh installation advertises prototype imports", w.Body.String(), err)
+			if err := json.Unmarshal(w.Body.Bytes(), &catalog); err != nil || len(catalog.Imports) != 1 || catalog.Imports[0].ID != "ar2-master" {
+				t.Fatal("fresh installation must offer only the Master", w.Body.String(), err)
 			}
 		}
 	}

@@ -2,6 +2,8 @@
    The Go service extracts/validates the original sprites. This canvas only
    composes cached images; illustrated fallback works without a ROM or cache. */
 import {createEncounterState,sampleEncounter} from "./encounters.mjs";
+import {loadSceneAtlas,samplePose} from "./scene-assets.mjs";
+import {MASTER_ACTIONS,sampleMasterPatrol,sampleMasterGlide} from "./ar2-scenes.mjs";
 
 (() => {
   "use strict";
@@ -20,11 +22,20 @@ import {createEncounterState,sampleEncounter} from "./encounters.mjs";
   const stage = canvas.parentElement;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const caption = document.querySelector("#scene-caption");
-  let nativeArt=null, clips=null, loading=false, closed=false, onScreen=true, retryAfter=0;
+  const sceneMessages={
+    fillmore:{caption:"builder.scene.fillmore",aria:"builder.scene.fillmore_aria"},
+    palace:{caption:"builder.scene.palace",aria:"builder.scene.palace_aria"},
+    placeholder:{caption:"builder.scene.placeholder",aria:"builder.scene.placeholder_aria"},
+    "ar2-fillmore":{label:"builder.scenery.ar2_fillmore",caption:"builder.scene.ar2_fillmore",aria:"builder.scene.ar2_fillmore_aria"},
+    "ar2-clouds":{label:"builder.scenery.ar2_clouds",caption:"builder.scene.ar2_clouds",aria:"builder.scene.ar2_clouds_aria"},
+  };
+  let nativeArt=null, clips=null, masterArt=null, masterDigest="", loading=false, refreshRequested=false, closed=false, onScreen=true, retryAfter=0;
+  let preferredScenery="fillmore";
   const pending = new AbortController();
   // This is only a browser-session preference. No game settings are mutated.
   try { const saved = sessionStorage.getItem("workshop-scene"); if (["auto", "animated", "still", "off"].includes(saved)) choice.value = saved; } catch (_) { /* Storage can be disabled. */ }
-  try { const saved=sessionStorage.getItem("workshop-scenery");if(["fillmore","palace"].includes(saved)) setting.value=saved; } catch (_) {}
+  try { const saved=sessionStorage.getItem("workshop-scenery");if(["fillmore","palace","ar2-fillmore","ar2-clouds"].includes(saved)) preferredScenery=saved; } catch (_) {}
+  if (["fillmore","palace"].includes(preferredScenery)) setting.value=preferredScenery;
   const art = document.createElement("canvas");
   art.width = 640; art.height = 420;
   const a = art.getContext("2d");
@@ -124,13 +135,7 @@ import {createEncounterState,sampleEncounter} from "./encounters.mjs";
     cloud(335+drift*.3,390,.6,.08);
   }
   function pose(id,t,loop=true) {
-    const clip=clips.get(id);
-    let tick=Math.floor(t*60/1000);
-    tick=loop?tick%clip.ticks:Math.min(tick,clip.ticks-1);
-    for(const step of clip.poses) {
-      if(tick<step.ticks) return nativeArt.get(step.frame);
-      tick-=step.ticks;
-    }
+    return samplePose({sprites:nativeArt,clips},id,t,loop);
   }
 
   const encounter=createEncounterState();
@@ -156,7 +161,7 @@ import {createEncounterState,sampleEncounter} from "./encounters.mjs";
     }
     context.globalAlpha=1;
   }
-  function drawFillmore(t) {
+  function drawFillmoreBackdrop(t) {
     context.clearRect(0,0,640,420);
     // Two extracted layers, scaled/cached once. Repetition and motion are a
     // decorative vignette, not a replay or a reconstruction of level physics.
@@ -173,27 +178,62 @@ import {createEncounterState,sampleEncounter} from "./encounters.mjs";
     const bird2=pose("fillmore.bird.flipped.fly",t+160);
     context.drawImage(bird2,Math.round(-120+(t/27)%960)-96,Math.round(80+Math.sin(t/1300)*14)-96);
     for(let gx=0;gx<640;gx+=512) context.drawImage(ground,gx,326);
+  }
+  function drawFillmore(t) {
+    drawFillmoreBackdrop(t);
     sampleEncounter(t,encounter);
     drawActor(encounter.enemy);
     drawActor(encounter.master);
     drawImpact(encounter.effect);
   }
+  function drawImportedMaster(state) {
+    const sprite=samplePose(masterArt,"ar2-master."+state.facing+"."+state.action,state.phase,state.loop);
+    context.drawImage(sprite,Math.round(state.x-128),Math.round(state.y-192));
+  }
+  function drawMasterClouds(t) {
+    context.clearRect(0,0,640,420);
+    context.fillStyle=glow;context.fillRect(0,0,640,420);
+    const drift=Math.sin(t/26000)*27;
+    cloud(173+drift,134,1.2,.15);cloud(455-drift,174,1,.18);
+    drawImportedMaster(sampleMasterGlide(t));
+    cloud(130+drift*.8,340,1.1,.22);cloud(515-drift,357,.95,.23);
+    cloud(335+drift*.3,390,.6,.08);
+  }
   function draw(t) {
-    if(!nativeArt) drawPlaceholder(t);
+    if(masterArt&&setting.value==="ar2-clouds") drawMasterClouds(t);
+    else if(masterArt&&nativeArt&&setting.value==="ar2-fillmore") {
+      drawFillmoreBackdrop(t);drawImportedMaster(sampleMasterPatrol(t));
+    }
+    else if(!nativeArt) drawPlaceholder(t);
     else if(setting.value==="fillmore") drawFillmore(t);
     else drawPalace(t);
     if(!panel.hidden) {preview.clearRect(0,0,640,420);preview.drawImage(buffer,0,0);}
     ambient.clearRect(0,0,640,420);ambient.drawImage(buffer,0,0);
   }
   function describe() {
-    const fillmore=nativeArt&&setting.value==="fillmore";
-    canvas.dataset.scene=fillmore?"fillmore":"palace";
-    canvas.setAttribute("data-i18n-aria",nativeArt?(fillmore?"builder.scene.fillmore_aria":"builder.scene.palace_aria"):"builder.scene.placeholder_aria");
+    const scene=masterArt&&setting.value.startsWith("ar2-")?setting.value:nativeArt?setting.value:"placeholder";
+    canvas.dataset.scene=scene;
+    canvas.dataset.art=scene.startsWith("ar2-")?"ar2-master":nativeArt?"native-us":"illustration";
+    canvas.setAttribute("data-i18n-aria",sceneMessages[scene].aria);
     window.workshopI18n.apply(canvas);
-    window.workshopI18n.set(caption,nativeArt?(fillmore?"builder.scene.fillmore":"builder.scene.palace"):"builder.scene.placeholder");
+    window.workshopI18n.set(caption,sceneMessages[scene].caption);
   }
-  async function loadArt() {
-    if(nativeArt||loading||closed||document.hidden||choice.value==="off"||performance.now()<retryAfter) return;
+  function updateSceneryChoices() {
+    for(const id of ["ar2-fillmore","ar2-clouds"]) {
+      const available=masterArt&&(id!=="ar2-fillmore"||nativeArt);
+      let option=setting.querySelector('[value="'+id+'"]');
+      if(available&&!option) {
+        option=document.createElement("option");option.value=id;
+        window.workshopI18n.set(option,sceneMessages[id].label);setting.append(option);
+      } else if(!available&&option) option.remove();
+    }
+    setting.value=Array.from(setting.options).some(option=>option.value===preferredScenery)?preferredScenery:"fillmore";
+    describe();
+  }
+  async function loadArt(force=false) {
+    if(force) refreshRequested=true;
+    if((nativeArt&&!refreshRequested)||loading||closed||document.hidden||choice.value==="off"||(!refreshRequested&&performance.now()<retryAfter)) return;
+    refreshRequested=false;
     loading=true;retryAfter=performance.now()+1500;
     try {
       const response=await fetch("scene-assets",{cache:"no-store",signal:pending.signal});
@@ -201,50 +241,48 @@ import {createEncounterState,sampleEncounter} from "./encounters.mjs";
       const data=await response.json();
       if(closed) return;
       caption.title=data.message||"Illustrated scenery";
-      if(!data.available) return;
-      const url=new URL(data.atlasURL,location.href);
-      if(url.origin!==location.origin||url.pathname!==new URL("scene-atlas.png",location.href).pathname) throw new Error("Unexpected scenery URL");
-      const sheet=new Image();sheet.src=url.href;await sheet.decode();
+      // Each source fails independently: a damaged character pack must not
+      // disable AR1 scenery, and an AR1 ROM is not needed for the cloud theme.
+      if(data.available&&!nativeArt) {
+        try {
+          const loaded=await loadSceneAtlas(data,{version:3,width:960,height:1728,frames:98,animations:28,
+            scale:id=>id.startsWith("palace.")?5:id.startsWith("angel.")?3:2});
+          const {sprites,clips:animations}=loaded;
+          for(const [group,count] of [["palace.idle",2],["angel.front",4],["angel.back",4],["angel.left",4],["angel.right",4]]) for(let i=0;i<count;i++) if(!sprites.has(group+"."+i)) throw new Error("Missing scenery pose");
+          for(const facing of ["left","right"]) {
+            for(const action of ["idle","walk","sword","jump","air-sword","fall"]) if(!animations.has("master."+facing+"."+action)) throw new Error("Missing Master animation");
+          }
+          for(const facing of ["normal","flipped"]) {
+            for(const [kind,actions] of [["bird",["fly"]],["club",["walk"]],["leaper",["rest","hop"]],["centaur",["idle","walk","charge","cast"]]]) {
+              for(const action of actions) if(!animations.has("fillmore."+kind+"."+facing+"."+action)) throw new Error("Missing encounter animation");
+            }
+          }
+          for(const id of ["fillmore.forest","fillmore.ground"]) if(!sprites.has(id)) throw new Error("Missing background");
+          clips=animations;nativeArt=sprites;
+        } catch (_) { /* Keep the illustrated fallback and other imports. */ }
+      }
+      const imported=data.imports?.["ar2-master"];
+      if(!imported) { masterArt=null;masterDigest=""; }
+      else if(!masterArt||masterDigest!==imported.catalog?.imageSHA256) {
+        try {
+          const loaded=await loadSceneAtlas(imported,{version:1,width:1024,animations:16,scale:()=>2});
+          for(const facing of ["left","right"]) for(const action of MASTER_ACTIONS) {
+            if(!loaded.clips.has("ar2-master."+facing+"."+action)) throw new Error("Missing imported Master animation");
+          }
+          masterArt=loaded;masterDigest=imported.catalog.imageSHA256;
+        } catch (_) { masterArt=null;masterDigest=""; }
+      }
       if(closed) return;
-      if(data.catalog?.version!==3||sheet.width!==960||sheet.height!==1728||data.catalog.frames.length!==98) throw new Error("Unsupported scenery atlas");
-      const sprites=new Map();
-      for(const frame of data.catalog.frames) {
-        if(![frame.x,frame.y,frame.width,frame.height].every(Number.isInteger)||frame.x<0||frame.y<0||frame.width<1||frame.width>256||frame.height<1||frame.height>256||frame.x+frame.width>sheet.width||frame.y+frame.height>sheet.height||sprites.has(frame.id)) throw new Error("Invalid scenery frame");
-        const scale=frame.id.startsWith("palace.")?5:frame.id.startsWith("angel.")?3:2;
-        const sprite=document.createElement("canvas");sprite.width=frame.width*scale;sprite.height=frame.height*scale;
-        const ctx=sprite.getContext("2d");if(!ctx) throw new Error("Scenery canvas unavailable");
-        ctx.imageSmoothingEnabled=false;
-        ctx.drawImage(sheet,frame.x,frame.y,frame.width,frame.height,0,0,sprite.width,sprite.height);
-        sprites.set(frame.id,sprite);
-      }
-      for(const [group,count] of [["palace.idle",2],["angel.front",4],["angel.back",4],["angel.left",4],["angel.right",4]]) for(let i=0;i<count;i++) if(!sprites.has(group+"."+i)) throw new Error("Missing scenery pose");
-      const animations=new Map();
-      if(!Array.isArray(data.catalog.animations)||data.catalog.animations.length!==28) throw new Error("Missing animation catalog");
-      for(const clip of data.catalog.animations) {
-        if(animations.has(clip.id)||!Array.isArray(clip.poses)||!clip.poses.length||clip.poses.length>16) throw new Error("Invalid animation");
-        let ticks=0;
-        for(const pose of clip.poses) {
-          if(!sprites.has(pose.frame)||!Number.isInteger(pose.ticks)||pose.ticks<1||pose.ticks>256) throw new Error("Invalid animation pose");
-          ticks+=pose.ticks;
-        }
-        animations.set(clip.id,{poses:clip.poses,ticks});
-      }
-      for(const facing of ["left","right"]) {
-        for(const action of ["idle","walk","sword","jump","air-sword","fall"]) if(!animations.has("master."+facing+"."+action)) throw new Error("Missing Master animation");
-      }
-      for(const facing of ["normal","flipped"]) {
-        for(const [kind,actions] of [["bird",["fly"]],["club",["walk"]],["leaper",["rest","hop"]],["centaur",["idle","walk","charge","cast"]]]) {
-          for(const action of actions) if(!animations.has("fillmore."+kind+"."+facing+"."+action)) throw new Error("Missing encounter animation");
-        }
-      }
-      for(const id of ["fillmore.forest","fillmore.ground"]) if(!sprites.has(id)) throw new Error("Missing background");
-      clips=animations;nativeArt=sprites;canvas.dataset.art="native-us";
-      describe();
+      updateSceneryChoices();
       sync();
     } catch(error) {
-      if(!closed) caption.title="Original scenery unavailable; using the illustration. Your game and tools are unaffected.";
-    } finally { loading=false; }
+      if(!closed) window.workshopI18n.set(caption,"builder.scene.unavailable");
+    } finally {
+      loading=false;
+      if(refreshRequested&&!closed) loadArt();
+    }
   }
+
   function frame(now) {
     raf=0;
     if(last===0) last=now;
@@ -265,11 +303,12 @@ import {createEncounterState,sampleEncounter} from "./encounters.mjs";
     loadArt();
   }
   choice.addEventListener("change",() => { try { sessionStorage.setItem("workshop-scene",choice.value); } catch (_) {} sync(); });
-  setting.addEventListener("change",()=>{try{sessionStorage.setItem("workshop-scenery",setting.value);}catch(_){}describe();sync();});
+  setting.addEventListener("change",()=>{preferredScenery=setting.value;try{sessionStorage.setItem("workshop-scenery",setting.value);}catch(_){}describe();sync();});
   reduced.addEventListener("change",sync);
   document.addEventListener("visibilitychange",sync);
   document.addEventListener("workshop:navigate",sync);
-  document.addEventListener("workshop:build-state",()=>{ retryAfter=0;loadArt(); });
+  document.addEventListener("workshop:build-state",()=>loadArt(true));
+  document.addEventListener("workshop:content-imported",()=>loadArt(true));
   document.addEventListener("workshop:closed",()=>{ closed=true;pending.abort();sync(); });
   if(window.IntersectionObserver) new IntersectionObserver(entries=>{onScreen=entries[0].isIntersecting;sync();}).observe(document.querySelector("#workshop-atmosphere"));
   window.addEventListener("pagehide",() => { cancelAnimationFrame(raf); raf=0; });

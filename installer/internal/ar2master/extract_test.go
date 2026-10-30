@@ -69,6 +69,22 @@ func TestPackBoundaries(t *testing.T) {
 	}
 }
 
+func TestGraphicsViewKeepsNativeTimingAndData(t *testing.T) {
+	data := fixture()
+	graphics, err := ParseGraphics(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graphics.Frames) != 1 || len(graphics.Palette) != 32 || len(graphics.Frames[0].Parts) != 7 || len(graphics.Frames[0].Tiles) != 32 {
+		t.Fatal("incorrect borrowed graphics spans")
+	}
+	for _, animation := range graphics.Animations {
+		if len(animation) != 1 || animation[0].Frame != 0 || animation[0].Ticks != 9 {
+			t.Fatal("native stored duration must display for duration + 1 ticks")
+		}
+	}
+}
+
 func TestInstallAndStatus(t *testing.T) {
 	root := t.TempDir()
 	if Status(root) != "missing" {

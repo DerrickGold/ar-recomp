@@ -75,6 +75,8 @@
       if (item) item.status = "installed";
       selection();
       input.value = "";
+      window.workshopFileInputs?.refresh(input);
+      document.dispatchEvent(new Event("workshop:content-imported"));
     }, install);
   }
   form.addEventListener("submit", event => { event.preventDefault(); return install(); });
