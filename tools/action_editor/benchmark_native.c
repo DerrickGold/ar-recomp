@@ -198,11 +198,13 @@ int main(int argc, char **argv) {
             "AR_BENCH_SHOT saves a PNG after the last measured frame.\n"
             "AR_BENCH_PROFILE=path.csv adds owner-thread CPU and submission diagnostics.\n"
             "AR_BENCH_FRAME_PROBE=library enables the optional Vulkan timestamp probe.\n"
-            "AR_BENCH_CAPTURE=directory captures every frame instead of timing.\n",
+            "AR_BENCH_CAPTURE=directory captures every frame instead of timing.\n"
+            "AR_BENCH_FLAT=1 selects standard widescreen (requires effects=0, player-x=-1);\n"
+            "flat mode ignores the Diorama layer/effect INIs.\n",
             argv[0]);
     return 2;
   }
-  int width, height, frames, warmup, clock, step, sky, enabled, x, y, ex, ey, px, py;
+  int width, height, frames, warmup, clock, step, sky, enabled, flat, x, y, ex, ey, px, py;
   if (!Integer("frames", argv[11], 2, 100000, &frames) ||
       !EnvInt("AR_BENCH_WIDTH", 1280, 1, 2048, &width) ||
       !EnvInt("AR_BENCH_HEIGHT", 800, 1, 2048, &height) ||
@@ -210,6 +212,7 @@ int main(int argc, char **argv) {
       !EnvInt("AR_BENCH_CLOCK", 0, 0, INT_MAX, &clock) ||
       !EnvInt("AR_BENCH_STEP", 2, 0, 60, &step) || !EnvInt("AR_BENCH_SKY", 1, 0, 2, &sky) ||
       !EnvInt("AR_BENCH_EFFECTS", 1, 0, 1, &enabled) ||
+      !EnvInt("AR_BENCH_FLAT", 0, 0, 1, &flat) ||
       !Integer("x", argv[5], INT_MIN, INT_MAX, &x) ||
       !Integer("y", argv[6], INT_MIN, INT_MAX, &y) ||
       !Integer("end-x", argv[7], INT_MIN, INT_MAX, &ex) ||
@@ -217,6 +220,10 @@ int main(int argc, char **argv) {
       !Integer("player-x", argv[9], INT_MIN, INT_MAX, &px) ||
       !Integer("player-y", argv[10], INT_MIN, INT_MAX, &py))
     return 2;
+  if (flat && (enabled || px >= 0)) {
+    fprintf(stderr, "[benchmark] AR_BENCH_FLAT=1 requires AR_BENCH_EFFECTS=0 and player-x=-1\n");
+    return 2;
+  }
   if (px >= 0 && ((int64_t)px + ex - x < INT_MIN || (int64_t)px + ex - x > INT_MAX ||
                   (int64_t)py + ey - y < INT_MIN || (int64_t)py + ey - y > INT_MAX)) {
     fprintf(stderr, "[benchmark] player route exceeds integer coordinates\n");
@@ -263,10 +270,10 @@ int main(int argc, char **argv) {
   RoomPreview_SetSourceEffectBatch(EffectBatch);
   result = 3;
   operation = "load room/layers/effects";
-  if (!Load(argv[4], RoomPreview_Load) || !Load(argv[2], RoomPreview_Configure) ||
-      !Load(argv[3], RoomPreview_ConfigureEffects))
+  if (!Load(argv[4], RoomPreview_Load) || (!flat &&
+      (!Load(argv[2], RoomPreview_Configure) || !Load(argv[3], RoomPreview_ConfigureEffects))))
     goto cleanup;
-  unsigned named = RoomPreview_SkyboxRoom();
+  unsigned named = flat ? 0 : RoomPreview_SkyboxRoom();
   char path[1024], name[32];
   if (named) {
     snprintf(name, sizeof(name), "%02x%02x.arscene", named >> 16, (named >> 8) & 255);
@@ -279,6 +286,7 @@ int main(int argc, char **argv) {
       goto cleanup;
   }
   RoomPreview_EnableEffects(enabled);
+  fprintf(stderr, "[benchmark] presentation=%s\n", flat ? "flat-widescreen" : "diorama");
   RoomPreview_SetSourceProjection(Effects, Skybox);
   if (!RoomPreview_SetView(3.25f, 0, 0, 1, 1)) goto cleanup;
   result = 4;
@@ -342,7 +350,9 @@ int main(int argc, char **argv) {
     memset(&s_profile_frame, 0, sizeof(s_profile_frame));
     const uint64_t draws = s_source.draws, submissions = s_source.submissions, cpu_start = CpuNow();
     const uint64_t start = SDL_GetPerformanceCounter();
-    if (!RoomPreview_Render(cx, cy, tick, 120, 64, width, height, 1, 0, 0, sky, 0) ||
+    const bool rendered = flat ? RoomPreview_RenderFlat(cx, cy, tick, width, height, 0) :
+        RoomPreview_Render(cx, cy, tick, 120, 64, width, height, 1, 0, 0, sky, 0);
+    if (!rendered ||
         !ArSdlRenderBackend_SubmitPending(&s_device))
       goto cleanup;
     const uint64_t submitted = SDL_GetPerformanceCounter();

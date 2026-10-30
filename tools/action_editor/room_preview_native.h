@@ -30,4 +30,7 @@ unsigned RoomPreview_Measure(int x, int y, uint32_t frame, int extra, int vertic
     int width, int height, float zoom, float yaw, float pitch, int skybox, int pixels, unsigned bg);
 int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     int width, int height, float distance, float yaw, float pitch, int skybox, int pixel_aspect);
+/* Native baseline for release comparisons. Output aspect determines horizontal
+ * coverage; no Diorama projection, skybox, authored tile edits or effects. */
+int RoomPreview_RenderFlat(int x, int y, uint32_t frame, int width, int height, int pixel_aspect);
 #endif

@@ -774,6 +774,85 @@ static bool RasterMatches(const EditorRoomScene *r, const ActionRoomSceneFrameSt
 
 unsigned EditorRoomScene_RasterCount(const EditorRoomScene *r) { return r ? r->raster_count : 0; }
 
+static bool LoadFrameGraphics(EditorRoomScene *r) {
+  const ActionRoomScene *s = &r->assets.scene;
+  uint8_t chars[kActionRoomSceneCharacterBytes];
+  if (!ActionRoomScene_BuildCharacters(s, r->frame.game_frame, r->frame.animation_phase,
+                                      chars, sizeof(chars))) return false;
+  for (unsigned i = 0; i < sizeof(chars) / 2; ++i)
+    r->vram[i] = chars[i * 2] | ((uint16_t)chars[i * 2 + 1] << 8);
+  for (unsigned i = 0; i < sizeof(s->extra_characters) / 2; ++i)
+    r->vram[sizeof(chars) / 2 + i] =
+        s->extra_characters[i * 2] | ((uint16_t)s->extra_characters[i * 2 + 1] << 8);
+  for (unsigned i = 0; i < sizeof(s->palette) / 2; ++i)
+    r->palette[i] = s->palette[i * 2] | ((uint16_t)s->palette[i * 2 + 1] << 8);
+  return true;
+}
+
+/* Both presentations use the same world provider, HDMA rows and margin policy.
+ * The projected path adds capture/paint metadata after this native binding. */
+static SrSceneBackground RasterBackground(EditorRoomScene *r, unsigned bg,
+                                           const ActionBgLayerPlan *plan) {
+  RoomLayer *l = &r->layers[bg];
+  const ActionRoomSceneFrameState *f = &r->frame;
+  l->plan = *plan;
+  l->page_cycle = bg == 1 && ActionRoomScene_HasBg2PageCycle(&r->assets.scene);
+  l->page = f->bg2_page_index;
+  for (unsigned row = 0; row < 224; ++row) {
+    ActionBgRowPolicy policy;
+    ActionBgLayerPlan_ResolveValidatedRow(plan, row, &policy);
+    r->policies[bg][row] = (SrSceneRowPolicy){.fill = policy.edge + 1,
+      .motion = policy.motion, .left = Extent(policy.horizontal_extent.mode, policy.horizontal_extent.left),
+      .right = Extent(policy.horizontal_extent.mode, policy.horizontal_extent.right)};
+  }
+  return (SrSceneBackground){
+    .tiles = {.lookup = Lookup, .lookup_span = Span, .user_data = l,
+      .camera_x = f->layer_camera_x[bg], .camera_y = f->layer_camera_y[bg],
+      .hscroll_anchor = f->layer_camera_x[bg] & 1023,
+      .vscroll_anchor = f->layer_camera_y[bg] & 1023,
+      .flags = SR_PPU_VIRTUAL_TILEMAP_INCLUDE_AUTHENTIC},
+    .rows = r->policies[bg], .hscroll = f->bg_hscroll[bg], .vscroll = f->bg_vscroll[bg],
+    .top = Extent(plan->vertical_extent.mode, plan->vertical_extent.top),
+    .bottom = Extent(plan->vertical_extent.mode, plan->vertical_extent.bottom)};
+}
+
+bool EditorRoomScene_RenderFlat(EditorRoomScene *r, int x, int y, uint32_t clock,
+                                int extra_x, EditorRoomCamera *out) {
+  if (!r || x < 0 || y < 0 || x > 65535 || y > 65535 || extra_x < 0 || extra_x > 128)
+    return false;
+  const int width = (int)EditorRoomScene_Width(r), height = (int)EditorRoomScene_Height(r);
+  EditorRoomCamera camera = {.x = Min(x, Max(0, width - 256)),
+    .maximum_y = Max(0, height - 225)};
+  camera.y = Min(y, camera.maximum_y);
+  ActionRoomSceneFrameRequest request = r->assets.frame;
+  request.camera_x = camera.x; request.camera_y = camera.y; request.game_frame = clock;
+  ActionBgPlan plan;
+  if (!ActionRoomScene_BuildFrameState(&r->assets.scene, &request, &r->frame) ||
+      !BuildBgPlan(r, &r->frame, &plan)) return false;
+  int before, after;
+  DioramaCameraPolicy_HorizontalMargins(&plan, NULL, extra_x, &before, &after);
+  if (!ActionCameraAxisBounds_Resolve(width, 256, before, after, &camera.travel)) return false;
+  camera.x = ActionCameraAxisBounds_Clamp(&camera.travel, camera.x);
+  request.camera_x = camera.x;
+  if (!ActionRoomScene_BuildFrameState(&r->assets.scene, &request, &r->frame) ||
+      !BuildBgPlan(r, &r->frame, &plan) || !LoadFrameGraphics(r)) return false;
+  const ActionRoomSceneFrameState *f = &r->frame;
+  SrSceneFrame input = {.struct_size = sizeof(input), .vram = r->vram, .cgram = r->palette,
+    .mosaic = f->mosaic, .extra_x = extra_x,
+    .main_screen = f->screen_enabled[0] & 3, .sub_screen = f->screen_enabled[1] & 3,
+    .cgwsel = f->cgwsel, .cgadsub = f->cgadsub, .fixed_color = f->fixed_color};
+  for (unsigned bg = 0; bg < 2; ++bg)
+    input.backgrounds[bg] = RasterBackground(r, bg, &plan.layer[bg]);
+  /* No REMOVE_FROM_GAME: the production PPU composes both BGs with native
+   * priority and color math into the ordinary framebuffer. */
+  r->raster_valid = false;
+  memset(&r->effects, 0, sizeof(r->effects));
+  if (!sr_scene_renderer_render(r->renderer, &input, &r->surfaces)) return false;
+  ++r->raster_count;
+  if (out) *out = camera;
+  return true;
+}
+
 bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
                             int extra_x, int budget, const EditorRoomCamera *camera) {
   if (!r || x < 0 || y < 0 || x > 65535 || y > 65535 || extra_x < 0 ||
@@ -794,16 +873,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   if (!ActionRoomScene_BuildFrameState(s, &request, f)) return false;
   memset(&r->effects,0,sizeof(r->effects));
   if (!ActionEnvironmentScene_FromRoom(&r->environment,s,f)) return false;
-  uint8_t chars[kActionRoomSceneCharacterBytes];
-  if (!ActionRoomScene_BuildCharacters(s, frame, f->animation_phase, chars, sizeof(chars)))
-    return false;
-  for (unsigned i = 0; i < sizeof(chars) / 2; ++i)
-    r->vram[i] = chars[i * 2] | ((uint16_t)chars[i * 2 + 1] << 8);
-  for (unsigned i = 0; i < sizeof(s->extra_characters) / 2; ++i)
-    r->vram[sizeof(chars) / 2 + i] =
-        s->extra_characters[i * 2] | ((uint16_t)s->extra_characters[i * 2 + 1] << 8);
-  for (unsigned i = 0; i < sizeof(s->palette) / 2; ++i)
-    r->palette[i] = s->palette[i * 2] | ((uint16_t)s->palette[i * 2 + 1] << 8);
+  if (!LoadFrameGraphics(r)) return false;
   r->environment.vram = r->vram;
   r->environment.tile_base[0] = 0;
   r->environment.tile_base[1] = 0;
@@ -853,32 +923,17 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       input.cgwsel, input.cgadsub, input.main_screen, input.sub_screen);
   r->scene.additive_plane_mask = 0;
   for (unsigned bg = 0; bg < 2; ++bg) {
-    RoomLayer *l = &r->layers[bg]; l->plan = plan.layer[bg];
-    l->page_cycle = bg == 1 && ActionRoomScene_HasBg2PageCycle(s);
-    l->page = f->bg2_page_index;
-    for (unsigned row = 0; row < 224; ++row) {
-      ActionBgRowPolicy policy;
-      ActionBgLayerPlan_ResolveValidatedRow(&l->plan, row, &policy);
-      r->policies[bg][row] = (SrSceneRowPolicy){.fill = policy.edge + 1,
-        .motion = policy.motion, .left = Extent(policy.horizontal_extent.mode, policy.horizontal_extent.left),
-        .right = Extent(policy.horizontal_extent.mode, policy.horizontal_extent.right)};
-    }
     SrSceneBackground *b = &input.backgrounds[bg];
-    *b = (SrSceneBackground){.tiles = {.lookup = Lookup, .lookup_span = Span,
-      .band_lookup = DioramaLayerOrder_VirtualLayerHasClassification(
-          &r->terrain.virtual_layers[bg]) ? Band : NULL, .user_data = l, .camera_x = f->layer_camera_x[bg],
-      .camera_y = f->layer_camera_y[bg], .hscroll_anchor = f->layer_camera_x[bg] & 1023,
-      .vscroll_anchor = f->layer_camera_y[bg] & 1023,
-      .flags = SR_PPU_VIRTUAL_TILEMAP_INCLUDE_AUTHENTIC},
-      .edits = {.lookup = r->terrain.stamp_layers[bg].count || r->terrain.pixel_layers[bg].count
-          ? Edit : NULL, .user_data = l, .apron = (camera->bg_apron_mask & (1u << bg)) ? 64 : 0},
-      .rows = r->policies[bg], .hscroll = f->bg_hscroll[bg], .vscroll = f->bg_vscroll[bg],
-      .top = Extent(l->plan.vertical_extent.mode, l->plan.vertical_extent.top),
-      .bottom = Extent(l->plan.vertical_extent.mode, l->plan.vertical_extent.bottom),
-      .capture_flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME,
-      .clip_vertical = top || bottom,
-      .clip_top = Min(Max(0, f->layer_camera_y[bg] + 1), Max(top, bottom)),
-      .clip_bottom = Min(Max(0, plan.layer[bg].world_height - 225 - f->layer_camera_y[bg]), Max(top, bottom))};
+    *b = RasterBackground(r, bg, &plan.layer[bg]);
+    b->tiles.band_lookup = DioramaLayerOrder_VirtualLayerHasClassification(
+        &r->terrain.virtual_layers[bg]) ? Band : NULL;
+    b->edits = (SrPpuCaptureTileBinding){
+      .lookup = r->terrain.stamp_layers[bg].count || r->terrain.pixel_layers[bg].count ? Edit : NULL,
+      .user_data = &r->layers[bg], .apron = (camera->bg_apron_mask & (1u << bg)) ? 64 : 0};
+    b->capture_flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME;
+    b->clip_vertical = top || bottom;
+    b->clip_top = Min(Max(0, f->layer_camera_y[bg] + 1), Max(top, bottom));
+    b->clip_bottom = Min(Max(0, plan.layer[bg].world_height - 225 - f->layer_camera_y[bg]), Max(top, bottom));
     if (DioramaCaptureBlend_LayerIsHalfAdded(f->cgwsel, f->cgadsub, input.sub_screen, 1u << bg))
       b->capture_flags |= SR_PPU_OVERLAY_MARK_BG_HALF_ADD;
     if (additive & (1u << bg)) {

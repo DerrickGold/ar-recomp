@@ -112,7 +112,7 @@ unsigned RoomPreview_Measure(int x, int y, uint32_t frame, int extra, int vertic
 }
 static unsigned s_uploads;
 static uint64_t s_bg2_revision;
-static ArRenderTexture s_page, s_view;
+static ArRenderTexture s_page, s_view, s_flat;
 static uint32_t s_view_pixels[640 * 352];
 static uint64_t s_view_revision;
 static uint32_t s_page_pixels[256 * 256];
@@ -342,6 +342,7 @@ void RoomPreview_Reset(void) {
   ArRenderDevice_DestroyTexture(device, s_page);
   s_page = ArRenderTexture_Invalid();
   ArRenderDevice_DestroyTexture(device, s_view); s_view = ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(device, s_flat); s_flat = ArRenderTexture_Invalid();
   ArRenderDevice_DestroyTexture(device, s_named_texture);
   s_named_texture = ArRenderTexture_Invalid(); s_named_source = 0; s_named_uploaded = false;
   EditorRoomScene_Destroy(s_room); s_room = NULL; s_cached = false;
@@ -708,6 +709,33 @@ static bool Upload(void) {
   }
   return true;
 }
+int RoomPreview_RenderFlat(int x, int y, uint32_t frame, int width, int height, int pixels) {
+  if (!s_room || width < 1 || height < 1 || width > 2048 || height > 2048 || pixels < 0 || pixels > 1)
+    return 0;
+  s_cached = false; s_receiver_projection.valid = false;
+  s_uploads = 0; s_effect_vertices = 0;
+  const int extra = DisplayGeometry_CalculateHorizontal(224, width, height,
+      pixels == kPixelAspect_Crt43, false).render_extra;
+  if (!EditorRoomScene_RenderFlat(s_room, x, y, frame, extra, NULL)) return 0;
+  const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(s_room);
+  ArRenderDevice *device = DioramaPreview_Device();
+  if (!ArRenderTexture_IsValid(s_flat)) {
+    const ArRenderTextureDesc desc = {.width = SR_SCENE_WIDTH, .height = 224,
+      .format = kArRenderPixelFormat_Argb8888, .usage = kArRenderTextureUsage_Streaming,
+      .filter = kArRenderFilter_Nearest, .blend = kArRenderBlendMode_Opaque};
+    if (!ArRenderDevice_CreateTexture(device, &desc, &s_flat)) return 0;
+  }
+  const ArRenderRectI update = {0, 0, surface->pitch_pixels, 224};
+  if (!ArRenderDevice_UpdateTexture(device, s_flat, &update,
+      surface->backdrop, surface->pitch_pixels * 4) || !DioramaPreview_Begin(width, height)) return 0;
+  ++s_uploads;
+  const ArRenderRectI viewport = ArPresentationLayout_ResolveViewport(
+      width, height, false, pixels == kPixelAspect_Crt43, surface->width, 224);
+  const ArRenderRectF source = {64, 0, surface->width, 224};
+  const ArRenderRectF destination = {viewport.x, viewport.y, viewport.w, viewport.h};
+  return ArRenderDevice_DrawTexture(device, s_flat, &source, &destination);
+}
+
 int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     int width, int height, float distance, float yaw, float pitch, int skybox, int pixel_aspect) {
   if (!s_room || !(distance >= 0.5f && distance <= 2.5f) || !(yaw >= -0.7f && yaw <= 0.7f) ||

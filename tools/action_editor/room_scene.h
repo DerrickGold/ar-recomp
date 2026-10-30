@@ -51,6 +51,12 @@ bool EditorRoomScene_MeasureView(const EditorRoomScene *, uint32_t frame,
 /* A NULL camera selects the unprojected 16:10 capture policy for raw captures. */
 bool EditorRoomScene_Render(EditorRoomScene *room, int x, int y, uint32_t frame,
                             int extra_x, int vertical_budget, const EditorRoomCamera *camera);
+/* Standard non-Diorama widescreen baseline: native 224 rows, production PPU
+ * composition and camera bounds. Ignores authored Diorama scenery and effects.
+ * The merged framebuffer is in Surfaces()->backdrop after its 64px apron;
+ * as in the game's base framebuffer, RGB is valid and alpha must be ignored. */
+bool EditorRoomScene_RenderFlat(EditorRoomScene *room, int x, int y, uint32_t frame,
+                                int extra_x, EditorRoomCamera *camera);
 const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *room);
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *room);
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *room);

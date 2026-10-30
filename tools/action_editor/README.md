@@ -1228,6 +1228,16 @@ output frame (30 fps). Use identical routes, settings and frame counts for
 before/after captures. `AR_BENCH_SHOT=/path/final.png` optionally saves just the
 last frame after a timed run. `--mode on` or `off` selects one configuration.
 
+For a standard non-Diorama widescreen baseline, invoke the executable directly
+with `AR_BENCH_FLAT=1 AR_BENCH_EFFECTS=0` and player coordinates `-1 0`.
+This uses the production PPU's original background composition, colour math and
+224-row frame, with widescreen margins determined by the output aspect ratio.
+The layer/effect INI arguments are ignored in this mode. It captures scenery
+without actors, authored Diorama tile extensions, skybox projection or effects.
+Use the same requested camera route, animation clock and output dimensions as
+the enhanced capture; each presentation retains its own framing and camera
+bounds. The Python repeat runner continues to compare Diorama effects off/on.
+
 #### Diagnosing a slow route
 
 For a direct benchmark invocation, `AR_BENCH_PROFILE=cpu.csv` adds owner-thread

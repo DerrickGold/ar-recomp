@@ -94,6 +94,35 @@ static char *Read(const char *path, size_t *size) {
   fclose(file); data[length] = 0; *size = (size_t)length; return data;
 }
 
+static void FlatCapture(EditorRoomScene *scene, const ActionSceneSnapshot *assets,
+                        int x, int y, uint32_t clock, int extra) {
+  EditorRoomCamera camera;
+  assert(EditorRoomScene_RenderFlat(scene, x, y, clock, extra, &camera));
+  const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(scene);
+  assert(surface->width == 256 + 2 * extra && surface->height == 224);
+  assert(!surface->background_view && !surface->native_pages[0] && !surface->native_pages[1]);
+  assert(!EditorRoomScene_Effects(scene)->authored_count && !EditorRoomScene_Effects(scene)->effect_count);
+  ActionRoomSceneFrameRequest request = assets->frame;
+  request.camera_x = camera.x; request.camera_y = camera.y; request.game_frame = clock;
+  ActionRoomSceneFrameState state;
+  static uint32_t original[kActionRoomSceneFramePixels];
+  assert(ActionRoomScene_BuildFrameState(&assets->scene, &request, &state));
+  /* The small original-frame oracle uses 10-bit PPU addresses, rather than
+   * the runtime's unwrapped world provider. Use it only inside that window;
+   * the production/reference PPU comparison still covers all room positions. */
+  for (unsigned bg = 0; bg < 2; ++bg)
+    if ((assets->scene.bg[bg].pages_wide > 4 && state.layer_camera_x[bg] + 256 > 1024) ||
+        (assets->scene.bg[bg].pages_high > 4 && state.layer_camera_y[bg] + 225 > 1024)) return;
+  assert(ActionRoomScene_RenderNativeFrame(&assets->scene, &state, original, kActionRoomSceneFramePixels));
+  /* An independent native-frame compositor verifies priority, palette and
+   * color math in the original 256px area. The interposed PPU oracle above
+   * also verifies every widescreen pixel against its reference rasterizer. */
+  for (unsigned row = 0; row < 224; ++row) for (unsigned col = 0; col < 256; ++col)
+    Equal(original[row * 256 + col] & 0xffffff,
+        surface->backdrop[row * surface->pitch_pixels + 64 + extra + col] & 0xffffff,
+        4, 3, 0, col, row);
+}
+
 int main(int argc, char **argv) {
   if (argc < 3) {
     fprintf(stderr, "usage: %s diorama-layers.ini room.arscene ...\n", argv[0]); return 2;
@@ -125,9 +154,15 @@ int main(int argc, char **argv) {
         EditorRoomCamera camera;
         assert(EditorRoomScene_ResolveCamera(scene,v[0],v[1],v[2],v[3],v[4],&view,kDioramaSky_Only,&camera));
         assert(EditorRoomScene_Render(scene,camera.x,camera.y,v[2],v[3],v[4],&camera));
+        const uint32_t projected = EditorRoomScene_Hash(scene);
+        FlatCapture(scene, assets, v[0], v[1], v[2], v[3]);
+        /* Switching back must not reuse the flat framebuffer as a cached
+         * projected capture, including when authored tile edits are loaded. */
+        assert(EditorRoomScene_Render(scene,camera.x,camera.y,v[2],v[3],v[4],&camera));
+        assert(EditorRoomScene_Hash(scene) == projected);
       }
     }
-    printf("%02x:%02x profile=%u captures=12 full-add=%u owned=%u fallback=%u\n", assets->scene.group,
+    printf("%02x:%02x profile=%u captures=36 full-add=%u owned=%u fallback=%u\n", assets->scene.group,
         assets->scene.map, assets->terrain_profile, full_add_frames-first_full,
         owned_frames-first_owned, fallback_frames-first_fallback); fflush(stdout);
     EditorRoomScene_Destroy(scene);
