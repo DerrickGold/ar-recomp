@@ -79,6 +79,10 @@ abort boundary. Linux also binds internal references locally. Keep runtime
 objects and generated symbols private: sharing the executable's mutable
 runtime state would mix the two games.
 
+Private builds force-include `snesrecomp/support/native_module.h` to declare
+the abort hook with C linkage before C++ standard headers import it. The hook
+does not return; a C++ implementation must also be `noexcept`.
+
 Binary SDK distributions must also include the runtime archive produced by
 `snesbuild runtime archive --private-module`; its filename has `_module`
 before the archive extension. A module never links the ordinary executable
