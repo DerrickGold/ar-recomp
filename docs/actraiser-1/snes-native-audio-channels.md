@@ -90,6 +90,28 @@ releases the voice.
 Track cleanup begins at `$0E51`. It removes `$47` from the active ownership and
 key masks and clears `$35` when the dual-lane event finishes.
 
+Extended audio groups these event `$07` producers on one UI voice per scene
+(addresses identify recompiled blocks, not necessarily the COP instruction):
+
+| UI producer | Request blocks |
+|---|---|
+| Offering selection / Message Speed | `$01:895A`, `$01:8B11` |
+| Menu navigation / cancel / confirm | `$01:8B82`, `$01:8C15`, `$01:8C1C` |
+| Inventory | `$01:8D00` |
+| Yes/No movement / confirm or cancel | `$01:8DCA`, `$01:8DD4`, `$01:8DED` |
+| Dialogue glyph | `$01:902D` |
+| Target selection feedback | `$01:9579`, `$01:958F` |
+| Title selection / name entry | `$02:A769`, `$02:C3EE` |
+
+At message speed zero (`$7E:0200 == 0`), the first request plays and further
+requests are blocked while that blip is pending or active. Enhanced layout can
+separate confirmation and its first glyph by two frames; merely restarting
+their shared voice still creates two audible attacks. The audio callback can
+also consume requests during an instant glyph burst. Once the blip finishes,
+the next interaction can play normally. Nonzero speeds retain the native
+per-glyph restart cadence. Other uses of event `$07` keep their separate source
+identities; this rule does not change dialogue pagination or input handling.
+
 ## Representative event-effect posts (COP / voice 6 or voices 6+7)
 
 The channel rule applies to every port-2 value: IDs `$01-$7F` use voice 6 and

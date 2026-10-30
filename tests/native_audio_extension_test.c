@@ -808,6 +808,92 @@ static void TestBurstCompactionAndReservations(void) {
   CHECK(s_started_serial[1] == 3 && s_started_voice[1] == 15);
 }
 
+static void TestMenuAndDialogueBlips(void) {
+  static const uint32_t menu_sites[] = {
+      0x01895a, 0x018b11, 0x018b82, 0x018c15, 0x018c1c, 0x018d00,
+      0x018dca, 0x018dd4, 0x018ded, 0x01902d, 0x019579, 0x01958f,
+      0x02a769, 0x02c3ee};
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
+  uint8_t ram[0x20000] = {0};
+  ram[0x19] = 7; /* Sky Palace */
+  for (unsigned speed = 0; speed <= 1; ++speed) {
+    ram[0x200] = speed;
+    for (unsigned site = 0; site < sizeof(menu_sites) / sizeof(menu_sites[0]); ++site) {
+      for (unsigned order = 0; order < 2; ++order) {
+        const uint32_t first = order ? 0x01902d : menu_sites[site];
+        const uint32_t second = order ? menu_sites[site] : 0x01902d;
+        for (unsigned playing = 0; playing < 2; ++playing) {
+          InitFixture(&apu, &spc, &dsp);
+          CHECK(NativeAudioExtension_QueueGameRequest(
+              ram, sizeof(ram), true, 7, first, 100, 0xa00, 0xf800, 1));
+          if (playing) Tick(&spc);
+          /* Enhanced layout separates confirmation and its first glyph by two
+           * frames. Instant text must not start the sound twice: restarting
+           * one voice still produces a second audible attack. */
+          CHECK(NativeAudioExtension_QueueGameRequest(
+              ram, sizeof(ram), true, 7, second, 102, 0x4ca, 0xf900, 2));
+          CHECK(NativeAudioExtension_QueuedRequestCount() == (int)(speed || !playing));
+          Tick(&spc);
+          CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
+          CHECK(s_start_count == 1 + (speed && playing));
+          CHECK(s_started_voice[0] == s_started_voice[s_start_count - 1]);
+          CHECK(s_policy_count[kNativeAudioDisposition_BlockedSelf] == !speed);
+          CHECK(s_policy_count[kNativeAudioDisposition_RestartedSelf] == (speed && playing));
+          CHECK(s_policy_count[kNativeAudioDisposition_ReplacedPending] == (speed && !playing));
+          if (!speed) CHECK(s_started_serial[0] == 1);
+        }
+      }
+    }
+  }
+  /* Other uses of event $07, other IDs and ordinary SFX keep their own voices. */
+  ram[0x200] = 0;
+  CHECK(NativeAudioExtension_QueueGameRequest(
+      ram, sizeof(ram), true, 7, 0x028000, 104, 0, 0, 3));
+  CHECK(NativeAudioExtension_QueueGameRequest(
+      ram, sizeof(ram), true, 8, 0x018c1c, 104, 0, 0, 4));
+  CHECK(NativeAudioExtension_QueueGameRequest(
+      ram, sizeof(ram), false, 7, 0x018c1c, 104, 0, 0, 5));
+  Tick(&spc);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 4);
+}
+
+static void TestInstantDialogueBurst(void) {
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
+  uint8_t ram[0x20000] = {0};
+  InitFixture(&apu, &spc, &dsp);
+  for (unsigned glyph = 0; glyph < 60; ++glyph) {
+    CHECK(NativeAudioExtension_QueueGameRequest(
+        ram, sizeof(ram), true, 7, 0x01902d, 100, 0x4ca, glyph, glyph + 1));
+    /* The audio callback can consume requests during a single instant reveal,
+     * so merging only requests that are still pending is insufficient. */
+    Tick(&spc);
+  }
+  CHECK(s_start_count == 1);
+  CHECK(s_policy_count[kNativeAudioDisposition_BlockedSelf] == 59);
+  CHECK(s_policy_count[kNativeAudioDisposition_RestartedSelf] == 0);
+
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  FlushVirtualLifecycle(&apu, &spc);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
+  CHECK(NativeAudioExtension_QueueGameRequest(
+      ram, sizeof(ram), true, 7, 0x01902d, 150, 0x4ca, 0xf900, 61));
+  Tick(&spc);
+  CHECK(s_start_count == 2 && s_started_serial[1] == 61);
+
+  /* A live speed change restores the per-glyph typewriter cadence. */
+  ram[0x200] = 1;
+  CHECK(NativeAudioExtension_QueueGameRequest(
+      ram, sizeof(ram), true, 7, 0x01902d, 151, 0x4ca, 0xf901, 62));
+  Tick(&spc);
+  CHECK(s_start_count == 3 && s_started_serial[2] == 62);
+  CHECK(s_policy_count[kNativeAudioDisposition_RestartedSelf] == 1);
+}
+
 static void TestCombinedGameRequestObservation(void) {
   Apu apu;
   Spc spc;
@@ -898,6 +984,8 @@ int main(void) {
   TestSelfPolicies();
   TestObservedSources();
   TestBurstCompactionAndReservations();
+  TestMenuAndDialogueBlips();
+  TestInstantDialogueBurst();
   TestCombinedGameRequestObservation();
   TestOpcodeFilterEquivalence();
   CHECK(s_lock_depth == 0);

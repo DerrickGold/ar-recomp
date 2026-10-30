@@ -155,6 +155,7 @@ typedef struct SourceObservation {
   uint64_t signature[kSourceSlots];
   uint16_t scene;
   bool miracle_active;
+  bool instant_text;
 } SourceObservation;
 
 /* Called on the game thread, which owns WRAM. Keep record decoding and memory
@@ -167,6 +168,7 @@ static bool ReadSourceObservation(const uint8_t *ram, size_t size,
   memset(observation, 0, sizeof(*observation));
   observation->scene = ReadWord(ram, 0x18);
   observation->miracle_active = ram[0x190e9] != 0;
+  observation->instant_text = ram[0x200] == 0;
   const bool action = ram[0x18] >= 1 && ram[0x18] <= 7;
   if (action) {
     for (unsigned i = 0; i < 80; ++i) {
@@ -217,24 +219,43 @@ void NativeAudioExtension_ObserveGameState(const uint8_t *ram, size_t size) {
   RtlApuUnlock();
 }
 
-/* One authorable table: add effect IDs or exact producer-site overrides here.
- * Repeated lightning and glyph requests retain the native lane's retrigger;
- * unrelated emitters still spill to another bank. Unknown emitters stay
- * independent instead of letting a guessed identity suppress a sound. */
-static const struct {
+typedef struct NativeAudioOverlapRule {
   uint32_t site;
   uint8_t event, id, policy;
-} kOverlapRules[] = {
-  {0x01902d, 1, 0x07, kNativeAudio_RestartSelf},
-  {0x01ccbc, 1, 0x8f, kNativeAudio_RestartSelf},
-  {0, 0, 0x10, kNativeAudio_RestartSelf},
-  {0, 1, 0x10, kNativeAudio_RestartSelf},
-  {0, 1, 0x90, kNativeAudio_RestartSelf},
+  bool menu_blip;
+} NativeAudioOverlapRule;
+
+/* One authorable table: add effect IDs or exact producer-site overrides here.
+ * Menu feedback and dialogue glyphs share the native UI blip's source:
+ * enhanced layout can yield between a confirmation and its first glyph.
+ * Treating those as independent sources plays two overlapping copies of $07.
+ * Instant text also needs BlockSelf below: restarting one voice still creates
+ * a second attack when layout or the audio callback separates requests.
+ * Unrelated emitters, including other uses of $07, still have their own voices. */
+static const NativeAudioOverlapRule kOverlapRules[] = {
+  {0x01895a, 1, 0x07, kNativeAudio_RestartSelf, true}, /* offering selection */
+  {0x018b11, 1, 0x07, kNativeAudio_RestartSelf, true}, /* Message Speed */
+  {0x018b82, 1, 0x07, kNativeAudio_RestartSelf, true}, /* menu navigation */
+  {0x018c15, 1, 0x07, kNativeAudio_RestartSelf, true}, /* menu cancel */
+  {0x018c1c, 1, 0x07, kNativeAudio_RestartSelf, true}, /* menu confirm */
+  {0x018d00, 1, 0x07, kNativeAudio_RestartSelf, true}, /* inventory */
+  {0x018dca, 1, 0x07, kNativeAudio_RestartSelf, true}, /* Yes/No movement */
+  {0x018dd4, 1, 0x07, kNativeAudio_RestartSelf, true}, /* Yes/No movement */
+  {0x018ded, 1, 0x07, kNativeAudio_RestartSelf, true}, /* Yes/No confirm */
+  {0x01902d, 1, 0x07, kNativeAudio_RestartSelf, true}, /* dialogue glyph */
+  {0x019579, 1, 0x07, kNativeAudio_RestartSelf, true}, /* target rejected */
+  {0x01958f, 1, 0x07, kNativeAudio_RestartSelf, true}, /* target confirm */
+  {0x01ccbc, 1, 0x8f, kNativeAudio_RestartSelf, false},
+  {0x02a769, 1, 0x07, kNativeAudio_RestartSelf, true}, /* title selection */
+  {0x02c3ee, 1, 0x07, kNativeAudio_RestartSelf, true}, /* name entry */
+  {0, 0, 0x10, kNativeAudio_RestartSelf, false},
+  {0, 1, 0x10, kNativeAudio_RestartSelf, false},
+  {0, 1, 0x90, kNativeAudio_RestartSelf, false},
 };
 
 static uint64_t SourceForRequest(bool event, uint8_t id, uint32_t site,
-                                 uint16_t x, uint16_t y) {
-  if (event && id == 7 && site == 0x01902d)
+                                 uint16_t x, uint16_t y, bool menu_blip) {
+  if (menu_blip)
     return (s_state.scene_key << 8) | 1u;
   /* $01:C8D5 owns the repeated lightning update. During the targeted
    * miracle, all its bolts belong to that one active controller. Town
@@ -454,18 +475,26 @@ bool NativeAudioExtension_QueueIdentifiedRequest(const NativeAudioRequest *reque
 static bool QueueRequestLocked(
     bool event_request, uint8_t id, uint32_t caller_pc,
     uint32_t game_frame, uint16_t actor_x, uint16_t actor_y,
-    uint64_t trace_serial) {
-  NativeAudioRequest request = {
-      .source_key = SourceForRequest(event_request, id, caller_pc, actor_x, actor_y),
-      .trace_serial = trace_serial, .caller_pc = caller_pc, .game_frame = game_frame,
-      .actor_x = actor_x, .actor_y = actor_y, .id = id, .event_request = event_request,
-  };
+    uint64_t trace_serial, bool instant_text) {
+  const NativeAudioOverlapRule *rule = NULL;
   for (unsigned i = 0; i < sizeof(kOverlapRules) / sizeof(kOverlapRules[0]); ++i)
     if (kOverlapRules[i].event == event_request && kOverlapRules[i].id == id &&
         (!kOverlapRules[i].site || kOverlapRules[i].site == caller_pc)) {
-      request.policy = kOverlapRules[i].policy;
+      rule = &kOverlapRules[i];
       break;
     }
+  NativeAudioRequest request = {
+      .source_key = SourceForRequest(event_request, id, caller_pc, actor_x, actor_y,
+                                     rule && rule->menu_blip),
+      .trace_serial = trace_serial, .caller_pc = caller_pc, .game_frame = game_frame,
+      .actor_x = actor_x, .actor_y = actor_y, .id = id, .event_request = event_request,
+      .policy = rule ? rule->policy : kNativeAudio_Independent,
+  };
+  /* Read speed with the request's WRAM snapshot, not from audio-thread state.
+   * Nonzero speeds retain per-glyph retriggers; speed zero needs only the
+   * first pending/playing UI blip, then accepts another after it finishes. */
+  if (rule && rule->menu_blip && instant_text)
+    request.policy = kNativeAudio_BlockSelf;
   return QueueIdentifiedRequestLocked(&request);
 }
 
@@ -476,7 +505,7 @@ bool NativeAudioExtension_QueueRequest(
   if (!s_enabled) return false;
   RtlApuLock();
   const bool result = QueueRequestLocked(event_request, id, caller_pc,
-      game_frame, actor_x, actor_y, trace_serial);
+      game_frame, actor_x, actor_y, trace_serial, false);
   RtlApuUnlock();
   return result;
 }
@@ -490,7 +519,7 @@ bool NativeAudioExtension_QueueGameRequest(
   RtlApuLock();
   ApplySourceObservationLocked(&observation);
   const bool result = QueueRequestLocked(event_request, id, caller_pc,
-      game_frame, actor_x, actor_y, trace_serial);
+      game_frame, actor_x, actor_y, trace_serial, observation.instant_text);
   RtlApuUnlock();
   return result;
 }
