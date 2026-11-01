@@ -188,12 +188,20 @@ void cpu_state_init(CpuState *cpu, uint8 *ram) {
 
 void cpu_dbg_funcname(const char *name) { (void)name; }
 
+/* Diagnostic switches are fixed for the process; read each once instead of
+ * walking the environment on every suppressed call or dispatch miss. */
+static int env_flag_present(int *cached, const char *name) {
+    if (*cached < 0) *cached = getenv(name) != NULL;
+    return *cached;
+}
+
 void sr_indirect_suppressed_log(CpuState *cpu, uint32 site_pc24,
                                 uint8 bank, uint16 table_base,
                                 uint16 x_register) {
+    static int s_indirect_log = -1;
     uint16 address;
     uint16 target;
-    if (getenv("SNESRECOMP_INDIRECT_LOG") == NULL) return;
+    if (!env_flag_present(&s_indirect_log, "SNESRECOMP_INDIRECT_LOG")) return;
     address = (uint16)(table_base + x_register);
     target = cpu_read16(cpu, bank, address);
     fprintf(stderr,
@@ -270,11 +278,13 @@ static int missing_dispatch_milestone(uint32 hits) {
 
 static void dispatch_missing_body_warn(CpuState *cpu, uint32 site_pc24,
                                        uint32 target_pc24) {
+    static int s_warning_disabled = -1;
     MissingDispatchWarning *entry = NULL;
     unsigned index;
     site_pc24 &= 0xffffffu;
     target_pc24 &= 0xffffffu;
-    if (getenv("SNESRECOMP_NO_DISPATCH_MISSING_WARNING") != NULL) return;
+    if (env_flag_present(&s_warning_disabled,
+                         "SNESRECOMP_NO_DISPATCH_MISSING_WARNING")) return;
     for (index = 0u; index < g_missing_dispatch_warning_count; ++index) {
         MissingDispatchWarning *candidate =
             &g_missing_dispatch_warning[index];

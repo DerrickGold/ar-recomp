@@ -3130,13 +3130,10 @@ static bool native_fast_eligible(const Ppu *ppu, int screen_y,
         const PpuVirtualTilemapBinding *binding = &ppu->virtualTilemap[layer];
         if (bpp_for_mode(mode, layer) == 0 &&
             !(mode == 7 && layer == 1 && PPU_m7extBg(ppu))) continue;
-        /* Tiled modes resolve mosaic per layer.  Rejecting the complete
-         * scanline made every other BG, OBJ, and composition stage pay the
-         * reference pixel-renderer cost for a local fetch effect.  Mode 7
-         * still needs a dedicated affine mosaic kernel. */
-        if (mode == 7 && (visible_layers & (1u << layer)) != 0u &&
-            PPU_mosaicEnabled(ppu, layer) && PPU_mosaicSize(ppu) > 1)
-            return false;
+        /* Mosaic resolves per layer in both tiled modes and Mode 7.
+         * Rejecting the complete scanline made every other BG, OBJ, and
+         * composition stage pay the reference pixel-renderer cost for a
+         * local fetch effect. */
         /* A disabled source cannot affect capture or either screen. Its
          * dormant binding must not deoptimize all the visible sources. */
         if (mode == 1 && (visible_layers & (1u << layer)) != 0u &&
@@ -3847,9 +3844,32 @@ static void native_resolve_sampled_bg_span(Ppu *SR_RESTRICT ppu, int layer,
     }
 }
 
+static void native_resolve_bg_mosaic(Ppu *SR_RESTRICT ppu, int layer,
+        int screen_y, bool want_sub,
+        uint16_t *SR_RESTRICT main_pixels,
+        uint16_t *SR_RESTRICT sub_pixels,
+        uint8_t *SR_RESTRICT bands);
+
+static bool mode7_layer_mosaic(const Ppu *ppu, int layer) {
+    return PPU_mosaicEnabled(ppu, layer) && PPU_mosaicSize(ppu) > 1;
+}
+
+/* Only the ordinary authentic scanline has a Mode 7 mosaic kernel; capture
+ * and margin spans still take the reference affine sampler for it. */
+static bool native_mode7_mosaic_visible(const Ppu *ppu) {
+    uint8_t visible_layers = ppu->screenEnabled[0] | ppu->screenEnabled[1];
+    if (PPU_mode(ppu) != 7) return false;
+    return ((visible_layers & 1u) != 0u && mode7_layer_mosaic(ppu, 0)) ||
+        (PPU_m7extBg(ppu) && (visible_layers & 2u) != 0u &&
+         mode7_layer_mosaic(ppu, 1));
+}
+
 /* Mode 7's transform changes linearly across a scanline.  Advance the two
  * affine numerators instead of recomputing four multiplies for every layer,
- * screen, and pixel as the general reference sampler must. */
+ * screen, and pixel as the general reference sampler must.  A mosaic layer
+ * instead samples once per display-anchored group through the shared mosaic
+ * kernel; BG1 and EXTBG select mosaic independently, so the other layer keeps
+ * the linear walk.  Winner merges are order-independent maxima. */
 static void native_resolve_mode7(Ppu *SR_RESTRICT ppu, int screen_y,
                                  bool want_sub,
                                  uint16_t *SR_RESTRICT main_pixels,
@@ -3861,12 +3881,20 @@ static void native_resolve_mode7(Ppu *SR_RESTRICT ppu, int screen_y,
     unsigned rank1[2];
     bool extbg = PPU_m7extBg(ppu);
     bool layer0_visible, layer1_visible;
-    mode7_line_transform(ppu, screen_y + 1, &source_x, &source_y,
-                         &x_step, &y_step);
-    native_layer_window_plan(ppu, 0, want_sub, &plans[0]);
-    layer0_visible = plans[0].main_mode != 0u || plans[0].sub_mode != 0u;
+    if (mode7_layer_mosaic(ppu, 0)) {
+        native_resolve_bg_mosaic(ppu, 0, screen_y, want_sub,
+                                 main_pixels, sub_pixels, NULL);
+        layer0_visible = false;
+    } else {
+        native_layer_window_plan(ppu, 0, want_sub, &plans[0]);
+        layer0_visible =
+            plans[0].main_mode != 0u || plans[0].sub_mode != 0u;
+    }
     layer1_visible = false;
-    if (extbg) {
+    if (extbg && mode7_layer_mosaic(ppu, 1)) {
+        native_resolve_bg_mosaic(ppu, 1, screen_y, want_sub,
+                                 main_pixels, sub_pixels, NULL);
+    } else if (extbg) {
         native_layer_window_plan(ppu, 1, want_sub, &plans[1]);
         layer1_visible =
             plans[1].main_mode != 0u || plans[1].sub_mode != 0u;
@@ -3874,6 +3902,8 @@ static void native_resolve_mode7(Ppu *SR_RESTRICT ppu, int screen_y,
         rank1[1] = layer_rank(ppu, 1, 1);
     }
     if (!layer0_visible && !layer1_visible) return;
+    mode7_line_transform(ppu, screen_y + 1, &source_x, &source_y,
+                         &x_step, &y_step);
     for (int x = 0; x < kPpuXPixels;
          ++x, source_x += (uint32_t)x_step,
          source_y += (uint32_t)y_step) {
@@ -6164,14 +6194,16 @@ static bool render_native_fast_line(Ppu *ppu, int screen_y,
         !native_capture_policy_on_line(ppu, screen_y) &&
         (ppu->extraLeftCur != 0u || ppu->extraRightCur != 0u ||
          screen_y < 0 || screen_y >= kPpuYPixels))
-        return render_native_mode7_wide_line(
-            ppu, screen_y, row, origin, dual_authentic,
-            authentic_row, authentic_origin);
+        return !native_mode7_mosaic_visible(ppu) &&
+            render_native_mode7_wide_line(
+                ppu, screen_y, row, origin, dual_authentic,
+                authentic_row, authentic_origin);
     if (capture && (native_capture_line_needed(ppu, screen_y) ||
                     ppu->extraLeftCur != 0u ||
                     ppu->extraRightCur != 0u ||
                     screen_y < 0 || screen_y >= kPpuYPixels))
-        return render_native_capture_line(
+        return !native_mode7_mosaic_visible(ppu) &&
+            render_native_capture_line(
             ppu, screen_y, row, origin, authentic, dual_authentic,
             authentic_row, authentic_origin);
     want_sub = PPU_addSubscreen(ppu) || PPU_pseudoHires(ppu) ||

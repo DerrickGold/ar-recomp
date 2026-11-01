@@ -1035,9 +1035,18 @@ static void test_native_fast_path_parity(void) {
         compare_native_fast_render(
             mode, 0u, mode == 1u, false, true, 16u, 0x0fu);
     }
-    /* Mode 7 mosaic deliberately remains on the reference affine path. */
-    compare_native_fast_render(
-        7u, 0u, false, false, false, 5u, 0x03u);
+    /* Mode 7 mosaic selects BG1 and EXTBG independently, across group phase,
+     * windows, main/subscreen, large-field transparency and character fill. */
+    for (uint8_t layers = 1u; layers <= 3u; ++layers) {
+        compare_native_fast_render(
+            7u, 0u, false, true, false, 2u, layers);
+        compare_native_fast_render(
+            7u, 0u, false, false, false, 5u, layers);
+        compare_native_fast_render(
+            7u, 0xf0u, false, false, true, 16u, layers);
+        compare_native_fast_render(
+            7u, 0x80u, false, false, false, 3u, layers);
+    }
 }
 
 /* sub_owned_layer selects a BG that is captured while enabled only on the
