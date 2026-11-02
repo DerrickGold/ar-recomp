@@ -93,6 +93,11 @@ unsigned EffectVisualTicks(const ActionEffectInstance *effect,
                                   unsigned ticks);
 float DeterministicPulse(const ActionEffectInstance *effect);
 float FlameSilhouette(unsigned seed, unsigned ticks, int segment);
+/* Captured lake-bubble clock shared by material lighting and nearby smoke. */
+float ActionLavaActivity_Light(const ActionSceneEffectFrame *frame,float x,float y);
+/* Evaluate each nearby burst once for a bank of mist patches. */
+void ActionLavaActivity_Sample(const ActionSceneEffectFrame *frame,
+    const ArRenderPointF *points,unsigned count,float *light);
 ArRenderColorF MixColor(ArRenderColorF a, ArRenderColorF b, float t);
 bool RectIsSane(const ActionEffectLocalRect *rect);
 bool ProjectWithScale(const ActionEffectInstance *effect,

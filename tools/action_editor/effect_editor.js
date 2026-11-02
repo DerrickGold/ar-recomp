@@ -90,7 +90,7 @@ const EffectEditor=(()=>{
   const fieldNames=['cloud-light','storm-lightning','fireflies','canopy-light','foliage-shadow','particle-path','heat-haze','torch','halo','light-gradient','particle-area','light-fan','water-surface','drips','waterfall-spray','cloud-bank','wet-contour'];
   const terrainNames=['ground-mist','wet-contour','exposure','canopy-light'];
   const requiresTerrain=name=>name.startsWith('stage:')||terrainNames.includes(name)||name.endsWith('-field')&&name!=='moon-field';
-  const fieldFields=[['emitterGlowStyle','glow-style','insects'],['emitterChorus','chorus','0'],['emitterTrail','trail','0'],['emitterRipple','ripple','0'],['emitterPlacement','placement','foreground'],['emitterPattern','pattern','motes'],
+  const fieldFields=[['emitterGlowStyle','glow-style','insects'],['emitterChorus','chorus','0'],['emitterTrail','trail','0'],['emitterRipple','ripple','0'],['emitterPlume','plume','0'],['emitterDebris','debris','0'],['emitterLanding','landing','0'],['emitterPlacement','placement','foreground'],['emitterPattern','pattern','motes'],
     ['emitterFoliageSeed','seed',''],['emitterRayThickness','thickness','1'],['emitterRayFadeIn','fade-in','0'],['emitterAngle','angle','0'],['emitterFan','fan','36'],['emitterStrands','strands','8'],
     ['emitterSoftness','softness','0.35'],['emitterDrift','drift','0'],['emitterAmplitude','amplitude','2'],['emitterCarry','carry','0'],['emitterGust','gust','0'],['emitterTwinkle','twinkle','0'],['emitterActivity','activity','1'],['emitterShadows','shadows','0'],['emitterScatter','scatter','.12'],['emitterBounce','bounce','.4'],['emitterTextured','textured','0'],['emitterRolling','rolling','0'],['emitterVolume','volume','0'],['emitterRainbow','rainbow','0'],['emitterSparkle','sparkle','0'],['emitterWake','wake','0'],['emitterLightResponse','canopy-response','0']];
   const cloudFields=[['edge-strength',9],['halo-strength',1.3],['streak-strength',1.7],
@@ -107,7 +107,10 @@ const EffectEditor=(()=>{
       case 'glow-style': return name==='fireflies';
       case 'chorus': return name==='fireflies'&&(record['glow-style']??'insects')==='insects';
       case 'trail': return name==='fireflies'&&record['glow-style']==='wisps';
-      case 'ripple': return name==='drips';
+      case 'ripple': return name==='drips'&&record.debris!=='1';
+      case 'debris': return name==='drips';
+      case 'landing': return name==='drips'&&record.debris==='1';
+      case 'plume': return cloud&&!record.points;
       case 'placement': return !['ground-mist','exposure','heat-haze','cloud-light'].includes(name);
       case 'pattern': return area||name==='particle-path';
       case 'seed': return ['storm-lightning','cloud-light','foliage-shadow','canopy-light'].includes(name)||freeTexturedCloud;
@@ -116,12 +119,12 @@ const EffectEditor=(()=>{
       case 'strands': return ['storm-lightning','cloud-light','light-fan','cloud-bank','foliage-shadow'].includes(name);
       case 'softness': return ['storm-lightning','cloud-light','light-fan','cloud-bank','halo','light-gradient','foliage-shadow','canopy-light'].includes(name)&&!(cloud&&record.textured==='1');
       case 'twinkle': return name==='light-fan'||area||name==='particle-path'||cloud&&!!record.points;
-      case 'gust': return cloud||name==='particle-path';
-      case 'activity': return ['storm-lightning','particle-path','drips'].includes(name);
+      case 'gust': return cloud&&record.plume!=='1'||name==='particle-path';
+      case 'activity': return ['storm-lightning','particle-path','drips'].includes(name)||cloud&&record.plume==='1';
       case 'scatter': case 'bounce': return name==='canopy-light';
-      case 'canopy-response': return area||['particle-path','drips'].includes(name)||terrainCloud;
-      case 'rolling': case 'volume': case 'rainbow': case 'sparkle': return freeTexturedCloud;
-      case 'wake': return terrainCloud;
+      case 'canopy-response': return area||['particle-path','drips'].includes(name)||terrainCloud&&record.plume!=='1';
+      case 'rolling': case 'volume': case 'rainbow': case 'sparkle': return freeTexturedCloud&&record.plume!=='1';
+      case 'wake': return terrainCloud&&record.plume!=='1';
       case 'textured': return (cloud||name==='foliage-shadow'||area&&record.pattern==='leaves')&&!record.points;
       case 'shadows': return ['torch','light-fan','canopy-light'].includes(name)||name==='foliage-shadow'&&record.textured==='1';
       case 'carry': return cloud&&!!record.points;
@@ -259,7 +262,7 @@ const EffectEditor=(()=>{
     document.querySelector('label[for="emitterSoftness"]').textContent=name==='storm-lightning'?'Distant bolt softness':name==='cloud-light'?'Edge / halo softness':name==='canopy-light'?'Light / shadow softness':name==='foliage-shadow'?'Leaf edge softness':'Soft backdrop';
     document.querySelector('label[for="emitterTwinkle"]').textContent=name==='light-fan'?'Cloud-break modulation':'Grain glint strength';
     $('#emitterTwinkle').title=name==='light-fan'?'Slowly vary ray brightness as cloud openings change. Zero keeps the fan steady; cycle length controls the pace. Geometry stays anchored.':'Brief highlights on moving grains. Zero disables glints; positions and particle count stay unchanged.';
-    document.querySelector('label[for="emitterAmplitude"]').textContent=name==='storm-lightning'?'Channel bends (pixels)':['foliage-shadow','canopy-light'].includes(name)?'Canopy sway (pixels)':name==='cloud-bank'?'Vertical billow':name==='heat-haze'?'Heat displacement (pixels)':'Wave height';
+    document.querySelector('label[for="emitterAmplitude"]').textContent=name==='storm-lightning'?'Channel bends (pixels)':['foliage-shadow','canopy-light'].includes(name)?'Canopy sway (pixels)':name==='cloud-bank'?(record.plume==='1'?'Puff curl':'Vertical billow'):name==='heat-haze'?'Heat displacement (pixels)':'Wave height';
     document.querySelector('label[for="emitterShadows"]').textContent=['canopy-light','foliage-shadow'].includes(name)?'Solid terrain shadows':name==='light-fan'?'Scenery occlusion':'Moving torch shadows';
     document.querySelector('label[for="emitterTextured"]').textContent=name==='foliage-shadow'?'Textured vine silhouettes':area?'Feathered leaf silhouettes':'Textured wisps';
     $('#emitterActivity').min=name==='storm-lightning'?.01:.05;$('#emitterActivity').max=name==='storm-lightning'?.2:1;
@@ -271,13 +274,15 @@ const EffectEditor=(()=>{
       name==='light-gradient'?'A room-sized color wash. 0° blends from top to bottom, 90° from left to right. Softness fades the outer edges. Choose BG2 for distant sky, or scenery/player/enemy light receivers.':
       name==='light-fan'?'X/Y is the opening centre. Width spreads origins across the sill, arch or cloud opening; height is ray length. 0° points down. Cloud-break modulation slowly varies brightness over Cycle frames without moving the rays. Zero keeps existing fans steady. Rays are clipped, never bent at screen edges. Scenery occlusion blocks light behind opaque BG1 pixels; turn it off when distant backdrop artwork is baked into that layer.':
       name==='water-surface'?'X/Y is the area centre; its top edge is the water surface. Ripples and glints share the wave clock. This adds surface geometry, not refraction.':
+      name==='drips'&&record.debris==='1'?'Small groups of grit fall from the top edge. Put it against a ceiling and place the bottom edge on the first stone or lava surface below. Choose Dust on stone or Tiny lava splash for that contact. Active fraction sets how much of each cycle is visible; lower values give longer pauses. Keep the path clear of platforms.':
       name==='drips'?'Drops fall from the top edge toward the bottom edge. Place the top on a wet ceiling or vine tip. Reduce Active fraction for occasional dew. Water landing adds a tiny ripple at the bottom edge: enable only over exposed water, with no platform between source and landing. Canopy response lets drops catch sunlight. Drag the region corners to adjust source width and fall height.':
       name==='waterfall-spray'?'Spray rises from the bottom edge. Anchor this edge to the native waterfall splash.':
+      name==='cloud-bank'&&record.plume==='1'?'Small puffs rise from the bottom centre of the region. Put that contact on a rock crack. Width and height set the spread and rise; drift sets the lean, billow adds curl, and Cycle frames sets the pace. Active fraction leaves quiet intervals. Each strand has its own timing and occasionally skips a puff. Use BG2 fixed point with Background placement to share the distant wall blur.':
       name==='cloud-bank'?'For free clouds, enable Textured wisps. Rolling mist adds dense billows and thin curls. Cloud volume replaces the flat wisps with stable rounded billows: higher values deepen their shaded undersides, while drift and billow move whole clouds without stretching. Spray rainbow response reveals spectral fragments only where droplets receive direct Cloud-break sunlight at the correct viewing angle. The light’s beam angle and Sun direction in depth control the shared spectrum; resizing this bank changes spray coverage without stretching a bow. Strength controls scattering, with actual density still limiting visibility. Spray sparkle response adds bright droplets only in sunlit moving mist density, with no sparkle in empty air. The main color tints crests and the end tint colors their shadowed body; billow, drift and cycle control their waves. Body wake stirs the fog near moving player/enemy feet and settles over 1.5 seconds. Canopy response catches the current canopy-light color and terrain shadows. Body wakes and canopy response require BG1; a rolling cloud bank without them also supports BG2 anchoring. Drag the shared renderer stand-ins while animation plays to preview wakes. Trace a BG1 ground path. Carry is the downwind settling distance: 0 hugs slopes; larger values carry dust over crests. Drift sets wind direction/travel, billow sets lift, and lifetime sets the gust cycle. Optional grains lift from this path; size, wander, tint and seed vary them. Clearing points also clears carry and grains for a free cloud.':'';
     $('#emittermist-height').disabled=source?.name!=='ground-mist';
     $('#mistHint').hidden=!['ground-mist','free-mist'].includes(name);
     $('#moteControls').hidden=!particleNames.includes(name)||(name==='cloud-bank'&&!record.points);
-    $('#effectTintControls').hidden=(!particleNames.includes(name)&&!['halo','cloud-light','light-gradient'].includes(name))||(name==='cloud-bank'&&!record.points&&!(Number(record.rolling)>0));
+    $('#effectTintControls').hidden=(!particleNames.includes(name)&&!['halo','cloud-light','light-gradient'].includes(name))||(name==='cloud-bank'&&!record.points&&!(Number(record.rolling)>0)&&record.plume!=='1');
     for(const [id,key,fallback] of moteFields) {
       $('#'+id).value=record[key]??fallback;
       $('#'+id).disabled=(name==='fireflies'&&record['glow-style']==='moss'&&['travel-x','travel-y','wander'].includes(key))||(['water-surface','drips','waterfall-spray'].includes(name)&&['travel-x','travel-y','wander','spread'].includes(key))||(['cloud-bank','particle-path'].includes(name)&&['travel-x','travel-y','spread'].includes(key));
@@ -390,8 +395,10 @@ const EffectEditor=(()=>{
     if(name==='water-field')return createWaterDefinition(x,y,false);
     const preset=name.startsWith('preset:')?name.slice(7):null;
     if(preset==='ground-dust'&&bgIndex!==0){status('Ground dust paths use BG1.');return false;}
-    if(preset)name=['wisps','moss'].includes(preset)?'fireflies':preset==='dew'?'drips':preset==='halo'?'halo':preset==='ground-dust'?'cloud-bank':'particle-area';
+    if(preset)name=['wisps','moss'].includes(preset)?'fireflies':['dew','falling-grit'].includes(preset)?'drips':preset==='halo'?'halo':['ground-dust','rock-vent'].includes(preset)?'cloud-bank':'particle-area';
     const presets={
+      'rock-vent':{width:'40',height:'64',color:'d5ad8c','color-end':'74646a',intensity:'.9',textured:'1',plume:'1',activity:'.55',particles:'0',strands:'3',amplitude:'3',drift:'8',lifetime:'480'},
+      'falling-grit':{width:'6',height:'128',color:'9b7656','color-end':'b79c84',intensity:'1.1',debris:'1',landing:'1',activity:'.14',particles:'3','size-min':'.6','size-max':'1',lifetime:'900',placement:'foreground'},
       wisps:{'glow-style':'wisps',trail:'.8',width:'160',height:'80',particles:'1',color:'a6efcf','color-end':'549f9b',intensity:'1.6',illumination:'.7','size-min':'1.5','size-max':'2.1',wander:'24','travel-x':'24','travel-y':'10',lifetime:'1100'},
       moss:{'glow-style':'moss',width:'48',height:'8',particles:'2',color:'68b38a','color-end':'305d49',intensity:'.9',illumination:'.25','size-min':'.8','size-max':'1.2',wander:'0','travel-x':'0','travel-y':'0',lifetime:'1800',placement:'playfield'},
       dew:{width:'4',height:'96',particles:'1',color:'c3dfc8','color-end':'8faba0',intensity:'2',activity:'.28',ripple:'0','size-min':'.45','size-max':'.65',lifetime:'420',placement:'foreground'},
@@ -566,13 +573,15 @@ const EffectEditor=(()=>{
   };
   $('#actorBindingStop').onclick=()=>{try{SharedRoomPreview.previewActorBinding(null,0,0,0);}catch(error){status(error.message);}};
   $('#emitterPoints').onchange=e=>editEmitter(selected,{points:e.target.value.trim()||null,
-    ...(e.target.value.trim()&&selected.includes(':cloud-bank:')?{textured:null,rolling:null,volume:null,rainbow:null,sparkle:null,wake:null,'canopy-response':null}:{}),
+    ...(e.target.value.trim()&&selected.includes(':cloud-bank:')?{textured:null,plume:null,rolling:null,volume:null,rainbow:null,sparkle:null,wake:null,'canopy-response':null}:{}),
     ...(!e.target.value.trim()&&selected.includes(':cloud-bank:')?{carry:null,particles:null,twinkle:null}:{})});
   for(const [key] of cloudFields)$('#cloudLight-'+key).onchange=e=>editEmitter(selected,{[key]:e.target.value});
   for(const [key] of stormFields)$('#storm-'+key).onchange=e=>editEmitter(selected,
     {[key]:e.target.value.trim()||null,anchor:'bg2-point'});
   for(const [id,key] of fieldFields)$('#'+id).onchange=e=>editEmitter(selected,{[key]:e.target.value===''?null:e.target.value,
-    ...(key==='textured'&&e.target.value!=='1'?(selected.includes(':foliage-shadow:')?{shadows:null}:selected.includes(':cloud-bank:')?{rolling:null,volume:null,rainbow:null,sparkle:null,wake:null,'canopy-response':null}:{}):{}),
+    ...(key==='textured'&&e.target.value!=='1'?(selected.includes(':foliage-shadow:')?{shadows:null}:selected.includes(':cloud-bank:')?{plume:null,rolling:null,volume:null,rainbow:null,sparkle:null,wake:null,'canopy-response':null}:{}):{}),
+    ...(key==='plume'&&e.target.value==='1'?{textured:'1',rolling:null,volume:null,rainbow:null,sparkle:null,wake:null,'canopy-response':null,points:null,particles:'0',carry:null,twinkle:null,gust:null}:{}),
+    ...(key==='debris'?e.target.value==='1'?{ripple:null}:{landing:null}:{}),
     ...(key==='pattern'&&e.target.value!=='leaves'?{textured:null}:{}),
     ...(key==='rolling'&&Number(e.target.value)===0?{volume:null,rainbow:null,sparkle:null,wake:null,'canopy-response':null}:{}),
     ...(selected.includes(':cloud-bank:')&&['volume','rainbow','sparkle','wake','canopy-response'].includes(key)&&Number(e.target.value)>0&&!(Number(records.get(selected)?.rolling)>0)?{rolling:'.8'}:{})});
@@ -1003,9 +1012,15 @@ const EffectEditor=(()=>{
     'wave-gain':['Minimum exposure','Centre exposure','Exposure width','Width per row','Base shimmer','Shimmer variation','Flash gain'],
     seeds:['Reflection seed','Wave seed']};
   const surfaceLabels={
+    'up-light':['Upward light strength (0–1)','Reach above lava (16–224 pixels)','Bank feather (4–96 pixels)','Scenery shadow strength (0–1)'],
+    'up-color':['Upward light red','Upward light green','Upward light blue'],
     'molten-surface':['Hot seam strength (0–1)','Surface cells (1–16)','Flow cycle (frames)','Surface depth (pixels)','Horizontal flow (pixels)','Surface height fraction'],
     'molten-bursts':['Bubble sites (0–4)','Mean interval (frames)','Active fraction (0.1–0.6)','Droplet height (pixels)','Bubble radius (pixels)'],
     'molten-color':['Red','Green','Blue','Opacity'],
+    'burst-light':['Bubble flash strength (0–1)','Local light radius (8–96 pixels)'],
+    'up-motion':['Moving light strength (0–1)','Light pattern width (64–384 px)','Light motion period (120–4096 frames)'],
+    'native-reaction':['Native burst light (0–1)','Native burst reach (8–64 px)','Native burst sparks (0–4)','Spark rise (4–24 px)'],
+    'native-bubbles':['Stagger native bubbles (0/1)','Burst chance per cycle (0–1)','Minimum quiet interval (frames)','Maximum quiet interval (frames)','Animation frame duration (1–16 frames)','Pattern seed (0–65535)'],
     heat:['Heat shimmer enabled (flat presentation only)'],'heat-amplitude':['Minimum output pixels','Authentic pixel displacement','Maximum output pixels'],
     'heat-motion':['Animation speed','Secondary speed','Vertical speed'],'heat-envelope':['Top weight','Floor weight'],
     'heat-wave':['Main X frequency','Main Y frequency','Secondary strength','Secondary X frequency','Secondary Y frequency'],
@@ -1098,7 +1113,7 @@ const EffectEditor=(()=>{
       if(property==='enabled')continue;
       const surface=Object.values(surfaceNames).find(([name])=>selected.includes(':'+name+':'))?.[1];
       if(surface!==undefined){
-        if(property==='kind'||(property.startsWith('heat')&&surface!==1)||(property.startsWith('molten-')&&surface!==0)||
+        if(property==='kind'||(property.startsWith('heat')&&surface!==1)||(property.startsWith('molten-')&&surface>1)||(['burst-light','native-bubbles','native-reaction','up-motion'].includes(property)&&surface!==1)||
           ((property.startsWith('cloud-')||property.startsWith('tier-'))&&surface!==4)||
           (['spill','body'].includes(property)&&surface===4)||(property==='segments'&&surface!==1)||
           (property==='map-rule'&&(surface>2||Number(record.mode)===1))||
@@ -1153,8 +1168,20 @@ const EffectEditor=(()=>{
       if(surface===1&&property==='heat'){
         const hint=document.createElement('p');hint.className='hint';hint.textContent='Refraction runs over the composited world in flat game presentation. The diorama preview shows lava glow and sparks, but does not run this flat-only pass.';group.append(hint);
       }
-      if(surface===0&&property==='molten-surface'){
-        const hint=document.createElement('p');hint.className='hint';hint.textContent='Moving cooling crust, hot seams and bubbles stay inside each lava source. Molten detail uses alpha draw layer 8; receiver lighting is routed separately. Surface height is measured upward from the middle of the captured lava rectangle. Set seam strength and bubble sites to zero for the original glow and embers.';group.append(hint);
+      if(surface===1&&property==='up-light'){
+        const hint=document.createElement('p');hint.className='hint';hint.textContent='Continuous warm illumination above the whole lava surface, with soft bank edges and scenery shadows. The remaining light supplies bounce. Uses the same scenery/player/enemy receivers in the game and shared preview. Zero strength restores the saved radial spill.';group.append(hint);
+      }
+      if(surface===1&&property==='up-motion'){
+        const hint=document.createElement('p');hint.className='hint';hint.textContent='Slow bands of warm lava light move across nearby rock. Strength controls the variation, wavelength sets the spacing, and cycle frames sets the pace. Zero keeps the upward illumination uniform.';group.append(hint);
+      }
+      if(surface===1&&property==='native-reaction'){
+        const hint=document.createElement('p');hint.className='hint';hint.textContent='A short warm flash and small sparks follow each original mound’s spurt and falling drops. Requires Native bubbles to be enabled. Flash and spark count can be adjusted independently.';group.append(hint);
+      }
+      if(surface===1&&property==='native-bubbles'){
+        const hint=document.createElement('p');hint.className='hint';hint.textContent='Staggers the original lava mound artwork in Diorama mode. Each whole mound keeps its own timing as the camera moves. Lower burst chance creates changing gaps; skipped cycles extend the quiet interval. Disable to restore native synchronized timing. The flowing lava lip and stepping platforms are unaffected.';group.append(hint);
+      }
+      if(surface<=1&&property==='molten-surface'){
+        const hint=document.createElement('p');hint.className='hint';hint.textContent='Moving cooling crust, hot seams and bubbles stay inside each lava source. Surface height is measured upward from the middle of the captured lava rectangle. Set seam strength and bubble sites to zero for the original glow and embers.'+(surface===1?' Small lakes automatically use fewer cells and bubble sites. Bubble flashes also warm nearby smoke.':' Molten detail requires alpha draw layer 8.');group.append(hint);
       }
       const values=String(value).trim().split(/\s+/);
       const labels=(surface!==undefined?(property==='motion'?surfaceMotionLabels[surface]:property==='map-rule'?surfaceRuleLabels[surface]:surfaceLabels[property]||surfaceLabels[/^source-\d+$/.test(property)?'source':/^tier-\d+$/.test(property)?'tier':['spill','body'].includes(property)?'style':''])||arcLabels[property]:null)||(projectile?(projectileLabels[property]||(['spill','body'].includes(property)?projectileLabels.style:null)||arcLabels[property]):null)||(arc?(arcLabels[property]||arcLabels[/^path-\d+$/.test(property)?'path':/-(spill|body)$/.test(property)?'style':'']):null)||(glow?(glowLabels[property]||glowLabels[/^source-\d+$/.test(property)?'source':/-(centre|ring-\d)$/.test(property)?'color':/-(radius|rings|flame)$/.test(property)?property.split('-').at(-1):'']):null)||({dimming:['Scenery darkness (0–1)'],'dimming-ramp':['World X','World Y','Ramp width','Ramp height']}[property])||(castle?(castleLabels[property]||(/^source-\d+$/.test(property)?castleLabels.source:null)||(property.startsWith('moon-')?(moonLabels[property.slice(5)]||moonLabels[property.slice(5).split('-')[0]]):null)):null)||(marsh?(marshLabels[property]||marshLabels[/^(span|material|witness)-\d+$/.test(property)?type:'']):null)||(selected.includes(':moon-field:')?(moonLabels[property]||moonLabels[/^(low|middle)-\d+$/.test(property)?type:'']):null)||(selected.includes(':atmosphere-field:')?(atmosphereLabels[property]||atmosphereLabels[/^(ambient|area|grit|tower)-\d+$/.test(property)?type:'']):null)||definitionLabels[property]||definitionLabels[/-color$/.test(property)?'color':/^(low|middle|ray|fan|profile|witness|pool|fall|wet|contour|ambient|area|grit|tower)-\d+$/.test(property)?type:''];

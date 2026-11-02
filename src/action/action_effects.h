@@ -225,6 +225,8 @@ typedef enum ActionEffectRenderLayer {
   kActionEffectRenderLayer_WorldSmoke,
   /* Background weather is composited into the sky source before its blur. */
   kActionEffectRenderLayer_Bg2Weather,
+  /* Wall-attached alpha particles share the background source's filtering. */
+  kActionEffectRenderLayer_Bg2SourceAlpha,
   kActionEffectRenderLayer_Count,
 } ActionEffectRenderLayer;
 
@@ -378,6 +380,8 @@ typedef struct ActionEffectFieldStyle {
   float sparkle; /* Small sunlit droplets following moving mist density; zero adds no geometry. */
   float carry; /* Ground dust: downwind distance over which lifted dust settles. */
   float gust, activity; /* Shared wind envelope; active fraction of a particle cycle. */
+  uint8_t plume; /* Textured clouds rise from the bottom centre in intermittent puffs. */
+  uint8_t debris, landing; /* Falling grit; landing 0 none, 1 dust, 2 molten splash. */
   float twinkle; /* Grain highlights or slow fan transmission; never changes geometry/motion. */
   float chorus, trail; /* Glow clusters: loose answering pulses, short wisp trails. */
   uint8_t glow_style, ripple; /* Explicit water landing at the bottom of a drip region. */
@@ -551,6 +555,12 @@ typedef struct ActionFireballSmoke {
   uint16_t clock;
 } ActionFireballSmoke;
 
+enum {kActionNativeBubbleMax=64};
+typedef struct ActionNativeBubbleEvent {
+  uint32_t owner,seed;
+  int16_t x,y;
+  uint8_t age,cadence;
+} ActionNativeBubbleEvent;
 typedef struct ActionSceneEffectFrame {
   uint16_t game_frame;
   /* Convert foreground world samples to the fixed-point background light field. */
@@ -577,6 +587,8 @@ typedef struct ActionSceneEffectFrame {
   ActionMoonlightOcclusion scenery;
   ActionBloodpoolDetails bloodpool;
   ActionFireballSmoke fireball_smoke;
+  uint8_t native_bubble_count;
+  ActionNativeBubbleEvent native_bubbles[kActionNativeBubbleMax];
   ActionNativeMembers members;
   /* Owned recipe data. Queued/retained frames never borrow editable documents. */
   ActionRayField ray_field;

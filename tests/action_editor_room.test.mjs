@@ -49,11 +49,11 @@ const imports={
    }
    return 1;},
  effect(kind,p,n){
-   assert(kind>=-1&&kind<=5);
+   assert(kind>=-1&&kind<=6);
    if(kind>=0){
-     assert.equal(effect,-1);assert.equal(n,[3,3,9,4,173,19][kind]);
+     assert.equal(effect,-1);assert.equal(n,[3,3,9,4,177,19,8][kind]);
      const params=new Float32Array(api.memory.buffer,p,n);assert(params.every(Number.isFinite));
-     if(kind===4)assert(textures.has(params[172])&&params[172]!==target,'illumination map is a valid separate texture');
+     if(kind===4)assert(textures.has(params[176])&&params[176]!==target,'illumination map is a valid separate texture');
    }
    effect=kind;return 1;
  },
@@ -346,7 +346,7 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  }
 
  // Aitos surfaces use the same bounded capture and mesh kernels from complete data.
- if(base.group===4&&[1,2,3,4,6].includes(base.map)){
+ if(base.group===4&&[1,2,3,4,5,6].includes(base.map)){
    const indices=base.map===1?[0]:[2,3].includes(base.map)?[2,3,4]:[1];
    const names=['lava-pit','lava-lake','splash','waterfall','waterfall-mist'];
    let scoped='[effects]\nversion=1\n';
@@ -363,6 +363,84 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    const configured=execFileSync(replay,[path.join(directory,'room.arscene'),iniFile,file],
      {input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'}).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
    assert.deepEqual(configured,native,'Aitos surface native/WASM round trip');
+   if(indices.includes(1)) {
+     const lakeGuides=()=>{
+       const result=[];
+       for(let i=0;i<api.RoomPreview_CatalogueCount();++i)
+         if(cstring(api.RoomPreview_KindName(api.RoomPreview_CatalogueValue(i,1)))==='lava-lake')
+           result.push([0,1,2,3].map(f=>api.RoomPreview_CatalogueGuideValue(i,0,f)));
+       return result;
+     };
+     const original=lakeGuides();assert(original.length>0);
+     const originalLight=scoped.match(/^up-light=(.*)$/m)[1].split(' ').map(Number);
+     const custom=scoped.replace(/^up-light=.*$/m,'up-light=0.4 144 24 0.5');
+     assert.equal(send(Buffer.from(custom),api.RoomPreview_ConfigureEffects),1);
+     assert.deepEqual(lakeGuides(),original.map(([x,y,w])=>
+       [x,y+(originalLight[1]-144)/2,w+2*(24-originalLight[2]),160]),
+       'upward reach and bank feather refresh the complete lake footprint');
+     const saved=cstring(api.RoomPreview_SurfaceFieldText(1));
+     assert.deepEqual(saved.match(/^up-light=(.*)$/m)[1].split(' ').map(v=>Math.fround(Number(v))),
+       [.4,144,24,.5].map(Math.fround),'all four light controls survive complete-field export');
+     const request=requests[1];
+     assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+     const edited=api.RoomPreview_EffectHash();
+     assert.equal(send(Buffer.from(custom.replace('up-light=0.4 144','up-light=0.4 225')),api.RoomPreview_ConfigureEffects),0);
+     assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+     assert.equal(api.RoomPreview_EffectHash(),edited,'invalid reach preserves the active saved lighting');
+     assert.equal(send(Buffer.from(scoped),api.RoomPreview_ConfigureEffects),1);
+     assert.deepEqual(lakeGuides(),original);
+     assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+     assert.equal(api.RoomPreview_EffectHash()>>>0,effectHashes[1],'restoring the exported field restores its rendering');
+     const activity=scoped.replace(/^molten-bursts=.*$/m,'molten-bursts=2 360 0.3 12 3')
+       .replace(/^molten-surface=.*$/m,'molten-surface=0.65 8 1200 2 4 0.1')
+       .replace(/^burst-light=.*$/m,'burst-light=0.5 48');
+     assert.equal(send(Buffer.from(activity),api.RoomPreview_ConfigureEffects),1);
+     const activitySaved=cstring(api.RoomPreview_SurfaceFieldText(1));
+     for(const key of ['molten-bursts','molten-surface','burst-light']) {
+       const values=text=>text.match(new RegExp(`^${key}=(.*)$`,'m'))[1].split(' ').map(v=>Math.fround(Number(v)));
+       assert.deepEqual(values(activitySaved),values(activity),`${key} survives shared editor export`);
+     }
+     assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+     const activityHash=api.RoomPreview_EffectHash();
+     assert.equal(send(Buffer.from(activity.replace('burst-light=0.5 48','burst-light=0.5 97')),api.RoomPreview_ConfigureEffects),0);
+     assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+     assert.equal(api.RoomPreview_EffectHash(),activityHash,'invalid bubble light keeps the previous complete field');
+     assert.equal(send(Buffer.from(scoped),api.RoomPreview_ConfigureEffects),1);
+
+     // Native mounds alter source pixels, so recipes and the global effects
+     // switch must invalidate the raster even at an unchanged camera/clock.
+     const position=({4:[440,410],5:[128,64],6:[240,332]})[base.map];
+     const bubbleRequests=[0,7,19,37,51,99,65535,37].map(t=>[...position,t,120,64]);
+     const bubbleConfig=values=>scoped.replace(/^native-bubbles=.*$/m,'native-bubbles='+values);
+     const renderBubbles=()=>bubbleRequests.map(request=>{
+       assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+       return [api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0];
+     });
+     const staggered=bubbleConfig('1 1 2 24 3 191');
+     assert.equal(send(Buffer.from(staggered),api.RoomPreview_ConfigureEffects),1);
+     assert.match(cstring(api.RoomPreview_SurfaceFieldText(1)),/^native-bubbles=1 1 2 24 3 191$/m);
+     const staggeredHashes=renderBubbles();
+     assert.deepEqual(staggeredHashes[3],staggeredHashes[7],'native bubbles reproduce earlier animation when seeking');
+     const bubbleFile=path.join(directory,'native-bubbles.ini');fs.writeFileSync(bubbleFile,staggered);
+     const nativeBubbles=execFileSync(replay,[path.join(directory,'room.arscene'),iniFile,bubbleFile],
+       {input:bubbleRequests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'})
+       .trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
+     assert.deepEqual(staggeredHashes,nativeBubbles,'native/WASM bubble pixels agree in every regional terrain');
+     const nativeTiming=bubbleConfig('0 1 2 24 3 191');
+     assert.equal(send(Buffer.from(nativeTiming),api.RoomPreview_ConfigureEffects),1);
+     const nativeHashes=renderBubbles();
+     assert(nativeHashes.some((h,i)=>h[0]!==staggeredHashes[i][0]),'staggering changes actual native bubble artwork');
+     assert.equal(send(Buffer.from(scoped.replace(/^native-bubbles=.*\n/m,'')),api.RoomPreview_ConfigureEffects),1);
+     assert.deepEqual(renderBubbles().map(h=>h[0]),nativeHashes.map(h=>h[0]),'old complete fields preserve synchronized native artwork');
+     assert.equal(send(Buffer.from(staggered),api.RoomPreview_ConfigureEffects),1);
+     api.RoomPreview_EnableEffects(0);
+     assert.deepEqual(renderBubbles().map(h=>h[0]),nativeHashes.map(h=>h[0]),'effects-off restores original artwork at the same clock');
+     api.RoomPreview_EnableEffects(1);
+     assert.deepEqual(renderBubbles(),staggeredHashes,'re-enabling effects restores deterministic native bubbles');
+     assert.equal(send(Buffer.from(bubbleConfig('1 1 24 2 3 191')),api.RoomPreview_ConfigureEffects),0);
+     assert.deepEqual(renderBubbles(),staggeredHashes,'invalid interval preserves the accepted bubble pattern');
+     assert.equal(send(Buffer.from(scoped),api.RoomPreview_ConfigureEffects),1);
+   }
    if(base.map===1) {
      const custom=scoped.replace(/^mode=0$/m,'mode=1').replace(/^source-count=0$/m,'source-count=1')
        .replace(/^source-1=.*$/m,'source-1=480 320 -32 -8 64 16 1');

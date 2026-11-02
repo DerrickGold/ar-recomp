@@ -17,12 +17,12 @@ case kActionEffect_AitosWaterSplash:return 2;case kActionEffect_AitosWaterfall:r
 case kActionEffect_AitosWaterfallMist:return 4;default:return -1;}}
 bool ActionSurfaceField_Set(ActionSurfaceField *f,const char *key,const char *value){return f&&ActionEffectVectors_Set(f,&f->seen,properties,kProperties,key,value);}
 void ActionSurfaceField_Upgrade(ActionSurfaceField *f){
-  /* Saved complete definitions keep their original appearance. Only the
-   * bundled pit opts in; export exposes these controls for subsequent edits. */
+  /* Saved complete definitions keep their original appearance. Bundled
+   * defaults opt in; export exposes the new controls for subsequent edits. */
   if(!f)return;
-  const char *names[]={"molten-surface","molten-bursts","molten-color"};
-  const char *values[]={"0 8 240 6 3 0.25","0 240 0.3 18 3","1 0.28 0.015 0.8"};
-  for(unsigned n=0;n<3;++n)for(unsigned i=0;i<kProperties;++i)
+  const char *names[]={"molten-surface","molten-bursts","molten-color","up-light","up-color","burst-light","native-bubbles","up-motion","native-reaction"};
+  const char *values[]={"0 8 240 6 3 0.25","0 240 0.3 18 3","1 0.28 0.015 0.8","0 192 64 0","1 0.55 0.22","0 56","0 0.75 48 144 8 9176","0 192 840","0 32 0 12"};
+  for(unsigned n=0;n<sizeof(names)/sizeof(names[0]);++n)for(unsigned i=0;i<kProperties;++i)
     if(!strcmp(properties[i].name,names[n])&&!(f->seen&(UINT64_C(1)<<i)))
       (void)ActionSurfaceField_Set(f,names[n],values[n]);
 }
@@ -44,10 +44,22 @@ bool ActionSurfaceField_Valid(const ActionSurfaceField *f){
   if(!f||!ActionEffectVectors_Valid(f,&f->seen,properties,kProperties)||!Integer(f->Kind[0],0,4)||!Integer(f->Components[0],0,3)||!Integer(f->Receivers[0],0,8)||!Integer(f->Mode[0],0,1))return false;
   if(!Integer(f->Heat[0],0,1)||f->HeatAmplitude[0]>f->HeatAmplitude[2]||f->HeatWave[2]<0||f->HeatWave[2]>1||f->HeatCross[2]<0||f->HeatCross[2]>1)return false;
   const unsigned kind=(unsigned)f->Kind[0];const unsigned max_particles[]={12,32,12,128,32};
+  if(f->UpMotion[0]>1||f->UpMotion[1]<64||f->UpMotion[1]>384||
+      !Integer(f->UpMotion[2],120,4096)||(f->UpMotion[0]>0&&kind!=1))return false;
+  if(f->NativeReaction[0]>1||f->NativeReaction[1]<8||f->NativeReaction[1]>64||
+      !Integer(f->NativeReaction[2],0,4)||f->NativeReaction[3]<4||f->NativeReaction[3]>24||
+      ((f->NativeReaction[0]>0||f->NativeReaction[2]>0)&&kind!=1))return false;
+  const float *native=f->NativeBubbles;
+  if(!Integer(native[0],0,1)||native[1]>1||!Integer(native[2],0,1800)||
+      !Integer(native[3],0,1800)||native[2]>native[3]||!Integer(native[4],1,16)||
+      !Integer(native[5],0,65535)||(native[0]>0&&kind!=1))return false;
+  if(f->UpLight[0]>1||f->UpLight[1]<16||f->UpLight[1]>224||f->UpLight[2]<4||f->UpLight[2]>96||
+      f->UpLight[3]>1||(f->UpLight[0]>0&&kind!=1))return false;
+  if(f->BurstLight[0]>1||f->BurstLight[1]<8||(f->BurstLight[0]>0&&kind!=1))return false;
   const float *m=f->MoltenSurface,*b=f->MoltenBursts;
   if(m[0]>1||!Integer(m[1],1,16)||!Integer(m[2],120,4096)||m[3]<1||m[3]>16||m[4]>12||m[5]>1||
       !Integer(b[0],0,4)||!Integer(b[1],90,4096)||b[2]<.1f||b[2]>.6f||b[3]>40||b[4]<.5f||b[4]>6||
-      ((m[0]>0||b[0]>0)&&(kind!=0||f->Projection[1]!=kActionEffectRenderLayer_WorldDust)))return false;
+      ((m[0]>0||b[0]>0)&&(kind>1||(kind==0&&f->Projection[1]!=kActionEffectRenderLayer_WorldDust))))return false;
   const unsigned max_sources[]={16,4,14,1,1};
   if(!Integer(f->SourceCount[0],0,max_sources[kind])||!Integer(f->Projection[0],0,kActionEffectProjectionPlane_BetweenBackgrounds)||!Integer(f->Projection[1],0,kActionEffectRenderLayer_Count-1))return false;
   for(unsigned i=0;i<16;++i)if(!Integer(f->MapRule[i],0,255))return false;

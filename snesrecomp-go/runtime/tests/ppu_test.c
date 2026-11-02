@@ -1,4 +1,5 @@
 #include "snes/ppu.h"
+#include "snesrecomp/runner/ppu_bg_packet.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -2225,6 +2226,7 @@ typedef struct CaptureTileFixture {
     bool masks;
     bool interior_only;
     bool complete;
+    bool character;
 } CaptureTileFixture;
 
 static uint32_t capture_tile_lookup(void *context, int32_t x, int32_t y,
@@ -2247,6 +2249,17 @@ static uint32_t capture_tile_lookup(void *context, int32_t x, int32_t y,
         }
         if ((x & 3) == 0) { tile->flags = 0; tile->band = 1; }
     }
+    if (fixture->character && (tile->flags & SR_PPU_CAPTURE_TILE_REPLACE)) {
+        tile->flags |= SR_PPU_CAPTURE_TILE_CHARACTER;
+        for (unsigned row = 0; row < 8; ++row) {
+            const unsigned low = 0x6699u ^ row * 0x311u;
+            const unsigned high = 0x1188u ^ row * 0x101u;
+            tile->character[row * 2] = (uint8_t)low;
+            tile->character[row * 2 + 1] = (uint8_t)(low >> 8);
+            tile->character[row * 2 + 16] = (uint8_t)high;
+            tile->character[row * 2 + 17] = (uint8_t)(high >> 8);
+        }
+    }
     return 1;
 }
 
@@ -2257,7 +2270,8 @@ static PpuVirtualTilemapLookupResult capture_world_lookup(
     *entry = 1u;
     if (fixture->merged && capture_tile_lookup(fixture, x, y, &tile) &&
         (tile.flags & SR_PPU_CAPTURE_TILE_REPLACE))
-        *entry = (tile.flags & SR_PPU_CAPTURE_TILE_BLANK) ? 0u : tile.entry;
+        *entry = (tile.flags & SR_PPU_CAPTURE_TILE_BLANK) ? 0u :
+            fixture->character ? (tile.entry & ~1023u) | 3u : tile.entry;
     return kPpuVirtualTilemapLookup_Found;
 }
 
@@ -2273,25 +2287,28 @@ static bool capture_world_band(const void *context, int32_t x, int32_t y,
 
 static void test_native_capture_tiles(void) {
     enum { kExtra = 120, kApron = 64, kWidth = 624, kRows = 16, kOrigin = 184 };
-    static uint32_t main_pixels[4][kWidth * kRows];
+    static uint32_t main_pixels[5][kWidth * kRows];
     static uint32_t authentic[4][kWidth * kPpuYPixels];
-    static uint32_t planes[4][3][kWidth * kRows];
-    Ppu *sources[4] = {ppu_init(), ppu_init(), ppu_init(), ppu_init()};
-    CHECK(sources[0] && sources[1] && sources[2] && sources[3]);
-    if (!sources[0] || !sources[1] || !sources[2] || !sources[3]) goto cleanup;
+    static uint32_t planes[5][3][kWidth * kRows];
+    static SrPpuBgPacket packet;
+    Ppu *sources[5] = {ppu_init(), ppu_init(), ppu_init(), ppu_init(), ppu_init()};
+    CHECK(sources[0] && sources[1] && sources[2] && sources[3] && sources[4]);
+    if (!sources[0] || !sources[1] || !sources[2] || !sources[3] || !sources[4]) goto cleanup;
     /* The oracle is the ordinary BG renderer with a merged tile provider,
      * independently exercising native scalar and tile-span paths. */
-    for (int variant = 0; variant < 24; ++variant) {
-        const int bg = variant / 12, mode = variant % 12;
-        CaptureTileFixture fixtures[4] = {{0}, {.masks = mode == 7},
-            {.merged = true, .masks = mode == 7}, {.masks = mode == 7}};
-        for (int i = 0; i < 4; ++i) {
+    for (int variant = 0; variant < 48; ++variant) {
+        const int bg = variant / 24, mode = variant % 12;
+        const bool character = (variant % 24) >= 12;
+        CaptureTileFixture fixtures[5] = {{0}, {.masks = mode == 7},
+            {.merged = true, .masks = mode == 7}, {.masks = mode == 7}, {.masks = mode == 7}};
+        for (int i = 0; i < 5; ++i) {
             /* Existing interior edits still appear in mirrored fallback.
              * Complete painted extensions instead use their own coordinates;
              * compare them with ordinary live-world rendering, not another
              * invocation of the capture-edit path. */
             fixtures[i].interior_only = mode == 4;
             fixtures[i].complete = mode >= 8;
+            fixtures[i].character = character;
             Ppu *ppu = sources[i];
             ppu_reset(ppu);
             ppu->inidisp = 15;
@@ -2304,6 +2321,11 @@ static void test_native_capture_tiles(void) {
             for (int row = 0; row < 8; ++row) {
                 ppu->vram[16 + row] = 0x00ff;
                 ppu->vram[32 + row] = (uint16_t)(0xf00fu ^ (row * 0x101u));
+                /* The independent merged-map oracle uses real VRAM tile 3;
+                 * the edited capture supplies those bytes without changing
+                 * tile 2 or the authentic frame. Includes all four bitplanes. */
+                ppu->vram[48 + row] = (uint16_t)(0x6699u ^ row * 0x311u);
+                ppu->vram[56 + row] = (uint16_t)(0x1188u ^ row * 0x101u);
             }
             PpuSetExtraSpace(ppu, kExtra);
             PpuVirtualTilemapBinding world = {
@@ -2321,10 +2343,10 @@ static void test_native_capture_tiles(void) {
                     : kPpuOverlayFlag_ApplyBgFixedColorSubtract)));
             CHECK(PpuSetOverlayTransparentFill(ppu, bg,
                 kPpuOverlayTransparentFill_Cgram, 0));
-            if (i == 1 || i == 3) ppu->captureTiles[bg] = (SrPpuCaptureTileBinding){
+            if (i == 1 || i >= 3) ppu->captureTiles[bg] = (SrPpuCaptureTileBinding){
                 .lookup = capture_tile_lookup, .user_data = &fixtures[i], .apron = kApron,
             };
-            if (i == 3) ppu->captureTileStableMask = 1u << bg;
+            if (i >= 3) ppu->captureTileStableMask = 1u << bg;
             if (mode == 1) ppu->mosaic = 0x40 | (1u << bg);
             if (mode == 2) {
                 ppu->screenWindowed[0] = 1u << bg;
@@ -2337,9 +2359,14 @@ static void test_native_capture_tiles(void) {
             if (mode == 11 && i != 2)
                 memset(ppu->wsBandFill[bg], kPpuWidescreenBandFill_Transparent,
                     sizeof(ppu->wsBandFill[bg]));
-            if (mode == 6) ppu->renderFlags |= kPpuRenderFlags_ReferencePixelRenderer;
+            ppu->renderFlags = mode == 6 ? kPpuRenderFlags_ReferencePixelRenderer : 0;
+            if (i == 4) {
+                packet.request_flags = SR_PPU_BG_PACKET_TILES | SR_PPU_BG_PACKET_VALIDATE_TILES;
+                SrPpuBgPacket_Begin(&packet, kWidth, kRows);
+                ppu->backgroundPacket = &packet;
+            }
             PpuBeginDrawing(ppu, (uint8_t *)main_pixels[i], kWidth * 4, ppu->renderFlags);
-            CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic[i], kWidth * 4, kPpuYPixels));
+            if (i < 4) CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic[i], kWidth * 4, kPpuYPixels));
             for (int row = 0; row < kRows; ++row) {
                 /* Raster changes must affect edits on exactly the same row. */
                 ppu_write(ppu, 0x15, 0x80);
@@ -2382,6 +2409,19 @@ static void test_native_capture_tiles(void) {
         CHECK(memcmp(main_pixels[1], main_pixels[3], sizeof(main_pixels[1])) == 0);
         CHECK(memcmp(authentic[1], authentic[3], sizeof(authentic[1])) == 0);
         CHECK(memcmp(planes[1], planes[3], sizeof(planes[1])) == 0);
+        CHECK(memcmp(planes[1], planes[4], sizeof(planes[1])) == 0);
+        unsigned packet_pixels = 0;
+        for (unsigned row = 0; row < kRows; ++row) {
+            if (!packet.words[SR_PPU_BG_PACKET_HEADER_WORDS +
+                    SrPpuBgPacket_Row(bg, row) * SR_PPU_BG_PACKET_ROW_WORDS]) continue;
+            for (unsigned band = 0; band < 3; ++band)
+                for (unsigned x = 0; x < kWidth; ++x) {
+                    CHECK(SrPpuBgPacket_Color(&packet, bg, band, x, row) ==
+                        planes[1][band][row * kWidth + x]);
+                    ++packet_pixels;
+                }
+        }
+        if (mode == 0 || mode == 7) CHECK(packet_pixels > 0);
         CHECK(fixtures[3].calls < fixtures[1].calls / 2);
         /* Hits and misses expire at frame start, even with the same binding.
          * Changing authored metadata must not leave prior-frame tiles behind. */
@@ -2406,7 +2446,7 @@ static void test_native_capture_tiles(void) {
         CHECK(sources[1]->captureTileCoverage[bg][kOrigin] == 0u);
     }
 cleanup:
-    for (int i = 0; i < 4; ++i) ppu_free(sources[i]);
+    for (int i = 0; i < 5; ++i) ppu_free(sources[i]);
 }
 
 static void test_native_background_view(void) {

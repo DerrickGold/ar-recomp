@@ -29,6 +29,9 @@ typedef struct SrSceneBackground {
     uint8_t capture_flags; /* SR_PPU_OVERLAY_* */
     uint8_t fill_mode, fill_cgram;
     bool fill_configured;
+    /* Opt in only when edit lookups depend solely on tile coordinates for
+     * this render. Reuses the production per-frame capture tile cache. */
+    bool edits_stable;
 } SrSceneBackground;
 typedef struct SrSceneBackgroundView {
     uint16_t width, world_width, world_height; /* width 0 disables */

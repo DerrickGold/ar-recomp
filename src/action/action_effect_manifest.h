@@ -5,6 +5,7 @@
 /* Capture-thread ownership. Reload before publishing subsequent frames; old
  * frames retain their own tuning values and never refer to mutable recipes. */
 void ActionEffectManifest_SurfaceFields(unsigned,unsigned,const ActionSurfaceField **);
+const ActionSurfaceField *ActionEffectManifest_NativeBubbleField(unsigned,unsigned);
 bool ActionEffectManifest_Load(void);
 bool ActionEffectManifest_NeedsBg2Mask(unsigned group,unsigned room);
 bool ActionEffectManifest_ReplacesRayField(unsigned group,unsigned room);

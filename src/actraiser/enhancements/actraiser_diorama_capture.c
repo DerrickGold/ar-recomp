@@ -303,6 +303,9 @@ static void ActRaiser_BindDioramaPriorityBands(size_t pitch) {
 }
 
 void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
+  ActRaiserActionBg_ConfigureLavaBubbles(g_diorama_frame_active && g_settings.action_environmental_effects
+      ? ActionEffectManifest_NativeBubbleField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]) : NULL,
+      ActionEffectCapture_VisualClock());
   /* Diorama per-layer capture: when active (D toggle) or armed for a one-shot
    * dump (Shift+D), override all existing capture policies with full-frame
    * RemoveFromGame captures for BG1/2/3/OBJ. Bind dedicated diorama buffers

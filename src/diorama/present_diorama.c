@@ -794,8 +794,9 @@ retry_projection:;
           ActionEffectReceivers_HasSurfaceLights(&slot->action_scene_effects)
           ? PresentActionEffects_DrawSceneryLight : NULL,
       .actor_light = slot->action_environmental_effects ? PresentActionEffects_DrawActorLight : NULL,
-      .sky_weather = slot->action_environmental_effects && slot->action_effect_lighting &&
-          ActionStorm_HasSkyWeather(&slot->action_scene_effects) ? PresentActionEffects_DrawSkyWeather : NULL,
+      .sky_weather = slot->action_environmental_effects &&
+          ActionBackground_HasSourceEffects(&slot->action_scene_effects,
+              slot->action_effect_lighting,slot->action_effect_particles) ? PresentActionEffects_DrawSkyWeather : NULL,
       .actor_light_reuse = {
         slot->action_effect_lighting&&ActionEffectReceivers_MapsMatch(&slot->action_scene_effects,1,2)?1:0,
         slot->action_effect_lighting&&ActionEffectReceivers_MapsMatch(&slot->action_scene_effects,1,4)?1:

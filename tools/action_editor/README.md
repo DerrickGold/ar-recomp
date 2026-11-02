@@ -658,7 +658,7 @@ Overrides are terrain-specific even where scenery edits share
 equivalent US/EU layouts.
 
 Each room/terrain permits 96 enabled emitters and at most 4096 added vertices per render batch;
-the file holds at most 1024 records/512 KiB across all rooms and regional profiles.
+the file holds at most 2048 records/512 KiB across all rooms and regional profiles.
 The per-room instance and geometry limits are independent of that document capacity.
 Conservative costs are 97 vertices
 per light, four per mote and 296 per free-mist volume. Ground mist reserves
@@ -706,6 +706,70 @@ Aitos fields offer material recognition or manual source lists. Add/remove sourc
 buttons preserve valid bounds and unique identities. Lava-lake heat controls
 operate the existing flat game refraction pass; the shared diorama preview shows
 its glow/sparks but does **not** preview that flat-only distortion.
+
+Side-view lava lakes additionally expose **Upward light** (`up-light`: strength,
+reach above the surface, bank feather and scenery shadow strength) and
+`up-color` (RGB). The extended source illuminates the whole lip continuously;
+the existing body glow accents the molten edge. Shadow strength leaves a soft
+bounced contribution. Light shares the existing scenery/player/enemy receiver
+controls, and its footprint appears in the lake's map guide. Reach is bounded
+to 16–224 game pixels and bank feather to 4–96. Zero strength retains the
+original radial spill. Old saved complete fields import with zero strength.
+The shared CPU/WASM and native GPU paths use existing geometry and shadow
+materials; no new shader or texture is required. Act 2's placed heat regions
+provide the independent Diorama distortion described below.
+
+Lake definitions also expose **Molten surface**, **Molten bursts** and
+**Molten color**, shared with the Act 1 pit effect. Surface cells drift slowly,
+with dark cooling centres and hot seams. Bubbles swell, burst and return their
+droplets to the lake. Counts are maxima: narrow lakes use fewer cells/sites.
+`burst-light` controls the synchronized local flash (strength 0–1, radius
+8–96 pixels), including warmth on nearby foreground smoke. Alpha surface
+detail keeps the lake's BG1-high projection while receiver lighting retains
+its original layer. Particle and lighting settings remain independent.
+Old saved fields upgrade with all new activity disabled. Surface activity
+and ash use the same clocks, export and native/WASM rendering paths.
+
+**Native bubbles** controls the original BG1 mound animation in Aitos Act 2
+rooms `04:04–06`, separately from procedural molten bursts. In Diorama, all
+four tiles of a mound share one deterministic world-cell schedule. The six
+`native-bubbles` values are enabled (0/1), burst chance (0–1), minimum and
+maximum quiet intervals (0–1800 ticks), frame duration (1–16 ticks), and seed
+(0–65535). Defaults are `1 0.75 48 144 8 9176`: native-speed four-frame bursts,
+variable pauses, and occasionally skipped cycles. Skipping extends the quiet
+interval. Zero chance suppresses mounds; disabled restores the native loop.
+Old complete definitions upgrade with staggering disabled. The editor effects
+toggle also restores native timing and invalidates cached pixels immediately.
+Original metatile `02` alone is animated this way; the lava lip, stepping
+platforms, authored stamps, tile masks and depth assignments retain their roles.
+The native capture API's capability-gated character override supplies the same
+immutable 4bpp bytes to CPU rendering and GPU tile packets without writing VRAM.
+
+**Moving lava light** (`up-motion`) modulates the existing extended source in
+world space: strength 0–1, wavelength 64–384 pixels, cycle 120–4096 ticks. The
+bundled lake uses `0.65 192 840`. It reuses the same receiver/shadow geometry.
+**Native bubble reaction** (`native-reaction`) is flash strength 0–1, radius
+8–64 pixels, spark count 0–4, and rise 4–24 pixels; default `0.65 40 3 14`.
+Its phase comes from the very same mound clock used for native CHR selection.
+Only visible, unmasked native mound pixels react, and each event belongs to its
+captured lake. Disabling staggering suppresses reactions. Both additions upgrade
+to disabled values in older complete definitions.
+
+**Rock vent** adds a textured `cloud-bank` with `plume=1`. Its bottom centre is
+the rock contact; the puffs rise, expand, fade and pause independently. `activity`
+sets the active part of each cycle; strands, amplitude, drift, lifetime, seed,
+main/end tint and intensity remain editable. Plumes exclude rolling/volume,
+wake, canopy and traced-ground modes. BG2 fixed point + Background placement
+uses the source alpha pass, so the puffs inherit plane/skybox DoF. Pair a vent
+with a small soft light at its contact when the rock should glow.
+
+**Falling grit** uses `drips` with `debris=1` and `landing=0/1/2` (none, stone
+dust, lava splash). Three grains by default fall in a short staggered group,
+then leave a long quiet interval. The top edge is the ceiling; the bottom edge
+is the first contact below. These contacts are authored: inspect the entire fall
+path and do not cross a platform. Grit uses alpha blending, excludes water
+ripples, and reserves its impact footprint in both culling and geometry budgets.
+The presets and mode controls save through the same native/WASM recipe parser.
 
 #### Actor attachments and reusable fire/clouds
 
@@ -1051,6 +1115,10 @@ count, size, end tint, travel, wander and lifetime in the emitter modal; use
 Reach and the shared glow definition to change the light pool. The mote area
 follows that radius (up to 256 pixels per axis). Existing torch embers remain
 independent. Older torch recipes have zero ambient motes and keep their look.
+Torches using a **BG2 fixed point** anchor with **Background** placement draw
+their sparks and motes into the background source before its blur. They share
+the native wall's DoF in plane, skybox-only and combined views; receiver light
+remains a separate pass. The flat view retains the usual BG2 winner mask.
 Kassandora sconces use wider amber spill profiles and slow golden motes.
 Act 1's soft sun glare uses an ordinary BG2 light gradient with clipped edges.
 
@@ -1187,8 +1255,8 @@ python3 tools/action_editor/benchmark_rooms.py \
   --output runs/room-benchmark --drivers metal
 ```
 
-The supplied route plan covers Marahna 05:01–08 and Aitos 04:01–03, including
-high/low sections and lava pits. Use `--only` to select named routes or `--plan`
+The supplied route plan covers Marahna 05:01–08 and Aitos 04:01–07, including
+high/low sections, lava crossings and the statue descent. Use `--only` to select named routes or `--plan`
 for another JSON plan. Review captures to verify that each route exposes the
 intended effects; the CSV coordinates are **requested** camera positions, subject
 to the normal room clamps. Actor stand-ins follow the route; this is not a

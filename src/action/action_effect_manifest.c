@@ -15,6 +15,7 @@ static ActionSceneryCaptureCache s_scenery_cache;
 static ActionSceneEffectFrame s_receiver_frame;
 static ActionReceiverLighting s_receiver_lighting;
 void ActionEffectManifest_SurfaceFields(unsigned group,unsigned room,const ActionSurfaceField **fields){ActionEffectRecipes_SurfaceFields(&s_recipes,group,room,ActRaiserActionBg_TerrainProfile(),fields);}
+const ActionSurfaceField *ActionEffectManifest_NativeBubbleField(unsigned group,unsigned room){return ActionEffectRecipes_NativeBubbleField(&s_recipes,group,room,ActRaiserActionBg_TerrainProfile());}
 bool ActionEffectManifest_ReplacesRayField(unsigned group,unsigned room) {
   return ActionEffectRecipes_ReplacesRayField(&s_recipes,group,room,ActRaiserActionBg_TerrainProfile());
 }

@@ -1,6 +1,7 @@
 #include "action/action_effect_recipes.h"
 #include "action/action_floor_support.h"
 #include "action/action_light_kinds.h"
+#include "action/action_storm.h"
 #include <math.h>
 #include "support/test_assert.h"
 #include <stdio.h>
@@ -9,6 +10,57 @@
 #include <time.h>
 static ActionEffectRecipes table, before;
 static bool Parse(const char *text) { unsigned line; return ActionEffectRecipes_Parse(&table,text,strlen(text),&line); }
+static void TestBackgroundTorchRouting(void) {
+  const char *header="[effects]\nversion=1\n[emitter:04:07:0:torch:1]\n"
+      "x=168\ny=54\nlight-scenery=1\n";
+  const char *placements[]={"background","playfield","foreground"};
+  const unsigned layers[]={kActionEffectRenderLayer_Bg2SourceAlpha,
+      kActionEffectRenderLayer_Bg1Plane,kActionEffectRenderLayer_WorldOverlay};
+  for (unsigned i=0;i<3;++i) {
+    char text[512];
+    snprintf(text,sizeof(text),"%sanchor=bg2-point\nplacement=%s\n",header,placements[i]);
+    assert(Parse(text));
+    ActionSceneEffectFrame frame={0};
+    ActionEffectRecipes_Apply(&table,4,7,0,37,NULL,&frame);
+    assert(frame.authored_count==1 && frame.authored[0].render_layer==layers[i]);
+    assert(ActionBackground_HasSourceEffects(&frame,true,true)==(i==0));
+    assert(ActionBackground_HasSourceEffects(&frame,false,true)==(i==0));
+    assert(!ActionBackground_HasSourceEffects(&frame,true,false));
+    frame.authored[0].flags&=~kActionEffectFlag_Visible;
+    assert(!ActionBackground_HasSourceEffects(&frame,true,true));
+  }
+}
+static void TestCaveLifeParameters(void) {
+  const char *head="[effects]\nversion=1\n[emitter:04:04:0:cloud-bank:1]\n";
+  char text[1024];
+  snprintf(text,sizeof(text),"%stextured=1\nplume=1\nactivity=.58\nstrands=3\nanchor=bg2-point\nplacement=background\n",head);
+  assert(Parse(text));
+  ActionSceneEffectFrame frame={0};ActionEffectRecipes_Apply(&table,4,4,0,180,NULL,&frame);
+  assert(frame.authored_count==1&&frame.authored[0].field_style.plume==1);
+  assert(frame.authored[0].render_layer==kActionEffectRenderLayer_Bg2SourceAlpha);
+  assert(ActionBackground_HasSourceEffects(&frame,false,true));
+  assert(!ActionBackground_HasSourceEffects(&frame,true,false));
+  before=table;
+  const char *bad[]={"plume=1\n","textured=1\nplume=2\n","textured=1\nplume=1\nrolling=.2\n",
+    "textured=1\nplume=1\nwake=.2\n","textured=1\nplume=1\nactivity=0\n",
+    "textured=1\nplume=1\nplume=0\n","textured=1\nplume=1\nparticles=2\n"};
+  for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);++i) {
+    snprintf(text,sizeof(text),"%s%s",head,bad[i]);assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));
+  }
+  head="[effects]\nversion=1\n[emitter:04:04:0:drips:1]\n";
+  for(unsigned landing=0;landing<3;++landing) {
+    snprintf(text,sizeof(text),"%sdebris=1\nlanding=%u\nactivity=.13\nparticles=3\n",head,landing);
+    assert(Parse(text));frame=(ActionSceneEffectFrame){0};ActionEffectRecipes_Apply(&table,4,4,0,180,NULL,&frame);
+    assert(frame.authored[0].field_style.debris&&frame.authored[0].field_style.landing==landing);
+    assert(frame.authored[0].render_layer==kActionEffectRenderLayer_WorldDust);
+  }
+  before=table;
+  const char *bad_grit[]={"landing=1\n","debris=2\n","debris=1\nlanding=3\n",
+      "debris=1\nripple=1\n","debris=1\nlanding=1.5\n","debris=1\nlanding=nan\n"};
+  for(unsigned i=0;i<sizeof(bad_grit)/sizeof(*bad_grit);++i) {
+    snprintf(text,sizeof(text),"%s%s",head,bad_grit[i]);assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));
+  }
+}
 static void TestDocumentCapacity(void) {
   static char text[kActionEffectRecipeMaxBytes + 1];
   size_t size = (size_t)snprintf(text, sizeof(text), "[effects]\nversion=1\n");
@@ -409,6 +461,8 @@ static void TestPerPassBudgets(void) {
 }
 
 int main(int argc,char **argv) {
+  TestBackgroundTorchRouting();
+  TestCaveLifeParameters();
   TestDocumentCapacity();
   TestSwampLifeParameters();
   TestCloudLightParameters();

@@ -13,6 +13,7 @@
 
 #include "action/action_bg_plan.h"
 #include "action/action_bg_world.h"
+#include "action/action_surface_field.h"
 #include "regional/media/regional_media.h"
 #include "snesrecomp/runner.h"
 
@@ -327,6 +328,7 @@ bool ActRaiserActionBg_PixelLayerHasEdits(unsigned bg);
 bool ActRaiserActionBg_CaptureTilesBound(unsigned bg);
 /* Bind authored tiles/masks and guard terrain to native BG capture export. */
 bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask);
+void ActRaiserActionBg_ConfigureLavaBubbles(const ActionSurfaceField *, uint16_t clock);
 /* A current world binding with ordinary live-world edges and no tuned caps
  * can supply diorama guard columns without requiring authored tile edits. */
 bool ActRaiserActionBg_WorldApronAvailable(unsigned bg);

@@ -105,6 +105,7 @@ static bool FrameUsesBg2Alpha(const FrameSlot *slot) {
     for (unsigned i = 0; i < count; ++i)
       if ((effects[i].flags & kActionEffectFlag_Visible) &&
           (effects[i].render_layer == kActionEffectRenderLayer_Bg2Alpha ||
+           effects[i].render_layer == kActionEffectRenderLayer_Bg2SourceAlpha ||
            effects[i].render_layer == kActionEffectRenderLayer_Bg2HighAlpha)) return true;
   }
   return false;
@@ -958,27 +959,41 @@ bool PresentActionEffects_DrawActorLight(void *userdata, const DioramaProjection
   return DrawMaterialLight(userdata, diorama, receiver);
 }
 
-bool PresentActionEffects_DrawSkyWeather(void *userdata, const DioramaProjection *diorama, bool submit) {
-  PresentActionPlaneEffectContext *context=userdata;
+static bool DrawBackgroundSourceLayer(PresentActionPlaneEffectContext *context,
+    const DioramaProjection *diorama, const ActionDecorationPass *pass, bool submit) {
   const FrameSlot *slot=context->slot;
   ActionEffectProjectionContext projection=DecorationProjection(slot,context->viewport,diorama);
-  const unsigned layer=kActionEffectRenderLayer_Bg2Weather;
+  const unsigned layer=pass->layer;
+  const bool lighting=pass->diorama_lighting && slot->action_effect_lighting;
+  const bool particles=slot->action_effect_particles;
   if (context->source_draw) {
-    ActionSourcePacketCache *cache=PrepareSourcePacket(slot,&projection,layer,true,true);
+    ActionSourcePacketCache *cache=PrepareSourcePacket(slot,&projection,layer,lighting,particles);
     if (cache->failed) return false;
     if (!submit) return cache->count>0;
     if (!cache->count) return true;
-    return DrawSourceDecoration(context->device,slot,&projection,layer,true,true,
-        kArRenderBlendMode_Add,context->source_draw);
+    return DrawSourceDecoration(context->device,slot,&projection,layer,lighting,particles,
+        pass->blend,context->source_draw);
   }
   ActionSceneEffectRenderBatch *geometry=&s_action_effect_render_scratch.scene;
-  if (!ActionSceneDecorationRender_Build(&slot->action_scene_effects,layer,true,true,
+  if (!ActionSceneDecorationRender_Build(&slot->action_scene_effects,layer,lighting,particles,
       ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&projection,geometry))return false;
   if (!submit)return geometry->index_count>0;
   if (!geometry->index_count)return true;
   FadeEffectVertices(slot,geometry->vertices,geometry->vertex_count);
   EffectBatch batch=SceneBatchView(context->device,geometry);
-  return EffectRenderer_Submit(context->device,&batch,kArRenderBlendMode_Add);
+  return EffectRenderer_Submit(context->device,&batch,pass->blend);
+}
+
+bool PresentActionEffects_DrawSkyWeather(void *userdata, const DioramaProjection *diorama, bool submit) {
+  bool visible=false;
+  for (unsigned i=0;i<sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]);++i) {
+    const ActionDecorationPass *pass=&kDecorationPasses[i];
+    if (!ActionDecorationPass_InBackgroundSource(pass->layer)) continue;
+    const bool result=DrawBackgroundSourceLayer(userdata,diorama,pass,submit);
+    if (submit && !result) return false;
+    visible|=result;
+  }
+  return submit || visible;
 }
 
 void PresentActionEffects_DrawDioramaPlane(
@@ -997,7 +1012,7 @@ void PresentActionEffects_DrawDioramaPlane(
   static bool announced[kActionEffectRenderLayer_Count];
   for (unsigned i = 0; i < sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]); i++) {
     const ActionDecorationPass *pass = &kDecorationPasses[i];
-    if (pass->layer==kActionEffectRenderLayer_Bg2Weather && diorama_projection->bg2_skybox.weather_composited) continue;
+    if (ActionDecorationPass_InBackgroundSource(pass->layer) && diorama_projection->bg2_skybox.weather_composited) continue;
     if (pass->attachment != plane ||
         (pass->finite_plane_only && diorama_projection->bg2_skybox.count)) continue;
     if (pass->layer == kActionEffectRenderLayer_Bg2Alpha && !FrameUsesBg2Alpha(slot))

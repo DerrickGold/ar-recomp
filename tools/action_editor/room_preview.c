@@ -183,7 +183,11 @@ int RoomPreview_SetEvent(unsigned index,int x,int y,int vx,int vy,unsigned start
     .x=x,.y=y,.velocity_x=vx,.velocity_y=vy,.start=start,.duration=duration,.seed=seed};
   EditorRoomScene_SetEvent(s_room,&event);s_cached=false;return 1;
 }
-void RoomPreview_EnableEffects(int enabled) { s_effects_enabled = enabled != 0; }
+void RoomPreview_EnableEffects(int enabled) {
+  if(s_effects_enabled!=(enabled!=0))s_cached=false;
+  s_effects_enabled = enabled != 0;
+  EditorRoomScene_EnableEffects(s_room,s_effects_enabled);
+}
 void RoomPreview_ShowBackdrop(int enabled) { s_show_backdrop = enabled != 0; }
 unsigned RoomPreview_EffectCount(void) {
   return s_room && s_effects_enabled ? EditorRoomScene_Effects(s_room)->decoration_count + EditorRoomScene_Effects(s_room)->authored_count + EditorRoomScene_Effects(s_room)->effect_count : 0;
@@ -238,7 +242,7 @@ static void DrawPlaneEffects(void *userdata, int plane, const DioramaProjection 
   if(!s_effects_enabled)return;
   for (unsigned i = 0; i < sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]); ++i) {
     const ActionDecorationPass *pass = &kDecorationPasses[i];
-    if (pass->layer==kActionEffectRenderLayer_Bg2Weather && projection->bg2_skybox.weather_composited) continue;
+    if (ActionDecorationPass_InBackgroundSource(pass->layer) && projection->bg2_skybox.weather_composited) continue;
     if (pass->attachment != plane ||
         (pass->finite_plane_only && projection->bg2_skybox.count)) continue;
     if (!DrawEffectLayer(context, pass->layer, pass->blend, pass->diorama_lighting, true)) {
@@ -250,7 +254,15 @@ static void DrawPlaneEffects(void *userdata, int plane, const DioramaProjection 
 static bool DrawSkyWeather(void *userdata, const DioramaProjection *projection, bool submit) {
   RoomEffectPass *pass=userdata;
   pass->projection.diorama_projection=projection;
-  return EffectLayer(pass,kActionEffectRenderLayer_Bg2Weather,kArRenderBlendMode_Add,true,true,submit);
+  bool visible=false;
+  for (unsigned i=0;i<sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]);++i) {
+    const ActionDecorationPass *draw=&kDecorationPasses[i];
+    if (!ActionDecorationPass_InBackgroundSource(draw->layer)) continue;
+    const bool result=EffectLayer(pass,draw->layer,draw->blend,draw->diorama_lighting,true,submit);
+    if (submit && !result) return false;
+    visible|=result;
+  }
+  return submit || visible;
 }
 
 static bool DrawSceneryLight(void *userdata, const DioramaProjection *projection) {
@@ -747,6 +759,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       vertical < 0 || vertical > 64 || width < 1 || height < 1 ||
       width > 2048 || height > 2048) return 0;
   s_uploads = 0; s_effect_vertices = 0;
+  EditorRoomScene_EnableEffects(s_room,s_effects_enabled);
   s_receiver_projection.valid=false;
   DioramaView view = PreviewView(width, height, pixel_aspect, distance, yaw, pitch);
   const DioramaView baseline = PreviewView(width, height, pixel_aspect, 1, 0, 0);
@@ -821,7 +834,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   scene.effect_obj_priority_mask=EditorReceiverPreview_Ready()?1u<<2:0;
   if (s_effects_enabled) {
     scene.actor_light=DrawActorLight;
-    scene.sky_weather=ActionStorm_HasSkyWeather(effects.frame)?DrawSkyWeather:NULL;
+    scene.sky_weather=ActionBackground_HasSourceEffects(effects.frame,true,true)?DrawSkyWeather:NULL;
     scene.actor_light_reuse[0]=ActionEffectReceivers_MapsMatch(effects.frame,1,2)?1:0;
     scene.actor_light_reuse[1]=ActionEffectReceivers_MapsMatch(effects.frame,1,4)?1:
         ActionEffectReceivers_MapsMatch(effects.frame,2,4)?2:0;

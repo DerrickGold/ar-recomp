@@ -54,3 +54,15 @@ SURFACE_VECTOR(HeatCross, "heat-cross", 3, -64, 64)
 SURFACE_VECTOR(MoltenSurface, "molten-surface", 6, 0, 4096)
 SURFACE_VECTOR(MoltenBursts, "molten-bursts", 5, 0, 4096)
 SURFACE_VECTOR(MoltenColor, "molten-color", 4, 0, 1)
+/* Continuous illumination above a side-view lake; zero strength retains the
+ * saved radial lighting. The existing body glow still accents the hot lip. */
+SURFACE_VECTOR(UpLight, "up-light", 4, 0, 256)
+SURFACE_VECTOR(UpColor, "up-color", 3, 0, 1)
+/* Local illumination synchronized to lake bubbles, independently switchable. */
+SURFACE_VECTOR(BurstLight, "burst-light", 2, 0, 96)
+/* Native mound timing; independent of the added procedural splash particles. */
+SURFACE_VECTOR(NativeBubbles, "native-bubbles", 6, 0, 65535)
+/* Strength, spatial wavelength and period of the moving upward light. */
+SURFACE_VECTOR(UpMotion, "up-motion", 3, 0, 4096)
+/* Native mound flash strength/reach, spark count and spark rise. */
+SURFACE_VECTOR(NativeReaction, "native-reaction", 4, 0, 96)

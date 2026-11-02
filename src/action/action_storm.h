@@ -108,12 +108,17 @@ static inline bool ActionStorm_Flash(const ActionEffectInstance *e, ActionStormF
   return true;
 }
 
-static inline bool ActionStorm_HasSkyWeather(const ActionSceneEffectFrame *frame) {
+/* Both storm channels and wall sparks must be filtered with their source art.
+ * The compositor probes actual geometry before allocating/copying a target. */
+static inline bool ActionBackground_HasSourceEffects(const ActionSceneEffectFrame *frame,
+    bool lighting, bool particles) {
   if (!frame || frame->authored_count>kActionAuthoredMaxInstances) return false;
   for (unsigned i=0;i<frame->authored_count;++i) {
     const ActionEffectInstance *e=&frame->authored[i];
+    if (!(e->flags&kActionEffectFlag_Visible)) continue;
+    if (particles && e->render_layer==kActionEffectRenderLayer_Bg2SourceAlpha) return true;
     ActionStormFlash flash;
-    if (e->kind==kActionEffect_AuthoredStorm && (e->flags&kActionEffectFlag_Visible) &&
+    if (lighting && e->kind==kActionEffect_AuthoredStorm &&
         e->render_layer==kActionEffectRenderLayer_Bg2Weather && e->particle_lifetime>=120 &&
         ActionStorm_Flash(e,&flash)) return true;
   }

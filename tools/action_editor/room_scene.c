@@ -3,6 +3,7 @@
 #include "room_scene.h"
 #include "action/action_bg_world.h"
 #include "action/action_effect_members.h"
+#include "action/action_lava_bubbles.h"
 #include "actraiser/actraiser_room_profiles.h"
 #include "actraiser_game.h"
 #include "diorama/diorama_capture_blend.h"
@@ -19,6 +20,7 @@ typedef struct RoomLayer {
   unsigned bg, page;
   bool page_cycle;
   uint8_t *bands;
+  ActionLavaBubbles bubbles;
 } RoomLayer;
 struct EditorRoomScene {
   ActionSceneSnapshot assets;
@@ -63,6 +65,7 @@ struct EditorRoomScene {
   int raster_extra, raster_budget;
   uint8_t raster_section;
   bool raster_reuse, raster_valid;
+  bool environmental_effects_enabled;
   unsigned raster_count;
 };
 const ActionSurfaceField *EditorRoomScene_SurfaceField(const EditorRoomScene *r,unsigned index){
@@ -342,6 +345,13 @@ bool EditorRoomScene_DefaultGuide(EditorRoomScene *r, unsigned index, unsigned g
     const ActionEffectLocalRect *rect = &e->geometry.data.rect;
     *bounds = (ArRenderRectF){e->world_x + rect->x0, e->world_y + rect->y0,
         rect->x1 - rect->x0, rect->y1 - rect->y0};
+    if(kind==kActionEffect_AitosLavaReservoir) {
+      const ActionSurfaceField *f=EditorRoomScene_SurfaceField(r,1);
+      if(f&&f->UpLight[0]>0) {
+        bounds->x-=f->UpLight[2];bounds->w+=2*f->UpLight[2];
+        bounds->y=e->world_y-f->UpLight[1];bounds->h=f->UpLight[1]+16;
+      }
+    }
     return true;
   }
   if (kind == kActionEffect_ForestLeaves) {
@@ -476,19 +486,22 @@ static uint32_t Edit(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile
   } else {
     uint8_t id;
     Coordinates(l, &x, &y);
-    if (!r->pixel_layers[l->bg].count ||
+    if ((!r->pixel_layers[l->bg].count && !l->bubbles.characters) ||
         ActionBgWorld_Lookup(l->world, x, y, &tile->entry) != kActionBgLookup_Tile ||
         !ActionBgWorld_LookupMetatile(l->world, x, y, &id)) return 0;
     cx = x / 2; cy = y / 2; metatile = id;
     Band(l, x, y, tile->entry, &tile->band);
   }
+  const bool bubble=!stamp && ActionLavaBubbles_Character(&l->bubbles,
+      (unsigned)metatile,tile->entry,x,y,tile->character);
+  if (bubble) tile->flags|=SR_PPU_CAPTURE_TILE_REPLACE|SR_PPU_CAPTURE_TILE_FOLLOW_POLICY|SR_PPU_CAPTURE_TILE_CHARACTER;
   const DioramaPixelEdit *edit = DioramaLayerOrder_PixelEditAt(r, l->bg, cx, cy, metatile);
   if (edit) for (unsigned row = 0; row < 8; ++row) {
     unsigned at = (y & 1) * 8 + row, shift = (x & 1) ? 0 : 8;
     tile->black_rows[row] = (uint8_t)(edit->black[at] >> shift);
     tile->transparent_rows[row] = (uint8_t)(edit->transparent[at] >> shift);
   }
-  return tile->band < 3 && (stamp || edit);
+  return tile->band < 3 && (stamp || edit || bubble);
 }
 static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
                                 ActionEnvironmentTileEdit *out) {
@@ -509,6 +522,8 @@ static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
                                      .blank = (tile.flags & SR_PPU_CAPTURE_TILE_BLANK) != 0};
   memcpy(out->black, tile.black_rows, 8);
   memcpy(out->transparent, tile.transparent_rows, 8);
+  out->custom_character=(tile.flags&SR_PPU_CAPTURE_TILE_CHARACTER)!=0;
+  if(out->custom_character)memcpy(out->character,tile.character,32);
   return true;
 }
 EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets) {
@@ -517,6 +532,7 @@ EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets) {
   if (!r) return NULL;
   r->assets = *assets;
   r->raster_reuse = true;
+  r->environmental_effects_enabled = true;
 #ifndef __EMSCRIPTEN__
   /* Native oracle switch; the offline WASM module has no process environment. */
   const char *reuse = getenv("AR_EDITOR_RASTER_CACHE");
@@ -763,8 +779,8 @@ static bool RasterMatches(const EditorRoomScene *r, const ActionRoomSceneFrameSt
     const EditorRoomCamera *camera, int extra, int budget) {
   /* BuildFrameState zero-initializes its whole output. Keep every scanline,
    * mosaic value, palette/color-math register and animation/page phase in the
-   * key; only game_frame itself is irrelevant to the resulting tile image.
-   * Character reconstruction uses this explicit animation_phase, not time.
+   * key. Native bubble overrides also depend on the exact visual clock;
+   * other rooms normalize game_frame and use only the explicit CHR phase.
    * The camera's travel bounds also affect finite skybox placement. */
   return r->raster_reuse && r->raster_valid &&
       r->raster_extra == extra && r->raster_budget == budget &&
@@ -878,6 +894,9 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   memset(&r->effects,0,sizeof(r->effects));
   if (!ActionEnvironmentScene_FromRoom(&r->environment,s,f)) return false;
   if (!LoadFrameGraphics(r)) return false;
+  ActionLavaBubbles_Prepare(&r->layers[0].bubbles,s,r->environmental_effects_enabled
+      ? ActionEffectRecipes_NativeBubbleField(&r->recipes,s->group,s->map,r->assets.terrain_profile) : NULL,
+      r->environment.clock);
   r->environment.vram = r->vram;
   r->environment.tile_base[0] = 0;
   r->environment.tile_base[1] = 0;
@@ -932,8 +951,10 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
     b->tiles.band_lookup = DioramaLayerOrder_VirtualLayerHasClassification(
         &r->terrain.virtual_layers[bg]) ? Band : NULL;
     b->edits = (SrPpuCaptureTileBinding){
-      .lookup = r->terrain.stamp_layers[bg].count || r->terrain.pixel_layers[bg].count ? Edit : NULL,
+      .lookup = r->terrain.stamp_layers[bg].count || r->terrain.pixel_layers[bg].count ||
+          r->layers[bg].bubbles.characters ? Edit : NULL,
       .user_data = &r->layers[bg], .apron = (camera->bg_apron_mask & (1u << bg)) ? 64 : 0};
+    b->edits_stable = r->layers[bg].bubbles.characters != NULL;
     b->capture_flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME;
     b->clip_vertical = top || bottom;
     b->clip_top = Min(Max(0, f->layer_camera_y[bg] + 1), Max(top, bottom));
@@ -984,7 +1005,8 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   }
   ActionRoomSceneFrameState raster_frame;
   memcpy(&raster_frame, f, sizeof(raster_frame));
-  raster_frame.game_frame = 0;
+  if (!r->layers[0].bubbles.characters || r->layers[0].bubbles.chance==0)
+    raster_frame.game_frame = 0;
   if (!RasterMatches(r, &raster_frame, camera, extra_x, budget)) {
     r->raster_valid = false;
     if (!sr_scene_renderer_render(r->renderer, &input, &r->surfaces)) return false;
@@ -1048,6 +1070,10 @@ const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *r) { return &r-
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *r) { return &r->surfaces; }
 bool EditorRoomScene_ConfigureEffects(EditorRoomScene *r, const char *text, size_t size, unsigned *line) {
   if (!r) return false;
+  float bubble_before[6]={0};
+  const ActionSurfaceField *bubble=ActionEffectRecipes_NativeBubbleField(&r->recipes,
+      r->assets.scene.group,r->assets.scene.map,r->assets.terrain_profile);
+  if(bubble)memcpy(bubble_before,bubble->NativeBubbles,sizeof(bubble_before));
   const ActionSurfaceField *surfaces[kActionSurfaceFieldKinds];
   uint32_t before[kActionSurfaceFieldKinds];
   ActionEffectRecipes_SurfaceFields(&r->recipes,r->assets.scene.group,r->assets.scene.map,r->assets.terrain_profile,surfaces);
@@ -1055,6 +1081,11 @@ bool EditorRoomScene_ConfigureEffects(EditorRoomScene *r, const char *text, size
   const bool valid=ActionEffectRecipes_ParseWithError(&r->recipes,text,size,&r->recipe_error);
   if(line)*line=r->recipe_error.line;
   if(!valid)return false;
+  float bubble_after[6]={0};
+  bubble=ActionEffectRecipes_NativeBubbleField(&r->recipes,
+      r->assets.scene.group,r->assets.scene.map,r->assets.terrain_profile);
+  if(bubble)memcpy(bubble_after,bubble->NativeBubbles,sizeof(bubble_after));
+  if(memcmp(bubble_before,bubble_after,sizeof(bubble_before)))r->raster_valid=false;
   ActionEffectRecipes_SurfaceFields(&r->recipes,r->assets.scene.group,r->assets.scene.map,r->assets.terrain_profile,surfaces);
   for(unsigned i=0;i<kActionSurfaceFieldKinds;++i)if(before[i]!=(surfaces[i]?surfaces[i]->hash:0)) {
     r->default_sources_ready=false;r->default_source_count=0;r->timber_guide_count=0;break;
@@ -1063,6 +1094,12 @@ bool EditorRoomScene_ConfigureEffects(EditorRoomScene *r, const char *text, size
   return true;
 }
 const ActionSceneEffectFrame *EditorRoomScene_Effects(const EditorRoomScene *r) { return &r->effects; }
+void EditorRoomScene_EnableEffects(EditorRoomScene *r,bool enabled) {
+  if(r && r->environmental_effects_enabled!=enabled) {
+    r->environmental_effects_enabled=enabled;
+    r->raster_valid=false;
+  }
+}
 const char *EditorRoomScene_RecipeError(const EditorRoomScene *r) { return r?r->recipe_error.message:""; }
 const ActionEnvironmentScene *EditorRoomScene_Environment(const EditorRoomScene *r) { return &r->environment; }
 unsigned EditorRoomScene_Width(const EditorRoomScene *r) { return r->assets.scene.bg[0].pages_wide * 256u; }
@@ -1093,6 +1130,12 @@ uint32_t EditorRoomScene_EffectHash(const EditorRoomScene *r) {
   if (!r) return 0;
   const ActionSceneEffectFrame *frame = &r->effects;
   uint32_t h = DETERMINISTIC_HASH_FNV1A32_OFFSET;
+  h=DeterministicHash_Fnv1a32Word(h,frame->native_bubble_count);
+  for(unsigned i=0;i<frame->native_bubble_count;++i) {
+    const ActionNativeBubbleEvent *b=&frame->native_bubbles[i];
+    const uint32_t words[]={b->owner,b->seed,(uint32_t)(int32_t)b->x,(uint32_t)(int32_t)b->y,b->age,b->cadence};
+    for(unsigned j=0;j<sizeof(words)/sizeof(*words);++j)h=DeterministicHash_Fnv1a32Word(h,words[j]);
+  }
   for(unsigned i=0;i<kActionSurfaceFieldKinds;++i){
     const ActionSurfaceField *field=(frame->surface_fields_valid&(1u<<i))?&frame->surface_fields[i]:ActionSurfaceField_Bundled(i);
     h=DeterministicHash_Fnv1a32Word(h,field->hash);
@@ -1165,7 +1208,8 @@ uint32_t EditorRoomScene_EffectHash(const EditorRoomScene *r) {
         (uint32_t)(int32_t)e->world_y,e->kind,e->phase,e->flags,e->render_layer,e->projection_plane,
         e->age_ticks,e->phase_ticks,e->pulse_ticks,e->source_mask,e->tuning.active,e->tuning.color,
         e->tuning.light_receivers,e->tuning.dim_receivers,e->tuning.light_receivers_set,e->tuning.dim_receivers_set,
-        e->particle_count,e->particle_lifetime,e->particle_style.active,e->particle_style.seed,e->particle_style.color_end,e->field_style.strands,e->field_style.pattern,e->field_style.placement,e->field_style.point_count};
+        e->particle_count,e->particle_lifetime,e->particle_style.active,e->particle_style.seed,e->particle_style.color_end,e->field_style.strands,e->field_style.pattern,e->field_style.placement,e->field_style.point_count,
+        e->field_style.plume,e->field_style.debris,e->field_style.landing};
       for (unsigned j=0;j<sizeof(words)/sizeof(words[0]);++j) h=DeterministicHash_Fnv1a32Word(h,words[j]);
       for(unsigned j=0;j<e->field_style.point_count && j<kActionContourMaxPoints;++j) {
         uint32_t bits;memcpy(&bits,&e->field_style.points[j].x,4);h=DeterministicHash_Fnv1a32Word(h,bits);
@@ -1176,7 +1220,7 @@ uint32_t EditorRoomScene_EffectHash(const EditorRoomScene *r) {
         e->clip_rect.x1,e->clip_rect.y1,e->tuning.intensity,e->tuning.reach,
         e->particle_style.size_min,e->particle_style.size_max,e->particle_style.travel_x,
         e->particle_style.travel_y,e->particle_style.wander,e->particle_style.spread,e->field_style.angle,e->field_style.fan,
-        e->field_style.softness,e->field_style.drift,e->field_style.amplitude,e->field_style.fade_in,e->field_style.twinkle,
+        e->field_style.softness,e->field_style.drift,e->field_style.amplitude,e->field_style.fade_in,e->field_style.twinkle,e->field_style.activity,
 #define CLOUD_PROPERTY(member,key,value,low,high) e->field_style.cloud.member,
 #include "action/action_cloud_light_properties.inc"
 #undef CLOUD_PROPERTY

@@ -28,6 +28,8 @@ static const ActionDecorationPass kDecorationPasses[] = {
    kArRenderBlendMode_Add, true, false, "BG2-local decoration"},
   {kActionEffectRenderLayer_Bg2Weather, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_BG2,
    kArRenderBlendMode_Add, true, false, "BG2 storm weather"},
+  {kActionEffectRenderLayer_Bg2SourceAlpha, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_BG2,
+   kArRenderBlendMode_Alpha, false, false, "BG2 source particles"},
   {kActionEffectRenderLayer_Bg2HighPlane, kDioramaPlane_Bg2Hi, SR_PPU_OVERLAY_BG2,
    kArRenderBlendMode_Add, true, false, "BG2-high water decoration"},
   {kActionEffectRenderLayer_Bg2Alpha, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_BG2,
@@ -40,5 +42,9 @@ static const ActionDecorationPass kDecorationPasses[] = {
    kArRenderBlendMode_Alpha, true, true, "waterfall bottom atmosphere"},
 };
 
+static inline bool ActionDecorationPass_InBackgroundSource(unsigned layer) {
+  return layer==kActionEffectRenderLayer_Bg2Weather ||
+      layer==kActionEffectRenderLayer_Bg2SourceAlpha;
+}
 
 #endif

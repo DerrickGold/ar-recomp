@@ -12,6 +12,7 @@
 #include "action/action_environment_scene.h"
 #include "action/action_room_terrain.h"
 #include "action/action_room_mosaic.h"
+#include "action/action_lava_bubbles.h"
 #include "deterministic_hash.h"
 #include "diorama/diorama_layer_order.h"
 #include "snesrecomp/runner.h"
@@ -101,6 +102,7 @@ typedef struct ActRaiserActionBgProvider {
   uint16_t hscroll_anchor, vscroll_anchor;
   int pixel_cell_x, pixel_cell_y;
   const DioramaPixelEdit *pixel_edit;
+  ActionLavaBubbles bubbles;
 } ActRaiserActionBgProvider;
 
 static ActRaiserActionBgObserver s_observer = {
@@ -1693,16 +1695,19 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
                                     int32_t tile_y, SrPpuCaptureTile *tile) {
   const ActRaiserActionBgProvider *provider = context;
   const DioramaRoomOverride *room = provider->virtual_room;
-  if (!room || !provider->pixel_edits_active) return 0;
+  const bool bubbles=provider->bubbles.characters!=NULL;
+  if ((!room || !provider->pixel_edits_active) && !bubbles) return 0;
   const unsigned bg = provider->layer;
   int cx = tile_x >= 0 ? tile_x / 2 : (tile_x - 1) / 2;
   int cy = tile_y >= 0 ? tile_y / 2 : (tile_y - 1) / 2;
-  const DioramaTileStamp *stamp = DioramaLayerOrder_ExtendedRowStampAt(
+  const DioramaTileStamp *stamp = room ? DioramaLayerOrder_ExtendedRowStampAt(
       &room->stamp_layers[bg], cx, cy,
       provider->capture_native_tiles ? (int)ActionBgWorld_TileWidth(provider->world) / 2 : 0,
-      provider->capture_native_tiles ? (int)ActionBgWorld_TileHeight(provider->world) / 2 : 0);
+      provider->capture_native_tiles ? (int)ActionBgWorld_TileHeight(provider->world) / 2 : 0) : NULL;
   int metatile = -1;
-  *tile = (SrPpuCaptureTile){0};
+  /* Keep the legacy callback prefix safe on an older runner. Character bytes
+   * are written only when ConfigureLavaBubbles verified the new capability. */
+  memset(tile,0,SR_PPU_CAPTURE_TILE_MASKS_SIZE);
   if (stamp) {
     cx = stamp->x; cy = stamp->y;
     unsigned quadrant = ((tile_y & 1) * 2) + (tile_x & 1);
@@ -1712,7 +1717,7 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
         (stamp->blank ? SR_PPU_CAPTURE_TILE_BLANK : 0u);
     if (!stamp->blank) metatile = stamp->metatile;
   } else {
-    if (!room->pixel_layers[bg].count && !provider->pixel_band_cache_active) return 0;
+    if ((!room || !room->pixel_layers[bg].count) && !provider->pixel_band_cache_active && !bubbles) return 0;
     if (provider->wrap_world_x)
       tile_x = WrapWorldTile(tile_x, ActionBgWorld_TileWidth(provider->world));
     if (provider->capture_native_tiles)
@@ -1736,7 +1741,10 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
         tile->flags |= SR_PPU_CAPTURE_TILE_FOLLOW_POLICY;
     }
   }
-  const DioramaPixelEdit *edit = room->pixel_layers[bg].count
+  const bool bubble=!stamp && bubbles && ActionLavaBubbles_Character(&provider->bubbles,
+      (unsigned)metatile,tile->entry,tile_x,tile_y,tile->character);
+  if (bubble) tile->flags|=SR_PPU_CAPTURE_TILE_REPLACE|SR_PPU_CAPTURE_TILE_FOLLOW_POLICY|SR_PPU_CAPTURE_TILE_CHARACTER;
+  const DioramaPixelEdit *edit = room && room->pixel_layers[bg].count
       ? DioramaLayerOrder_PixelEditAt(room, bg, cx, cy, metatile) : NULL;
   if (edit)
     for (unsigned row = 0; row < 8; ++row) {
@@ -1746,7 +1754,7 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
       tile->transparent_rows[row] = (uint8_t)(edit->transparent[mask_row] >> shift);
     }
   return tile->band < kDioramaVirtualBandCount &&
-      (stamp || edit || provider->pixel_band_cache_active);
+      (stamp || edit || provider->pixel_band_cache_active || bubble);
 }
 
 static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
@@ -1775,6 +1783,8 @@ static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
                                      .blank = (tile.flags & SR_PPU_CAPTURE_TILE_BLANK) != 0};
   memcpy(out->black, tile.black_rows, 8);
   memcpy(out->transparent, tile.transparent_rows, 8);
+  out->custom_character=(tile.flags&SR_PPU_CAPTURE_TILE_CHARACTER)!=0;
+  if(out->custom_character)memcpy(out->character,tile.character,32);
   return true;
 }
 static bool EnvironmentRasterFrame(const ActionEnvironmentScene *scene, ActionRoomSceneFrameState *out) {
@@ -1810,6 +1820,14 @@ bool ActRaiserActionBg_BindEnvironmentScenery(ActionEnvironmentScene *scene) {
   return true;
 }
 
+void ActRaiserActionBg_ConfigureLavaBubbles(const ActionSurfaceField *field, uint16_t clock) {
+  const bool supported=field && s_observer.map_valid && s_runner_api &&
+      (s_runner_api->capabilities&SR_RUNNER_CAP_PPU_CAPTURE_CHARACTER) &&
+      EnsureRoomScene(s_observer.map_group,s_observer.map_number);
+  ActionLavaBubbles_Prepare(&s_provider[0].bubbles,
+      supported?s_observer.room_scene:NULL,field,clock);
+}
+
 bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask) {
   s_capture_edit_mask = 0;
   SrPpuStateSnapshot state;
@@ -1825,9 +1843,9 @@ bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask
     if (!(capture_mask & (1u << bg))) continue;
     ActRaiserActionBgProvider *provider = &s_provider[bg];
     const DioramaRoomOverride *room = provider->virtual_room;
-    bool edits = provider->pixel_edits_active && room &&
+    bool edits = provider->bubbles.characters || (provider->pixel_edits_active && room &&
         (room->stamp_layers[bg].count || room->pixel_layers[bg].count ||
-         provider->pixel_band_cache_active);
+         provider->pixel_band_cache_active));
     if (!edits && !(apron_mask & (1u << bg))) continue;
     request.layer_mask |= 1u << bg;
     /* The published room edits/world are immutable through scanout. Raster

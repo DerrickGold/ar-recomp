@@ -270,5 +270,117 @@
       128,
       210
     ]
+  },
+  {
+    "name": "aitos2-crossing",
+    "room": "0404",
+    "start": [
+      420,
+      410
+    ],
+    "end": [
+      640,
+      410
+    ],
+    "player": [
+      548,
+      584
+    ]
+  },
+  {
+    "name": "aitos2-descent",
+    "room": "0404",
+    "start": [
+      100,
+      720
+    ],
+    "end": [
+      480,
+      744
+    ],
+    "player": [
+      228,
+      896
+    ]
+  },
+  {
+    "name": "aitos2-deep-lake",
+    "room": "0405",
+    "start": [
+      128,
+      64
+    ],
+    "end": [
+      128,
+      64
+    ],
+    "player": [
+      -1,
+      0
+    ]
+  },
+  {
+    "name": "aitos2-long-lake",
+    "room": "0406",
+    "start": [
+      40,
+      332
+    ],
+    "end": [
+      580,
+      332
+    ],
+    "player": [
+      168,
+      480
+    ]
+  },
+  {
+    "name": "aitos2-high-cavern",
+    "room": "0406",
+    "start": [
+      720,
+      200
+    ],
+    "end": [
+      1152,
+      120
+    ],
+    "player": [
+      848,
+      376
+    ]
+  },
+  {
+    "name": "aitos2-statue-descent",
+    "room": "0406",
+    "start": [
+      1200,
+      430
+    ],
+    "end": [
+      1200,
+      750
+    ],
+    "player": [
+      1328,
+      606
+    ]
+  },
+  {
+    "name": "aitos2-wheel-arena",
+    "room": "0407",
+    "start": [
+      128,
+      0
+    ],
+    "end": [
+      128,
+      0
+    ],
+    "player": [
+      256,
+      210
+    ]
   }
 ]

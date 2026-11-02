@@ -1431,9 +1431,10 @@ static ArRenderTexture CompositeSkyWeather(ArRenderDevice *device, ArRenderTextu
     int width, int height, const DioramaScene *scene, DioramaProjection *projection,
     bool *composited, PresentationOutcome *outcome) {
   *composited=false;
+  const unsigned bands=projection->bg2_skybox.count?projection->bg2_skybox.count:1;
   bool visible=false;
-  for (unsigned i=0;!visible&&i<projection->bg2_skybox.count;++i) {
-    projection->bg2_skybox.active_band=(int)i;
+  for (unsigned i=0;!visible&&i<bands;++i) {
+    projection->bg2_skybox.active_band=projection->bg2_skybox.count?(int)i:-1;
     visible=scene->sky_weather(scene->plane_effect_userdata,projection,false);
   }
   if (!visible)return source;
@@ -1450,8 +1451,8 @@ static ArRenderTexture CompositeSkyWeather(ArRenderDevice *device, ArRenderTextu
   const DioramaSourceEffectBatch batch=scene->render->source_effect_batch;
   const bool began=ok&&(!batch||batch(device,true));
   ok=began;
-  for (unsigned i=0;ok&&i<projection->bg2_skybox.count;++i) {
-    projection->bg2_skybox.active_band=(int)i;
+  for (unsigned i=0;ok&&i<bands;++i) {
+    projection->bg2_skybox.active_band=projection->bg2_skybox.count?(int)i:-1;
     ok=scene->sky_weather(scene->plane_effect_userdata,projection,true);
   }
   if (began&&batch)ok=batch(device,false)&&ok;
@@ -1461,6 +1462,29 @@ static ArRenderTexture CompositeSkyWeather(ArRenderDevice *device, ArRenderTextu
   }
   *composited=true;
   return target;
+}
+
+/* Bake source-attached effects into an unwarped copy of a finite BG2 plane.
+ * The normal face draw then applies the wall's perspective, heat and DoF to
+ * artwork and particles together. The identity projection maps capture pixels
+ * directly to texels, including the generated-camera offset and OBJ apron. */
+static ArRenderTexture CompositePlaneWeather(ArRenderDevice *device, ArRenderTexture source,
+    const DioramaScene *scene, DioramaProjection *projection, PresentationOutcome *outcome) {
+  DioramaProjection flat=*projection;
+  memset(flat.matrix,0,sizeof(flat.matrix));
+  flat.matrix[0]=flat.matrix[5]=flat.matrix[10]=flat.matrix[15]=1;
+  flat.aspect_x=flat.height_scale=2;
+  flat.output_x=flat.output_y=0;
+  flat.output_width=flat.texture_width;
+  flat.output_height=flat.texture_height;
+  flat.bg2_skybox=(DioramaSkyboxProjection){0};
+  flat.bg2_plane=(DioramaPlaneProjection){.valid=true,
+      .capture_offset=projection->bg2_plane.capture_offset,.u1=1,.v1=1};
+  bool composited;
+  source=CompositeSkyWeather(device,source,flat.texture_width,flat.texture_height,
+      scene,&flat,&composited,outcome);
+  projection->bg2_skybox.weather_composited|=composited;
+  return source;
 }
 
 static PresentationOutcome DrawDioramaSkybox(
@@ -3638,7 +3662,7 @@ static PresentationOutcome DrawResolvedDioramaLayer(
   const float dimming = scenery ? fminf(1, fmaxf(0, scene->bg1_dimming)) : 0;
   const bool additive =
       (scene->additive_plane_mask & (1u << (unsigned)description->plane)) != 0;
-  const DioramaLayerDraw layer = {
+  DioramaLayerDraw layer = {
       .authored = resolved,
       .description = description,
       .texture = textures[description->plane],
@@ -3673,6 +3697,12 @@ static PresentationOutcome DrawResolvedDioramaLayer(
                : additive ? kArRenderBlendMode_Add
                           : kArRenderBlendMode_Alpha,
   };
+  if (description->plane==SR_PPU_OVERLAY_BG2 && scene->sky_weather &&
+      out_projection && out_projection->bg2_plane.valid) {
+    PresentationOutcome source_outcome=kPresentationOutcome_Complete;
+    layer.texture=CompositePlaneWeather(device,layer.texture,scene,out_projection,&source_outcome);
+    if (!PresentationOutcome_IsUsable(source_outcome)) return source_outcome;
+  }
   DioramaLayerMesh mesh;
   DioramaViewGeometry layer_geometry = *geometry;
   DioramaCapture layer_capture;

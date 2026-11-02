@@ -80,10 +80,14 @@ enum {
    * the conservative extra scratch remains explicitly bounded. */
   kActionSceneEffectLavaGlowSpanPixels = 96,
   kActionSceneEffectMaxLavaGlowSegments = 12,
+  /* The continuous source uses two columns per segment plus bank feathers,
+   * five vertical cells, and the existing lip glow. Clipped triangles have
+   * at most seven vertices / fifteen indices; retain that conservative bound. */
   kActionSceneEffectLavaReservoirGlowExtraVertices =
-      kActionSceneEffectMaxLavaGlowSegments * 2 *
-      kActionEffectGlowVertices,
+      (kActionSceneEffectMaxLavaGlowSegments*2+kActionSceneEffectMaxLavaReservoirs*2)*5*14 +
+      kActionSceneEffectMaxLavaGlowSegments*kActionEffectGlowVertices,
   kActionSceneEffectLavaReservoirGlowExtraIndices =
+      /* The legacy pair of radial glows uses more indices than the strip. */
       kActionSceneEffectMaxLavaGlowSegments * 2 *
       kActionEffectGlowIndices,
   /* The wheel composition authors twelve distinct 16x16 fireball parts. The
@@ -202,12 +206,21 @@ enum {
       kActionSceneEffectGlowsPerInstance * kActionEffectGlowIndices +
       (kActionSceneEffectWaterfallMistParticleCount -
        kActionSceneEffectParticlesPerInstance) * 6,
-  /* Up to 16 crust cells and four overlapping swell/ripple pairs per pit.
+  /* Up to 16 crust cells and four overlapping swell/ripple pairs per source.
    * Eight-sided three-ring meshes plus five droplet quads per burst. Alpha
-   * detail and receiver lighting use separate existing batches. */
+   * detail and receiver lighting use separate existing batches. Four lakes
+   * may coexist with the sixteen authored pit sources; their local bubble
+   * flashes reserve four additional soft glows per lake. */
   kActionSceneEffectMoltenVerticesPerPit = (16 + 2 * 4) * (1 + 3 * 8) + 4 * 5 * 4,
   kActionSceneEffectMoltenIndicesPerPit = (16 + 2 * 4) * 8 * 15 + 4 * 5 * 6,
+  kActionSceneEffectMoltenLakeExtraVertices = kActionSceneEffectMaxLavaReservoirs *
+      (kActionSceneEffectMoltenVerticesPerPit + 4 * kActionEffectGlowVertices) +
+      kActionNativeBubbleMax * (kActionEffectGlowVertices + 4*4),
+  kActionSceneEffectMoltenLakeExtraIndices = kActionSceneEffectMaxLavaReservoirs *
+      (kActionSceneEffectMoltenIndicesPerPit + 4 * kActionEffectGlowIndices) +
+      kActionNativeBubbleMax * (kActionEffectGlowIndices + 4*6),
   kActionSceneEffectRenderMaxVertices = kActionAuthoredMaxVertices +
+      kActionSceneEffectMoltenLakeExtraVertices +
       kActionSceneEffectMaxInstances * kActionSceneEffectMoltenVerticesPerPit +
       kActionSceneEffectMaxGlows * kActionEffectGlowVertices +
       kActionSceneEffectMaxParticles * 4 +
@@ -227,6 +240,7 @@ enum {
       kActionSceneEffectMaxFlamingWheels *
           kActionSceneEffectFlamingWheelExtraVertices,
   kActionSceneEffectRenderMaxIndices = kActionAuthoredMaxIndices +
+      kActionSceneEffectMoltenLakeExtraIndices +
       kActionSceneEffectMaxInstances * kActionSceneEffectMoltenIndicesPerPit +
       kActionSceneEffectMaxGlows * kActionEffectGlowIndices +
       kActionSceneEffectMaxParticles * 6 +

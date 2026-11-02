@@ -535,6 +535,33 @@ console.log('Cloud volumes: actual WASM BG2 drawing, motion, seek and texture re
 // The shipped native definitions must fit the real WASM budget too. Moving
 // through every Marahna room exercises all glow variants and sparse dew cycles.
 const shippedEffects=fs.readFileSync('action-effects.ini','utf8');
+// Aitos Act 2 combines the shared extended lava source with placed atmosphere.
+// Validate the complete shipped document in every terrain, through scrolling
+// and reverse-time seeking, rather than checking only isolated field defaults.
+for(const [id,positions] of [[4,[[440,410],[160,748]]],[5,[[128,64]]],
+                            [6,[[240,332],[1230,560]]],[7,[[128,0]]]])
+for(const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===4&&r.map===id);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  configure(shippedEffects);api.RoomPreview_EnableEffects(1);
+  const cellCount=api.RoomPreview_CollisionGrid(),columns=api.RoomPreview_Width()/16;
+  const collision=new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),cellCount).slice();
+  for(const block of shippedEffects.split(/(?=^\[)/m).filter(b=>b.startsWith(`[emitter:04:0${id}:${terrain}:drips:`)&&/^debris=1$/m.test(b))) {
+    const v=Object.fromEntries([...block.matchAll(/^([a-z-]+)=([^\n]*)$/gm)].map(m=>[m[1],Number(m[2])]));
+    for(let py=Math.ceil((v.y-v.height/2+8)/16)*16;py<v.y+v.height/2-8;py+=16)
+      for(const px of [v.x-v.width/2,v.x+v.width/2])
+        assert.equal(collision[(py/16|0)*columns+(px/16|0)]&15,0,'grit path stops before intervening terrain');
+  }
+  for(const position of positions)for(const height of [360,400]) {
+    camera=position;const view=[640,height,1,0,0,1,0];
+    render(view,180);const hash=api.RoomPreview_EffectHash(),allocated=creates;
+    render(view,211);render(view,180);
+    assert.equal(api.RoomPreview_EffectHash(),hash,'lava and atmosphere return to the same saved clock');
+    assert.equal(creates,allocated,'Aitos lighting and atmosphere reuse textures during animation');
+  }
+}
+console.log('Aitos Act 2: all four rooms/three terrains, shipped effects, 16:9/16:10, scrolling, reverse seeking and texture reuse passed.');
 for(const id of [1,2,3]) for(const terrain of [0,1,2]) {
   const originalRoom=data.rooms.find(r=>r.group===5&&r.map===id);
   const terrainRoom={...originalRoom,terrainProfile:terrain,bg:[originalRoom.terrainVariants.find(v=>v.profile===terrain).bg1,originalRoom.bg[1]]};
@@ -691,6 +718,63 @@ for (const terrain of [0,1,2]) {
   }
 }
 console.log('Aitos lightning: real regional BG2 contacts, 16:9/16:10, missing-ground suppression, reverse seeking and texture reuse passed.');
+// Boss-room flames are native BG2 artwork. Their added sparks must enter the
+// same source texture before filtering, in every background presentation.
+for (const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===4&&r.map===7);
+  const room={...base,terrainProfile:terrain,
+    bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);
+  const torches=noEffects+shippedBlocks.filter(b=>b.startsWith(`[emitter:04:07:${terrain}:torch:`)).join('');
+  camera=[128,0];baselineDistance=3.25;
+  const filtered=(id,start)=>draws.some((d,i)=>i>start&&d.id===id&&
+    ((d.effect===0||d.effect===2)||(d.target>0&&filtered(d.target,i))));
+  const sourceParticles=()=>draws.filter((d,i)=>d.target>0&&!d.id&&d.effect===-1&&
+    d.v.length>32&&filtered(d.target,i));
+  for (const mode of [0,1,2]) for (const height of [360,400]) {
+    const view=[640,height,1,0,0,mode,0];
+    configure(torches);render(view,240);
+    const particles=sourceParticles(),allocated=creates;
+    assert(particles.length>0,`boss sparks share BG2 filtering in mode ${mode}, terrain ${terrain}`);
+    assert(particles.every(d=>d.target===particles[0].target),'one source composition per background');
+    assert(!draws.some(d=>!d.target&&!d.id&&d.effect===-1&&d.v.length>32),
+      'the source-composited sparks are not drawn again as a sharp overlay');
+    const geometry=particles.map(d=>[...d.v]);
+    render(view,274);render(view,240);
+    assert.equal(creates,allocated,'torch animation reuses source and filter textures');
+    assert.deepEqual(sourceParticles().map(d=>[...d.v]),geometry,'torch source rendering seeks deterministically');
+    configure(torches.replace(/^x=.*$/gm,'x=8000'));render(view,240);
+    assert(!sourceParticles().length,'offscreen torches add no source composition');
+  }
+}
+console.log('Aitos boss torches: source DoF in all background modes, regional art, aspect ratios, seeking and texture reuse passed.');
+// Textured rock vents share the background source pass as well. Verify the
+// mask atlas is composited before every DoF mapping, rather than as an overlay.
+for(const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===4&&r.map===4);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  const vents=noEffects+shippedBlocks.filter(b=>b.startsWith(`[emitter:04:04:${terrain}:cloud-bank:`)&&
+    /^plume=1$/m.test(b)&&/^anchor=bg2-point$/m.test(b)).join('');
+  const filtered=(id,start)=>draws.some((d,i)=>i>start&&d.id===id&&
+    ((d.effect===0||d.effect===2)||(d.target>0&&filtered(d.target,i))));
+  const puffs=()=>draws.filter((d,i)=>d.target>0&&textures.get(d.id)?.w===1024&&
+    textures.get(d.id)?.h===768&&d.effect===-1&&filtered(d.target,i));
+  camera=[440,410];baselineDistance=3.25;
+  for(const mode of [0,1,2])for(const height of [360,400]) {
+    const view=[640,height,1,0,0,mode,0];configure(vents);render(view,180);
+    const first=puffs().map(d=>[...d.v]),allocated=creates;
+    assert(first.length,`vent mask enters source DoF, mode ${mode}, terrain ${terrain}`);
+    render(view,211);render(view,180);
+    assert.deepEqual(puffs().map(d=>[...d.v]),first,'vent puff clocks seek without state');
+    assert.equal(creates,allocated,'vent animation reuses source/filter/atlas textures');
+    configure(vents.replace(/^x=.*$/gm,'x=8000'));render(view,180);
+    assert(!puffs().length,'offscreen vents do not schedule source composition');
+  }
+}
+console.log('Aitos rock vents: textured source DoF in all background modes/terrains/aspects, seek, culling and texture reuse passed.');
+
 // Periodic waterfall art repeats its page, but the sky light belongs to the
 // unwrapped world. Exercise the real WASM material path used by the editor.
 for (const map of [2,3]) {

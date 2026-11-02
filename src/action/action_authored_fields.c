@@ -395,16 +395,38 @@ static bool FallingWater(ActionEffectGeometryWriter *w,const ActionEffectInstanc
   const ActionEffectLocalRect *r=&e->geometry.data.rect;
   const ActionEffectFieldStyle *s=&e->field_style;
   if(!isfinite(s->activity)||s->activity<.05f||s->activity>1||s->ripple>1||
+      s->debris>1||s->landing>2||(s->landing&&!s->debris)||(s->debris&&s->ripple)||
       !isfinite(s->canopy_response)||s->canopy_response<0||s->canopy_response>1)return false;
   ActionEffectInstance source=*e;source.pulse_generation=e->particle_style.seed;
   for(unsigned i=0;i<e->particle_count;++i) {
-    const SceneParticleClock clock=SceneParticleClockAt(&source,e->pulse_ticks,i,(SceneParticleLifetime){e->particle_lifetime,0,0});
+    const SceneParticleClock clock=SceneParticleClockAt(&source,
+        s->debris?(unsigned)e->pulse_ticks+e->particle_lifetime-(i*4)%e->particle_lifetime:e->pulse_ticks,
+        s->debris?0:i,(SceneParticleLifetime){e->particle_lifetime,0,0});
     float t=clock.t;
     if(e->kind==kActionEffect_AuthoredDrips) {
       t/=s->activity;
       if(t>=1)continue;
     }
-    const float birth=r->x0+(r->x1-r->x0)*HashUnit(clock.seed),height=r->y1-r->y0;
+    const unsigned seed=clock.seed^(s->debris?i*0x85ebca6bu:0);
+    const float birth=r->x0+(r->x1-r->x0)*HashUnit(seed),height=r->y1-r->y0;
+    if(s->debris&&s->landing) {
+      if(t>=.72f) {
+        const float age=(t-.72f)/.28f;
+        ArRenderColorF c=FieldColor(e->particle_style.color_end);
+        c.a=fminf(.65f,e->tuning.intensity*.5f)*(1-age)*(1-age);
+        if(s->landing==1) {
+          if(!MaskPatch(w,e,clip,kActionMaskCloudBodyFirst+seed%kActionMaskCloudCount,
+              birth,r->y1-1-3*age,2+7*age,1+3*age,c,project,context))return false;
+        } else for(unsigned drop=0;drop<3;++drop) {
+          const float dx=((int)drop-1)*8*age;
+          const float y=r->y1-24*age*(1-age),size=.6f*(1-age)+.2f;
+          c.r=1;c.g=.55f-.3f*age;c.b=.05f;c.a=fminf(1,e->tuning.intensity)*(1-age);
+          if(!AppendSceneParticle(w,e,birth+dx,y,birth+dx-(int)drop+1,y+1-2*age,size,size*1.3f,c,project,context))return false;
+        }
+        continue;
+      }
+      t/=.72f;
+    }
     if(e->kind==kActionEffect_AuthoredDrips) {
       /* Waiting time belongs to the source clock, not the viewport. A ripple
        * is opt-in: its authored bottom edge must be an exposed water surface. */
@@ -420,8 +442,9 @@ static bool FallingWater(ActionEffectGeometryWriter *w,const ActionEffectInstanc
         t/=.7f;
       }
     }
-    const float size=e->particle_style.size_min+(e->particle_style.size_max-e->particle_style.size_min)*HashUnit(clock.seed^27);
+    const float size=e->particle_style.size_min+(e->particle_style.size_max-e->particle_style.size_min)*HashUnit(seed^27);
     float x=birth,y=r->y0+height*t*t,dy=1,reach=2;
+    if(s->debris)reach=.8f+.5f*HashUnit(seed^37);
     if(e->kind==kActionEffect_AuthoredSpray) {
       x+=(HashUnit(clock.seed^71)-.5f)*height*t;
       y=r->y1-height*3*t*(1-t);dy=t-.5f;reach=1;
@@ -433,6 +456,36 @@ static bool FallingWater(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     c.a=fminf(1,e->tuning.intensity*.65f*sinf(t*3.1415927f));
     if(e->kind==kActionEffect_AuthoredDrips)ParticleLightTint(w,e,x,y,&c,true);
     if(!AppendSceneParticle(w,e,x,y,x,y-dy,size,size*reach,c,project,context))return false;
+  }
+  return true;
+}
+
+/* Small intermittent sources, not a bank oscillating as one slab. Each puff
+ * grows and fades while rising from the authored bottom-centre contact. */
+static bool RisingPlume(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const ActionEffectFieldStyle *s=&e->field_style;
+  if(!s->textured||s->plume!=1||!isfinite(s->activity)||s->activity<.05f||s->activity>1||
+      s->point_count||s->rolling||s->volume||s->rainbow||s->sparkle||s->wake||s->canopy_response)return false;
+  const float width=r->x1-r->x0,height=r->y1-r->y0;
+  for(unsigned i=0;i<s->strands;++i) {
+    const unsigned seed=e->particle_style.seed^(i+1)*0x9e3779b9u;
+    const unsigned period=e->particle_lifetime+seed%(e->particle_lifetime/4+1);
+    const unsigned tick=e->pulse_ticks+DeterministicHash_Mix32(seed)%period;
+    const unsigned cycle=DeterministicHash_Mix32(seed^(tick/period)*0x85ebca6bu);
+    const float t=(tick%period)/(period*s->activity);
+    if(t>=1||HashUnit(cycle^17)<.12f)continue;
+    const float rx=fminf(width*.3f,2+width*(.08f+.14f*t)),ry=rx*(.85f+.4f*t);
+    const float drift=fminf(fabsf(s->drift),fmaxf(0,width*.5f-rx));
+    const float x=(r->x0+r->x1)*.5f+drift*t*(.3f+.7f*HashUnit(cycle))*(s->drift<0?-1:1)+
+        sinf(t*6+HashUnit(cycle^91)*6)*fminf(s->amplitude,rx*.5f)*t;
+    const float y=r->y1-ry-fmaxf(0,height-2*ry)*t;
+    ArRenderColorF c=MixColor(FieldColor(e->tuning.color),FieldColor(e->particle_style.color_end),t);
+    const float fade=sinf(t*3.14159265f);c.a=fminf(.8f,e->tuning.intensity*.65f)*fade*fade;
+    /* The broad rounded density mask keeps small puffs feathered. The thin
+     * wisp sheet loses its narrow edge fade at this scale and reads as a box. */
+    if(!MaskPatch(w,e,clip,kActionMaskCloudBodyFirst+cycle%kActionMaskCloudCount,x,y,rx,ry,c,project,context))return false;
   }
   return true;
 }
@@ -1281,7 +1334,21 @@ static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance
         .tint={.a=fminf(.65f,e->tuning.intensity*s->wake*weights[i]*.7f)}});
   }
   TintMistPatches(w,e,patches,count);
+  const bool lava_light=!w->atmosphere_unlit&&LightingWorldPlane(e->projection_plane)==kActionEffectProjectionPlane_Bg1;
+  float bursts[kRollingMistMaxPatches];
+  if(lava_light) {
+    ArRenderPointF points[kRollingMistMaxPatches];
+    for(unsigned i=0;i<count;++i)points[i]=(ArRenderPointF){e->world_x+patches[i].x,e->world_y+patches[i].y};
+    ActionLavaActivity_Sample(w->frame,points,count,bursts);
+  }
   for(unsigned i=0;i<count;++i) {
+    if(lava_light) {
+      const float burst=bursts[i];
+      ArRenderColorF *tint=&patches[i].tint;
+      tint->r=fminf(1,tint->r+burst*.85f);
+      tint->g=fminf(1,tint->g+burst*.32f);
+      tint->b=fminf(1,tint->b+burst*.06f);
+    }
     const MistPatch *p=&patches[i];
     if(!MaskPatch(w,e,clip,p->cell,p->x,p->y,p->rx,p->ry,p->tint,project,context))return false;
   }
@@ -1438,7 +1505,7 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     const float pad=e->particle_style.size_max*3;
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-s->amplitude-pad,r->x1+pad,fmaxf(r->y1,r->y0+s->amplitude)+pad};
   } else if(e->kind==kActionEffect_AuthoredDrips) {
-    const float pad=fmaxf(s->ripple?10:0,e->particle_style.size_max*2);
+    const float pad=fmaxf(s->ripple||s->landing?12:0,e->particle_style.size_max*2);
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-pad,r->x1+pad,r->y1+pad};
   } else if(e->kind==kActionEffect_AuthoredCloud) {
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-fabsf(s->drift),r->y0-s->amplitude,r->x1+fabsf(s->drift),r->y1+s->amplitude};
@@ -1494,6 +1561,7 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       if(!isfinite(s->sparkle)||s->sparkle<0||s->sparkle>1||
           (s->sparkle>0&&(!s->textured||s->point_count||s->rolling<=0)))return false;
       if((s->rolling>0||s->wake>0||s->canopy_response>0)&&(!s->textured||s->point_count))return false;
+      if(s->plume)return RisingPlume(w,e,&visible,project,context);
       if(s->point_count)return GroundCloud(w,e,&visible,project,context);
       if(s->rolling>0)return RollingMist(w,e,&visible,project,context,lighting);
       const float width=r->x1-r->x0,height=r->y1-r->y0;

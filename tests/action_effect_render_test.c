@@ -683,6 +683,12 @@ static void TestAitosSideLavaLightingAndHeatMesh(void) {
       .decoration_visible_count = 1,
   };
   frame.decorations[0] = SceneEffect(kActionEffect_AitosLavaReservoir, 400);
+  /* Older saved complete fields retain the radial spill contract. The
+   * continuous source and its receiver/shadow behavior have their own tests. */
+  frame.surface_fields_valid=2;
+  frame.surface_fields[1]=*ActionSurfaceField_Bundled(1);
+  frame.surface_fields[1].UpLight[0]=0;
+  frame.surface_fields[1].BurstLight[0]=0;
   static ActionSceneEffectRenderBatch lighting, particles;
   CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1HighPlane, true,
                                           false, IdentityProjection, NULL, NULL, &lighting));
@@ -1733,12 +1739,14 @@ static void TestSceneCapacityAndMalformedInput(void) {
    * within it without manufacturing that separate map-derived record. */
   CHECK(batch.vertex_count ==
         kActionSceneEffectRenderMaxVertices - kActionAuthoredMaxVertices - kActionSceneEffectWaterfallMistExtraVertices -
+            kActionSceneEffectMoltenLakeExtraVertices -
             kActionSceneEffectMaxInstances * kActionSceneEffectMoltenVerticesPerPit -
             kActionSceneEffectLavaReservoirParticleExtraVertices -
             kActionSceneEffectLavaReservoirGlowExtraVertices -
             kActionSceneEffectMaxFlamingWheels * kActionSceneEffectFlamingWheelExtraVertices);
   CHECK(batch.index_count ==
         kActionSceneEffectRenderMaxIndices - kActionAuthoredMaxIndices - kActionSceneEffectWaterfallMistExtraIndices -
+            kActionSceneEffectMoltenLakeExtraIndices -
             kActionSceneEffectMaxInstances * kActionSceneEffectMoltenIndicesPerPit -
             kActionSceneEffectLavaReservoirParticleExtraIndices -
             kActionSceneEffectLavaReservoirGlowExtraIndices -
@@ -4400,6 +4408,11 @@ static void TestDioramaEffectsUseDrawnGuards(void) {
 }
 
 int main(void) {
+  const ActionEffectInstance background_torch={.kind=kActionEffect_AuthoredTorch,
+      .render_layer=kActionEffectRenderLayer_Bg2SourceAlpha,
+      .tuning={.light_receivers_set=1,.light_receivers=kActionReceiver_Scenery}};
+  assert(ActionEffectReceivers_Layer(&background_torch)==kActionEffectRenderLayer_Bg2Alpha);
+  assert(ActionEffectReceivers_SurfaceLayer(&background_torch)==kActionEffectRenderLayer_Bg1Plane);
   TestDioramaEffectsUseDrawnGuards();
   TestAutoFlatProjection();
   TestRetainedShadowParity();

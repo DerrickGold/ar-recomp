@@ -83,7 +83,10 @@ static unsigned Opacity(const ActionEnvironmentScene *s, unsigned bg,
   if (tile->blank || tile->band != 1) return 0;
   const unsigned native_row = (tile->entry & 0x8000) ? 7 - row : row;
   const unsigned at = (s->tile_base[bg] + (tile->entry & 0x3ff) * 16 + native_row) & 32767;
-  const unsigned planes = s->vram[at] | s->vram[(at + 8) & 32767];
+  const unsigned planes = tile->custom_character ?
+      tile->character[native_row*2] | tile->character[native_row*2+1] |
+      tile->character[native_row*2+16] | tile->character[native_row*2+17] :
+      s->vram[at] | s->vram[(at + 8) & 32767];
   unsigned bits = (planes | (planes >> 8)) & 255;
   if (!(tile->entry & 0x4000)) bits = Reverse(bits);
   return (bits | Reverse(tile->black[row])) & ~Reverse(tile->transparent[row]);
@@ -106,7 +109,10 @@ bool ActionEnvironmentScene_PaletteIndex(const ActionEnvironmentScene *s, unsign
   const unsigned native_row = (tile.entry & 0x8000) ? 7 - row : row;
   const unsigned native_bit = (tile.entry & 0x4000) ? 7 - bit : bit;
   const unsigned at = (s->tile_base[bg] + (tile.entry & 0x3ff) * 16 + native_row) & 32767;
-  const unsigned lo = s->vram[at], hi = s->vram[(at + 8) & 32767];
+  const unsigned lo = tile.custom_character ? tile.character[native_row*2] |
+      ((unsigned)tile.character[native_row*2+1]<<8) : s->vram[at];
+  const unsigned hi = tile.custom_character ? tile.character[native_row*2+16] |
+      ((unsigned)tile.character[native_row*2+17]<<8) : s->vram[(at + 8) & 32767];
   const unsigned color = ((lo >> native_bit) & 1) | (((lo >> (native_bit + 8)) & 1) << 1) |
       (((hi >> native_bit) & 1) << 2) | (((hi >> (native_bit + 8)) & 1) << 3);
   if (!color || (tile.black[row] & (1u << bit))) return false;

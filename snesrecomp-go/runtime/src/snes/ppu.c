@@ -3227,7 +3227,7 @@ static void background_packet_native_tile(uint32_t *pixels, uint32_t *meta,
 static void background_packet_tile_to(Ppu *ppu, int layer, unsigned source_row, int origin,
         int x, int run, int fine_x, int fine_y, int step, uint16_t entry,
         unsigned band, bool edit, bool replace, bool blank,
-        unsigned black, unsigned transparent) {
+        unsigned black, unsigned transparent, const uint8_t *character) {
     const unsigned packet_source = source_row / SR_PPU_BG_PACKET_HEIGHT;
     uint32_t *pixels = SrPpuBgPacket_AllocatePixels(ppu->backgroundPacket,
         packet_source, source_row % SR_PPU_BG_PACKET_HEIGHT);
@@ -3235,7 +3235,9 @@ static void background_packet_tile_to(Ppu *ppu, int layer, unsigned source_row, 
     const unsigned row = (entry & 0x8000u) ? 7u - (unsigned)fine_y : (unsigned)fine_y;
     const unsigned address = PPU_bgTileAdr(ppu, layer) + (entry & 1023u) * 16u + row;
     uint32_t raw = !blank && (!edit || replace)
-        ? ppu->vram[address & 0x7fffu] | ((uint32_t)ppu->vram[(address + 8) & 0x7fffu] << 16) : 0;
+        ? character ? (uint32_t)character[row * 2] | ((uint32_t)character[row * 2 + 1] << 8) |
+            ((uint32_t)character[row * 2 + 16] << 16) | ((uint32_t)character[row * 2 + 17] << 24)
+        : ppu->vram[address & 0x7fffu] | ((uint32_t)ppu->vram[(address + 8) & 0x7fffu] << 16) : 0;
     uint32_t *meta = SrPpuBgPacket_Meta(ppu->backgroundPacket, packet_source,
         source_row % SR_PPU_BG_PACKET_HEIGHT);
     if (meta[0] >= 3u && !edit) {
@@ -3334,12 +3336,12 @@ static void background_packet_tile_to(Ppu *ppu, int layer, unsigned source_row, 
 static void background_packet_tile(Ppu *ppu, int layer, int screen_y,
         int x, int run, int fine_x, int fine_y, int step, uint16_t entry,
         unsigned band, bool edit, bool replace, bool blank,
-        unsigned black, unsigned transparent) {
+        unsigned black, unsigned transparent, const uint8_t *character) {
     if (!background_packet_row(ppu, (unsigned)layer, screen_y)) return;
     background_packet_tile_to(ppu, layer,
         SrPpuBgPacket_Row((unsigned)layer, (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y)),
         surface_origin_x(ppu, ppu->overlayRenderPitch[layer]),
-        x, run, fine_x, fine_y, step, entry, band, edit, replace, blank, black, transparent);
+        x, run, fine_x, fine_y, step, entry, band, edit, replace, blank, black, transparent, character);
 }
 
 static unsigned background_packet_band(Ppu *ppu, int layer, uint16_t entry, uint8_t semantic) {
@@ -3531,7 +3533,7 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
                     while (at < run && (visibility != 2u || !native_window_plan_inside(&plan, x + at))) ++at;
                     background_packet_tile(ppu, layer, screen_y, x + start, at - start,
                         fine_x + start * step, fine_y, step, entry, band_slot,
-                        false, false, false, 0, 0);
+                        false, false, false, 0, 0, NULL);
                 }
             }
             if (!(ppu->backgroundCpuSources & (1u << layer))) { x += run; continue; }
@@ -3746,7 +3748,7 @@ static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
                 const int start = at++;
                 while (at < run && (visibility != 2u || !native_window_plan_inside(&plan, x + at))) ++at;
                 background_packet_tile(ppu, layer, screen_y, x + start, at - start,
-                    fine_x + start * step, in_y, step, entry, band, false, false, false, 0, 0);
+                    fine_x + start * step, in_y, step, entry, band, false, false, false, 0, 0, NULL);
             }
             if (!(ppu->backgroundCpuSources & (1u << layer))) { x += run; continue; }
             plan.run = (uint8_t)saved_window_run;
@@ -4817,17 +4819,27 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
         NativeOverlayLinePlan *plan, uint32_t backing) {
     const bool replace = (tile->flags & SR_PPU_CAPTURE_TILE_REPLACE) != 0u;
     const bool blank = (tile->flags & SR_PPU_CAPTURE_TILE_BLANK) != 0u;
+    const uint8_t *character = (tile->flags & SR_PPU_CAPTURE_TILE_CHARACTER) ? tile->character : NULL;
     const int band = tile->band == 1u ? 0 : tile->band == 2u ? 1 : 2;
     uint32_t *target = band ? plan->bands[band - 1] : plan->primary;
     if (plan->tile_packet) {
         background_packet_tile(ppu, layer, plan->screen_y, x, run, fine_x, fine_y,
             step, tile->entry, (unsigned)band, true, replace, blank,
-            tile->black_rows[fine_y], tile->transparent_rows[fine_y]);
+            tile->black_rows[fine_y], tile->transparent_rows[fine_y], character);
         if (!plan->cpu_pixels) return;
     }
     unsigned row = (tile->entry & 0x8000u) ? 7 - fine_y : fine_y;
-    uint32_t decoded = replace && !blank ? decoded_4bpp_row(ppu,
+    uint32_t decoded = replace && !blank && !character ? decoded_4bpp_row(ppu,
         PPU_bgTileAdr(ppu, layer) + (tile->entry & 1023u) * 16 + row) : 0u;
+    if (replace && !blank && character)
+        for (unsigned x = 0; x < 8; ++x) {
+            const unsigned bit = 7 - x;
+            const unsigned pixel = ((character[row * 2] >> bit) & 1u) |
+                (((character[row * 2 + 1] >> bit) & 1u) << 1) |
+                (((character[row * 2 + 16] >> bit) & 1u) << 2) |
+                (((character[row * 2 + 17] >> bit) & 1u) << 3);
+            decoded |= pixel << (x * 4);
+        }
     unsigned palette = ((tile->entry >> 10) & 7u) * 16u;
     uint32_t *packet_row = plan->tile_packet ? NULL : plan->packet_row;
     for (int offset = 0; offset < run; ++offset) {
@@ -4889,8 +4901,8 @@ static bool native_capture_tile_lookup(Ppu *ppu, unsigned layer,
     }
     *tile = (SrPpuCaptureTile){0};
     bool found = binding->lookup && binding->lookup(binding->user_data, x, y, tile);
-    if (tile->band > 2 || (tile->flags & ~7u) ||
-        ((tile->flags & SR_PPU_CAPTURE_TILE_FOLLOW_POLICY) &&
+    if (tile->band > 2 || (tile->flags & ~15u) ||
+        ((tile->flags & (SR_PPU_CAPTURE_TILE_FOLLOW_POLICY | SR_PPU_CAPTURE_TILE_CHARACTER)) &&
          !(tile->flags & SR_PPU_CAPTURE_TILE_REPLACE))) found = false;
     if (cache) *cache = (PpuCaptureTileCacheEntry){
         .tile = *tile, .x = x, .y = y, .valid = true, .found = found,
@@ -6746,7 +6758,7 @@ bool PpuRenderBackgroundViewLine(Ppu *ppu,
             if (view_meta && found == kPpuVirtualTilemapLookup_Found) {
                 background_packet_tile_to(ppu, layer, SrPpuBgPacket_Row(2, view_y), 0,
                     x, run, fine_x, world_y & 7, 1, entry, 0, false, false,
-                    (entry & 0x2000u) && ppu->overlayRenderBands[layer][0], 0, 0);
+                    (entry & 0x2000u) && ppu->overlayRenderBands[layer][0], 0, 0, NULL);
             }
             if (gpu_view) { x += run; continue; }
             uint32_t decoded = found == kPpuVirtualTilemapLookup_Found
@@ -6803,7 +6815,7 @@ bool PpuRenderNativeBackgroundView(Ppu *ppu,
             if (view_meta) background_packet_tile_to(ppu, (int)layer,
                 SrPpuBgPacket_Row(2, y), 0, (int)x, 8, 0, (int)(y & 7), 1,
                 entry, 0, false, false, blank ||
-                    ((entry & 0x2000u) && ppu->overlayRenderBands[layer][0]), 0, 0);
+                    ((entry & 0x2000u) && ppu->overlayRenderBands[layer][0]), 0, 0, NULL);
             if (gpu_view) continue;
             const uint32_t decoded = blank ||
                 ((entry & 0x2000u) && ppu->overlayRenderBands[layer][0]) ? 0 :

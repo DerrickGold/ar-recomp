@@ -7,7 +7,7 @@
  * generation, never an array index or a transient actor address. */
 /* Catalogue capacity is independent of the unchanged per-room instance and
  * geometry budgets. Regional copies of authored scenes share this table. */
-enum { kActionEffectRecipeMax = 1024, kActionEffectRecipeMaxBytes = 512 * 1024 };
+enum { kActionEffectRecipeMax = 2048, kActionEffectRecipeMaxBytes = 512 * 1024 };
 /* Draw placement is independent of the source coordinate system. */
 typedef enum ActionEffectAnchor {
   kActionEffectAnchor_Bg1, kActionEffectAnchor_Bg2Point, kActionEffectAnchor_Bg2Raster,
@@ -58,6 +58,7 @@ bool ActionEffectRecipes_ReplacesRayField(const ActionEffectRecipes *table,
 bool ActionEffectRecipes_NeedsBgMask(const ActionEffectRecipes *table,
     unsigned group,unsigned room,unsigned terrain,unsigned bg);
 void ActionEffectRecipes_SurfaceFields(const ActionEffectRecipes *,unsigned,unsigned,unsigned,const ActionSurfaceField **);
+const ActionSurfaceField *ActionEffectRecipes_NativeBubbleField(const ActionEffectRecipes *,unsigned,unsigned,unsigned);
 bool ActionEffectRecipes_ReplacesGlowField(const ActionEffectRecipes *,unsigned,unsigned,unsigned);
 bool ActionEffectRecipes_ReplacesCastleField(const ActionEffectRecipes *,unsigned,unsigned,unsigned);
 bool ActionEffectRecipes_ReplacesMarshField(const ActionEffectRecipes *,unsigned,unsigned,unsigned);

@@ -65,6 +65,7 @@ unsigned EditorRoomScene_RasterCount(const EditorRoomScene *room);
 bool EditorRoomScene_ConfigureEffects(EditorRoomScene *room, const char *text, size_t size, unsigned *line);
 const char *EditorRoomScene_RecipeError(const EditorRoomScene *room);
 const ActionSceneEffectFrame *EditorRoomScene_Effects(const EditorRoomScene *room);
+void EditorRoomScene_EnableEffects(EditorRoomScene *room,bool enabled);
 const ActionEnvironmentScene *EditorRoomScene_Environment(const EditorRoomScene *room);
 const ActionAtmosphereField *EditorRoomScene_AtmosphereField(const EditorRoomScene *room);
 bool EditorRoomScene_PreviewBinding(EditorRoomScene *,bool enabled,uint32_t source,int x,int y,unsigned start);

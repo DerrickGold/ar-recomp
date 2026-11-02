@@ -412,8 +412,9 @@ typedef struct DioramaScene {
    * read back. On success, attached effects omit that surface contribution. */
   bool (*scenery_light)(void *userdata, const DioramaProjection *projection);
   bool (*actor_light)(void *userdata, const DioramaProjection *, unsigned receiver);
-  /* Draw background weather into the current source-sized texture, before
-   * blur. Uses the published inverse sky mapping; no framebuffer readback. */
+  /* Draw background weather/particles into the current source-sized texture,
+   * before blur. Uses an inverse sky mapping or an unwarped finite plane;
+   * no framebuffer readback. */
   /* submit=false checks for intersecting geometry without drawing. This
    * avoids copying/filtering the sky for an active but offscreen strike. */
   bool (*sky_weather)(void *userdata, const DioramaProjection *, bool submit);

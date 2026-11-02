@@ -8,6 +8,7 @@
 #include <time.h>
 #include <math.h>
 #include "action/action_effect_render.h"
+#include "action/action_lava_bubbles.h"
 #include "diorama/diorama_camera_policy.h"
 #include "render/presentation_layout.h"
 
@@ -204,6 +205,31 @@ int main(int argc, char **argv) {
     assert(!EditorRoomScene_Configure(room, "[unterminated"));
     assert(EditorRoomScene_Hash(room) == hash);
     printf("%08x %08x\n", hash, EditorRoomScene_EffectHash(room));
+  }
+  if(assets.scene.group==4&&assets.scene.map>=4&&assets.scene.map<=6) {
+    const unsigned id=assets.scene.map;
+    assert(EditorRoomScene_Configure(room,""));
+    unsigned line;const char defaults[]="[effects]\nversion=1\n";
+    assert(EditorRoomScene_ConfigureEffects(room,defaults,strlen(defaults),&line));
+    ActionLavaBubbles timing;ActionLavaBubbles_Prepare(&timing,&assets.scene,ActionSurfaceField_Bundled(1),0);
+    unsigned events=0;
+    for(unsigned tick=0;tick<240;tick+=7) {
+      assert(EditorRoomScene_Render(room,id==4?440:id==5?128:240,id==4?410:id==5?64:332,tick,0,0,NULL));
+      const ActionSceneEffectFrame *effects=EditorRoomScene_Effects(room);timing.clock=tick;
+      assert(!effects->decoration_overflow);
+      for(unsigned i=0;i<effects->native_bubble_count;++i) {
+        const ActionNativeBubbleEvent *b=&effects->native_bubbles[i];
+        assert(b->age==ActionLavaBubbles_Age(&timing,b->x/16,b->y/16));
+        assert(b->cadence==timing.cadence);
+        bool owner=false;for(unsigned j=0;j<effects->decoration_count;++j)owner|=effects->decorations[j].generation==b->owner;
+        assert(owner);++events;
+      }
+    }
+    assert(events>20); /* Real regional mound pixels, not fabricated event fixtures. */
+    char erased[192];snprintf(erased,sizeof(erased),"[layers:04:%02x]\nbg1-pixels:us+jp+eu = metatile:02 transparent:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n",id);
+    assert(EditorRoomScene_Configure(room,erased));
+    assert(EditorRoomScene_Render(room,id==4?440:id==5?128:240,id==4?410:id==5?64:332,180,0,0,NULL));
+    assert(!EditorRoomScene_Effects(room)->native_bubble_count);
   }
   CameraPolicy(room, &assets);
   if (assets.scene.group == 1 && assets.scene.map == 1 && !assets.terrain_profile) {

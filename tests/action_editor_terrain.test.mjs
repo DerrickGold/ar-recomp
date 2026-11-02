@@ -3224,6 +3224,30 @@ lr(`$('#emitterRipple').value='1';$('#emitterRipple').onchange({target:$('#emitt
 assert.match(lr('EffectEditor.text()'),/^ripple=1$/m);
 console.log('Swamp life editor: glow styles, trails, moss movement lock, dew endpoints and copy/paste passed');
 
+const caveUi=editor(fixture()),caveRun=caveUi.run;
+caveRun(`SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
+ EffectEditor.loadDocument('[effects]\\nversion=1\\n');EffectEditor.placeEmitter('preset:rock-vent',160,128);
+ EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(caveUi.elements.get('#emitterPlume').value,'1');
+assert.equal(caveUi.elements.get('#emitterActivity').disabled,false);
+assert.equal(caveUi.elements.get('#emitterRolling').disabled,true);
+assert.equal(caveUi.elements.get('#emitterGust').disabled,true);
+assert.match(caveRun('EffectEditor.text()'),/^plume=1$/m);
+caveRun(`EffectEditor.copyEffects();EffectEditor.pasteEffects(320,128);`);
+assert.equal((caveRun('EffectEditor.text()').match(/^plume=1$/gm)||[]).length,2);
+caveRun(`EffectEditor.loadDocument(EffectEditor.text());EffectEditor.placeEmitter('preset:falling-grit',224,128);
+ EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(caveUi.elements.get('#emitterDebris').value,'1');
+assert.equal(caveUi.elements.get('#emitterLanding').value,'1');
+assert.equal(caveUi.elements.get('#emitterRipple').disabled,true);
+assert.equal(caveUi.elements.get('#emitterLanding').disabled,false);
+caveRun(`$('#emitterLanding').value='2';$('#emitterLanding').onchange({target:$('#emitterLanding')});`);
+assert.match(caveRun('EffectEditor.text()'),/^landing=2$/m);
+caveRun(`$('#emitterDebris').value='0';$('#emitterDebris').onchange({target:$('#emitterDebris')});`);
+assert.doesNotMatch(caveRun('EffectEditor.text()'),/^landing=/m);
+assert.equal(caveUi.elements.get('#emitterRipple').disabled,false);
+console.log('Cave life editor: vent/grit presets, compatible controls, copy, reload and stone/lava impacts passed');
+
 const pathUi=editor(fixture()),pathRun=pathUi.run;
 pathRun(`SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
  EffectEditor.loadDocument('[effects]\\nversion=1\\n');EffectEditor.placeEmitter('particle-path',160,128);

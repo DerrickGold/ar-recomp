@@ -38,6 +38,11 @@ bool ActionEffectReceivers_Member(const ActionEffectInstance *e,
       ? member->light_receivers : ActionEffectReceivers_Mask(e)) & receiver);
 }
 uint8_t ActionEffectReceivers_Layer(const ActionEffectInstance *e) {
+  /* The sparks enter the source texture; incident light still belongs to
+   * the existing receiver pass and must not be baked into the backdrop. */
+  if (e->kind==kActionEffect_AuthoredTorch &&
+      e->render_layer==kActionEffectRenderLayer_Bg2SourceAlpha)
+    return kActionEffectRenderLayer_Bg2Alpha;
   if(ActionEffectReceivers_IsLight(e->kind)) {
     /* Multiplicative light belongs to receiving artwork, never the final
      * image (which already contains lit sprites and HUD). Flat mode uses the

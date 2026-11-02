@@ -941,6 +941,10 @@ typedef struct SrPpuVirtualTilemapRequest {
  * extent clipping. Unlike an explicit scenery stamp this cannot extend the
  * visible source. Requires SR_RUNNER_CAP_PPU_CAPTURE_TILE_POLICY. */
 #define SR_PPU_CAPTURE_TILE_FOLLOW_POLICY UINT32_C(4)
+/* With REPLACE, use the supplied 4bpp character instead of live VRAM. Only
+ * capture artwork changes; authentic output, VRAM and gameplay are untouched.
+ * Requires SR_RUNNER_CAP_PPU_CAPTURE_CHARACTER. */
+#define SR_PPU_CAPTURE_TILE_CHARACTER UINT32_C(8)
 typedef struct SrPpuCaptureTile {
     uint16_t entry;
     uint8_t band;
@@ -949,7 +953,12 @@ typedef struct SrPpuCaptureTile {
     /* Requires SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY before a callback may
      * write this extension. Older callbacks retain the original black edits. */
     uint8_t transparent_rows[8];
+    /* Native SNES 4bpp bytes, before entry H/V flips. Callbacks may write this
+     * extension only after checking SR_RUNNER_CAP_PPU_CAPTURE_CHARACTER.
+     * It is copied with the tile, including by the stable per-frame cache. */
+    uint8_t character[32];
 } SrPpuCaptureTile;
+#define SR_PPU_CAPTURE_TILE_MASKS_SIZE ((uint32_t)offsetof(SrPpuCaptureTile, character))
 typedef uint32_t (*SrPpuCaptureTileLookup)(
     void *user_data, int32_t tile_x, int32_t tile_y, SrPpuCaptureTile *tile);
 typedef struct SrPpuCaptureTileBinding {

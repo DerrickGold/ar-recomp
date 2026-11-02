@@ -1,6 +1,7 @@
 #include "action_environment_capture_internal.h"
 #include "action_map_effect_sources.h"
 #include "action_bg_plan.h"
+#include "action_lava_bubbles.h"
 #include <math.h>
 
 static uint32_t SurfaceIdentity(const ActionSurfaceField *f,unsigned offset){
@@ -404,6 +405,50 @@ static void CaptureManualSurface(const ActionEnvironmentScene *scene,ActionScene
     if(!AppendSurface(dst,f,&e))return;
   }
 }
+/* Capture only real, visible native mounds. Authored stamps/erased pixels do
+ * not emit reactions. The event clock is exactly the character override's
+ * clock; retained frames own small events rather than map/CHR pointers. */
+static void CaptureNativeBubbleEvents(const ActionEnvironmentScene *scene,
+    ActionSceneEffectFrame *dst,const ActionSurfaceField *f) {
+  dst->native_bubble_count=0;
+  ActionLavaBubbles timing;
+  if(!scene->tile_edit||!ActionLavaBubbles_Configure(&timing,f,scene->group,scene->room,scene->clock)||
+      (!f->NativeReaction[0]&&!f->NativeReaction[2]))return;
+  for(unsigned i=0;i<dst->decoration_count;++i) {
+    const ActionEffectInstance *lake=&dst->decorations[i];
+    if(lake->kind!=kActionEffect_AitosLavaReservoir)continue;
+    const int y=((int)lake->world_y/16-1)*16;
+    const int x0=(int)floorf((lake->world_x+lake->geometry.data.rect.x0)/16)*16;
+    const int x1=(int)ceilf((lake->world_x+lake->geometry.data.rect.x1)/16)*16;
+    for(int x=x0;x<x1;x+=16) {
+      uint8_t metatile;
+      if(!ActionBgMapView_LookupMetatile(&scene->maps[0],x,y,&metatile)||metatile!=2)continue;
+      const int age=ActionLavaBubbles_Age(&timing,x/16,y/16);
+      if(age<0)continue;
+      bool visible=false;
+      for(unsigned q=0;q<2;++q) {
+        ActionEnvironmentTileEdit tile={0};
+        if(!scene->tile_edit(scene->tile_edit_context,0,x/8+q,y/8+1,&tile)||
+            !tile.custom_character||tile.blank)continue;
+        for(unsigned row=0;row<8;++row) {
+          const unsigned bits=tile.character[row*2]|tile.character[row*2+1]|
+              tile.character[row*2+16]|tile.character[row*2+17];
+          visible|=(bits&~tile.transparent[row]&~tile.black[row])!=0;
+        }
+      }
+      if(!visible)continue;
+      bool duplicate=false;
+      for(unsigned n=0;n<dst->native_bubble_count;++n)
+        duplicate|=dst->native_bubbles[n].x==x+8&&dst->native_bubbles[n].y==y+12;
+      if(duplicate)continue;
+      if(dst->native_bubble_count==kActionNativeBubbleMax){dst->decoration_overflow=true;return;}
+      dst->native_bubbles[dst->native_bubble_count++]=(ActionNativeBubbleEvent){
+        .owner=lake->generation,.seed=DeterministicHash_Mix32(timing.seed^(uint32_t)x^((uint32_t)y<<16)),
+        .x=(int16_t)(x+8),.y=(int16_t)(y+12),.age=(uint8_t)age,.cadence=timing.cadence};
+    }
+  }
+}
+
 void ActionSurfaceField_Capture(const ActionEnvironmentScene *scene,ActionSceneEffectFrame *dst,
     const ActionSurfaceField *const configured[5],ActionEnvironmentWaterfallTrace *trace){
   if(!scene||!dst||dst->decoration_overflow)return;
@@ -417,6 +462,7 @@ void ActionSurfaceField_Capture(const ActionEnvironmentScene *scene,ActionSceneE
   CaptureAitosLavaPits(dst,scene,fields[0]);CaptureAitosSideLavaReservoirs(dst,scene,fields[1]);
   CaptureAitosWater(dst,scene,trace,fields);
   for(unsigned i=0;i<5;++i)if(fields[i]&&fields[i]->Mode[0])CaptureManualSurface(scene,dst,fields[i]);
+  CaptureNativeBubbleEvents(scene,dst,fields[1]);
 }
 bool ActionMapEnvironmentScene_UsesTorches(uint8_t group, uint8_t room) {
   return ActionGlowField_Bundled(group,room)!=NULL;

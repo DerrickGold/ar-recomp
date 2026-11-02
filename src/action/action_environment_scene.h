@@ -11,6 +11,8 @@ typedef struct ActionEnvironmentTileEdit {
   uint16_t entry;
   uint8_t band, replace, blank;
   uint8_t black[8], transparent[8];
+  bool custom_character;
+  uint8_t character[32];
 } ActionEnvironmentTileEdit;
 typedef bool (*ActionEnvironmentTileEditFn)(void *context, unsigned bg, int tile_x, int tile_y,
                                             ActionEnvironmentTileEdit *out);

@@ -4581,6 +4581,9 @@ int main(void) {
                         "capture tile cache capability missing");
         failed |= check((api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILE_POLICY) != 0,
                         "capture tile policy capability missing");
+        failed |= check((api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_CHARACTER) != 0 &&
+                        SR_PPU_CAPTURE_TILE_MASKS_SIZE == 20,
+                        "capture character capability or legacy mask prefix missing");
         edits.stable_layer_mask = 1;
         failed |= check(api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_OK &&
                         snes->ppu->captureTileStableMask == 1,

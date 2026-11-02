@@ -111,6 +111,7 @@ bool sr_scene_renderer_render(SrSceneRenderer *r, const SrSceneFrame *f,
         };
         PpuSetVirtualTilemap(p, bg, &binding);
         p->captureTiles[bg] = b->edits;
+        if (b->edits_stable) p->captureTileStableMask |= 1u << bg;
         PpuBindOverlaySurfaceSized(p, (PpuOverlaySource)bg,
             (uint8_t *)r->pixels[1 + bg * 3], pitch * 4, height);
         for (int band = 1; band < 3; ++band)
