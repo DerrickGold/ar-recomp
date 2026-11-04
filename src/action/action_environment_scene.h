@@ -61,6 +61,13 @@ typedef struct ActionEnvironmentScene {
   bool suppress_default_atmosphere_field;
 } ActionEnvironmentScene;
 
+static inline const ActionRoomSceneFrameState *ActionEnvironmentScene_BackgroundFrame(
+    const ActionEnvironmentScene *scene,ActionRoomSceneFrameState *scratch) {
+  if(!scene)return NULL;
+  if(scene->background_frame)return scene->background_frame;
+  return scene->capture_background_frame&&scene->capture_background_frame(scene,scratch)?scratch:NULL;
+}
+
 typedef struct ActionEnvironmentWaterfallTrace {
   int camera_x, camera_y;
   unsigned x0, y0, x1, y1, splash_count;

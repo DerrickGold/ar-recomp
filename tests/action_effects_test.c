@@ -1,5 +1,6 @@
 #include "actraiser/actraiser_room_profiles.h"
 #include <stdio.h>
+#include <math.h>
 #include <string.h>
 
 #include "action_effect_clock.h"
@@ -3913,6 +3914,21 @@ static void TestActorMistWakes(void) {
   old=actor;actor.x+=128;ActionEffectActor_UpdateWake(&actor,&old,1);CHECK(actor.wake.strength==0);
   old=actor;actor.x+=2;actor.generation++;ActionEffectActor_UpdateWake(&actor,&old,1);CHECK(actor.wake.strength==0);
   old=actor;actor.x+=2;actor.body_radius=0;ActionEffectActor_UpdateWake(&actor,&old,1);CHECK(actor.wake.strength==0);
+  /* Constant 0.75px/tick motion quantizes into alternating 1px/2px samples.
+   * The captured wake should remain near the mean, rather than pulsing by 2x. */
+  actor=(ActionEffectActor){.generation=7,.visible=1,.body_radius=8,.x=100,.y=120,.feet_y=144};
+  float minimum=1,maximum=0,previous=0;
+  for(unsigned i=0;i<40;++i) {
+    old=actor;actor.x+=(i&1)?2:1;ActionEffectActor_UpdateWake(&actor,&old,2);
+    if(i>20) {
+      minimum=fminf(minimum,actor.wake.strength);maximum=fmaxf(maximum,actor.wake.strength);
+      CHECK(fabsf(actor.wake.strength-previous)<.025f);
+    }
+    previous=actor.wake.strength;
+  }
+  CHECK(minimum>.23f&&maximum<.27f);
+  old=actor;ActionEffectActor_UpdateWake(&actor,&old,0);CHECK(!memcmp(&actor.wake,&old.wake,sizeof(actor.wake)));
+  old=actor;actor.x+=3;ActionEffectActor_UpdateWake(&actor,&old,5);CHECK(actor.wake.strength==0);
   /* Exercise native body qualification, including projectile exclusion. */
   static uint8_t ram[kActRaiserWramSize];static ActionEffectObserver observer;static ActionSceneEffectFrame frame;
   memset(ram,0,sizeof(ram));ActionEffectObserver_Reset(&observer);ram[0x18]=5;ram[0x19]=1;

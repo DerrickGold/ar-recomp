@@ -14,6 +14,8 @@ def check(html, wasm, sanitize):
                     str(html.resolve()), str(wasm.resolve())], cwd=ROOT, check=True)
     subprocess.run(['node', str(ROOT / 'tests/action_editor_policy_transport.test.mjs'),
                     str(html.resolve()), str(wasm.resolve())], cwd=ROOT, check=True)
+    subprocess.run(['node', str(ROOT / 'tests/action_editor_trunk.test.mjs'),
+                    str(html.resolve()), str(wasm.resolve())], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory(prefix='action-room-') as directory:
         work = Path(directory)
         compiler = os.environ.get('CC', 'cc')

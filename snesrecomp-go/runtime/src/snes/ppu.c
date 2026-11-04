@@ -4818,6 +4818,11 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
         int fine_x, int fine_y, int step, const SrPpuCaptureTile *tile,
         NativeOverlayLinePlan *plan, uint32_t backing) {
     const bool replace = (tile->flags & SR_PPU_CAPTURE_TILE_REPLACE) != 0u;
+    /* A band-only provider can return a tile without changing its pixels.
+     * Empty rows own no lanes, so they need neither a packet edit overlay nor
+     * CPU capture work. Keep native source/band resolution independent. */
+    if (!replace && !(tile->black_rows[fine_y] | tile->transparent_rows[fine_y]))
+        return;
     const bool blank = (tile->flags & SR_PPU_CAPTURE_TILE_BLANK) != 0u;
     const uint8_t *character = (tile->flags & SR_PPU_CAPTURE_TILE_CHARACTER) ? tile->character : NULL;
     const int band = tile->band == 1u ? 0 : tile->band == 2u ? 1 : 2;

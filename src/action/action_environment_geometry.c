@@ -268,7 +268,7 @@ static ActionEffectSourcePrimitive *SourcePrimitive(ActionEffectSourceBatch *b,
   const ArRenderPointF origin = ActionEffectProjection_CaptureOrigin(&b->context, e);
   ActionEffectSourcePrimitive *p = &b->primitives[b->count++];
   const bool weather=(e->kind==kActionEffect_AuthoredCloud&&e->field_style.textured)||
-      e->kind==kActionEffect_AuthoredStorm||
+      e->kind==kActionEffect_AuthoredStorm||e->kind==kActionEffect_AuthoredAurora||e->kind==kActionEffect_AuthoredStarfield||
       (e->kind==kActionEffect_AuthoredFan&&!e->field_style.shadows);
   b->weather_only=weather&&(b->count==1||b->weather_only);
   *p = (ActionEffectSourcePrimitive){

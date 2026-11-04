@@ -28,6 +28,15 @@ interval on the source plane. Explicit copy counts override density; density
 otherwise keeps slice spacing consistent as authored depth changes. Both paths
 are clamped to their draw-budget caps.
 
+Northwall's two tree interiors (`06:06–07`) use a connected enclosure instead
+of these independent BG shapes. Native bark rims remain at the front; platforms
+and actors recede together, and a smoothly curved rear wall closes the hollow.
+The enclosure owns BG fill, tile-band routing, plane order/depth and skybox
+composition. Ordinary BG policies remain saved but cannot change that geometry.
+Tile artwork edits still apply. In the action editor, **Tree enclosure** provides
+wall curvature, play-space recess and ambience controls. Choosing **Original
+layers** restores ordinary BG policies and shapes.
+
 Connected BG1 art can cross the low/high tile-priority boundary, as the rocks
 and sand do in Kassandora Act 1 (`03/02`) and the upper/lower water tiles do in
 Bloodpool Act 1 (`02/01`) and Marahna Act 1 (`05/01`, `05/03`). Keep both front faces at

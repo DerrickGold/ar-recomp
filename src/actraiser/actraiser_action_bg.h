@@ -27,6 +27,10 @@ bool ActRaiserActionBg_LiveRasterCameraSensitivity(
     float subtexel[224], int32_t *raster_camera_x);
 
 struct DioramaRoomOverride;
+struct ActionTrunkAssets;
+/* Immutable assets retained until the producer/presenter session is stopped. */
+const struct ActionTrunkAssets *ActRaiserActionBg_TrunkAssets(unsigned group,unsigned room,
+    const struct DioramaRoomOverride *edits);
 struct ActionEnvironmentScene;
 bool ActRaiserActionBg_BindEnvironmentScenery(struct ActionEnvironmentScene *scene);
 struct ActionRoomScene;

@@ -219,7 +219,7 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
 
  // The distributed room compositions must use exactly the same recipes in
  // native rendering and the editor, across regional terrain and camera edges.
- if(base.group===3) {
+ if(base.group===3||(base.group===6&&base.map>=5&&base.map<=8)) {
    const shipped=JSON.parse(html.match(/window\.__ACTION_EFFECTS__=(.*?);window\.__ACTION_ACTORS__/s)[1]);
    assert.equal(shipped,fs.readFileSync('action-effects.ini','utf8'),'editor embeds the shipped effects document');
    const effectsFile=path.join(directory,'shipped-effects.ini');fs.writeFileSync(effectsFile,shipped);
@@ -233,10 +233,10 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    const nativeEffects=execFileSync(replay,[file,iniFile,effectsFile],{
      input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'
    }).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
-   assert.deepEqual(enhanced,nativeEffects,`shipped Kassandora effects ${base.map}/${terrain.profile}`);
-   assert(enhanced.some((h,i)=>h[1]!==effectHashes[i]),'every Kassandora room receives its composition');
+   assert.deepEqual(enhanced,nativeEffects,`shipped effects ${base.group}:${base.map}/${terrain.profile}`);
+   assert(enhanced.some((h,i)=>h[1]!==effectHashes[i]),'each authored room receives its composition');
    assert.deepEqual(enhanced[1],enhanced[3],'authored animation is deterministic when scrubbing backwards');
-   if(base.map===5) {
+   if(base.group===3&&base.map===5) {
      const original=[...shipped.matchAll(new RegExp(`\\[emitter:03:05:${terrain.profile}:soft-light:[^\\]]+\\]([^\\[]+)`,'g'))]
        .find(match=>/^y=1424$/m.test(match[1]))[1];
      const pasted=shipped+`\n[emitter:03:05:${terrain.profile}:soft-light:f0000000]\n`+

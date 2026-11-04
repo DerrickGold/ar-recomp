@@ -7,6 +7,7 @@
 #include "app/settings.h"
 #include "present/preparation_indicator.h"
 #include "diorama/diorama_bg_gpu.h"
+#include "diorama/diorama_trunk_gpu.h"
 #include "diorama/diorama_astral_rift.h"
 #include "diorama/diorama_effect_backend.h"
 #include "diorama/diorama_frame_generation.h"
@@ -51,6 +52,7 @@ static void PrepareActionStage(ArRenderDevice *device, bool interpolation) {
    * when the preference is off. No generated artwork is decoded or uploaded. */
   DioramaAstralRift_Prepare(device);
   DioramaBgGpu_Prepare(device);
+  DioramaTrunkGpu_Prepare(device);
   DioramaEffectBackend_IsAvailable(device, kDioramaEffect_PrioritySurface);
   DioramaEffectBackend_PrepareSceneryLight(device);
   DioramaFrameGeneration_PreparePipelines(device, interpolation);

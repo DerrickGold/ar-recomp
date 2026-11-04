@@ -1,5 +1,7 @@
 #include "action/action_effect_capture.h"
 #include "action/action_effect_manifest.h"
+#include "action/action_trunk_life.h"
+#include "actraiser/actraiser_action_bg.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -11,6 +13,7 @@
 #include "app/settings.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_layer_order.h"
+#include "diorama/diorama_layer_manifest.h"
 #include "present/present.h"
 
 /* Capture history follows this running game, independently of GPU resources.
@@ -18,6 +21,13 @@
  * redraws do not age effects. Both spell and scene capture share one delta. */
 static ActionEffectObserver s_action_effect_observer;
 static ActionEffectTickClock s_action_effect_tick_clock;
+
+static const DioramaRoomOverride *CurrentTrunkRoom(void) {
+  if(!DioramaTrunk_Room(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]))return NULL;
+  return DioramaLayerManifest_TerrainRoom(DioramaLayerOrder_Find(
+      DioramaLayerManifest_Table(), g_ram[kActRaiserWram_MapGroup],
+      g_ram[kActRaiserWram_CurrentMap]), ActRaiserActionBg_TerrainProfile());
+}
 
 uint16_t ActionEffectCapture_VisualClock(void) {
   const uint16_t game_clock=(uint16_t)(g_ram[kActRaiserWram_GameFrame]|g_ram[kActRaiserWram_GameFrame+1]<<8);
@@ -199,6 +209,13 @@ static void PreparePendingFrame(void) {
   if (!g_settings.action_effect_lighting)
     for (unsigned i = 0; i < s_pending.scene.effect_count; ++i)
       s_pending.scene.effects[i].flags |= kActionEffectFlag_LightingOff;
+  const unsigned group=g_ram[kActRaiserWram_MapGroup],room=g_ram[kActRaiserWram_CurrentMap];
+  const DioramaRoomOverride *trunk_room=CurrentTrunkRoom();
+  DioramaTrunkSettings trunk=DioramaTrunk_Resolve(group,room,trunk_room);
+  trunk.enabled &= g_diorama_frame_active&&g_settings.action_environmental_effects;
+  ActionTrunk_Capture(&s_pending.observer.trunk,&s_pending.scene,
+      trunk.enabled?ActRaiserActionBg_TrunkAssets(group,room,trunk_room):NULL,
+      trunk,s_pending.observer.scene_clock,g_settings.action_effect_particles);
   s_pending.valid = true;
 }
 
@@ -213,6 +230,10 @@ void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
   s_pending.valid = false;
   dst->diorama_map_group = g_ram[kActRaiserWram_MapGroup];
   dst->diorama_map_number = g_ram[kActRaiserWram_CurrentMap];
+  const DioramaRoomOverride *trunk_room=CurrentTrunkRoom();
+  dst->diorama_trunk_settings=DioramaTrunk_Resolve(dst->diorama_map_group,dst->diorama_map_number,trunk_room);
+  dst->diorama_trunk=g_diorama_frame_active&&dst->diorama_trunk_settings.enabled?
+      ActRaiserActionBg_TrunkAssets(dst->diorama_map_group,dst->diorama_map_number,trunk_room):NULL;
   Diorama_PublishLiveLayerSection(
       dst->diorama_map_group, dst->diorama_map_number,
       dst->diorama_layer_section);

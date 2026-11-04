@@ -193,6 +193,8 @@ typedef struct FrameSlot {
   /* Immutable key for scoped diorama layer overrides. The section is derived
    * from positively identified captured scene art, never from present-time
    * live WRAM. */
+  const struct ActionTrunkAssets *diorama_trunk;
+  DioramaTrunkSettings diorama_trunk_settings;
   uint8_t diorama_map_group;
   uint8_t diorama_map_number;
   uint8_t diorama_layer_section;

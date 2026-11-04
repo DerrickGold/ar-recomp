@@ -91,6 +91,7 @@ function setKey(target, k, value) {
 function applySide(op, which) {
   if(op.backgroundReset)return BackgroundReset.restore(op.backgroundReset,which);
   if(op.palette)return PaletteEditor.restore(op.palette,which);
+  if(op.trunk)return TrunkEditor.restore(op.trunk,which);
   if(op.nativeBloom)return NativeBloomEditor.restore(op.nativeBloom,which);
   if(op.policy)return BackgroundPolicyEditor.restore(op.policy,which);
   if(op.effects){EffectEditor.restore(op.effects[which]);return true;}

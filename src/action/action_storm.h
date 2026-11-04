@@ -108,7 +108,7 @@ static inline bool ActionStorm_Flash(const ActionEffectInstance *e, ActionStormF
   return true;
 }
 
-/* Both storm channels and wall sparks must be filtered with their source art.
+/* Sky lighting and wall sparks must be filtered with their source art.
  * The compositor probes actual geometry before allocating/copying a target. */
 static inline bool ActionBackground_HasSourceEffects(const ActionSceneEffectFrame *frame,
     bool lighting, bool particles) {
@@ -116,6 +116,8 @@ static inline bool ActionBackground_HasSourceEffects(const ActionSceneEffectFram
   for (unsigned i=0;i<frame->authored_count;++i) {
     const ActionEffectInstance *e=&frame->authored[i];
     if (!(e->flags&kActionEffectFlag_Visible)) continue;
+    if(lighting&&(e->kind==kActionEffect_AuthoredAurora||e->kind==kActionEffect_AuthoredStarfield)&&
+        e->render_layer==kActionEffectRenderLayer_Bg2Weather&&e->tuning.intensity>0)return true;
     if (particles && e->render_layer==kActionEffectRenderLayer_Bg2SourceAlpha) return true;
     ActionStormFlash flash;
     if (lighting && e->kind==kActionEffect_AuthoredStorm &&

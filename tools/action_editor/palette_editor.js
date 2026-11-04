@@ -133,3 +133,55 @@ const NativeBloomEditor=(()=>{
   $('#nebula-apply').onclick=()=>apply();$('#nebula-reset').onclick=()=>apply(true);
   return {refresh,restore};
 })();
+
+/* Connected tree enclosure: saved independently of ordinary BG policies. */
+const defaultTrunk={enabled:1,depth:.38,recess:.24,wrap:1,gust:1,frost:1,bark:1};
+function parseTrunk(values) {
+  const result={};
+  for(const key of Object.keys(defaultTrunk)) {
+    const value=Number(values[key]),max=key==='depth'?.4:key==='recess'?.35:1;
+    if(!Number.isFinite(value)||value<0||value>max||key==='enabled'&&!Number.isInteger(value))
+      throw Error(`Invalid trunk ${key} (0–${max}).`);
+    result[key]=value;
+  }
+  return result;
+}
+function trunkIniLines(r) {
+  const saved=roomConfig(r).trunk;
+  return saved?[`trunk = ${Object.keys(defaultTrunk).map(key=>`${key}:${saved[key]}`).join(' ')}`]:[];
+}
+function trunkEnabled(r) {
+  return r?.group===6&&[6,7].includes(r.map)&&(roomConfig(r).trunk||defaultTrunk).enabled===1;
+}
+const TrunkEditor=(()=>{
+  const controls=Object.fromEntries(Object.keys(defaultTrunk).map(k=>[k,$('#trunk-'+k)]));
+  function refresh() {
+    if(!room)return;
+    const eligible=room.group===6&&[6,7].includes(room.map),values=roomConfig(room).trunk||defaultTrunk;
+    $('#trunk-section').hidden=!eligible;
+    for(const [key,input] of Object.entries(controls)){input.disabled=!eligible;input.value=values[key];}
+  }
+  function apply(reset=false) {
+    const before=roomConfig(room).trunk;
+    try {
+      const after=reset?undefined:parseTrunk(Object.fromEntries(Object.entries(controls).map(([k,v])=>[k,v.value])));
+      if(JSON.stringify(before)===JSON.stringify(after))return;
+      let text;roomConfig(room).trunk=after;
+      try{text=roomSectionIni(room);}finally{roomConfig(room).trunk=before;}
+      SharedRoomPreview.validateScenery(text);
+      commitOp();roomConfig(room).trunk=after;
+      undoStack.push({label:'tree enclosure',trunk:{room:roomKey(room),before,after}});
+      if(undoStack.length>kMaxUndo)undoStack.shift();redoStack.length=0;
+      markEditorChanged();SharedRoomPreview.invalidate();refreshHistoryButtons();refresh();draw();
+      $('#trunk-status').textContent='Applied. Save project to keep these settings.';
+    }catch(e){$('#trunk-status').textContent=`Not applied: ${e.message}`;}
+  }
+  function restore(op,which) {
+    const target=DATA.rooms.find(r=>roomKey(r)===op.room);if(!target)return false;
+    roomConfig(target).trunk=op[which];
+    if(roomKey(room)!==op.room){room=terrainRoom(target,terrainProfile);$('#room').value=String(DATA.rooms.indexOf(target));setLayer(bgIndex);}
+    markEditorChanged();SharedRoomPreview.invalidate();refresh();draw();return true;
+  }
+  $('#trunk-apply').onclick=()=>apply();$('#trunk-reset').onclick=()=>apply(true);
+  return {refresh,restore};
+})();

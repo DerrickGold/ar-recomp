@@ -3,6 +3,34 @@
 #include "action_effect_render_internal.h"
 #include "action_authored_particles.h"
 #include "action_light_kinds.h"
+#include "action_soft_light.h"
+
+/* Material-only caustics share the atlas and clipped triangle transport with
+ * other textured lights. Geometry stays fixed; UV deformation moves the light. */
+static bool ReflectedRipples(ActionEffectGeometryWriter *writer,const ActionEffectInstance *e,
+    ActionEffectProjectPointFn project,ActionEffectClipBoundsFn clip_fn,void *context) {
+  ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
+  ActionEffectLocalRect clip=e->geometry.data.rect;
+  if(clip.x1<=clip.x0||clip.y1<=clip.y0)return true;
+  if(clip_fn&&!clip_fn(context,&mesh,&clip))return true;
+  const float phase=ActionWaterWave_Phase(e)+e->field_style.drift*.01f;
+  const float scatter=e->field_style.scatter>0&&!writer->light_receiver?e->field_style.scatter:1;
+  for(unsigned layer=0;layer<kActionWaterRippleLayers;++layer) {
+    ArRenderVertex2D vertices[9];int mapped[9];
+    for(unsigned row=0;row<3;++row)for(unsigned col=0;col<3;++col) {
+      const unsigned n=row*3+col;
+      vertices[n]=ActionWaterRipple_Vertex(e,phase,layer,col,row);
+      vertices[n].color.a*=scatter;mapped[n]=-1;
+    }
+    for(unsigned row=0;row<2;++row)for(unsigned col=0;col<2;++col) {
+      const int a=row*3+col,b=a+1,c=a+3,d=c+1;
+      const int indices[]={a,b,c,b,d,c};
+      for(unsigned t=0;t<6;t+=3)if(!AppendSceneClippedTriangle(writer,&mesh,vertices,mapped,indices+t,
+          &clip,project,context))return false;
+    }
+  }
+  return true;
+}
 
 /* Three density slices over fixed world-space samples. Clip the grid in local
  * space before projection; never clamp projected beam/mesh vertices to screen
@@ -107,11 +135,20 @@ static bool AppendAuthoredEnvironmentBase(ActionEffectGeometryWriter *writer,
   const float width = r->x1-r->x0, height = r->y1-r->y0;
   if (effect->kind == kActionEffect_AuthoredLight) {
     if (!lighting) return true;
+    if(!isfinite(effect->field_style.scatter)||effect->field_style.scatter<0||effect->field_style.scatter>1)return false;
+    if(!ActionSoftLight_Valid(effect))return false;
+    if(effect->field_style.ripple)return ReflectedRipples(writer,effect,project,clip,context);
     ActionEffectGlowStyle glow = {.radius_x=width*.5f,.radius_y=height*.5f,
-      .ring_scale={.16f,.58f,1}, .centre=tint, .ring={tint,tint,tint}, .axis_x=1};
-    glow.centre.a=.20f*intensity;glow.ring[0].a=.16f*intensity;
-    glow.ring[1].a=.05f*intensity;glow.ring[2].a=0;
-    return AppendGlow(writer,effect,&glow,1,0,0,project,context);
+      .centre=tint, .ring={tint,tint,tint}, .axis_x=1};
+    glow.centre.a=kActionSoftLightAlpha[0]*intensity;
+    for(unsigned i=0;i<3;++i) {
+      glow.ring_scale[i]=kActionSoftLightRadius[i+1];
+      glow.ring[i].a=kActionSoftLightAlpha[i+1]*intensity;
+    }
+    /* Visible diffusion is independent of energy received by cave artwork
+     * and actors. The same anchored footprint serves both existing passes. */
+    const float scatter=effect->field_style.scatter;
+    return AppendGlow(writer,effect,&glow,scatter>0&&!writer->light_receiver?scatter:1,0,0,project,context);
   }
   if(effect->kind==kActionEffect_AuthoredFlame&&lighting) {
     const unsigned ticks=EffectVisualTicks(effect,effect->pulse_ticks);

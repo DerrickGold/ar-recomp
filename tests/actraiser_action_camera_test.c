@@ -9,6 +9,7 @@
 #include "present/display_geometry.h"
 #include "snesrecomp/game/cpu.h"
 #include "support/test_assert.h"
+#include "action/action_trunk.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -28,6 +29,12 @@ RecompReturn bank_02_B9D5_M0X0(CpuState *cpu) { (void)cpu; s_dx = (int16_t)Read(
 RecompReturn bank_02_BA0B_M0X0(CpuState *cpu) { (void)cpu; s_dy = (int16_t)Read(0x7e); ++s_calls; return RECOMP_RETURN_NORMAL; }
 RecompReturn bank_00_A1B0_M0X0(CpuState *cpu) { (void)cpu; ++s_calls; return RECOMP_RETURN_NORMAL; }
 bool ActRaiserActionBg_HleEnabled(void) { return s_hle; }
+bool Diorama_ModeIsOn(void) { return g_settings.diorama_mode; }
+const ActionTrunkAssets *ActRaiserActionBg_TrunkAssets(unsigned group,unsigned room,const DioramaRoomOverride *edits) {
+  static ActionTrunkAssets assets;
+  if(!DioramaTrunk_Resolve(group,room,edits).enabled)return NULL;
+  assets.room=room;assets.height=2048;return &assets;
+}
 const DioramaLayerOrderTable *DioramaLayerManifest_Table(void) { return &s_layers; }
 const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void) {
   if (!g_settings.diorama_mode) return NULL;
@@ -190,8 +197,24 @@ static void NearlyScreenSizedRoom(void) {
     }
   }
 }
+static void TrunkPolicy(void) {
+  for(unsigned map=6;map<=7;++map) {
+    Reset();g_settings.diorama_mode=true;
+    g_ram[kActRaiserWram_MapGroup]=6;g_ram[kActRaiserWram_CurrentMap]=map;
+    Write(kActRaiserWram_Bg1Width,1024);Write(kActRaiserWram_Bg1Height,2048);
+    Step(384,1,0);uint16_t lo,hi;assert(ActRaiser_ActionCameraTravel(&lo,&hi));
+    DioramaRoomOverride *room=DioramaLayerOrder_FindOrAdd(&s_layers,6,map);assert(room);
+    assert(DioramaLayerOrder_ParseLine(room,"bg1-policy = edge:clamp horizontal:fixed left:0 right:0",NULL));
+    assert(DioramaLayerOrder_ParseLine(room,"bg1 = z:-1 alpha:0 rake:1 bow:1",NULL));
+    for(int sky=0;sky<3;++sky) {
+      g_settings.diorama_skybox=sky;g_settings.diorama_layer_bg1=false;
+      Step(384,1,0);uint16_t a,b;assert(ActRaiser_ActionCameraTravel(&a,&b));
+      assert(a==lo&&b==hi&&Read(kActRaiserWram_Bg1CameraX)==385);
+    }
+  }
+}
 int main(void) {
-  AutoProfiles(); SavedPolicy(); CapturePolicy(); NearlyScreenSizedRoom();
+  AutoProfiles(); SavedPolicy(); CapturePolicy(); NearlyScreenSizedRoom();TrunkPolicy();
   DioramaLayerOrder_ClearTable(&s_layers);
   puts("Production action camera: Auto/manual policies, saved extents, edge stops, native Y and capture guards passed");
   return 0;

@@ -1,3 +1,5 @@
+#include "diorama/diorama_trunk_gpu.h"
+#include "action/action_trunk.h"
 #include "action/action_cloud_light.h"
 #include "action/action_heat.h"
 #include "action/action_storm.h"
@@ -32,6 +34,28 @@
 static ArRenderTexture s_plane_textures[kDioramaPlane_Count];
 static ArRenderTexture s_resolved_textures[kDioramaPlane_Count];
 static uint32_t *s_bg_fallback[kDioramaPlane_Count + 1];
+static uint32_t *s_trunk_fallback[3];
+
+/* CPU backends and diagnostic/CPU-motion snapshots use the same split as the
+ * GPU path. Never read back a texture merely to obtain this representation. */
+static bool MaterializeTrunk(const FrameSlot *slot,
+    const uint8_t *pixels[kDioramaPlane_Count],size_t pitches[kDioramaPlane_Count]) {
+  const unsigned planes[3]={SR_PPU_OVERLAY_BG1,kDioramaPlane_Bg1Hi,kDioramaPlane_Bg1Far};
+  const uint32_t *input[3];size_t input_pitch[3];
+  for(unsigned i=0;i<3;++i) {
+    if(!s_trunk_fallback[i])s_trunk_fallback[i]=calloc(SR_PPU_SURFACE_MAX_WIDTH*SR_PPU_SURFACE_MAX_HEIGHT,4);
+    if(!s_trunk_fallback[i])return false;
+    input[i]=(const uint32_t *)pixels[planes[i]];input_pitch[i]=pitches[planes[i]]/4;
+  }
+  ActionTrunk_Split(slot->diorama_trunk,slot->bg1_camera_x-slot->ws_extra-slot->obj_apron,
+      slot->bg1_camera_y-slot->ws_extra_top+1,slot->snes_width+slot->obj_apron*2,
+      slot->snes_height+slot->ws_extra_top+slot->ws_extra_bottom,SR_PPU_SURFACE_MAX_WIDTH,
+      input,input_pitch,s_trunk_fallback,(slot->inidisp&0x80)?0:slot->inidisp&15);
+  for(unsigned i=0;i<3;++i) {
+    pixels[planes[i]]=(const uint8_t *)s_trunk_fallback[i];pitches[planes[i]]=SR_PPU_SURFACE_MAX_WIDTH*4;
+  }
+  return true;
+}
 static uint32_t s_diorama_uploaded_plane_mask;
 static DioramaCoverageMask s_diorama_coverage_masks[kDioramaPlane_Count];
 static uint64_t s_diorama_bg2_content_revision;
@@ -297,7 +321,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   const DioramaPerformanceScope gpu_capture_scope =
       DioramaPerformance_Begin(kDioramaPerformance_Upload);
   ArRenderTexture gpu_skybox = ArRenderTexture_Invalid();
-  const uint32_t gpu_mask = DioramaBgGpu_Resolve(device,
+  uint32_t gpu_mask = DioramaBgGpu_Resolve(device,
       slot->background_packet, upload_mask, s_resolved_textures, &gpu_skybox, &gpu_changed);
   if (ArRenderTexture_IsValid(gpu_skybox)) {
     skybox_changed = (gpu_changed & (1u << kDioramaPlane_Count)) != 0;
@@ -388,8 +412,17 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   const bool needs_cpu_analysis = slot->interp_setting_enabled &&
       !DioramaFrameGeneration_UsesGpuAnalysis(device, slot);
   const bool needs_cpu_diagnostic = getenv("AR_PLANESTAT") || getenv("AR_DIORAMA_SNAPSHOT");
+  const bool trunk=slot->diorama_trunk&&slot->diorama_trunk_settings.enabled;
+  const bool gpu_trunk=trunk&&DioramaTrunkGpu_Prepare(device);
   MaterializeBackgrounds(slot->background_packet, owned_mask & upload_mask &
-      (needs_cpu_analysis || needs_cpu_diagnostic ? UINT32_MAX : ~gpu_mask), pixels, pitch_bytes);
+      (needs_cpu_analysis || needs_cpu_diagnostic || (trunk&&!gpu_trunk) ? UINT32_MAX : ~gpu_mask), pixels, pitch_bytes);
+  if(trunk&&!gpu_trunk&&!MaterializeTrunk(slot,pixels,pitch_bytes)) {
+    SessionFatal_Request("Cannot allocate trunk enclosure surfaces");return;
+  }
+  if(trunk&&!gpu_trunk)for(unsigned i=0;i<3;++i) {
+    const unsigned plane=i==0?SR_PPU_OVERLAY_BG1:i==1?kDioramaPlane_Bg1Hi:kDioramaPlane_Bg1Far;
+    gpu_mask&=~(1u<<plane);s_resolved_textures[plane]=s_plane_textures[plane];
+  }
   /* Row 0 is the top of the captured world band. Upload both sides; the
    * authentic frame begins at ws_extra_top and the lower band follows it. */
   const DioramaUploadResult upload = Diorama_UploadResolved(
@@ -398,6 +431,14 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
       slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
       slot->obj_apron, slot->diorama_bg_apron_mask, upload_mask, gpu_mask, gpu_changed);
   s_diorama_uploaded_plane_mask = upload.synchronized_plane_mask;
+  uint32_t trunk_changed=upload.changed_plane_mask;
+  if(gpu_trunk&&!DioramaTrunkGpu_Upload(device,slot,s_resolved_textures,upload.changed_plane_mask,&trunk_changed)) {
+    SessionFatal_Request("Trunk enclosure split failed: %s",ArRenderDevice_LastError(device));return;
+  }
+  if(slot->diorama_trunk) s_diorama_uploaded_plane_mask|=(1u<<SR_PPU_OVERLAY_BG1)|(1u<<kDioramaPlane_Bg1Hi)|(1u<<kDioramaPlane_Bg1Far);
+  if(gpu_trunk&&(needs_cpu_analysis||needs_cpu_diagnostic)&&!MaterializeTrunk(slot,pixels,pitch_bytes)) {
+    SessionFatal_Request("Cannot allocate trunk enclosure snapshot");return;
+  }
   if (upload.changed_plane_mask &
       ((UINT32_C(1) << SR_PPU_OVERLAY_BG2) | (UINT32_C(1) << kDioramaPlane_Bg2Far)))
     s_diorama_bg2_content_revision++;
@@ -414,6 +455,10 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     } else s_diorama_coverage_masks[plane] = upload.coverage_masks[plane];
   }
   PerformanceMetrics_End(coverage);
+  if(slot->diorama_trunk) {
+    s_diorama_coverage_masks[kDioramaPlane_Bg1Hi]=UINT64_MAX;
+    s_diorama_coverage_masks[kDioramaPlane_Bg1Far]=UINT64_MAX;
+  }
   PlaneStatCensus(
       pixels, pitch_bytes,
       slot->snes_width + slot->obj_apron * 2,
@@ -432,7 +477,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
       DioramaPerformance_Begin(kDioramaPerformance_FrameAnalysis);
   DioramaFrameGeneration_CaptureWithSkybox(
       device, slot, s_resolved_textures, pixels, pitch_bytes,
-      s_diorama_uploaded_plane_mask, upload.changed_plane_mask,
+      s_diorama_uploaded_plane_mask, trunk_changed,
       s_diorama_skybox_view.texture, skybox_changed);
   DioramaPerformance_End(frame_analysis);
 }
@@ -779,6 +824,9 @@ retry_projection:;
       .visible_planes = render.visible_planes, .device = device};
   DioramaScene scene = {
       .render = &render,
+      .trunk=slot->diorama_trunk,.trunk_settings=slot->diorama_trunk_settings,
+      .trunk_effects=slot->action_environmental_effects?&slot->action_scene_effects:NULL,
+      .trunk_lighting=slot->action_effect_lighting,.trunk_particles=slot->action_effect_particles,
       .map_group = slot->diorama_map_group,
       .map_number = slot->diorama_map_number,
       .native_bloom_clock = slot->action_scene_clock,
@@ -905,6 +953,8 @@ void PresentDiorama_Reset(ArRenderDevice *device) {
     free(s_bg_fallback[plane]);
     s_bg_fallback[plane] = NULL;
   }
+  DioramaTrunkGpu_Reset(device);
+  for(unsigned i=0;i<3;++i){free(s_trunk_fallback[i]);s_trunk_fallback[i]=NULL;}
   DioramaBgGpu_Reset(device);
   DioramaSnapshotCapture_Reset();
   ArRenderDevice_DestroyTexture(device, s_diorama_skybox_texture);

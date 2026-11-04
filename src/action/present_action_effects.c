@@ -152,7 +152,8 @@ static bool FrameUsesAlphaBg1Mask(const FrameSlot *slot) {
   if (slot->action_scene_effects.authored_count <= kActionAuthoredMaxInstances)
     for (unsigned i=0;i<slot->action_scene_effects.authored_count;++i) {
       const ActionEffectInstance *e=&slot->action_scene_effects.authored[i];
-      if ((e->flags & kActionEffectFlag_Visible) && e->render_layer==kActionEffectRenderLayer_Bg1Mist)
+      if ((e->flags & kActionEffectFlag_Visible) && (e->render_layer==kActionEffectRenderLayer_Bg1Mist ||
+          (e->kind==kActionEffect_AuthoredCloud&&e->field_style.ground_depth>0&&e->field_style.ground_width>0)))
         return true;
     }
   return false;

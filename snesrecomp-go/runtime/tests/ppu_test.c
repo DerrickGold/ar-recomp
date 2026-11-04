@@ -2227,6 +2227,7 @@ typedef struct CaptureTileFixture {
     bool interior_only;
     bool complete;
     bool character;
+    bool sparse_masks;
 } CaptureTileFixture;
 
 static uint32_t capture_tile_lookup(void *context, int32_t x, int32_t y,
@@ -2242,8 +2243,15 @@ static uint32_t capture_tile_lookup(void *context, int32_t x, int32_t y,
         .flags = SR_PPU_CAPTURE_TILE_REPLACE,
     };
     if ((x & 3) == 2) tile->flags |= SR_PPU_CAPTURE_TILE_BLANK;
+    if (fixture->sparse_masks) {
+        tile->flags = 0;
+        tile->band = 1;
+    }
     if (fixture->masks) {
         for (int row = 0; row < 8; ++row) {
+            /* Include entirely inert mask tiles and empty rows next to real
+             * edits. Neither may hide the ordinary source or its backing. */
+            if (fixture->sparse_masks && ((row & 1) || (x & 7) == 0)) continue;
             tile->black_rows[row] = 0x81;
             tile->transparent_rows[row] = (uint8_t)(0x40u >> (row & 3));
         }
@@ -2296,9 +2304,11 @@ static void test_native_capture_tiles(void) {
     if (!sources[0] || !sources[1] || !sources[2] || !sources[3] || !sources[4]) goto cleanup;
     /* The oracle is the ordinary BG renderer with a merged tile provider,
      * independently exercising native scalar and tile-span paths. */
-    for (int variant = 0; variant < 48; ++variant) {
-        const int bg = variant / 24, mode = variant % 12;
-        const bool character = (variant % 24) >= 12;
+    for (int variant = 0; variant < 50; ++variant) {
+        const bool sparse_masks = variant >= 48;
+        const int bg = sparse_masks ? variant - 48 : variant / 24;
+        const int mode = sparse_masks ? 7 : variant % 12;
+        const bool character = !sparse_masks && (variant % 24) >= 12;
         CaptureTileFixture fixtures[5] = {{0}, {.masks = mode == 7},
             {.merged = true, .masks = mode == 7}, {.masks = mode == 7}, {.masks = mode == 7}};
         for (int i = 0; i < 5; ++i) {
@@ -2309,6 +2319,7 @@ static void test_native_capture_tiles(void) {
             fixtures[i].interior_only = mode == 4;
             fixtures[i].complete = mode >= 8;
             fixtures[i].character = character;
+            fixtures[i].sparse_masks = sparse_masks;
             Ppu *ppu = sources[i];
             ppu_reset(ppu);
             ppu->inidisp = 15;
@@ -2435,7 +2446,7 @@ static void test_native_capture_tiles(void) {
             CHECK(memcmp(planes[1], planes[3], sizeof(planes[1])) == 0);
             CHECK(fixtures[3].calls > 0 && fixtures[3].calls < fixtures[1].calls / 2);
         }
-        CHECK(sources[1]->overlayRenderContentMask[bg] == 7u);
+        CHECK(sources[1]->overlayRenderContentMask[bg] == (sparse_masks ? 1u : 7u));
         /* Guard terrain is streamed even where the native game stops. */
         if (mode == 0) {
             CHECK(planes[1][0][0] != 0u);

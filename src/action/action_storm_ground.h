@@ -5,13 +5,6 @@
 #include "action_storm.h"
 #include "action_environment_scene.h"
 
-static inline const ActionRoomSceneFrameState *ActionStorm_GroundFrame(
-    const ActionEnvironmentScene *scene, ActionRoomSceneFrameState *scratch) {
-  if (!scene) return NULL;
-  if (scene->background_frame) return scene->background_frame;
-  return scene->capture_background_frame && scene->capture_background_frame(scene, scratch) ? scratch : NULL;
-}
-
 static inline bool ActionStorm_GroundPixel(const ActionEnvironmentScene *scene,
     const ActionRoomSceneFrameState *frame, const float *depth,
     const ActionEffectInstance *e, ArRenderPointF point) {

@@ -44,3 +44,5 @@ src/action/action_castle_field_capture.c
 src/action/action_marsh_field_capture.c
 src/action/action_water_field.c
 src/action/action_water_field_capture.c
+src/action/action_trunk.c
+src/action/action_trunk_life.c

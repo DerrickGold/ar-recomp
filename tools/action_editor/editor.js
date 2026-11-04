@@ -200,6 +200,7 @@ function draw() {
 function drawNow() {
   PaletteEditor.refresh();
   NativeBloomEditor.refresh();
+  TrunkEditor.refresh();
   BackgroundPolicyEditor.refresh();
   refreshEditorFeedback();
   if (mode === '2d') draw2d();

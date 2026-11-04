@@ -2022,10 +2022,16 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_action_effect_capture_test
         tests/action_effect_capture_test.c
-        src/action/action_effect_capture.c src/action/action_effect_clock.c)
+        src/action/action_effect_capture.c src/action/action_effect_clock.c
+        src/action/action_trunk_life.c src/diorama/diorama_layer_order.c)
     target_include_directories(actraiser_action_effect_capture_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_action_effect_capture COMMAND actraiser_action_effect_capture_test)
+
+    add_executable(actraiser_action_trunk_test tests/action_trunk_test.c src/action/action_trunk_life.c)
+    target_include_directories(actraiser_action_trunk_test PRIVATE src)
+    target_link_libraries(actraiser_action_trunk_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_action_trunk COMMAND actraiser_action_trunk_test)
 
     add_executable(actraiser_action_effect_recipes_test
         tests/action_effect_recipes_test.c src/action/action_effect_recipes.c src/action/action_ray_field.c src/action/action_atmosphere_field.c src/action/action_atmosphere_field_capture.c src/action/action_moon_field_capture.c
@@ -2251,6 +2257,7 @@ if(BUILD_TESTING)
         src/action/action_bg_world.c
         src/action/action_room_scene.c src/action/action_room_terrain.c src/action/action_room_mosaic.c
         src/actraiser/actraiser_action_bg.c
+        src/action/action_trunk.c
         src/diorama/diorama_layer_order.c)
     target_link_libraries(actraiser_action_bg_test PRIVATE
         actraiser_rom_decode_test_support)
@@ -4194,6 +4201,15 @@ if(BUILD_TESTING)
         src/app/session_fatal.c
         src/render/gpu_compile_log.c
         src/platform/sdl/presentation_geometry_sdl.c src/render/presentation_layout.c)
+    add_executable(actraiser_diorama_trunk_gpu_test tests/diorama_trunk_gpu_test.c
+        src/platform/sdl/diorama_trunk_gpu_sdl.c src/action/action_trunk.c
+        src/action/action_room_scene.c src/diorama/diorama_layer_order.c
+        src/render/gpu_compile_log.c src/platform/sdl/presentation_geometry_sdl.c src/render/presentation_layout.c)
+    target_include_directories(actraiser_diorama_trunk_gpu_test PRIVATE src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diorama_trunk_gpu_test PRIVATE
+        actraiser_render_sdl_test_support actraiser_rom_decode_test_support SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_diorama_trunk_gpu COMMAND actraiser_diorama_trunk_gpu_test)
+    set_tests_properties(actraiser_diorama_trunk_gpu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
     add_executable(actraiser_gpu_block_motion_test
         tests/gpu_block_motion_test.c src/platform/sdl/gpu_block_motion_sdl.c
         src/render/gpu_compile_log.c

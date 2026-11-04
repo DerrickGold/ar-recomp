@@ -1,3 +1,4 @@
+#include "action_trunk_life.h"
 #include "render/cloud_motion.h"
 #include "render/mist_rainbow.h"
 /* Pure authoring kernels. All storage belongs to the caller's retained batch;
@@ -7,7 +8,9 @@
 #include "action_exposure.h"
 #include "action_effect_masks.h"
 #include "action_light_kinds.h"
+#include "action_soft_light.h"
 #include "action_storm.h"
+#include "action_starfield.h"
 
 typedef struct ExposureWriter {
   ActionEffectGeometryWriter *writer;
@@ -98,6 +101,7 @@ static ArRenderColorF DirectSkyLight(ActionEffectGeometryWriter *w,const ActionE
   y+=e->world_y+(foreground?w->frame->bg1_to_bg2_y:0);
   for(unsigned i=0;i<(unsigned)w->cloud_light.meta[0];++i) {
     const DioramaCloudLightRegion *light=&w->cloud_light.regions[i];
+    if(light->core[2]==0||light->color[3]==0)continue;
     const CloudLightSample s=DioramaCloudLight_Sample(light,x,y);
     const float strength=s.streak*light->core[2]*light->color[3];
     incoming.r+=(light->color[0]*.8f+light->spill[0]*.2f)*strength;
@@ -113,6 +117,11 @@ static ArRenderColorF DirectSkyLight(ActionEffectGeometryWriter *w,const ActionE
 static void ParticleLightTint(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
     float x,float y,ArRenderColorF *tint,bool lighting) {
   if(e->field_style.canopy_response<=0)return;
+  if(e->field_style.pattern==kActionParticle_IceCrystals&&
+      (!w->frame||w->atmosphere_unlit)) {
+    tint->a*=1-e->field_style.canopy_response;
+    return;
+  }
   if(e->field_style.pattern==kActionParticle_WaterGlints&&!lighting) {
     tint->a*=1-e->field_style.canopy_response;
     return;
@@ -123,10 +132,16 @@ static void ParticleLightTint(ActionEffectGeometryWriter *w,const ActionEffectIn
     return;
   }
   const ActionSceneEffectFrame *f=w->frame;float strength=0;ArRenderColorF incoming={0};
-  for(unsigned i=0;foreground&&i<f->authored_count&&i<kActionAuthoredMaxInstances;++i) {
+  for(unsigned i=0;i<f->authored_count&&i<kActionAuthoredMaxInstances;++i) {
     const ActionEffectInstance *light=&f->authored[i];
-    if(light->kind!=kActionEffect_AuthoredCanopy||!(light->flags&kActionEffectFlag_Visible)||
-        (light->flags&kActionEffectFlag_LightingOff))continue;
+    if(!(light->flags&kActionEffectFlag_Visible)||(light->flags&kActionEffectFlag_LightingOff))continue;
+    if(light->kind==kActionEffect_AuthoredLight &&
+        LightingWorldPlane(light->projection_plane)==LightingWorldPlane(e->projection_plane)) {
+      const ArRenderColorF sample=ActionSoftLight_Sample(light,e->world_x+x,e->world_y+y);
+      strength+=sample.a;incoming.r+=sample.r;incoming.g+=sample.g;incoming.b+=sample.b;
+      continue;
+    }
+    if(!foreground||light->kind!=kActionEffect_AuthoredCanopy)continue;
     const float amount=ActionCanopy_Sample(light,&f->authored_floor[i],e->world_x+x,e->world_y+y);
     const ArRenderColorF color=FieldColor(light->tuning.color);
     strength+=amount;incoming.r+=color.r*amount;incoming.g+=color.g*amount;incoming.b+=color.b*amount;
@@ -140,6 +155,134 @@ static void ParticleLightTint(ActionEffectGeometryWriter *w,const ActionEffectIn
     tint->g*=1-response+response*incoming.g/strength;
     tint->b*=1-response+response*incoming.b/strength;
   }
+}
+
+/* A gentle, periodic energy envelope shared by sky curtains and an optional
+ * reflected-light gradient. Matching cycle lengths keeps their breathing in
+ * step without hidden emitter links or renderer-owned animation history. */
+static float SkyLightEnvelope(const ActionEffectInstance *e) {
+  if(e->field_style.twinkle<=0||!e->particle_lifetime)return 1;
+  const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
+  return 1-e->field_style.twinkle*(.5f-.5f*cosf(phase));
+}
+/* The gradient's mesh and incident-light samples use the same vertices. This
+ * keeps snow reflections aligned with the light illuminating nearby actors. */
+static ArRenderVertex2D GradientVertex(const ActionEffectInstance *e,unsigned col,unsigned row) {
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float dx=sinf(e->field_style.angle*.0174532925f),dy=cosf(e->field_style.angle*.0174532925f);
+  const float width=r->x1-r->x0,height=r->y1-r->y0,span=fabsf(dx)*width+fabsf(dy)*height;
+  const float x=r->x0+width*col*.25f,y=r->y0+height*row*.25f;
+  const float t=fmaxf(0,fminf(1,.5f+(x*dx+y*dy)/span));
+  const float edge=fminf(fminf(col,4-col),fminf(row,4-row))*.25f;
+  const float fade=e->field_style.softness>0?fminf(1,edge/(e->field_style.softness*.5f)):1;
+  ArRenderVertex2D out={.position={x,y},.color=MixColor(FieldColor(e->tuning.color),FieldColor(e->particle_style.color_end),t)};
+  out.color.a=fminf(1,e->tuning.intensity*.18f)*fade*SkyLightEnvelope(e);
+  return out;
+}
+static ArRenderColorF GradientLight(const ActionEffectInstance *e,float x,float y) {
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  x-=e->world_x;y-=e->world_y;
+  if(x<=r->x0||x>=r->x1||y<=r->y0||y>=r->y1)return (ArRenderColorF){0};
+  const float u=(x-r->x0)*4/(r->x1-r->x0),v=(y-r->y0)*4/(r->y1-r->y0);
+  const unsigned col=(unsigned)u,row=(unsigned)v;
+  const float tx=u-col,ty=v-row;
+  const bool upper=tx+ty<=1;
+  const ArRenderColorF a=GradientVertex(e,col+(upper?0:1),row+(upper?0:1)).color;
+  const ArRenderColorF b=GradientVertex(e,col+1,row).color,c=GradientVertex(e,col,row+1).color;
+  const float wa=upper?1-tx-ty:tx+ty-1,wb=upper?tx:1-ty,wc=upper?ty:1-tx;
+  ArRenderColorF out={a.r*wa+b.r*wb+c.r*wc,a.g*wa+b.g*wb+c.g*wc,
+      a.b*wa+b.b*wb+c.b*wc,a.a*wa+b.a*wb+c.a*wc};
+  out.a*=e->tuning.illumination_set?e->tuning.illumination:ActionLightKind_Illumination(e->kind);
+  out.r*=out.a;out.g*=out.a;out.b*=out.a;
+  return out;
+}
+/* Snow stays visible in shade. Only the extra specular flash needs incident
+ * sunlight; turning lighting off cannot leave self-illuminated sparkles. */
+static void ReflectiveGrainTint(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    float x,float y,uint32_t seed,float age,float envelope,ArRenderColorF *tint,bool lighting,bool glint) {
+  const float response=e->field_style.canopy_response;
+  const float twinkle=glint?e->field_style.twinkle:0;
+  if(response<=0) {Twinkle(twinkle,seed,age,envelope,tint);return;}
+  ArRenderColorF incoming={0};
+  if(lighting&&w->frame&&!w->atmosphere_unlit) {
+    incoming=DirectSkyLight(w,e,x,y);
+    const unsigned plane=LightingWorldPlane(e->projection_plane);
+    for(unsigned i=0;i<w->frame->authored_count&&i<kActionAuthoredMaxInstances;++i) {
+      const ActionEffectInstance *light=&w->frame->authored[i];
+      if(light->kind!=kActionEffect_AuthoredGradient||!(light->flags&kActionEffectFlag_Visible)||
+          (light->flags&kActionEffectFlag_LightingOff)||LightingWorldPlane(light->projection_plane)!=plane)continue;
+      const ArRenderColorF sample=GradientLight(light,e->world_x+x,e->world_y+y);
+      incoming.r+=sample.r;incoming.g+=sample.g;incoming.b+=sample.b;incoming.a+=sample.a;
+    }
+  }
+  const float lit=fminf(1,incoming.a*6);
+  if(incoming.a>0) {
+    const float mix=response*lit;
+    tint->r+=(incoming.r/incoming.a-tint->r)*mix;
+    tint->g+=(incoming.g/incoming.a-tint->g)*mix;
+    tint->b+=(incoming.b/incoming.a-tint->b)*mix;
+  }
+  Twinkle(twinkle*lit,seed,age,envelope,tint);
+}
+
+static float GroundHeight(const ActionEffectFieldStyle *,float);
+static bool MaskPatch(ActionEffectGeometryWriter *,const ActionEffectInstance *,const ActionEffectLocalRect *,
+    unsigned,float,float,float,float,ArRenderColorF,ActionEffectProjectPointFn,void *);
+/* Long holds and eased births/settling avoid the busy blinking of snow sparks.
+ * Soft crystals reuse the glow atlas; near crystals keep a small faceted core. */
+static float CrystalEnvelope(float age) {
+  const float t=fmaxf(0,fminf(1,fminf(age,1-age)*6));
+  return t*t*(3-2*t);
+}
+static bool IceCrystal(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,float x,float y,float dx,float dy,float size,
+    ArRenderColorF color,ActionEffectProjectPointFn project,void *context) {
+  const float softness=e->field_style.softness;
+  if(!isfinite(softness)||softness<0||softness>1)return false;
+  if(softness>0) {
+    ArRenderColorF halo=color;halo.a*=softness*.7f;
+    const float radius=size*(1.25f+softness);
+    if(!MaskPatch(w,e,clip,kActionMaskGlow,x,y,radius,radius,halo,project,context))return false;
+  }
+  color.a*=1-softness*.85f;
+  return AppendSceneParticle(w,e,x,y,x-dx,y-dy,size*.5f,size*1.15f,color,project,context);
+}
+typedef struct FieldWake {float x,y,dx,radius,strength,age;uint32_t seed;} FieldWake;
+typedef struct FieldWakes {FieldWake bodies[kActionFieldWakeCount];} FieldWakes;
+/* One player and the strongest nearby enemy, selected once per field. The
+ * captured observer excludes props, teleports and timeline discontinuities. */
+static FieldWakes GatherFieldWakes(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,bool ground) {
+  FieldWakes out={0};
+  if(!w->frame||e->field_style.wake<=0||w->frame->actor_count>kActionEffectActorMax)return out;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  for(unsigned i=0;i<w->frame->actor_count;++i) {
+    const ActionEffectActor *a=&w->frame->actors[i];const ActionActorWake *wake=&a->wake;
+    if(!a->visible||!a->body_radius||wake->strength<=0||wake->age>=kActionActorWakeTicks)continue;
+    const float x=wake->x-e->world_x,y=wake->y-e->world_y;
+    if(x<clip->x0-72||x>clip->x1+72||y<clip->y0-72||y>clip->y1+72)continue;
+    if(ground) {
+      const ActionEffectFieldStyle *s=&e->field_style;
+      if(x<s->points[0].x||x>s->points[s->point_count-1].x||fabsf(y-GroundHeight(s,x))>12)continue;
+    } else if(x<r->x0-32||x>r->x1+32||y<r->y0||y>r->y1+32)continue;
+    const float age=wake->age/(float)kActionActorWakeTicks;
+    const float strength=e->field_style.wake*wake->strength*(1-age)*(1-age);
+    const unsigned slot=a->player?0:1;
+    if(strength>out.bodies[slot].strength)
+      out.bodies[slot]=(FieldWake){x,y,wake->dx,a->body_radius+28,strength,wake->age,a->generation};
+  }
+  return out;
+}
+static float WakeDisplacement(const FieldWakes *wakes,float *x,float *y,bool ground) {
+  float dx=0,dy=0,amount=0;
+  for(unsigned i=0;i<kActionFieldWakeCount;++i) {
+    const FieldWake *w=&wakes->bodies[i];if(w->strength<=0)continue;
+    const float u=(*x-w->x)/w->radius,v=(*y-w->y+(ground?8:20))/(ground?32:44);
+    const float weight=w->strength*SceneSoftFalloff(u)*SceneSoftFalloff(v);
+    const float side=w->dx<0?-1.f:w->dx>0?1.f:u<0?-1.f:1.f;
+    dx+=weight*(side*16+u*6);dy-=weight*(14+4*cosf(u*3.1415927f));amount+=weight;
+  }
+  *x+=dx;*y+=dy;return fminf(1,amount);
 }
 
 /* Ordered paths support crest streamers, surface slides, falling grit and
@@ -157,7 +300,10 @@ static bool ParticlePath(ActionEffectGeometryWriter *w,const ActionEffectInstanc
   }
   ActionEffectInstance source=*e;source.pulse_generation=e->particle_style.seed;
   const bool glint=s->pattern==kActionParticle_Glints;
-  const float wind=WindEnvelope(e);
+  const ActionEffectInstance *opening=ActionTrunk_Opening(w->frame,e->world_x,e->world_y);
+  const float life=w->frame->trunk.gust;
+  const float gust=ActionTrunk_Gust(opening,opening?hypotf(e->world_x-opening->world_x,e->world_y-opening->world_y):0);
+  const float wind=WindEnvelope(e)*(opening?1-life*(.72f-.72f*gust):1);
   for(unsigned i=0;i<e->particle_count;++i) {
     const SceneParticleClock clock=SceneParticleClockAt(&source,e->pulse_ticks,i,
         (SceneParticleLifetime){e->particle_lifetime,9,127});
@@ -170,16 +316,27 @@ static bool ParticlePath(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     const float dx=s->points[segment].x-s->points[segment-1].x,dy=s->points[segment].y-s->points[segment-1].y;
     const float length=lengths[segment]-lengths[segment-1];
     const float sway=sinf(age*9+HashUnit(clock.seed^57)*6)*e->particle_style.wander*sinf(age*3.1415927f);
-    const float x=s->points[segment-1].x+dx*u-dy/length*sway;
-    const float y=s->points[segment-1].y+dy*u+dx/length*sway;
+    float x=s->points[segment-1].x+dx*u-dy/length*sway;
+    float y=s->points[segment-1].y+dy*u+dx/length*sway;
+    if(opening) {
+      const float carried=life*gust*sinf(age*3.1415927f),dir=opening->world_x<512?1.f:-1.f;
+      x+=dir*carried*12;y+=carried*(5*sinf(age*5)-3);
+    }
     const float size=e->particle_style.size_min+(e->particle_style.size_max-e->particle_style.size_min)*HashUnit(clock.seed^27);
-    if(x+size*2<clip->x0||x-size*2>clip->x1||y+size*2<clip->y0||y-size*2>clip->y1)continue;
+    const bool crystal=s->pattern==kActionParticle_IceCrystals;
+    const float extent=size*(crystal?2.25f:2);
+    if(x+extent<clip->x0||x-extent>clip->x1||y+extent<clip->y0||y-extent>clip->y1)continue;
     ArRenderColorF color=MixColor(FieldColor(e->tuning.color),FieldColor(e->particle_style.color_end),age);
-    float fade=fmaxf(0,sinf(age*3.1415927f));
+    float fade=crystal?CrystalEnvelope(age):fmaxf(0,sinf(age*3.1415927f));
     if(glint||s->pattern==kActionParticle_WaterGlints)fade=fade*fade*fade*fade;
     color.a=fminf(1,e->tuning.intensity*.65f*fade*wind);
-    Twinkle(s->twinkle,clock.seed,age,fade*wind*fminf(1,e->tuning.intensity),&color);
+    if(!crystal)Twinkle(s->twinkle,clock.seed,age,fade*wind*fminf(1,e->tuning.intensity),&color);
     ParticleLightTint(w,e,x,y,&color,lighting);
+    if(crystal) {
+      Twinkle(s->twinkle,clock.seed,age,fminf(1,color.a*1.25f),&color);
+      if(!IceCrystal(w,e,clip,x,y,dx/length,dy/length,size,color,project,context))return false;
+      continue;
+    }
     if(s->pattern==kActionParticle_WaterGlints&&color.a<=.001f)continue;
     if(!AppendSceneParticle(w,e,x,y,x-dx/length,y-dy/length,size*.65f,size*(glint?1.6f:1),color,project,context))return false;
   }
@@ -189,7 +346,7 @@ static bool LeafParticle(ActionEffectGeometryWriter *,const ActionEffectInstance
     float,float,float,float,float,float,ArRenderColorF,ActionEffectProjectPointFn,void *);
 static bool FieldParticle(ActionEffectGeometryWriter *w, const ActionEffectInstance *e,
     const ActionEffectInstance *clock_source, unsigned index, uint32_t seed, float birth_x, float birth_y, const ActionEffectLocalRect *clip,
-    ActionEffectProjectPointFn project, void *context, bool lighting) {
+    const FieldWakes *wakes,ActionEffectProjectPointFn project, void *context, bool lighting) {
   const ActionEffectParticleStyle *s=&e->particle_style;
   const SceneParticleClock clock=SceneParticleClockAt(clock_source,e->pulse_ticks,index,
       (SceneParticleLifetime){e->particle_lifetime,0,0});
@@ -210,21 +367,32 @@ static bool FieldParticle(ActionEffectGeometryWriter *w, const ActionEffectInsta
     case kActionParticle_Sparks: y+=24*t*t;reach=size*(1+2*(1-t));break;
     case kActionParticle_Glints: x=birth_x;y=birth_y;dx=0;dy=1;reach=size*1.6f;break;
     case kActionParticle_WaterGlints: dx=0;dy=1;width=size*1.5f;reach=size*.65f;break;
+    case kActionParticle_IceCrystals: dx=cosf(phase+t*1.5f);dy=sinf(phase+t*1.5f);width=reach=size*2.25f;break;
     default: break;
   }
+  if(e->field_style.wake>0)WakeDisplacement(wakes,&x,&y,false);
   const bool leaf=e->field_style.textured&&e->field_style.pattern==kActionParticle_Leaves;
   const float ex=leaf?fabsf(dx)*reach+fabsf(dy)*width:fmaxf(width,reach);
   const float ey=leaf?fabsf(dy)*reach+fabsf(dx)*width:fmaxf(width,reach);
   if (x+ex<clip->x0 || x-ex>clip->x1 || y+ey<clip->y0 || y-ey>clip->y1) return true;
   ArRenderColorF color=MixColor(FieldColor(e->tuning.color),FieldColor(s->color_end),t);
-  const float fade=fmaxf(0,sinf(t*3.1415927f));
+  const bool crystal=e->field_style.pattern==kActionParticle_IceCrystals;
+  const float fade=crystal?CrystalEnvelope(t):fmaxf(0,sinf(t*3.1415927f));
   color.a=fminf(1,e->tuning.intensity*.7f*fade);
   if(e->field_style.pattern==kActionParticle_Glints||e->field_style.pattern==kActionParticle_WaterGlints) {
     color.a=fminf(1,e->tuning.intensity*.7f*fade*fade*fade*fade);
   }
   if(e->field_style.pattern==kActionParticle_Insects)color.a*=.5f+.5f*sinf(t*25+phase)*sinf(t*25+phase);
-  Twinkle(e->field_style.twinkle,clock.seed,t,fade*fminf(1,e->tuning.intensity),&color);
-  ParticleLightTint(w,e,x,y,&color,lighting);
+  if(e->field_style.pattern==kActionParticle_Snow&&e->field_style.canopy_response>0)
+    ReflectiveGrainTint(w,e,x,y,clock.seed,t,fade*fminf(1,e->tuning.intensity),&color,lighting,true);
+  else if(crystal) {
+    ParticleLightTint(w,e,x,y,&color,lighting);
+    Twinkle(e->field_style.twinkle,clock.seed,t,fminf(1,color.a*1.25f),&color);
+    return IceCrystal(w,e,clip,x,y,dx,dy,size,color,project,context);
+  } else {
+    Twinkle(e->field_style.twinkle,clock.seed,t,fade*fminf(1,e->tuning.intensity),&color);
+    ParticleLightTint(w,e,x,y,&color,lighting);
+  }
   if(e->field_style.pattern==kActionParticle_WaterGlints&&color.a<=.001f)return true;
   if(e->field_style.textured&&e->field_style.pattern==kActionParticle_Leaves)
     return LeafParticle(w,e,clip,x,y,dx,dy,width,reach,color,project,context);
@@ -233,13 +401,14 @@ static bool FieldParticle(ActionEffectGeometryWriter *w, const ActionEffectInsta
 static bool ParticleArea(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
     const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context,bool lighting) {
   if(!ActionAuthoredParticles_Valid(&e->particle_style) || e->particle_count>16 ||
-      e->field_style.pattern>=kActionParticle_Count)return false;
+      e->field_style.pattern>=kActionParticle_Count||!isfinite(e->field_style.wake)||
+      e->field_style.wake<0||e->field_style.wake>1)return false;
   const ActionEffectLocalRect *r=&e->geometry.data.rect;
   const ActionEffectParticleStyle *s=&e->particle_style;
   /* Cells are anchored in world space. Panning changes the visited set, never
    * seeds, ages or positions. Backtrack from the visible motion envelope to
    * birth cells; do not traverse or rasterize the complete saved region. */
-  const float pad=s->wander*1.6f+s->size_max*3+25;
+  const float pad=s->wander*1.6f+s->size_max*3+25+44*e->field_style.wake;
   const float x0=fmaxf(r->x0,clip->x0-fmaxf(0,s->travel_x)-pad)+e->world_x;
   const float x1=fminf(r->x1,clip->x1-fminf(0,s->travel_x)+pad)+e->world_x;
   const float y0=fmaxf(r->y0,clip->y0-fmaxf(0,s->travel_y)-pad)+e->world_y;
@@ -248,6 +417,7 @@ static bool ParticleArea(ActionEffectGeometryWriter *w,const ActionEffectInstanc
   const int first_x=(int)floorf(x0/kActionParticleCellSize), last_x=(int)floorf(x1/kActionParticleCellSize);
   const int first_y=(int)floorf(y0/kActionParticleCellSize), last_y=(int)floorf(y1/kActionParticleCellSize);
   if((last_x-first_x+1)*(last_y-first_y+1)>kActionParticleMaxCells)return false;
+  const FieldWakes wakes=GatherFieldWakes(w,e,clip,false);
   ActionEffectInstance clock_source=*e;
   for(int cy=first_y;cy<=last_y;++cy)for(int cx=first_x;cx<=last_x;++cx) {
     const uint32_t seed=DeterministicHash_Mix32(s->seed^(uint32_t)cx*0x9e3779b9u^(uint32_t)cy*0x85ebca6bu);
@@ -256,7 +426,7 @@ static bool ParticleArea(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       const float x=(cx+.5f+(HashUnit(seed^i*71u)-.5f)*s->spread)*kActionParticleCellSize-e->world_x;
       const float y=(cy+HashUnit(seed^i*91u^51u))*kActionParticleCellSize-e->world_y;
       if(x<r->x0 || x>r->x1 || y<r->y0 || y>r->y1)continue;
-      if(!FieldParticle(w,e,&clock_source,i,seed,x,y,clip,project,context,lighting))return false;
+      if(!FieldParticle(w,e,&clock_source,i,seed,x,y,clip,&wakes,project,context,lighting))return false;
     }
   }
   return true;
@@ -289,20 +459,12 @@ static bool Halo(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
 }
 static bool LightGradient(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
     const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
-  const ActionEffectLocalRect *r=&e->geometry.data.rect;
   const float softness=e->field_style.softness,angle=e->field_style.angle;
   if(!isfinite(softness)||softness<0||softness>1||!isfinite(angle)||fabsf(angle)>180)return false;
   ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
-  const float dx=sinf(angle*.0174532925f),dy=cosf(angle*.0174532925f);
-  const float width=r->x1-r->x0,height=r->y1-r->y0,span=fabsf(dx)*width+fabsf(dy)*height;
   ArRenderVertex2D vertices[25];int mapped[25];
   for(unsigned row=0;row<5;++row)for(unsigned col=0;col<5;++col){
-    const unsigned n=row*5+col;const float x=r->x0+width*col*.25f,y=r->y0+height*row*.25f;
-    const float t=fmaxf(0,fminf(1,.5f+(x*dx+y*dy)/span));
-    const float edge=fminf(fminf(col,4-col),fminf(row,4-row))*.25f;
-    const float fade=softness>0?fminf(1,edge/(softness*.5f)):1;
-    vertices[n]=(ArRenderVertex2D){.position={x,y},.color=MixColor(FieldColor(e->tuning.color),FieldColor(e->particle_style.color_end),t)};
-    vertices[n].color.a=fminf(1,e->tuning.intensity*.18f)*fade;mapped[n]=-1;
+    const unsigned n=row*5+col;vertices[n]=GradientVertex(e,col,row);mapped[n]=-1;
   }
   for(unsigned row=0;row<4;++row)for(unsigned col=0;col<4;++col){
     const int a=row*5+col,b=a+5,triangles[]={a,a+1,b,a+1,b+1,b};
@@ -364,7 +526,7 @@ static bool WaterField(ActionEffectGeometryWriter *w,const ActionEffectInstance 
   ArRenderColorF tint=FieldColor(e->tuning.color);
   ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
   ArRenderVertex2D vertices[18];int mapped[18];
-  const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
+  const float phase=ActionWaterWave_Phase(e);
   for(unsigned i=0;i<9;++i)for(unsigned row=0;row<2;++row) {
     const unsigned n=row*9+i;const float x=r->x0+(r->x1-r->x0)*i/8;
     const float crest=r->y0+sinf(x*.05f+phase+s->drift*.01f)*s->amplitude;
@@ -387,9 +549,9 @@ static bool WaterField(ActionEffectGeometryWriter *w,const ActionEffectInstance 
   }
   return true;
 }
-static bool MaskPatch(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
-    const ActionEffectLocalRect *clip,unsigned cell,float x,float y,float rx,float ry,
-    ArRenderColorF color,ActionEffectProjectPointFn project,void *context);
+static bool SlopedPowderPatch(ActionEffectGeometryWriter *,const ActionEffectInstance *,
+    const ActionEffectLocalRect *,unsigned,float,float,float,float,float,
+    ArRenderColorF,ActionEffectProjectPointFn,void *);
 static bool FallingWater(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
     const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
   const ActionEffectLocalRect *r=&e->geometry.data.rect;
@@ -517,6 +679,15 @@ static float GroundHeight(const ActionEffectFieldStyle *s, float x) {
   const float t=fmaxf(0,fminf(1,(x-s->points[i-1].x)/(s->points[i].x-s->points[i-1].x)));
   return s->points[i-1].y+t*(s->points[i].y-s->points[i-1].y);
 }
+/* A footprint-wide grade changes continuously across authored corners. The
+ * walking edge itself remains exact; only loose powder uses this tangent. */
+static float GroundSlope(const ActionEffectFieldStyle *s,float x) {
+  const float a=fmaxf(s->points[0].x,x-8),b=fminf(s->points[s->point_count-1].x,x+8);
+  return b>a?(GroundHeight(s,b)-GroundHeight(s,a))/(b-a):0;
+}
+static float GroundSlopeResponse(float slope) {
+  return slope*slope/(.16f+slope*slope);
+}
 /* A crest sheds dust horizontally; settling grows with travel time instead
  * of snapping to the lee slope. Evaluate the upstream path analytically, so
  * reversing a preview or panning never resets a simulation. */
@@ -531,8 +702,11 @@ static float CarriedGroundHeight(const ActionEffectFieldStyle *s, float x, float
   }
   return y;
 }
+static float GroundPowderRadius(float size,float motion,float swell) {
+  return (3.4f+4.2f*size)*(.65f+.5f*swell)*(.65f+.35f*motion);
+}
 static bool GroundGrains(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
-    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+    const ActionEffectLocalRect *clip,const FieldWakes *wakes,ActionEffectProjectPointFn project,void *context,bool lighting) {
   const ActionEffectFieldStyle *s=&e->field_style;
   const ActionEffectParticleStyle *style=&e->particle_style;
   const float left=s->points[0].x,right=s->points[s->point_count-1].x;
@@ -543,7 +717,7 @@ static bool GroundGrains(ActionEffectGeometryWriter *w,const ActionEffectInstanc
         (SceneParticleLifetime){e->particle_lifetime,9,127});
     const float t=clock.t,birth=left+(right-left)*HashUnit(clock.seed^71);
     const float wind=s->drift*(.6f+.8f*HashUnit(clock.seed^11));
-    const float x=birth+wind*t;
+    float x=birth+wind*t;
     if(x<=left || x>=right)continue;
     const float size=style->size_min+(style->size_max-style->size_min)*HashUnit(clock.seed^27);
     const float lift=(8+2*s->amplitude)*(.35f+.65f*HashUnit(clock.seed^91));
@@ -552,21 +726,164 @@ static bool GroundGrains(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     const float weight=HashUnit(clock.seed^39),flight=weight<.65f?t*(1-.35f*t):4*t*(1-t);
     float y=GroundHeight(s,birth)-lift*flight+
         sinf(t*9+HashUnit(clock.seed^57)*6)*style->wander*sinf(t*3.1415927f);
+    if(s->wake>0)WakeDisplacement(wakes,&x,&y,true);
+    if(x<=left||x>=right)continue;
     y=fminf(y,GroundHeight(s,x)-size*2);
     if(x+size<clip->x0||x-size>clip->x1||y+size<clip->y0||y-size>clip->y1)continue;
     ArRenderColorF tint=MixColor(FieldColor(e->tuning.color),FieldColor(style->color_end),t);
     const float edge=fminf(1,fminf(x-left,right-x)/16);
     const float envelope=fmaxf(0,sinf(t*3.1415927f))*edge*strength;
     tint.a=fminf(.9f,e->tuning.intensity*.32f)*envelope;
-    Twinkle(s->twinkle,clock.seed,t,envelope*fminf(1,e->tuning.intensity),&tint);
+    ReflectiveGrainTint(w,e,x,y,clock.seed,t,envelope*fminf(1,e->tuning.intensity),&tint,lighting,true);
     if(!AppendSceneParticle(w,e,x,y,x-wind*.003f,y+lift*.003f,size*.65f,size,tint,project,context))return false;
+  }
+  /* Dense, rounded clumps carry the mass of kicked-up powder; fine grains
+   * catch the sun around them. Motion controls their spread and lift without
+   * making an ordinary walking step almost transparent. The last cohort ages
+   * out after movement stops, rather than spawning around a stationary body. */
+  for(unsigned body=0;body<kActionFieldWakeCount;++body) {
+    const FieldWake *wake=&wakes->bodies[body];if(wake->strength<=0)continue;
+    const float source_slope=GroundSlope(s,wake->x),source_grade=GroundSlopeResponse(source_slope);
+    const unsigned phase=DeterministicHash_Mix32(wake->seed^0x4d31u)%48;
+    for(unsigned i=0;i<kActionGroundWakeGrains;++i) {
+      const uint32_t seed=DeterministicHash_Mix32(wake->seed^i*0x9e3779b9u);
+      const bool puff=i<kActionGroundWakePuffs;
+      /* Overlap staggered births instead of allowing several dense clumps
+       * to appear together. Each birth fades in over roughly ten ticks. */
+      const unsigned offset=puff?phase+i*48/kActionGroundWakePuffs+seed%5:seed;
+      const float age=((e->pulse_ticks-(unsigned)wake->age+offset)%48)+(float)wake->age;
+      const float t=age/48;if(t>=1)continue;
+      const float motion=sqrtf(wake->strength);
+      const float side=wake->dx<0?-1.f:wake->dx>0?1.f:HashUnit(seed^3)<.5f?-1.f:1.f;
+      /* A short kick follows the foot, then gravity carries loose snow down
+       * the grade. Positive Y is down. Flat paths retain the original motion. */
+      float x=wake->x-side*(7+34*t)*motion*(1-.4f*source_grade)+
+          (HashUnit(seed^13)-.5f)*24*t*motion+
+          source_slope/(1+source_slope*source_slope)*56*t*t*motion;
+      if(x<=left||x>=right)continue;
+      const float size=style->size_min+(style->size_max-style->size_min)*HashUnit(seed^27);
+      const float local_slope=GroundSlope(s,x);
+      const float grade=fmaxf(source_grade,GroundSlopeResponse(local_slope));
+      const float lift=(puff?7+11*HashUnit(seed^71):12+18*HashUnit(seed^71))*motion;
+      const float radius=puff?GroundPowderRadius(size,motion,sinf(t*3.1415927f)):size;
+      const float ry=puff?radius*(.75f+.2f*HashUnit(seed^11)):size;
+      const float floor=puff?fminf(GroundHeight(s,x-radius),GroundHeight(s,x+radius)):GroundHeight(s,x);
+      const float old_y=fminf(wake->y-lift*4*t*(1-t),floor)-(puff?ry:size*2);
+      const float slope=local_slope*grade,normal=1/sqrtf(1+slope*slope);
+      const float hop=lift*(1-.68f*grade)*4*t*(1-t);
+      const float height=(puff?ry:size*2)+hop;
+      const float surface=GroundHeight(s,x);
+      float y=old_y+(surface-height*normal-old_y)*grade;
+      x+=slope*normal*height*grade;
+      if(x<=left||x>=right)continue;
+      const float extent_x=puff?(radius+fabsf(slope)*ry)*normal:radius;
+      const float extent_y=puff?(fabsf(slope)*radius+ry)*normal:ry;
+      if(x+extent_x<clip->x0||x-extent_x>clip->x1||y+extent_y<clip->y0||y-extent_y>clip->y1)continue;
+      ArRenderColorF tint=MixColor(FieldColor(e->tuning.color),FieldColor(style->color_end),t);
+      const float enter=fminf(1,t*5),settle=fminf(1,(1-t)/.4f);
+      const float envelope=enter*enter*(3-2*enter)*settle*settle*(3-2*settle)*fminf(1,wake->strength*4)*
+          fminf(1,fminf(x-left,right-x)/12);
+      tint.a=fminf(1,e->tuning.intensity)*envelope;
+      /* Fine ice gets one slow highlight during its short flight, rather
+       * than repeating the longer ambient-grain sparkle cycle several times. */
+      ReflectiveGrainTint(w,e,x,y,seed,t*.25f,envelope,&tint,lighting,!puff);
+      if(puff) {
+        const unsigned variant=seed%kActionMaskCloudCount;
+        ArRenderColorF body=tint;body.r*=.88f;body.g*=.94f;
+        if(!SlopedPowderPatch(w,e,clip,kActionMaskCloudBodyFirst+variant,x,y,radius,ry,slope,body,project,context))return false;
+        ArRenderColorF crest=MixColor(tint,(ArRenderColorF){1,1,1,tint.a},.65f);crest.a*=.75f;
+        if(!SlopedPowderPatch(w,e,clip,kActionMaskCloudLightFirst+variant,x,y,radius,ry,slope,crest,project,context))return false;
+      } else if(!AppendSceneParticle(w,e,x,y,x+side,y+1,size*.85f,size*1.15f,tint,project,context))return false;
+    }
+  }
+  return true;
+}
+typedef struct GroundPressure {float x,radius,strength;} GroundPressure;
+/* A quiet material surface, independent of the gust clock. Current feet also
+ * compress while standing still; a captured wake can briefly retain pressure
+ * after contact. Select at most one player and one enemy, just like powder. */
+static bool GroundCover(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectFieldStyle *path,const ActionEffectLocalRect *clip,
+    ActionEffectProjectPointFn project,void *context,bool lighting) {
+  GroundPressure pressure[kActionFieldWakeCount]={0};
+  const bool surface=e->render_layer==kActionEffectRenderLayer_Bg1Mist;
+  const float left=path->points[0].x,right=path->points[path->point_count-1].x;
+  if(w->frame&&w->frame->actor_count<=kActionEffectActorMax) {
+    for(unsigned i=0;i<w->frame->actor_count;++i) {
+      const ActionEffectActor *a=&w->frame->actors[i];
+      if(!a->visible||!a->body_radius)continue;
+      float x=a->x-e->world_x;
+      float strength=SceneSoftFalloff((a->feet_y-e->world_y-GroundHeight(path,x))/(path->ground_depth+2));
+      if(x<left||x>right)strength=0;
+      if(strength<=0&&a->wake.age<kActionActorWakeTicks) {
+        x=a->wake.x-e->world_x;
+        const float age=a->wake.age/(float)kActionActorWakeTicks;
+        strength=.4f*path->wake*a->wake.strength*(1-age)*(1-age)*
+            SceneSoftFalloff((a->wake.y-e->world_y-GroundHeight(path,x))/(path->ground_depth+2));
+      }
+      if(x<left||x>right||x<clip->x0-16||x>clip->x1+16)continue;
+      const unsigned slot=a->player?0:1;
+      if(strength>pressure[slot].strength)
+        pressure[slot]=(GroundPressure){x,fmaxf(6,fminf(12,a->body_radius)),strength};
+    }
+  }
+  float columns[kActionGroundCoverColumns];unsigned count=path->point_count;
+  for(unsigned i=0;i<count;++i)columns[i]=path->points[i].x;
+  /* Insert contact samples without moving any terrain corners. The stable
+   * base profile is interpolated from the original columns below, so walking
+   * cannot resample noise and make the entire bank shimmer. */
+  for(unsigned i=0;i<kActionFieldWakeCount;++i)if(pressure[i].strength>0) {
+    for(int offset=-1;offset<=1;++offset) {
+      const float x=pressure[i].x+offset*pressure[i].radius;
+      if(x<=left||x>=right)continue;
+      unsigned at=0;while(at<count&&columns[at]<x)++at;
+      if((at<count&&columns[at]-x<.01f)||(at&&x-columns[at-1]<.01f))continue;
+      for(unsigned j=count;j>at;--j)columns[j]=columns[j-1];
+      columns[at]=x;++count;
+    }
+  }
+  ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
+  ArRenderVertex2D vertices[kActionGroundCoverColumns*3];int mapped[kActionGroundCoverColumns*3];
+  for(unsigned col=0;col<count;++col) {
+    const float x=columns[col],floor=GroundHeight(path,x);
+    unsigned segment=1;while(segment+1<path->point_count&&x>path->points[segment].x)++segment;
+    const float t=(x-path->points[segment-1].x)/(path->points[segment].x-path->points[segment-1].x);
+    const float a=HashUnit(e->particle_style.seed^(segment-1)*71),b=HashUnit(e->particle_style.seed^segment*71);
+    const float edge=fminf(1,fminf(x-left,right-x)/12);
+    const float settled_depth=path->ground_depth*(.82f+.18f*(a+(b-a)*t))*edge;
+    float compression=0;
+    for(unsigned i=0;i<kActionFieldWakeCount;++i)if(pressure[i].strength>0)
+      compression=fmaxf(compression,pressure[i].strength*SceneSoftFalloff((x-pressure[i].x)/pressure[i].radius));
+    const float depth=settled_depth*(1-.35f*fminf(1,compression));
+    ArRenderColorF crest=FieldColor(e->particle_style.color_end),body=FieldColor(e->tuning.color);
+    ReflectiveGrainTint(w,e,x,floor-depth,0,0,1,&crest,lighting,false);
+    ReflectiveGrainTint(w,e,x,floor,0,0,1,&body,lighting,false);
+    const float alpha=fminf(.98f,e->tuning.intensity*.75f)*edge;
+    /* Surface width and snow thickness are independent. The rear edge stays
+     * on the broad painted top, while only the front responds to foot contact.
+     * A narrow rear feather retains the transition into the original artwork. */
+    const float back=floor-path->ground_width-settled_depth;
+    const float feather=fminf(.8f,path->ground_width*.25f);
+    for(unsigned row=0;row<3;++row) {
+      const unsigned n=col*3+row;
+      const float y=surface?(row==0?back:row==1?back+feather:floor-depth):
+          row==0?floor-depth:row==1?floor:floor+1.5f;
+      const ArRenderColorF tint=surface?(row==2?crest:MixColor(body,crest,.45f)):row==0?crest:body;
+      vertices[n]=(ArRenderVertex2D){.position={x,y},.color=tint};
+      vertices[n].color.a=surface?(row==0?0:alpha*(row==1?.58f:.78f)):row==2?0:alpha;mapped[n]=-1;
+    }
+  }
+  for(unsigned col=0;col+1<count;++col)for(unsigned row=0;row<2;++row) {
+    const int a=col*3+row,b=a+3,triangles[]={a,b,a+1,b,b+1,a+1};
+    for(unsigned t=0;t<6;t+=3)
+      if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,triangles+t,clip,project,context))return false;
   }
   return true;
 }
 /* Overlapping gusts build on windward slopes, carry over crests and dissipate.
  * One bounded mesh is shared by CPU/WASM and GPU projection. */
 static bool GroundCloud(ActionEffectGeometryWriter *w, const ActionEffectInstance *e,
-    const ActionEffectLocalRect *clip, ActionEffectProjectPointFn project, void *context) {
+    const ActionEffectLocalRect *clip, ActionEffectProjectPointFn project, void *context,bool lighting) {
   ActionEffectFieldStyle path = e->field_style;
   const ActionEffectFieldStyle *s = &path;
   if (s->point_count < 2 || s->point_count > kActionContourMaxPoints) return false;
@@ -587,6 +904,10 @@ static bool GroundCloud(ActionEffectGeometryWriter *w, const ActionEffectInstanc
   const float left = s->points[0].x, right = s->points[s->point_count-1].x;
   if (!(right > left)) return false;
   const float wind_density=WindEnvelope(e);
+  const FieldWakes wakes=GatherFieldWakes(w,e,clip,true);
+  if(s->ground_depth>0)
+    return GroundCover(w,e,s,clip,project,context,lighting)&&
+        (e->render_layer==kActionEffectRenderLayer_Bg1Mist||GroundGrains(w,e,clip,&wakes,project,context,lighting));
   struct { float centre, radius, weight; } gusts[24];
   for (unsigned i=0; i<s->strands; ++i) {
     const SceneParticleClock clock = SceneParticleClockAt(e,e->pulse_ticks,i,
@@ -606,12 +927,15 @@ static bool GroundCloud(ActionEffectGeometryWriter *w, const ActionEffectInstanc
     float density=0;
     for (unsigned i=0; i<s->strands; ++i)
       density+=gusts[i].weight*SceneSoftFalloff((x-gusts[i].centre)/gusts[i].radius);
+    float stirred_x=x,stirred_y=floor;
+    const float stirred=s->wake>0?WakeDisplacement(&wakes,&stirred_x,&stirred_y,true):0;
+    density+=stirred*.25f;
     const unsigned prev=col?col-1:col, next=col+1<s->point_count?col+1:col;
     const float slope=(s->points[next].y-s->points[prev].y)/(s->points[next].x-s->points[prev].x);
     const float bank=1+fminf(.5f,fmaxf(0,-slope*(s->drift>0?1:s->drift<0?-1:0)));
     const float edge=fminf(1,fminf(x-left,right-x)/fmaxf(8,(right-left)*.08f));
     const float base=CarriedGroundHeight(s,x,floor);
-    const float height=(8+2*s->amplitude)*bank*(.25f+.75f*fminf(1,density));
+    const float height=(8+2*s->amplitude)*bank*(.25f+.75f*fminf(1,density))+stirred*5;
     const float airborne=fminf(1,(floor-base)/8);
     for (unsigned row=0; row<4; ++row) {
       const unsigned n=col*4+row;
@@ -626,10 +950,12 @@ static bool GroundCloud(ActionEffectGeometryWriter *w, const ActionEffectInstanc
     for (unsigned t=0;t<6;t+=3)
       if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,indices+t,clip,project,context))return false;
   }
-  return GroundGrains(w,e,clip,project,context);
+  return GroundGrains(w,e,clip,&wakes,project,context,lighting);
 }
-/* A soft stencil of hanging vines and broad leaves. Positions and wind phase
- * depend only on the saved definition and clock, never on the visible window.
+/* A soft stencil of hanging vines and broad leaves, or bare woody fibers.
+ * The bare variant retains the fixed roots and only bends the slender tips.
+ * Positions and wind phase depend only on the saved definition and clock,
+ * never on the visible window.
  * This is ordinary alpha geometry behind the playfield, not a light receiver
  * or an additional full-screen shadow pass. Six segments/leaves per stem keep
  * the worst-case clipped cost exactly bounded by the recipe validator. */
@@ -652,27 +978,37 @@ static bool FoliageShadow(ActionEffectGeometryWriter *w,const ActionEffectInstan
     const float x=r->x0+inset+(width-2*inset)*(stem+.25f+.5f*HashUnit(seed))/s->strands;
     const float length=height*(.56f+.37f*HashUnit(seed^17));
     const float bow=max_bow*(HashUnit(seed^43)*2-1);
-    const float sway=sinf(phase+HashUnit(seed^91)*6.2831853f)*s->amplitude;
+    const ActionEffectInstance *opening=s->bare?ActionTrunk_Opening(w->frame,e->world_x,e->world_y):NULL;
+    const float gust=ActionTrunk_Gust(opening,opening?hypotf(e->world_x-opening->world_x,e->world_y-opening->world_y)+20:0);
+    const float push=opening?(opening->world_x<512?1.f:-1.f)*w->frame->trunk.gust*gust:0;
+    const float sway=(sinf(phase+HashUnit(seed^91)*6.2831853f)+push*1.7f)*s->amplitude;
     ArRenderColorF tint=FieldColor(e->tuning.color);
     const float opacity=fminf(1,e->tuning.intensity)*(.65f+.35f*HashUnit(seed^57));
     ArRenderPointF previous={x,r->y0};
     for(unsigned segment=0;segment<6;++segment) {
       const float t=(segment+1)/6.f;
       const ArRenderPointF tip={x+sinf(t*3.14159265f)*bow+sway*t*t,r->y0+length*t};
-      const float half=fminf(1.8f,height*.006f)*(1-.65f*t);
+      const float half=s->bare?fminf(1.1f,.4f+height*.012f)*(1-.9f*t):
+          fminf(1.8f,height*.006f)*(1-.65f*t);
+      const float previous_half=s->bare?fminf(1.1f,.4f+height*.012f)*(1-.9f*segment/6.f):half;
       ArRenderVertex2D vine[4]={
-        {.position={previous.x-half,previous.y},.color=tint},
-        {.position={previous.x+half,previous.y},.color=tint},
+        {.position={previous.x-previous_half,previous.y},.color=tint},
+        {.position={previous.x+previous_half,previous.y},.color=tint},
         {.position={tip.x+half,tip.y},.color=tint},
         {.position={tip.x-half,tip.y},.color=tint}};
       for(unsigned j=0;j<4;++j) {
         const ArRenderPointF p=vine[j].position;
         vine[j].position=(ArRenderPointF){cs*p.x+sn*p.y,-sn*p.x+cs*p.y};
-        vine[j].color.a=opacity*.55f;
+        vine[j].color.a=opacity*(s->bare?1.f:.55f);
+        if(s->bare&&(j==0||j==3)) {
+          vine[j].color.r*=.6f;vine[j].color.g*=.6f;vine[j].color.b*=.6f;
+        }
       }
       int mapped[4]={-1,-1,-1,-1};const int triangles[]={0,1,2,0,2,3};
       for(unsigned j=0;j<6;j+=3)
         if(!AppendSceneClippedTriangle(w,&mesh,vine,mapped,triangles+j,clip,project,context))return false;
+
+      if(s->bare) {previous=tip;continue;}
 
       const uint32_t leaf_seed=seed^(segment+1)*71u;
       const float side=(segment&1)?1.f:-1.f;
@@ -745,6 +1081,17 @@ static bool MaskPatch(ActionEffectGeometryWriter *w,const ActionEffectInstance *
     const ActionEffectLocalRect *clip,unsigned cell,float x,float y,float rx,float ry,
     ArRenderColorF color,ActionEffectProjectPointFn project,void *context) {
   const ArRenderPointF p[4]={{x-rx,y-ry},{x+rx,y-ry},{x+rx,y+ry},{x-rx,y+ry}};
+  const ArRenderPointF uv[4]={ActionEffectMasks_Uv(cell,0,0),ActionEffectMasks_Uv(cell,1,0),
+      ActionEffectMasks_Uv(cell,1,1),ActionEffectMasks_Uv(cell,0,1)};
+  return MaskQuad(w,e,clip,p,uv,color,NULL,project,context);
+}
+static bool SlopedPowderPatch(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,unsigned cell,float x,float y,float rx,float ry,float slope,
+    ArRenderColorF color,ActionEffectProjectPointFn project,void *context) {
+  if(slope==0)return MaskPatch(w,e,clip,cell,x,y,rx,ry,color,project,context);
+  const float n=1/sqrtf(1+slope*slope),tx=rx*n,ty=rx*slope*n,nx=-ry*slope*n,ny=ry*n;
+  const ArRenderPointF p[4]={{x-tx-nx,y-ty-ny},{x+tx-nx,y+ty-ny},
+      {x+tx+nx,y+ty+ny},{x-tx+nx,y-ty+ny}};
   const ArRenderPointF uv[4]={ActionEffectMasks_Uv(cell,0,0),ActionEffectMasks_Uv(cell,1,0),
       ActionEffectMasks_Uv(cell,1,1),ActionEffectMasks_Uv(cell,0,1)};
   return MaskQuad(w,e,clip,p,uv,color,NULL,project,context);
@@ -1100,6 +1447,11 @@ static void TintMistPatches(ActionEffectGeometryWriter *w,const ActionEffectInst
           color->r+=p.color.r*amount;color->g+=p.color.g*amount;color->b+=p.color.b*amount;
         }
       }
+    } else if(light->kind==kActionEffect_AuthoredLight) {
+      for(unsigned k=0;k<count;++k) {
+        const ArRenderColorF sample=ActionSoftLight_Sample(light,e->world_x+patches[k].x,e->world_y+patches[k].y);
+        incoming[k].r+=sample.r;incoming[k].g+=sample.g;incoming[k].b+=sample.b;
+      }
     } else if(light->kind==kActionEffect_AuthoredCanopy) {
       const ArRenderColorF color=FieldColor(light->tuning.color);
       for(unsigned k=0;k<count;++k) {
@@ -1117,6 +1469,8 @@ static void TintMistPatches(ActionEffectGeometryWriter *w,const ActionEffectInst
   }
   for(unsigned j=0;j<(unsigned)w->cloud_light.meta[0];++j) {
     const DioramaCloudLightRegion *light=&w->cloud_light.regions[j];
+    if(light->color[3]==0||
+        (light->core[1]==0&&light->core[2]==0&&light->core[3]==0))continue;
     for(unsigned k=0;k<count;++k) {
       const CloudLightSample sample=DioramaCloudLight_Sample(light,
           e->world_x+patches[k].x+f->bg1_to_bg2_x,
@@ -1209,6 +1563,7 @@ static bool MistRainbow(ActionEffectGeometryWriter *w,const ActionEffectInstance
     bool receives_light=false;
     if(density>0)for(unsigned j=0;j<(unsigned)w->cloud_light.meta[0];++j) {
       const DioramaCloudLightRegion *light=&w->cloud_light.regions[j];
+      if(light->core[2]==0||light->color[3]==0)continue;
       const CloudLightSample sample=DioramaCloudLight_Sample(light,x+e->world_x+dx,y+e->world_y+dy);
       /* Direct shafts alone produce spectral scattering. Ambient halo and
        * reflected cloud light must not conjure rainbows in shadowed spray. */
@@ -1401,6 +1756,112 @@ static bool StormRibbon(ActionEffectGeometryWriter *w, const ActionEffectInstanc
   return true;
 }
 
+/* Fixed sky points, independent shimmer phases and a faint haze. Source-art
+ * coverage is captured separately so this renderer never reads native tiles. */
+static bool Starfield(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+  const ActionEffectFieldStyle *s=&e->field_style;
+  if(e->particle_count>kActionSkyMaxStars||!ActionAuthoredParticles_Valid(&e->particle_style)||
+      !isfinite(s->scatter)||s->scatter<0||s->scatter>1||!isfinite(s->angle)||fabsf(s->angle)>70||
+      e->projection_plane!=kActionEffectProjectionPlane_Bg2||s->placement!=0)return false;
+  ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
+  const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
+  if(s->scatter>0) {
+    ArRenderVertex2D vertices[(kActionSkyHazeSegments+1)*3];int mapped[(kActionSkyHazeSegments+1)*3];
+    for(unsigned col=0;col<=kActionSkyHazeSegments;++col)for(unsigned row=0;row<3;++row) {
+      const unsigned n=col*3+row;
+      const float edge=sinf(col*3.1415927f/kActionSkyHazeSegments);
+      const float density=.6f+.4f*ActionStarfield_Unit(e->particle_style.seed^(col/3)*137u);
+      vertices[n]=(ArRenderVertex2D){.position=ActionStarfield_HazePoint(e,col,row),
+          .color=FieldColor(e->particle_style.color_end)};
+      vertices[n].color.a=row==1?.12f*e->tuning.intensity*s->scatter*edge*edge*density*
+          ActionStarfield_Visibility(e,kActionSkyMaxStars+n):0;
+      mapped[n]=-1;
+    }
+    for(unsigned col=0;col<kActionSkyHazeSegments;++col)for(unsigned row=0;row<2;++row) {
+      const int a=col*3+row,b=a+3,triangles[]={a,b,a+1,b,b+1,a+1};
+      for(unsigned t=0;t<6;t+=3) {
+        if(vertices[triangles[t]].color.a<=0&&vertices[triangles[t+1]].color.a<=0&&vertices[triangles[t+2]].color.a<=0)continue;
+        if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,triangles+t,clip,project,context))return false;
+      }
+    }
+  }
+  for(unsigned i=0;i<e->particle_count;++i) {
+    const float visibility=ActionStarfield_Visibility(e,i);
+    if(visibility<=0)continue;
+    const uint32_t seed=e->particle_style.seed^i*0x9e3779b9u;
+    const ArRenderPointF p=ActionStarfield_Point(e,i);
+    const float weight=ActionStarfield_Unit(seed^29),bright=weight>.82f?1:.4f+.35f*weight;
+    const float size=e->particle_style.size_min+(e->particle_style.size_max-e->particle_style.size_min)*weight*weight;
+    /* Most stars stay steady. Independent phases and rates keep the brighter
+     * minority gently shimmering without synchronized flashes or respawns. */
+    const float shimmer=weight>.72f?1-s->twinkle*(.5f+.5f*sinf(phase*(1+i%3)+ActionStarfield_Unit(seed^53)*6.2831853f)):1;
+    ArRenderColorF tint=FieldColor(e->tuning.color);
+    tint.a=fminf(1,.65f*e->tuning.intensity)*bright*visibility*shimmer;
+    const ArRenderPointF corners[]={{p.x-size,p.y},{p.x,p.y-size},{p.x+size,p.y},{p.x,p.y+size}};
+    ArRenderVertex2D vertices[4];int mapped[]={-1,-1,-1,-1};
+    for(unsigned j=0;j<4;++j)vertices[j]=(ArRenderVertex2D){.position=corners[j],.color=tint};
+    const int triangles[]={0,1,2,0,2,3};
+    for(unsigned t=0;t<6;t+=3)
+      if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,triangles+t,clip,project,context))return false;
+  }
+  return true;
+}
+
+/* Soft curtains with traveling folds and sweeping upper veils. Integer time
+ * harmonics keep every activity setting continuous at the cycle boundary. */
+static bool Aurora(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+  const ActionEffectFieldStyle *s=&e->field_style;
+  if(s->strands<1||s->strands>kActionAuroraMaxCurtains||!isfinite(s->angle)||fabsf(s->angle)>70||
+      !isfinite(s->softness)||s->softness<0||s->softness>1||
+      e->projection_plane!=kActionEffectProjectionPlane_Bg2||s->placement!=0)return false;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float width=r->x1-r->x0,height=r->y1-r->y0;
+  const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
+  const float energy=SkyLightEnvelope(e),lean=tanf(s->angle*.01745329252f);
+  ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
+  for(unsigned strand=0;strand<s->strands;++strand) {
+    const uint32_t seed=e->particle_style.seed^strand*0x9e3779b9u;
+    const float offset=HashUnit(seed)*6.2831853f;
+    ArRenderVertex2D vertices[(kActionAuroraSegments+1)*4];int mapped[(kActionAuroraSegments+1)*4];
+    for(unsigned col=0;col<=kActionAuroraSegments;++col) {
+      const float u=col/(float)kActionAuroraSegments,spatial=u*6.2831853f;
+      const float edge=sinf(u*3.1415927f);
+      const float activity=s->gust;
+      const float flow=phase*(strand&1?-1:1);
+      const float x=r->x0+width*u+s->drift*(sinf(flow+offset)+
+          .45f*activity*sinf(spatial*1.6f-flow*2+offset))*edge;
+      const float broad=.7f*sinf(spatial*1.1f+flow+offset)+.3f*sinf(spatial*2.4f-flow+offset*.7f);
+      const float fold=broad*(1-.45f*activity)+activity*(.28f*sinf(spatial*3.2f-flow*2+offset)+
+          .17f*sinf(spatial*5.1f+flow*3+offset*.6f));
+      const float bottom=r->y0+height*(.53f+.22f*strand/fmaxf(1,s->strands-1))+s->amplitude*fold;
+      const float veil=height*(.18f+.2f*s->softness+.05f*cosf(spatial*.7f+flow+offset))*
+          (1+.25f*activity*sinf(spatial*2.2f-flow*2+offset));
+      const float calm=cosf(spatial*3+flow+offset);
+      const float rays=cosf(spatial*3+flow*3+offset+activity*sinf(spatial*1.7f+flow));
+      const float gathered=(1-activity)*(.65f+.35f*calm*calm)+activity*(.4f+.6f*rays*rays);
+      const float rows[]={-1,-.42f,-.06f,.10f},alpha[]={0,.18f+.2f*activity,1,0};
+      for(unsigned row=0;row<4;++row) {
+        const unsigned n=col*4+row;
+        const float y=bottom+veil*rows[row];
+        const float tint_mix=fminf(1,.16f+.2f*strand+.35f*(1-row/3.f));
+        const float sweep=lean+.1f*activity*sinf(spatial+flow*2+offset);
+        vertices[n]=(ArRenderVertex2D){.position={x+sweep*(bottom-y),y},
+            .color=MixColor(FieldColor(e->tuning.color),FieldColor(e->particle_style.color_end),tint_mix)};
+        vertices[n].color.a=fminf(.75f,e->tuning.intensity*.22f)*alpha[row]*edge*edge*gathered*energy;
+        mapped[n]=-1;
+      }
+    }
+    for(unsigned col=0;col<kActionAuroraSegments;++col)for(unsigned row=0;row<3;++row) {
+      const int a=col*4+row,b=a+4,triangles[]={a,b,a+1,b,b+1,a+1};
+      for(unsigned t=0;t<6;t+=3)
+        if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,triangles+t,clip,project,context))return false;
+    }
+  }
+  return true;
+}
+
 /* Clip the cloud flash in source space like the channel. A screen billboard
  * would be submitted whole for every intersecting sky band in the editor,
  * while the resident weather path draws the union once. This compact fan also
@@ -1472,8 +1933,9 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
   if((e->kind==kActionEffect_AuthoredFireflies || e->kind==kActionEffect_AuthoredParticlePath || e->kind==kActionEffect_AuthoredParticleArea || e->kind==kActionEffect_AuthoredWater ||
       e->kind==kActionEffect_AuthoredDrips || e->kind==kActionEffect_AuthoredSpray ||
       e->kind==kActionEffect_AuthoredCloud) && !ActionAuthoredParticles_Valid(&e->particle_style))return false;
-  if(s->placement>2 || !isfinite(s->amplitude)||s->amplitude<0||s->amplitude>32 ||
+  if(s->placement>3 || !isfinite(s->amplitude)||s->amplitude<0||s->amplitude>32 ||
       !isfinite(s->drift)||fabsf(s->drift)>128||!isfinite(s->gust)||s->gust<0||s->gust>1||
+      !isfinite(s->wake)||s->wake<0||s->wake>1||
       !isfinite(s->twinkle)||s->twinkle<0||s->twinkle>1)return false;
   if(e->kind==kActionEffect_AuthoredHeat||e->kind==kActionEffect_AuthoredCloudLight)return true; /* Background texture sampling owns this effect. */
   if(e->kind==kActionEffect_AuthoredStorm) {
@@ -1481,8 +1943,19 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
      * for admission; an offscreen bolt may still illuminate visible cloud. */
     motion.geometry.data.rect = ActionStorm_Bounds(e);
   }
+  if(e->kind==kActionEffect_AuthoredAurora) {
+    if(!isfinite(s->angle)||fabsf(s->angle)>70)return false;
+    const float pad=fabsf(s->drift)*(1+.45f*s->gust)+
+        (fabsf(tanf(s->angle*.01745329252f))+.1f*s->gust)*(r->y1-r->y0);
+    motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-s->amplitude-(r->y1-r->y0)*.01f,r->x1+pad,r->y1+s->amplitude};
+  }
+  if(e->kind==kActionEffect_AuthoredStarfield) {
+    const float pad=e->particle_style.size_max;
+    const float vertical=fabsf(tanf(s->angle*.01745329252f))*(r->x1-r->x0)*.1f+pad;
+    motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-vertical,r->x1+pad,r->y1+vertical};
+  }
   if(e->kind==kActionEffect_AuthoredParticlePath) {
-    const float pad=e->particle_style.wander+e->particle_style.size_max*2;
+    const float pad=e->particle_style.wander+e->particle_style.size_max*(s->pattern==kActionParticle_IceCrystals?2.25f:2);
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-pad,r->x1+pad,r->y1+pad};
   }
   if(e->kind==kActionEffect_AuthoredCanopy) {
@@ -1500,7 +1973,8 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     const float pad=e->particle_style.wander+fmaxf(fabsf(e->particle_style.travel_x),fabsf(e->particle_style.travel_y))*.5f+8+e->particle_style.size_max*12;
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-pad,r->x1+pad,r->y1+pad};
   } else if(e->kind==kActionEffect_AuthoredParticleArea) {
-    motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-600,r->y0-600,r->x1+600,r->y1+600};
+    const float pad=600+44*s->wake;
+    motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-pad,r->x1+pad,r->y1+pad};
   } else if(e->kind==kActionEffect_AuthoredWater) {
     const float pad=e->particle_style.size_max*3;
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-s->amplitude-pad,r->x1+pad,fmaxf(r->y1,r->y0+s->amplitude)+pad};
@@ -1509,7 +1983,18 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-pad,r->y0-pad,r->x1+pad,r->y1+pad};
   } else if(e->kind==kActionEffect_AuthoredCloud) {
     motion.geometry.data.rect=(ActionEffectLocalRect){r->x0-fabsf(s->drift),r->y0-s->amplitude,r->x1+fabsf(s->drift),r->y1+s->amplitude};
-    if(s->point_count) motion.geometry.data.rect.y0=r->y0-(8+2*s->amplitude)*1.5f-e->particle_style.wander-e->particle_style.size_max*2;
+    if(s->point_count) {
+      float rise=(8+2*s->amplitude)*1.5f+e->particle_style.wander+e->particle_style.size_max*2+36*s->wake;
+      if(s->wake>0) {
+        const float motion_strength=sqrtf(s->wake);
+        const float radius=GroundPowderRadius(e->particle_style.size_max,motion_strength,1);
+        const float pad=fmaxf(fabsf(s->drift),2*radius+18*motion_strength);
+        motion.geometry.data.rect.x0=r->x0-pad;motion.geometry.data.rect.x1=r->x1+pad;
+        rise=fmaxf(rise,18*motion_strength+2*radius*.95f);
+      }
+      motion.geometry.data.rect.y0=r->y0-fmaxf(rise,s->ground_depth+s->ground_width);
+      if(s->ground_depth>0)motion.geometry.data.rect.y1=fmaxf(motion.geometry.data.rect.y1,r->y1+1.5f);
+    }
   } else if(e->kind==kActionEffect_AuthoredFan) {
     const float extent=(r->x1-r->x0)*.5f+r->y1-r->y0;
     motion.geometry.data.rect=(ActionEffectLocalRect){-extent,-extent,extent,extent};
@@ -1521,6 +2006,8 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       clip_fn&&!clip_fn(context,&motion,&visible))return true;
   switch(e->kind) {
     case kActionEffect_AuthoredStorm: return !lighting || StormLightning(w,e,&visible,project,context);
+    case kActionEffect_AuthoredAurora: return !lighting || Aurora(w,e,&visible,project,context);
+    case kActionEffect_AuthoredStarfield: return !lighting || Starfield(w,e,&visible,project,context);
     case kActionEffect_AuthoredCanopy: return !lighting || CanopyLight(w,e,floor,&visible,project,context);
     case kActionEffect_AuthoredFoliage: return !particles || (s->textured?TexturedFoliage(w,e,floor,&visible,project,context):FoliageShadow(w,e,&visible,project,context));
     case kActionEffect_AuthoredFireflies: return Fireflies(w,e,&visible,lighting,particles,project,context);
@@ -1550,6 +2037,10 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       return !particles || FallingWater(w,e,&visible,project,context);
     case kActionEffect_AuthoredCloud: {
       if(!particles)return true;
+      if(!isfinite(s->ground_depth)||s->ground_depth<0||s->ground_depth>12||
+          (s->ground_depth>0&&(!s->point_count||s->placement!=2||e->projection_plane!=kActionEffectProjectionPlane_Bg1)))return false;
+      if(!isfinite(s->ground_width)||s->ground_width<0||s->ground_width>24||
+          (s->ground_width>0&&s->ground_depth<=0))return false;
       if(s->strands<1||s->strands>kRollingMistMaxStrands||!isfinite(s->softness)||s->softness<0||s->softness>1)return false;
       if(!isfinite(s->carry)||s->carry<0||s->carry>512||(!s->point_count&&(s->carry>0||e->particle_count)))return false;
       if(!isfinite(s->rolling)||s->rolling<0||s->rolling>1||!isfinite(s->wake)||s->wake<0||s->wake>1||
@@ -1560,9 +2051,10 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
           (s->rainbow>0&&(!s->textured||s->point_count||s->rolling<=0)))return false;
       if(!isfinite(s->sparkle)||s->sparkle<0||s->sparkle>1||
           (s->sparkle>0&&(!s->textured||s->point_count||s->rolling<=0)))return false;
-      if((s->rolling>0||s->wake>0||s->canopy_response>0)&&(!s->textured||s->point_count))return false;
+      if(s->rolling>0&&(!s->textured||s->point_count))return false;
+      if((s->wake>0||s->canopy_response>0)&&!s->point_count&&(!s->textured||s->rolling<=0))return false;
       if(s->plume)return RisingPlume(w,e,&visible,project,context);
-      if(s->point_count)return GroundCloud(w,e,&visible,project,context);
+      if(s->point_count)return GroundCloud(w,e,&visible,project,context,lighting);
       if(s->rolling>0)return RollingMist(w,e,&visible,project,context,lighting);
       const float width=r->x1-r->x0,height=r->y1-r->y0;
       const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;

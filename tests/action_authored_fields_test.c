@@ -324,6 +324,11 @@ static void BillboardExtents(void) {
 static void DeferredAuthored(void) {
   static const struct {const char *kind,*extra;} cases[]={
     {"storm-lightning","lifetime=120\nactivity=.2\nseed=7\n"},{"soft-light",""},{"motes",""},{"free-mist",""},{"ground-mist","mist-height=26\n"},
+    {"aurora","gust=.85\ntwinkle=.35\n"},{"starfield","scatter=.12\n"},
+    {"soft-light","ripple=1\nsoftness=.18\namplitude=6\ndrift=19\nlifetime=286\n"},
+    {"drips","ripple=1\nparticles=1\nactivity=.17\nlifetime=547\nplacement=background-high\n"},
+    {"particle-area","particles=8\npattern=ice-crystals\nsoftness=.75\nlifetime=1037\n"},
+    {"particle-path","points=-60,-40 0,-24 60,40\npattern=ice-crystals\nsoftness=.75\nlifetime=1037\n"},
     {"particle-area","particles=8\npattern=snow\n"},{"light-fan",""},{"water-surface",""},
     {"fireflies","particles=6\n"},{"drips",""},{"waterfall-spray",""},{"cloud-bank",""},{"foliage-shadow","angle=23\nseed=1234\n"},{"canopy-light","angle=23\nseed=1234\n"},
     {"cloud-bank","points=-96,24 -48,-8 0,0 48,-24 96,16\namplitude=17\ndrift=110\n"},
@@ -342,8 +347,8 @@ static void DeferredAuthored(void) {
         "[effects]\nversion=1\n[emitter:01:02:0:%s:123]\nx=128\ny=160\nwidth=192\nheight=128\n%s",
         cases[k].kind,cases[k].extra);Parse(text);
     assert(frame.authored_count==1);
-    if(frame.authored[0].kind==kActionEffect_AuthoredStorm) {
-      for(unsigned tick=0;tick<120;++tick) {
+    if(frame.authored[0].kind==kActionEffect_AuthoredStorm||frame.authored[0].kind==kActionEffect_AuthoredDrips) {
+      for(unsigned tick=0;tick<frame.authored[0].particle_lifetime;++tick) {
         frame.authored[0].pulse_ticks=tick;
         assert(ActionSceneDecorationRender_Build(&frame,frame.authored[0].render_layer,true,true,Project,NULL,NULL,&a));
         if(a.vertex_count)break;
@@ -395,6 +400,38 @@ static void TorchShadows(void) {
   unsigned shadowed=0;
   for(unsigned i=0;i<count;++i)if(primitives[i].meta[3])++shadowed;
   assert(shadowed&&shadowed<count); /* Resident rendering retains the same split. */
+}
+static void BareFibers(void) {
+  frame=(ActionSceneEffectFrame){0};
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:123]\n"
+      "x=128\ny=96\nwidth=26\nheight=36\nstrands=3\nbare=1\namplitude=.5\nseed=99\nplacement=playfield\n");
+  const unsigned layer=frame.authored[0].render_layer;
+  assert(layer==kActionEffectRenderLayer_Bg1Mist);
+  const ActionEffectLocalRect full={0,0,256,224};
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,Clip,(void *)&full,&a));
+  assert(a.vertex_count>0&&a.vertex_count<=3*84);Valid(&a);
+  unsigned roots=0;
+  for(int i=0;i<a.vertex_count;++i) {
+    assert(a.vertices[i].position.x>=115&&a.vertices[i].position.x<=141);
+    assert(a.vertices[i].position.y>=78&&a.vertices[i].position.y<=114);
+    if(a.vertices[i].position.y==78)++roots;
+  }
+  assert(roots==6);
+  frame.authored[0].pulse_ticks=310;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,Clip,(void *)&full,&b));
+  assert(a.vertex_count==b.vertex_count);Valid(&b);
+  assert(memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(a.vertices[0])));
+  for(int i=0;i<a.vertex_count;++i)if(a.vertices[i].position.y==78)
+    assert(!memcmp(&a.vertices[i],&b.vertices[i],sizeof(a.vertices[i])));
+  frame.authored[0].pulse_ticks=37;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,Clip,(void *)&full,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(a.vertices[0])));
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,false,Project,Clip,(void *)&full,&b));
+  assert(!b.vertex_count);
+  frame.authored[0].field_style.bare=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,Clip,(void *)&full,&b));
+  assert(b.vertex_count>a.vertex_count); /* Leafy defaults retain their full stencil. */
+  puts("Bare woody fibers: fixed roots, bounded tapered strands, tip sway, deterministic seeking and toggles passed.");
 }
 static void CanopyFields(void) {
   Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:123]\n"
@@ -575,6 +612,18 @@ static void TexturedCanopy(void) {
       assert(fabsf(ActionEffectMasks_Sample(uv.x,uv.y)-expected)<.0001f);total+=expected;
     }
     assert(total>0);
+  }
+  float previous=0;
+  for(unsigned cell=kActionMaskCausticFirst;cell<kActionMaskCausticFirst+kActionMaskCausticCount;++cell) {
+    float total=0;
+    for(unsigned y=0;y<128;y+=4)for(unsigned x=0;x<128;x+=4) {
+      const ArRenderPointF uv=ActionEffectMasks_Uv(cell,x/127.f,y/127.f);
+      const float sampled=ActionEffectMasks_Sample(uv.x,uv.y);
+      const float pixel=(ActionEffectMasks_Pixel(cell%8*128+x,cell/8*128+y)>>24)/255.f;
+      assert(fabsf(sampled-pixel)<.0001f);total+=sampled;
+      if(x==0||y==0)assert(sampled==0); /* No rectangular seams at region edges. */
+    }
+    assert(total>previous);previous=total; /* Softer masks retain more reflected light. */
   }
   puts("Textured canopy: 64 distinct seed mappings, square leaf proportions, atlas containment, collision stops and camera-stable shadows passed.");
 }
@@ -2572,7 +2621,7 @@ int main(int argc, char **argv) {
   HighIntensityGeometry();
   SurfaceLightingSplit();
   CastleSkyDepth();
-  DeferredAuthored();TorchShadows();CanopyFields();TexturedCanopy();DeferredParticleArea();
+  DeferredAuthored();TorchShadows();BareFibers();CanopyFields();TexturedCanopy();DeferredParticleArea();
   LayerAnchors();
   Geometry();GroundDust();MovingGlints();HeatAndParticlePaths();HaloAndGradient();
   Receivers();TorchReceivers();ReceiverIllumination();ExposureBoxes();ExposureMeshScroll();ExposureGroupCapacity();

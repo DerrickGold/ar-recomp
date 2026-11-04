@@ -13,9 +13,10 @@
 
 /* These families include light scattered through air. Keep that volume at
  * its authored depth as well as illuminating the artwork it passes across.
- * Soft lights, gradients and torch spill only belong to the material. */
-static bool HasLightVolume(unsigned kind) {
-  switch (kind) {
+ * Soft lights opt into a diffuse volume; their default remains material-only. */
+static bool HasLightVolume(const ActionEffectInstance *effect) {
+  switch (effect->kind) {
+    case kActionEffect_AuthoredLight: return effect->field_style.scatter>0;
     case kActionEffect_AuthoredStorm:
     case kActionEffect_AuthoredFan:
     case kActionEffect_AuthoredCanopy:
@@ -44,7 +45,7 @@ static bool IncludeSurfaceLighting(const ActionEffectInstance *effect, unsigned 
   routed.tuning.light_receivers = mask;
   effect = &routed;
   const bool material = context && context->scenery_lighting_only;
-  const bool volume = HasLightVolume(effect->kind);
+  const bool volume = HasLightVolume(effect);
   /* Scattering stays at the authored depth even when no foreground material
    * receives it. Receiver sampling has already selected the relevant lights. */
   if (ActionEffectReceivers_IsLight(effect->kind) &&
@@ -2120,7 +2121,7 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
         project_point == ActionEffectProjection_ProjectPoint ? project_userdata : NULL;
     writer.light_receiver = field_frame->light_receiver ? field_frame->light_receiver :
         projection && projection->light_receiver ? projection->light_receiver :
-        (projection && projection->scenery_lighting_only) || !HasLightVolume(effect->kind)
+        (projection && projection->scenery_lighting_only) || !HasLightVolume(effect)
             ? kActionReceiver_Scenery : 0;
     if (!(effect->flags & kActionEffectFlag_Visible) ||
         effect->geometry.kind != kActionEffectGeometry_Rect ||
@@ -2422,12 +2423,19 @@ bool ActionSceneDecorationRender_Build(
   bool shadow_prepared = false;
   for (unsigned i=0;i<frame->authored_count;++i) {
     const ActionEffectInstance *e=&frame->authored[i];
+    ActionEffectInstance ground_top;
+    if(render_layer==kActionEffectRenderLayer_Bg1Mist&&e->kind==kActionEffect_AuthoredCloud&&
+        e->render_layer==kActionEffectRenderLayer_WorldDust&&e->field_style.ground_depth>0&&e->field_style.ground_width>0) {
+      /* The broad top face is scenery; only its shallow front lip and loose
+       * powder overlap the characters. Both use the same captured contact. */
+      ground_top=*e;ground_top.render_layer=render_layer;e=&ground_top;
+    }
     const ActionEffectProjectionContext *projection=writer.source?&writer.source->context:
         project_point==ActionEffectProjection_ProjectPoint?project_userdata:NULL;
     writer.atmosphere_unlit=projection&&projection->atmosphere_unlit;
     writer.light_receiver=frame->light_receiver?frame->light_receiver:
         projection&&projection->light_receiver?projection->light_receiver:
-        (projection&&projection->scenery_lighting_only)||project_point==ActionEffectReceivers_ProjectPoint||!HasLightVolume(e->kind)
+        (projection&&projection->scenery_lighting_only)||project_point==ActionEffectReceivers_ProjectPoint||!HasLightVolume(e)
             ?kActionReceiver_Scenery:0;
     const bool light=lighting_enabled&&IncludeSurfaceLighting(e,render_layer,project_point,project_userdata,frame);
     const bool particles=particles_enabled&&e->render_layer==render_layer;

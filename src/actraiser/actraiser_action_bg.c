@@ -9,6 +9,7 @@
 
 #include "actraiser_game.h"
 #include "action/action_room_scene.h"
+#include "action/action_trunk.h"
 #include "action/action_environment_scene.h"
 #include "action/action_room_terrain.h"
 #include "action/action_room_mosaic.h"
@@ -671,6 +672,24 @@ static bool RoomSceneCompareVerbose(void) {
         value && value[0] && value[0] != '0';
   }
   return s_observer.room_scene_compare_verbose != 0;
+}
+
+/* One immutable native-art cache per supported room and terrain. Both queued
+ * frame slots and the producer's landing observer borrow these assets. */
+static ActionTrunkAssets *s_trunk_rooms[kDioramaTerrainProfileCount][2];
+const ActionTrunkAssets *ActRaiserActionBg_TrunkAssets(unsigned group,unsigned room,
+    const DioramaRoomOverride *edits) {
+  if(!DioramaTrunk_Resolve(group,room,edits).enabled||!s_observer.rom||
+      s_observer.terrain_profile>=kDioramaTerrainProfileCount)return NULL;
+  ActionTrunkAssets **cache=&s_trunk_rooms[s_observer.terrain_profile][room-6];
+  if(*cache)return *cache;
+  ActionRoomScene *scene=malloc(sizeof(*scene));
+  ActionTrunkAssets *assets=malloc(sizeof(*assets));
+  const bool ok=scene&&assets&&ActionRoomScene_Load(scene,s_observer.rom,s_observer.rom_size,group,room)&&
+      ActionRoomTerrain_Project(scene,s_observer.terrain_profile)&&ActionTrunk_Build(assets,scene,edits);
+  free(scene);
+  if(!ok){free(assets);return NULL;}
+  *cache=assets;return assets;
 }
 
 bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
@@ -2590,6 +2609,9 @@ void ActRaiserActionBg_Shutdown(void) {
     ActionBgWorld_Destroy(s_observer.provider_world[layer]);
     ActionBgWorld_Destroy(s_observer.comparison_world[layer]);
     free(s_provider[layer].tile_band_cache);
+  }
+  for(unsigned terrain=0;terrain<kDioramaTerrainProfileCount;++terrain)for(unsigned room=0;room<2;++room) {
+    free(s_trunk_rooms[terrain][room]);s_trunk_rooms[terrain][room]=NULL;
   }
   free(s_observer.room_scene);
   memset(&s_observer, 0, sizeof(s_observer));

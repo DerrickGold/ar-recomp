@@ -172,6 +172,31 @@ function fixture() {
   assert.equal(run('roomConfig(room).nativeBloom.receivers'),2);
 }
 
+/* Enclosure controls share ordinary project persistence and undo, while
+ * preserving dormant BG authoring for the disabled state. */
+{
+  const data=fixture();data.rooms[0]={...data.rooms[0],group:6,map:6};
+  const {run,elements}=editor(data,{ini:'; preserved\n[layers:06:06]\nbg1-policy = edge:clamp\n'});
+  run('SharedRoomPreview.validateScenery=()=>{};TrunkEditor.refresh();');
+  assert.equal(elements.get('#trunk-section').hidden,false);
+  assert.equal(run('trunkEnabled(room)'),true);
+  run("$('#trunk-depth').value='.32';$('#trunk-recess').value='.18';$('#trunk-frost').value='.6';$('#trunk-apply').onclick();");
+  const saved=run('mergeDioramaIni()');
+  assert.match(saved,/trunk = enabled:1 depth:0.32 recess:0.18 wrap:1 gust:1 frost:0.6 bark:1/);
+  assert.match(saved,/bg1-policy = edge:clamp/);assert.match(saved,/; preserved/);
+  assert.equal(editor(data,{ini:saved}).run('roomConfig(room).trunk.recess'),.18);
+  run('undo()');assert.equal(run('roomConfig(room).trunk'),undefined);
+  run('redo()');assert.equal(run('mergeDioramaIni()'),saved);
+  run("$('#trunk-enabled').value='0';$('#trunk-apply').onclick();");
+  assert.equal(run('trunkEnabled(room)'),false);
+  run("$('#trunk-depth').value='1';$('#trunk-apply').onclick();");
+  assert.equal(run('roomConfig(room).trunk.depth'),.32,'invalid values leave the prior settings intact');
+  run("$('#trunk-reset').onclick();");assert.equal(run('trunkEnabled(room)'),true);
+  run("$('#room').value='1';$('#room').onchange();TrunkEditor.refresh();");
+  assert.equal(elements.get('#trunk-section').hidden,true);
+  run('undo()');assert.equal(run('room.map'),6);assert.equal(run('trunkEnabled(room)'),false);
+}
+
 /* Same ROM room, independent scenery identities, including cross-scene undo. */
 {
   const data=fixture(),base={...data.rooms[0],group:7,map:1,section:'',sceneLabel:'1 A — faces'};
@@ -1184,6 +1209,14 @@ ar(`EffectEditor.openModal(${JSON.stringify(waterId)})`);
 const anchorControl=anchored.elements.get('#emitterAnchor');anchorControl.value='bg1';anchorControl.onchange({target:anchorControl});
 assert.equal(ar('EffectEditor.mapEmitters().length'),1);
 ar(`$('#effectInspectorClose').onclick()`);assert.equal(ar('EffectEditor.text()'),withWater);
+ar(`EffectEditor.openModal(${JSON.stringify(waterId)})`);
+const waterPlacement=anchored.elements.get('#emitterPlacement');
+waterPlacement.value='background-high';waterPlacement.onchange({target:waterPlacement});
+ar(`$('#effectInspectorApply').onclick()`);
+const highWater=ar('EffectEditor.text()');assert.match(highWater,/placement=background-high/);
+ar(`EffectEditor.restore(${JSON.stringify(highWater)});EffectEditor.openModal(${JSON.stringify(waterId)})`);
+assert.equal(waterPlacement.value,'background-high','water depth survives export and reload');
+ar(`$('#effectInspectorClose').onclick()`);
 console.log('BG2 anchors: placement, layer markers, drag/undo, map location, transactional edits, water raster and camera-preserving preview passed');
 }
 
@@ -2751,6 +2784,21 @@ cpr('EffectEditor.pasteEffects(400,200)');assert.equal(cpr('EffectEditor.mapEmit
 cpr(`setLayer(1)`);assert.equal(cpr('EffectEditor.pasteEffects(100,100)'),false);
 console.log('Multi-effect copy/paste preserves spacing and settings, repeats with fresh identities, isolates BG coordinates and undoes atomically');
 
+const fiberEditor=editor(fixture()),fir=fiberEditor.run;
+fir(`loadIniText('','fibers.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ EffectEditor.placeEmitter('foliage-shadow',128,96);EffectEditor.selectEmitter(EffectEditor.selected());
+ $('#emitterBare').value='1';$('#emitterBare').onchange({target:$('#emitterBare')});`);
+assert.match(fir('EffectEditor.text()'),/^bare=1$/m);
+assert.doesNotMatch(fir('EffectEditor.text()'),/^textured=1$|^shadows=1$/m);
+assert.equal(fiberEditor.elements.get('#emitterTextured').disabled,true);
+assert.equal(fiberEditor.elements.get('#emitterSoftness').disabled,true);
+const fiberSaved=fir('EffectEditor.text()');
+fir('undo()');assert.doesNotMatch(fir('EffectEditor.text()'),/^bare=1$/m);
+fir('redo()');assert.equal(fir('EffectEditor.text()'),fiberSaved);
+fir('EffectEditor.copyEffects();EffectEditor.pasteEffects(256,160)');
+assert.equal((fir('EffectEditor.text()').match(/^bare=1$/gm)||[]).length,2);
+console.log('Bare woody fibers: stencil compatibility, relevant controls, undo/redo and copy/paste passed');
+
 const weatherEditor=editor(fixture()),wtr=weatherEditor.run;
 wtr(`loadIniText('','weather.ini');setLayer(1);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  EffectEditor.placeEmitter('storm-lightning',160,64);EffectEditor.selectEmitter(EffectEditor.selected());`);
@@ -2833,6 +2881,19 @@ assert.match(wpr('EffectEditor.text()'),/^canopy-response=1$/m);
 assert.match(wpr('EffectEditor.text()'),/^travel-y=96$/m);
 assert.match(wpr('EffectEditor.text()'),/^anchor=bg2-point$/m);
 console.log('Sunlit waterfall particles: BG2 anchoring, flowing pattern and response survive copy/paste/export');
+const crystalEditor=editor(fixture()),icr=crystalEditor.run;
+icr(`loadIniText('','ice-crystals.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ EffectEditor.placeEmitter('particle-area',300,200);
+ EffectEditor.editEmitter(EffectEditor.selected(),{pattern:'ice-crystals',softness:.75,'canopy-response':.75,twinkle:.35,'travel-y':24,particles:12,lifetime:1037});
+ EffectEditor.selectEmitter(EffectEditor.selected());EffectEditor.copyEffects();EffectEditor.pasteEffects(600,200);
+ EffectEditor.loadDocument(EffectEditor.text());EffectEditor.selectEmitter(EffectEditor.mapEmitters(0)[0].id);`);
+assert.equal(crystalEditor.elements.get('#emitterSoftness').disabled,false);
+assert.equal(crystalEditor.elements.get('#emitterLightResponse').disabled,false);
+for(const line of ['pattern=ice-crystals','softness=0.75','canopy-response=0.75','twinkle=0.35','travel-y=24','particles=12','lifetime=1037'])
+  assert(icr('EffectEditor.text()').includes(line),`ice controls survive copy/reload: ${line}`);
+icr(`EffectEditor.editEmitter(EffectEditor.selected(),{pattern:'snow'});`);
+assert.equal(crystalEditor.elements.get('#emitterSoftness').disabled,true);
+console.log('Suspended ice: alpha pattern, softness, light response and slow motion survive copy/paste/reload/export');
 console.log('Storm region placement, resizing, copy/paste, defaults and BG2 cloud controls passed');
 wtr(`setLayer(1);EffectEditor.placeEmitter('light-fan',240,68);
  EffectEditor.editEmitter(EffectEditor.selected(),{twinkle:.6,'fade-in':.25,lifetime:1260,shadows:0});
@@ -2880,6 +2941,43 @@ assert.equal(clr('EffectEditor.mapEmitters(1).find(e=>e.id===EffectEditor.select
 assert.equal(clr('EffectEditor.mapEmitters(1).find(e=>e.id===EffectEditor.selected()).seed'),104,
   'map guides carry the same pattern seed as the material');
 console.log('Cloud material placement, BG2 isolation, sparse defaults, sizing, angles, copy/paste and reset/export passed');
+
+const auroraEditor=editor(fixture()),aur=auroraEditor.run;
+aur(`loadIniText('','aurora.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};`);
+assert.equal(aur("EffectEditor.placeEmitter('aurora',128,54)"),false,'aurora placement requires the sky map');
+aur(`setLayer(1);EffectEditor.placeEmitter('aurora',128,54);EffectEditor.selectEmitter(EffectEditor.selected());`);
+for(const id of ['#emitterAnchor','#emitterPlacement','#emitterparticles'])
+  assert.equal(auroraEditor.elements.get(id).disabled,true);
+assert.equal(auroraEditor.elements.get('#receiverControls').hidden,true);
+assert.equal(auroraEditor.elements.get('#effectTintControls').hidden,false);
+assert.equal(Number(auroraEditor.elements.get('#emitterStrands').max),3);
+assert.equal(Number(auroraEditor.elements.get('#emitterlifetime').value),1800);
+assert.equal(auroraEditor.elements.get('#emitterGust').disabled,false);
+assert.doesNotMatch(aur('EffectEditor.text()'),/^particles=/m,'visual curtains do not export a particle count');
+aur(`EffectEditor.editEmitter(EffectEditor.selected(),{strands:1,angle:-18,amplitude:16,drift:8,gust:.85,softness:.7,twinkle:.25,lifetime:4000,'color-end':'8899aa'});
+ EffectEditor.copyEffects();EffectEditor.pasteEffects(180,54);`);
+assert.equal(aur('EffectEditor.mapEmitters(1).length'),2);
+for(const line of ['strands=1','angle=-18','amplitude=16','drift=8','gust=0.85','softness=0.7','twinkle=0.25','lifetime=4000','color-end=8899aa'])
+  assert(aur('EffectEditor.text()').includes(line),`aurora copy preserves ${line}`);
+aur(`EffectEditor.loadDocument(EffectEditor.text());EffectEditor.selectEmitter(EffectEditor.mapEmitters(1)[0].id);`);
+assert.equal(Number(auroraEditor.elements.get('#emitterlifetime').value),4000);
+aur(`setLayer(0);EffectEditor.placeEmitter('light-gradient',128,160);EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(auroraEditor.elements.get('#emitterlifetime').disabled,false);
+assert.equal(auroraEditor.elements.get('#emitterTwinkle').disabled,false);
+console.log('Aurora BG2 placement, bounded curtain controls, tint, copy/reload and reflected-light modulation passed');
+aur(`setLayer(1);EffectEditor.placeEmitter('starfield',128,44);EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(auroraEditor.elements.get('#skyControls').hidden,false);
+assert.equal(Number(auroraEditor.elements.get('#emitterparticles').max),64);
+assert.equal(auroraEditor.elements.get('#emitterScatter').disabled,false);
+assert.equal(auroraEditor.elements.get('#emitterTravelY').disabled,true);
+aur(`$('#sky-sky-palettes').onchange({target:{value:'1,2'}});
+ $('#sky-sky-colors').onchange({target:{value:'7,8,9'}});
+ EffectEditor.editEmitter(EffectEditor.selected(),{particles:48,scatter:.22,twinkle:.25,'size-max':1.5});
+ EffectEditor.copyEffects();EffectEditor.pasteEffects(180,44);
+ EffectEditor.loadDocument(EffectEditor.text());`);
+for(const line of ['sky-palettes=1,2','sky-colors=7,8,9','particles=48','scatter=0.22','twinkle=0.25','size-max=1.5'])
+  assert(aur('EffectEditor.text()').includes(line),`starfield controls survive copy/reload: ${line}`);
+console.log('Starfield count, fixed positions, native sky masking, haze and copied/reloaded controls passed');
 
 // Use the context menu and keyboard/mouse handlers at a scrolled, zoomed map
 // with a sidebar offset. A rejected paste must be visible beside the map.
@@ -2931,12 +3029,33 @@ assert.equal(Number(lir("$('#effectReach').value")),2);
 assert.equal(Number(lir("$('#effectIllumination').value")),1);
 lir(`EffectEditor.placeEmitter('soft-light',160,120);EffectEditor.selectEmitter(EffectEditor.selected());`);
 assert.equal(Number(lir("$('#effectIllumination').value")),3);
+assert.equal(Number(lir("$('#emitterScatter').value")),0,'legacy soft lights have no visible diffusion');
+assert.equal(lir("$('#emitterScatter').disabled"),false);
+lir(`EffectEditor.editEmitter(EffectEditor.selected(),{scatter:.65,placement:'playfield'});`);
+assert.match(lir('EffectEditor.text()'),/^scatter=0.65$/m,'diffusion survives export');
 lir(`$('#effectIllumination').onchange({target:{value:'0'}});`);
 assert.match(lir('EffectEditor.text()'),/^illumination=0$/m,'explicit zero survives export');
 lir('EffectEditor.copyEffects();EffectEditor.pasteEffects(240,120)');
 assert.equal(Number(lir("$('#effectIllumination').value")),0,'copy retains the override');
+assert.equal(Number(lir("$('#emitterScatter').value")),.65,'copy retains diffusion');
 lir('undo()');assert.equal(lir('EffectEditor.mapEmitters().filter(e=>e.kind==="soft-light").length'),1);
 console.log('Shared light defaults, torch 4/2, independent illumination, reset, export and copying passed');
+const reflectionEditor=editor(fixture()),rfr=reflectionEditor.run;
+rfr(`loadIniText('','reflected-water-light.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ EffectEditor.placeEmitter('soft-light',240,180);EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(reflectionEditor.elements.get('#emitterlifetime').disabled,true);
+rfr(`EffectEditor.editEmitter(EffectEditor.selected(),{ripple:1,softness:.18,amplitude:6,drift:19,lifetime:286,scatter:0,placement:'playfield'});
+ EffectEditor.copyEffects();EffectEditor.pasteEffects(400,180);
+ EffectEditor.loadDocument(EffectEditor.text());EffectEditor.selectEmitter(EffectEditor.mapEmitters(0)[0].id);`);
+for(const control of ['#emitterRipple','#emitterlifetime','#emitterAmplitude','#emitterDrift','#emitterSoftness'])
+  assert.equal(reflectionEditor.elements.get(control).disabled,false);
+for(const value of ['ripple=1','softness=0.18','amplitude=6','drift=19','lifetime=286','scatter=0','placement=playfield'])
+  assert(rfr('EffectEditor.text()').includes(value),`reflection control survives copy/reload: ${value}`);
+rfr(`EffectEditor.editEmitter(EffectEditor.selected(),{ripple:0});`);
+assert.equal(reflectionEditor.elements.get('#emitterlifetime').disabled,true);
+assert.equal(reflectionEditor.elements.get('#emitterAmplitude').disabled,true);
+assert.equal(reflectionEditor.elements.get('#emitterSoftness').disabled,true);
+console.log('Reflected water light: optional ripple motion, matching phase/cycle, copy/reload/export and static reset passed');
 
 const surfaceEditor=editor(fixture()),sur=surfaceEditor.run;
 const surfaceData=fs.readFileSync(path.join(root,'assets/effects/lava-lake-field.ini'),'utf8')
@@ -3167,9 +3286,12 @@ gr(`SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDoc
  EffectEditor.selectEmitter(EffectEditor.mapEmitters(0).find(e=>e.kind==='cloud-bank').id);`);
 assert.equal(groundUi.elements.get('#contourControls').hidden,false);
 assert.equal(groundUi.elements.get('#emitterCarry').disabled,false);
+assert.equal(groundUi.elements.get('#emitterGroundDepth').disabled,false);
 assert.equal(groundUi.elements.get('#emitterTwinkle').disabled,false);
 assert.equal(groundUi.elements.get('#emitterparticles').disabled,false);
 assert.equal(groundUi.elements.get('#emitterTravelX').disabled,true);
+assert.equal(groundUi.elements.get('#emitterWake').disabled,false);
+assert.equal(groundUi.elements.get('#emitterLightResponse').disabled,false);
 const groundId=gr('EffectEditor.selected()'),groundInitial=gr('EffectEditor.text()');
 assert.equal(gr('EffectGeometry.outline(EffectEditor.mapEmitters(0).find(e=>e.id===EffectEditor.selected())).length'),22);
 gr(`EffectEditor.editEmitter(EffectEditor.selected(),{width:160});`);
@@ -3187,9 +3309,41 @@ assert.equal(gr('EffectEditor.mapEmitters(0).filter(e=>e.kind==="cloud-bank").le
 gr(`$('#emitterPoints').onchange({target:{value:''}});`);
 assert.equal(gr('EffectEditor.mapEmitters(0).find(e=>e.id===EffectEditor.selected()).points'),'');
 assert.equal(groundUi.elements.get('#emitterCarry').disabled,true);
+assert.equal(groundUi.elements.get('#emitterGroundDepth').disabled,true);
 assert.equal(groundUi.elements.get('#emitterparticles').disabled,true);
 gr('undo()');assert.equal(groundUi.elements.get('#emitterCarry').disabled,false);
 assert.equal(gr('EffectEditor.mapEmitters(0).find(e=>e.id===EffectEditor.selected()).carry'),140);
+gr(`EffectEditor.placeEmitter('preset:snow-drift',160,128);EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(Number(groundUi.elements.get('#emitterGroundDepth').value),4);
+assert.equal(Number(groundUi.elements.get('#emitterGroundWidth').value),8);
+assert.equal(groundUi.elements.get('#emitterGroundWidth').disabled,false);
+for(const id of ['#emitterCarry','#emitterStrands','#emitterSoftness'])assert.equal(groundUi.elements.get(id).disabled,true);
+gr(`$('#emitterGroundDepth').onchange({target:{value:'0'}});`);
+assert.equal(Number(groundUi.elements.get('#emitterGroundWidth').value),0);
+assert.equal(groundUi.elements.get('#emitterGroundWidth').disabled,true);
+for(const id of ['#emitterCarry','#emitterStrands','#emitterSoftness'])assert.equal(groundUi.elements.get(id).disabled,false);
+gr('undo()');
+assert.match(gr('EffectEditor.text()'),/^wake=\.9$/m);
+gr(`$('#contourDraw').onclick();EffectEditor.paintContour([{x:80,y:144},{x:240,y:144}]);`);
+assert.match(gr('EffectEditor.text()'),/^wake=\.9$/m);
+assert.match(gr('EffectEditor.text()'),/^canopy-response=\.65$/m);
+assert.match(gr('EffectEditor.text()'),/^ground-depth=4$/m);
+assert.match(gr('EffectEditor.text()'),/^ground-width=8$/m);
+gr(`$('#emitterGroundWidth').onchange({target:{value:'10'}});`);
+gr(`$('#emitterGroundDepth').onchange({target:{value:'3.5'}});EffectEditor.copyEffects();EffectEditor.pasteEffects(400,128);`);
+assert.equal((gr('EffectEditor.text()').match(/^ground-depth=3.5$/gm)||[]).length,2);
+assert.equal((gr('EffectEditor.text()').match(/^ground-width=10$/gm)||[]).length,2);
+gr(`EffectEditor.editEmitter(EffectEditor.selected(),{placement:'playfield'});`);
+assert.equal(Number(groundUi.elements.get('#emitterGroundDepth').value),0);
+assert.equal(Number(groundUi.elements.get('#emitterGroundWidth').value),0);
+gr(`$('#emitterGroundDepth').onchange({target:{value:'4'}});`);
+assert.equal(groundUi.elements.get('#emitterPlacement').value,'foreground');
+gr(`$('#emitterPoints').onchange({target:{value:''}});`);
+assert.equal(Number(groundUi.elements.get('#emitterGroundDepth').value),0);
+gr('undo()');
+gr(`$('#emitterWake').onchange({target:{value:'.6'}});`);
+assert.match(gr('EffectEditor.text()'),/^wake=\.6$/m);
+assert.doesNotMatch(gr('EffectEditor.text()'),/^rolling=/m);
 gr(`EffectEditor.placeEmitter('torch',96,128);EffectEditor.selectEmitter(EffectEditor.mapEmitters(0).find(e=>e.kind==='torch').id);`);
 assert.equal(groundUi.elements.get('#emitterparticles').disabled,false);
 assert.equal(Number(groundUi.elements.get('#emitterparticles').value),0);

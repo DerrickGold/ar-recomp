@@ -79,6 +79,8 @@ def load_plan(path: Path) -> list[dict]:
             for start, end, player in zip(route['start'], route['end'], route['player']):
                 if not -(2**31) <= player + end - start < 2**31:
                     raise ValueError(f'Player route exceeds integer coordinates: {name}')
+        if 'receivers' in route and (not isinstance(route['receivers'], str) or not route['receivers']):
+            raise ValueError(f'{name}.receivers must name a CSV route relative to the plan')
     return plan
 
 
@@ -147,13 +149,18 @@ def main() -> None:
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--frames', type=int, default=240)
     parser.add_argument('--size', type=int, nargs=2, default=[1280, 800])
+    parser.add_argument('--clock', type=int, default=0, help='Initial animation tick for warmup and measurement')
+    parser.add_argument('--profile', action='store_true', help='Record diagnostic owner-thread CPU and packet counters separately')
     parser.add_argument('--mode', choices=['both', 'on', 'off'], default='both')
     parser.add_argument('--wake-deck', action='store_true')
     parser.add_argument('--wsl', action='store_true')
     parser.add_argument('--capture', action='store_true', help='PNG sequence, no performance measurements; use a smaller --size')
     args = parser.parse_args()
-    if args.repeats < 1 or not 2 <= args.frames <= 10000 or any(not 1 <= n <= 2048 for n in args.size):
-        parser.error('Invalid repeat count, frames or dimensions')
+    if (args.repeats < 1 or not 2 <= args.frames <= 10000 or not 0 <= args.clock < 2**31 or
+            any(not 1 <= n <= 2048 for n in args.size)):
+        parser.error('Invalid repeat count, frames, clock or dimensions')
+    if args.capture and args.profile:
+        parser.error('Capture and profiling must be separate runs')
     if args.wsl and args.wake_deck:
         parser.error('--wake-deck is for the Deck desktop, not WSL')
     try:
@@ -172,17 +179,28 @@ def main() -> None:
     provenance = dict(plan=plan, layers_sha256=sha(layers), effects_sha256=sha(effects),
                       binaries={label: sha(path) for label, path in binaries},
                       assets={p.name: sha(p) for p in rooms.iterdir() if p.suffix in ('.arscene', '.bin')},
-                      warmup_frames=args.frames, dimensions=args.size, capture=args.capture)
+                      warmup_frames=args.frames, dimensions=args.size, capture=args.capture,
+                      clock=args.clock, profile=args.profile, receivers={})
+    receivers = {}
     for route in plan:
         if not (rooms/(route['room']+'.arscene')).is_file():
             parser.error(f'Missing scene for {route["name"]}: {route["room"]}.arscene')
-        if route['player'][0] >= 0 and not (rooms/'player.bin').is_file():
+        if (route['player'][0] >= 0 or 'receivers' in route) and not (rooms/'player.bin').is_file():
             parser.error('Player stand-ins require rooms/player.bin')
+        if 'receivers' in route:
+            path = (args.plan.resolve().parent/route['receivers']).resolve()
+            try:
+                if len(path.read_text().splitlines()) != args.frames:
+                    parser.error(f'{route["name"]}: receiver route must have {args.frames} rows')
+                provenance['receivers'][route['name']] = dict(path=str(path), sha256=sha(path))
+                receivers[route['name']] = path
+            except OSError as error:
+                parser.error(f'{route["name"]}: {error}')
     output.mkdir(parents=True, exist_ok=False)
     (output/'inputs.json').write_text(json.dumps(provenance, indent=2)+'\n')
     env = {k: v for k, v in os.environ.items() if not k.startswith(('AR_', 'SDL_', 'SNESRECOMP_', 'LD_PRELOAD'))}
     env.update(AR_BENCH_WIDTH=str(args.size[0]), AR_BENCH_HEIGHT=str(args.size[1]),
-               AR_BENCH_WARMUP=str(args.frames), AR_BENCH_STEP='2', AR_BENCH_CLOCK='0')
+               AR_BENCH_WARMUP=str(args.frames), AR_BENCH_STEP='2', AR_BENCH_CLOCK=str(args.clock))
     if args.wake_deck:
         env.update(DISPLAY=':0', WAYLAND_DISPLAY='wayland-0', XDG_RUNTIME_DIR=f'/run/user/{os.getuid()}',
                    DBUS_SESSION_BUS_ADDRESS=f'unix:path=/run/user/{os.getuid()}/bus', SDL_VIDEO_DRIVER='wayland')
@@ -200,6 +218,10 @@ def main() -> None:
                         out = output/name
                         out.mkdir()
                         run_env = dict(env, SDL_GPU_DRIVER=driver, AR_BENCH_EFFECTS=str(int(mode == 'on')))
+                        if route['name'] in receivers:
+                            run_env['AR_BENCH_RECEIVER_ROUTE'] = native(receivers[route['name']])
+                        if args.profile:
+                            run_env['AR_BENCH_PROFILE'] = native(out/'cpu.csv')
                         if args.wake_deck:
                             display = []
                             for command in (['kscreen-doctor', '--dpms', 'on'], ['kscreen-doctor', '-o']):

@@ -151,14 +151,16 @@ static bool ActRaiser_ResolveActionBgPlan(
           g_ram, kActRaiserWramSize,
           g_settings.ws_bg2_padding, plan, presentation)) return false;
   const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
-  if (room) DioramaBgPolicy_Apply(room->bg_policy, plan);
+  const bool trunk=Diorama_ModeIsOn()&&DioramaTrunk_Resolve(map_group,map_number,room).enabled;
+  if(trunk)DioramaTrunk_ApplyBgPolicy(map_group,map_number,room,plan);
+  else if(room)DioramaBgPolicy_Apply(room->bg_policy,plan);
   if (!ActionBgTuner_ObservePlan(
           map_group, map_number, plan,
           (ActionBgTunerLimits) {
             SR_PPU_HORIZONTAL_MARGIN_MAX, SR_PPU_HORIZONTAL_MARGIN_MAX,
             SR_PPU_VERTICAL_MARGIN_MAX, SR_PPU_VERTICAL_MARGIN_MAX,
           })) return false;
-  if (apply_tuner_draft && !ActionBgTuner_ApplyDraft(plan) &&
+  if (apply_tuner_draft && !trunk && !ActionBgTuner_ApplyDraft(plan) &&
       !reported_rejected_draft) {
     reported_rejected_draft = true;
     fprintf(stderr,

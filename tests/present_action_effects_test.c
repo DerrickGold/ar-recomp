@@ -441,11 +441,12 @@ static void EnvironmentalEffectsIndependence(void) {
   frame.action_scene_effects.decorations[0].render_layer = kActionEffectRenderLayer_WorldOverlay;
   frame.action_environmental_effects = true;
   PresentActionEffects_Draw(&device, &frame, viewport, NULL);
-  assert(b.geometries == 2);
+  assert(b.geometries == 3 && b.geometry_blends[1]==kArRenderBlendMode_Add &&
+      b.geometry_blends[2]==kArRenderBlendMode_Alpha); /* Lava light plus molten detail. */
   frame.action_environmental_effects = false;
   frame.action_effect_lighting = true;
   PresentActionEffects_Draw(&device, &frame, viewport, NULL);
-  assert(b.geometries == 2);
+  assert(b.geometries == 3);
   frame.action_scene_effects.effect_count = frame.action_scene_effects.visible_count = 1;
   frame.action_scene_effects.effects[0] = (ActionEffectInstance){
     .world_x = 128, .world_y = 100,
@@ -455,7 +456,7 @@ static void EnvironmentalEffectsIndependence(void) {
     .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-4, -4, 4, 4}},
   };
   PresentActionEffects_Draw(&device, &frame, viewport, NULL);
-  assert(b.geometries == 3);
+  assert(b.geometries == 4);
   PresentActionEffects_Reset(&device);
 }
 
@@ -1129,8 +1130,11 @@ static void TestEffectMasterBrightness(void) {
   for (int path = 0; path < 5; path++) {
     LavaFrame();
     frame.action_bg1_mask_valid = true;
-    float full_peak = 0;
-    ArRenderColorF full_color = {0};
+    /* World lava now submits both its light and its alpha molten detail.
+     * Master brightness must scale every batch without changing opacity. */
+    const int batches=path==2?2:1;
+    float full_peak[2] = {0};
+    ArRenderColorF full_color[2] = {{0}};
     frame.action_scene_effects.decorations[0].render_layer = path >= 2
         ? kActionEffectRenderLayer_WorldOverlay : kActionEffectRenderLayer_Bg1HighPlane;
     if (path == 3) {
@@ -1168,15 +1172,17 @@ static void TestEffectMasterBrightness(void) {
         assert(!PresentActionHeat_Begin(&device, &frame, viewport));
         continue;
       }
-      assert(b.geometries == before + 1);
-      if (!i) {
-        full_peak = b.geometry_peak_rgb[before];
-        full_color = b.geometry_colors[before];
-        assert(full_peak > 0);
+      assert(b.geometries == before + batches);
+      for(int batch=0;batch<batches;++batch) {
+        if (!i) {
+          full_peak[batch] = b.geometry_peak_rgb[before+batch];
+          full_color[batch] = b.geometry_colors[before+batch];
+          assert(full_peak[batch] > 0);
+        }
+        const float brightness = controls[i] / 15.0f;
+        assert(fabsf(b.geometry_peak_rgb[before+batch] - full_peak[batch] * brightness) < .00001f);
+        assert(b.geometry_colors[before+batch].a == full_color[batch].a);
       }
-      const float brightness = controls[i] / 15.0f;
-      assert(fabsf(b.geometry_peak_rgb[before] - full_peak * brightness) < .00001f);
-      assert(b.geometry_colors[before].a == full_color.a);
     }
   }
   PresentActionEffects_Reset(&device);
@@ -1267,6 +1273,44 @@ static void AuthoredOnlyComposition(void) {
   frame.action_environmental_effects = false;
   PresentActionEffects_Draw(&device,&frame,viewport,NULL);
   assert(b.geometries == 4 && b.created==resources);
+  PresentActionEffects_Reset(&device);
+}
+
+static void GroundCoverComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b,&device);LavaFrame();
+  frame.action_effect_lighting=frame.action_effect_particles=false;
+  frame.action_bg1_mask_valid=true;
+  frame.action_scene_effects=(ActionSceneEffectFrame){.authored_count=1};
+  ActionEffectInstance *e=&frame.action_scene_effects.authored[0];
+  *e=(ActionEffectInstance){.world_x=128,.world_y=112,.kind=kActionEffect_AuthoredCloud,
+      .flags=kActionEffectFlag_Visible,.render_layer=kActionEffectRenderLayer_WorldDust,
+      .projection_plane=kActionEffectProjectionPlane_Bg1,
+      .tuning={.intensity=2,.color=0xd8e6f6,.active=1},.particle_lifetime=240,
+      .particle_style=ActionAuthoredParticles_Default(64,93),
+      .field_style={.placement=2,.strands=2,.ground_depth=4,.ground_width=8,
+          .point_count=2,.points={{-96,0},{96,0}}},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-96,-32,96,32}}};
+  memset(pixels,0xff,sizeof(pixels));pixels[0]=0xff000000u;
+  assert(PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)pixels,256*4)==sizeof(pixels));
+  assert(b.first_uploaded_pixel==0); /* Winning actors exclude the broad top. */
+  const unsigned resources=b.created;
+  device.capabilities.flags&=~(kArRenderCapability_RenderTargets|kArRenderCapability_ScopedRenderTargets);
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries==1&&b.geometry_blends[0]==kArRenderBlendMode_Alpha);
+  PresentActionEffects_Draw(&device,&frame,viewport,NULL);
+  assert(b.geometries==2&&b.geometry_blends[1]==kArRenderBlendMode_Alpha); /* Shallow lip. */
+  assert(b.created==resources&&!b.resolves&&!b.restores);
+  b.fail_update=true;pixels[1]=0xff000000u; /* Force a changed upload, not a mirror cache hit. */
+  assert(!PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)pixels,256*4));
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries==2); /* Never draw the broad top over actors using a stale mask. */
+  frame.action_environmental_effects=false;
+  PresentActionEffects_Draw(&device,&frame,viewport,NULL);
+  assert(b.geometries==2);
   PresentActionEffects_Reset(&device);
 }
 
@@ -1544,6 +1588,7 @@ int main(void) {
   for(unsigned i=0;i<sizeof(particle_slots)/sizeof(particle_slots[0]);++i)
     for(unsigned weather=0;weather<2;++weather)SourceParticleViewLifetime(particle_slots[i],weather!=0);
   AuthoredOnlyComposition();
+  GroundCoverComposition();
   TexturedCloudResources();
   TestEffectMasterBrightness();
   SkyboxWaterfallComposition();

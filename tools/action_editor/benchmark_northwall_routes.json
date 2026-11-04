@@ -1,0 +1,179 @@
+[
+  {
+    "name": "northwall-snow",
+    "room": "0601",
+    "start": [
+      0,
+      288
+    ],
+    "end": [
+      0,
+      288
+    ],
+    "player": [
+      -1,
+      0
+    ],
+    "receivers": "../../tests/fixtures/benchmark/northwall-snow-receivers.csv"
+  },
+  {
+    "name": "northwall-outdoors",
+    "room": "0601",
+    "start": [
+      0,
+      288
+    ],
+    "end": [
+      2304,
+      656
+    ],
+    "player": [
+      -1,
+      0
+    ]
+  },
+  {
+    "name": "northwall-water-cave",
+    "room": "0602",
+    "start": [
+      384,
+      448
+    ],
+    "end": [
+      1280,
+      480
+    ],
+    "player": [
+      512,
+      620
+    ]
+  },
+  {
+    "name": "northwall-upper-cave",
+    "room": "0602",
+    "start": [
+      256,
+      128
+    ],
+    "end": [
+      1280,
+      128
+    ],
+    "player": [
+      384,
+      304
+    ]
+  },
+  {
+    "name": "northwall-ice-shaft",
+    "room": "0603",
+    "start": [
+      768,
+      1280
+    ],
+    "end": [
+      768,
+      64
+    ],
+    "player": [
+      896,
+      1456
+    ]
+  },
+  {
+    "name": "northwall-ice-boss",
+    "room": "0604",
+    "start": [
+      128,
+      224
+    ],
+    "end": [
+      128,
+      224
+    ],
+    "player": [
+      256,
+      400
+    ]
+  },
+  {
+    "name": "northwall-tree-approach",
+    "room": "0605",
+    "start": [
+      0,
+      512
+    ],
+    "end": [
+      512,
+      64
+    ],
+    "player": [
+      128,
+      688
+    ]
+  },
+  {
+    "name": "northwall-tree-lower",
+    "room": "0606",
+    "start": [
+      384,
+      1792
+    ],
+    "end": [
+      384,
+      896
+    ],
+    "player": [
+      512,
+      1968
+    ]
+  },
+  {
+    "name": "northwall-tree-upper",
+    "room": "0606",
+    "start": [
+      384,
+      896
+    ],
+    "end": [
+      384,
+      0
+    ],
+    "player": [
+      512,
+      1072
+    ]
+  },
+  {
+    "name": "northwall-upper-trunk",
+    "room": "0607",
+    "start": [
+      384,
+      1280
+    ],
+    "end": [
+      384,
+      0
+    ],
+    "player": [
+      512,
+      1456
+    ]
+  },
+  {
+    "name": "northwall-treetop",
+    "room": "0608",
+    "start": [
+      128,
+      192
+    ],
+    "end": [
+      128,
+      192
+    ],
+    "player": [
+      256,
+      368
+    ]
+  }
+]

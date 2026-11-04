@@ -35,6 +35,7 @@ class RoomBenchmarkTest(unittest.TestCase):
         for key, value in [('name', '../outside'), ('name', ''), ('room', '../0502'),
                            ('room', '050'), ('start', [0]), ('end', [True, 0]),
                            ('end', [0, 1.5]), ('player', [2**31, 0]),
+                           ('receivers', ''), ('receivers', [1, 2]),
                            ('player', [2**31 - 1, 0])]:
             invalid.append([dict(route, **{key: value})])
         with tempfile.TemporaryDirectory() as directory:
@@ -44,6 +45,29 @@ class RoomBenchmarkTest(unittest.TestCase):
                     path.write_text(json.dumps(plan))
                     with self.assertRaises(ValueError):
                         benchmark.load_plan(path)
+
+    def test_northwall_covers_both_acts_and_moving_snow_receivers(self):
+        path = ROOT / 'tools/action_editor/benchmark_northwall_routes.json'
+        plan = benchmark.load_plan(path)
+        self.assertEqual({r['room'] for r in plan}, {f'060{n}' for n in range(1, 9)})
+        snow = next(r for r in plan if r['name'] == 'northwall-snow')
+        with (path.parent / snow['receivers']).open() as route:
+            rows = list(csv.reader(route))
+        self.assertEqual(len(rows), 240)
+        self.assertTrue(all(len(r) == 5 and r[0] == '3' for r in rows))
+        self.assertGreater(len({r[1] for r in rows}), 100)
+        self.assertGreater(len({r[3] for r in rows}), 100)
+
+    def test_capture_and_profile_cannot_share_a_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'new-run'
+            result = subprocess.run([sys.executable, str(ROOT / 'tools/action_editor/benchmark_rooms.py'),
+                '--binary', 'unused', '--rooms', 'unused', '--layers', 'unused', '--effects', 'unused',
+                '--output', str(output), '--drivers', 'metal', '--capture', '--profile'],
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('Capture and profiling', result.stderr)
+            self.assertFalse(output.exists())
 
     def test_display_check_requires_valid_awake_backlight(self):
         state = {'/panel/actual_brightness': '200', '/panel/bl_power': '0'}

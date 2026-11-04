@@ -23,6 +23,30 @@ static void BakeCloud(unsigned variant,uint8_t *atlas) {
 static float Density(unsigned cell,float u,float v) {
   if(!cell)return 1;
   const uint32_t seed=cell*0x91e10da5u;
+  if(cell>=kActionMaskCausticFirst) {
+    /* Warped cellular boundaries form rounded, interlocking light arcs.
+     * All eight cells share the pattern with progressively softer ridges.
+     * Bake once; animation only deforms UVs on the existing light mesh. */
+    const float edge=CloudNoise_Ramp(0,.16f,u)*CloudNoise_Ramp(0,.16f,1-u)*
+        CloudNoise_Ramp(0,.16f,v)*CloudNoise_Ramp(0,.16f,1-v);
+    if(edge==0)return 0;
+    const float x=u*4.6f+.32f*sinf(v*12+.6f*sinf(u*15)),
+                y=v*4.6f+.28f*sinf(u*13-.5f*cosf(v*17));
+    const int ix=(int)floorf(x),iy=(int)floorf(y);
+    float nearest=100,second=100;
+    for(int j=-1;j<=1;++j)for(int i=-1;i<=1;++i) {
+      const uint32_t id=(uint32_t)(ix+i)*0x9e3779b9u^(uint32_t)(iy+j)*0x85ebca6bu^713;
+      const float dx=x-(ix+i+.16f+.68f*CloudNoise_Seed(id)),
+                  dy=y-(iy+j+.16f+.68f*CloudNoise_Seed(id^173));
+      const float d=dx*dx+dy*dy;
+      if(d<nearest){second=nearest;nearest=d;}else second=fminf(second,d);
+    }
+    const float distance=sqrtf(second)-sqrtf(nearest);
+    const float softness=(float)(cell-kActionMaskCausticFirst)/(kActionMaskCausticCount-1);
+    const float ridge=1-CloudNoise_Ramp(.018f+.045f*softness,.065f+.12f*softness,distance);
+    const float broken=.18f+.82f*CloudNoise_Ramp(.23f,.70f,CloudNoise_Seeded2(x*.8f,y*.8f,991));
+    return edge*ridge*broken;
+  }
   if(cell==kActionMaskRipple) {
     const float r=hypotf(u*2-1,v*2-1);
     return CloudNoise_Ramp(.62f,.76f,r)*(1-CloudNoise_Ramp(.80f,.96f,r));
@@ -101,6 +125,9 @@ static void Prepare(void) {
       s_alpha[y*kActionMaskAtlasWidth+x]=(uint8_t)(GeneratePixel(x,y)>>24);
     for (unsigned variant=0; variant<kActionMaskCloudCount; ++variant)
       BakeCloud(variant,s_alpha);
+    for(unsigned y=kActionMaskCausticFirst/kActionMaskAtlasColumns*kActionMaskCellSize;
+        y<kActionMaskAtlasHeight;++y)for(unsigned x=0;x<kActionMaskAtlasWidth;++x)
+      s_alpha[y*kActionMaskAtlasWidth+x]=(uint8_t)(GeneratePixel(x,y)>>24);
     atomic_store_explicit(&s_ready,2,memory_order_release);
   } else while(atomic_load_explicit(&s_ready,memory_order_acquire)!=2) {}
 }

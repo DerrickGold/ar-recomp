@@ -125,6 +125,120 @@ These regions use BG1/world coordinates. Window, torch, and ambient lighting
 can affect scenery, the player, and enemies. Rooms `05:06–07` share a map, so
 their authored light positions remain consistent across the room transition.
 
+## Northwall Act 2
+
+Rooms `06:05–08` progress from blue hour to a brighter, multicolored summit.
+All three regional terrain profiles use editable recipes in `action-effects.ini`
+and follow **Environmental effects**.
+
+| Room | Environment |
+| --- | --- |
+| 06:05 | A deeper blue mountain sky, cool reflected light and sparse windblown snow at two depths. |
+| 06:06 | Shaded trunk scenery, cool ambient light and a few slowly drifting frost grains. |
+| 06:07 | Darker upper branches, a restrained green aurora glimpsed through the native openings and a faint green cast on the climb. |
+| 06:08 | Three broader, brighter green/cyan and rose/red aurora curtains above the snowy canopy, matching reflected color and light windblown snow. |
+
+In Diorama, the two interiors form a connected tree hollow: a smoothly curved
+rear wall, recessed platforms and actors, and solid native bark edges. The
+**Tree enclosure** controls in the action editor set curvature and recess.
+The enclosure owns its background layout, so ordinary BG layer and skybox policies
+cannot change it. Choosing **Original layers** restores the saved BG settings.
+
+Twelve short, widening beams shine through selected openings. They softly light
+the curved wall and branch undersides, with restrained shadows beneath branches.
+Local gusts move the existing grains and woody fibers; sparse frost on exposed
+bark glints as the camera turns. Hard landings on native branches release a few
+bark flakes, with a local cooldown to keep them rare. The central column does
+not shed flakes. These accents follow Environmental effects and their lighting/
+particle switches, and have separate enclosure strength controls.
+
+The summit retains the original star artwork. Its two aurora emitters have
+different motion seeds, directions and 1680/2160-frame cycles; the corresponding
+light gradients share each curtain's brightness cycle. Scenery, player and enemy
+receivers remain independently editable. The gradients provide broad reflected
+color, not a projected image of the curtains. Snow samples their incident light;
+the trunk's sparse frost retains enough ambient visibility in unlit pockets.
+
+Select **Aurora** markers on BG2 to change shape, motion or color. They enter the
+background source before DoF and stay behind the native scenery and actors.
+Select **Particle region** markers on BG1 for snow/frost drift, density, size and
+movement response. Sky brightness uses **Cloud-break sunlight** with its ray,
+halo and echo components disabled; **Exposure** controls scenery brightness
+separately from actors. Existing layer edits and native terrain are preserved.
+
+Nine selected snow-covered footholds on the approach, lower-trunk shelves and
+summit crests now have shallow contact snow. Its top face follows the platform
+surface, compresses under player/enemy feet and releases soft powder during
+movement. The broad native slopes and bare interior branches retain their art.
+Five separate ground paths shed loose spindrift, with stronger wind at the
+summit and different cycles/seeds so neighbouring plumes do not repeat together.
+Select their **Cloud bank** markers to adjust the traced path, cover depth/width,
+wind, powder and contact response.
+
+Twenty soft lights follow actual side apertures in the two trunk rooms. They
+catch nearby bark, branch edges and passing actors, with a faint source glow.
+The lower climb uses icy blue; upper openings shift toward pale green. Their
+limited reach keeps the central trunk shaded. These **Soft light** markers have
+independent intensity, diffuse glow and scenery/player/enemy receiver controls.
+
+Four long, feathered **Exposure** regions shade the curved inner wall edges in
+`06:06–07`; two smaller recesses deepen selected branch junctions. They affect
+scenery only, leaving actor brightness and the existing opening lights separate.
+Nine sparse clusters of short woody fibers attach inside the native branch art.
+Their roots stay fixed while their tapered tips move gently with independent
+cycles. These use **Foliage shadow → Bare woody fibers**, with playfield placement
+behind actors. Width/height, fiber count, tint, seed and tip sway remain editable.
+
+The summit reserves 4032 of the existing 4096 sky vertices. Keep its three-curtain
+limit when editing; adding another sky effect requires reducing this budget.
+The sky composition reuses existing texture assets, shaders and compositor stages,
+although animated aurora requires recomposing and filtering the sky source each frame.
+
+## Northwall Act 1 ice caves
+
+Rooms `06:02–04` have soft icy-blue light around the larger distant ice blocks,
+with spill onto nearby scenery, the player and enemies. The lights follow the
+original artwork and remain steady as the camera moves. They are available in
+US, Japanese and European terrain layouts and follow **Environmental effects**.
+Selected ice faces also show small white star glints facing the camera, suggesting
+light coming through the ice toward the viewer. Their glare stays separate from
+the blue light illuminating the cave.
+The cave scenery uses 82% ambient brightness to give these light sources more
+presence while retaining visible rock and ledge detail. Player and enemy
+brightness, blue light spill and white glints retain their previous settings.
+The water cave (`06:02`) and boss chamber (`06:04`) also have narrow blue-white
+shimmer patches along the water, with varied cycles. Faint hanging haze fills
+the open air above those pools, thinning toward the ceiling and leaving the
+waterline and nearby ledges clear.
+Sparse suspended ice grains drift sideways and settle slowly, catching the
+blue light with gentle glints. Softer grains behind actors and a few sharper
+grains in front add depth without filling the cave with snowfall.
+Broken, interlocking curves of reflected water light slowly deform across
+nearby ice, stone walls and hanging icicles, leaving dark gaps between them. Foreground icicle tips in the main water cave release occasional drops,
+ending in small rings on the pools. Their timings are staggered. The distant
+ice blocks in the boss room do not emit visible drops.
+
+In the action editor, select a **Soft light** to change its position, size, tint
+or intensity. **Diffuse glow** adjusts the visible halo; **Illumination** and
+the receiver toggles independently control light on surfaces and characters.
+These ice blocks belong to BG1, so their lights use a BG1 anchor and Playfield
+placement. A diffuse glow of zero restores a material-only light.
+Each cave also has one **Exposure** region covering its full map; its
+**Brightness** controls the scenery's ambient level independently of the lights.
+Select **Water surface** to tune the shimmer. Water uses **BG2 · surface raster**
+anchoring and **On foreground BG2 water** placement to follow the native water
+depth in every background mode.
+The airborne haze uses **Cloud bank** regions. For ice grains, select
+a **Particle region** with **Suspended ice crystals**; adjust **Crystal softness**,
+**Light response**, travel, count and cycle length. Both air layers follow BG1,
+matching the cave artwork and its ice lights.
+Reflections are **Soft light** regions with **Reflected water ripples** enabled.
+Their cycle, wave phase and **Ripple movement** control the motion. Lower
+**Ripple softness** sharpens the curved highlights; a diffuse glow of zero keeps the light
+on receiving surfaces. **Drips** regions
+run from an icicle tip to the water, with **Water landing** enabled and a low
+**Active fraction** for long pauses between drops.
+
 ## Death Heim final battle
 
 For room `07:08`, enable **Action 3D → Scene → Diorama 3D** and **Environmental

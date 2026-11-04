@@ -20,7 +20,16 @@ void ActionEffectActor_UpdateWake(ActionEffectActor *actor,const ActionEffectAct
   if(age>=kActionActorWakeTicks)actor->wake.strength=0;
   const float speed=hypotf(dx,dy)/ticks;
   if(speed<.25f)return;
-  const float strength=fminf(1,speed/3);
+  float strength=fminf(1,speed/3);
+  /* Body positions are whole pixels. A steady fractional walking speed can
+   * alternate one- and two-pixel steps; do not resize/flash every live puff
+   * with that quantization. Keep this short filter in the captured observer,
+   * so native/WASM renderers and paused frames receive the same value. */
+  if(old->wake.strength>0&&old->wake.age<=4) {
+    float retained=1;
+    for(unsigned i=0;i<ticks;++i)retained*=.875f;
+    strength+=(old->wake.strength-strength)*retained;
+  }
   actor->wake=(ActionActorWake){.x=actor->x,.y=actor->feet_y,
     .dx=dx/ticks,.strength=strength,.age=0};
 }

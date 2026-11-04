@@ -1,3 +1,4 @@
+#include "action/action_trunk_life.h"
 /* Whole-room adapter. Pixel sampling, priority splitting, edit application and
  * margin scanout run through the native PPU, never a browser approximation. */
 #include "room_scene.h"
@@ -67,6 +68,9 @@ struct EditorRoomScene {
   bool raster_reuse, raster_valid;
   bool environmental_effects_enabled;
   unsigned raster_count;
+  ActionTrunkAssets *trunk;
+  ActionTrunkObserver trunk_observer;
+  uint32_t *trunk_pixels[3];
 };
 const ActionSurfaceField *EditorRoomScene_SurfaceField(const EditorRoomScene *r,unsigned index){
   if(!r||index>=kActionSurfaceFieldKinds)return NULL;
@@ -565,6 +569,12 @@ EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets) {
       !ActionEnvironmentScene_FromRoom(&r->environment,&r->assets.scene,&r->frame)) {
     EditorRoomScene_Destroy(r); return NULL;
   }
+  r->scene.trunk_settings=DioramaTrunk_Resolve(assets->scene.group,assets->scene.map,NULL);
+  if(r->scene.trunk_settings.enabled) {
+    r->trunk=malloc(sizeof(*r->trunk));
+    if(!r->trunk||!ActionTrunk_Build(r->trunk,&r->assets.scene,NULL)){EditorRoomScene_Destroy(r);return NULL;}
+    r->scene.trunk=r->trunk;
+  }
   return r;
 }
 void EditorRoomScene_Destroy(EditorRoomScene *r) {
@@ -572,6 +582,8 @@ void EditorRoomScene_Destroy(EditorRoomScene *r) {
   for (unsigned bg = 0; bg < 2; ++bg) {
     ActionBgWorld_Destroy(r->layers[bg].world); free(r->layers[bg].bands);
   }
+  for(unsigned i=0;i<3;++i)free(r->trunk_pixels[i]);
+  free(r->trunk);
   sr_scene_renderer_destroy(r->renderer);
   if (r->table) { DioramaLayerOrder_ClearTable(r->table); free(r->table); }
   DioramaLayerOrder_ClearRoom(&r->terrain);
@@ -605,7 +617,7 @@ bool EditorRoomScene_BgPolicy(const EditorRoomScene *r, int x, int y,
       !BuildBgPlan(r, &frame, out)) return false;
   if (camera_x)
     for (unsigned bg = 0; bg < 2; bg++) camera_x[bg] = frame.layer_camera_x[bg];
-  return defaults || DioramaBgPolicy_Apply(r->terrain.bg_policy, out);
+  return defaults || DioramaTrunk_ApplyBgPolicy(r->assets.scene.group,r->assets.scene.map,&r->terrain,out);
 }
 
 bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
@@ -646,7 +658,7 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
   if (ok && base) ok = DioramaLayerOrder_ForTerrain(base, r->assets.terrain_profile, terrain);
   ActionBgPlan policy;
   if (ok) ok = EditorRoomScene_BgPolicy(r, 0, 0, 0, true, &policy, NULL) &&
-      DioramaBgPolicy_Apply(terrain->bg_policy, &policy);
+      DioramaTrunk_ApplyBgPolicy(r->assets.scene.group,r->assets.scene.map,terrain,&policy);
   uint8_t *bands[2] = {0};
   for (unsigned bg = 0; ok && bg < 2; ++bg) {
     if (!DioramaLayerOrder_VirtualLayerHasClassification(&terrain->virtual_layers[bg])) continue;
@@ -661,14 +673,21 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
       bands[bg][(size_t)y * w + x] = (uint8_t)DioramaLayerOrder_VirtualBand(terrain, bg, x / 2, y / 2, id, word);
     }
   }
+  ActionTrunkAssets *trunk=NULL;
+  const DioramaTrunkSettings settings=DioramaTrunk_Resolve(r->assets.scene.group,r->assets.scene.map,terrain);
+  if(ok&&settings.enabled) {
+    trunk=malloc(sizeof(*trunk));ok=trunk&&ActionTrunk_Build(trunk,&r->assets.scene,terrain);
+  }
   if (ok) {
+    free(r->trunk);r->trunk=trunk;r->scene.trunk=trunk;r->scene.trunk_settings=settings;
+    memset(&r->trunk_observer,0,sizeof(r->trunk_observer));
     for (unsigned bg = 0; bg < 2; ++bg) { free(r->layers[bg].bands); r->layers[bg].bands = bands[bg]; }
     if (r->table) { DioramaLayerOrder_ClearTable(r->table); free(r->table); }
     DioramaLayerOrder_ClearRoom(&r->terrain);
     r->table = table; r->terrain = *terrain; r->options.layers = table;
     r->raster_valid = false;
   } else {
-    free(bands[0]); free(bands[1]);
+    free(trunk);free(bands[0]); free(bands[1]);
     DioramaLayerOrder_ClearTable(table); free(table);
     DioramaLayerOrder_ClearRoom(terrain);
   }
@@ -686,6 +705,7 @@ void EditorRoomScene_AdvanceReceivers(EditorRoomScene *r,unsigned mask,const int
   for(unsigned i=0;i<2;++i) {
     ActionEffectActor actor={.generation=i+1,.x=x[i],.y=feet_y[i]-24,.feet_y=feet_y[i],
       .body_radius=8,.visible=(mask>>i)&1,.player=i==0,.priority=2};
+    actor.vy=ticks&&ticks<=4?(int16_t)((actor.y-r->receiver_actors[i].y)/(int)ticks):0;
     ActionEffectActor_UpdateWake(&actor,r->receiver_actors[i].visible?&r->receiver_actors[i]:NULL,ticks);
     r->receiver_actors[i]=actor;
   }
@@ -733,7 +753,7 @@ bool EditorRoomScene_ResolveCamera(const EditorRoomScene *r, int x, int y,
   const DioramaCapture capture = DioramaCameraPolicy_Capture(&plan, &r->terrain,
       x, y, extra_x, budget, out->bg_apron_mask);
   DioramaRenderOptions options = r->options;
-  options.skybox = skybox;
+  options.skybox = r->scene.trunk_settings.enabled ? kDioramaSky_Only : skybox;
   DioramaScene scene = r->scene;
   scene.render = &options;
   int lo, hi;
@@ -753,6 +773,7 @@ bool EditorRoomScene_MeasureView(const EditorRoomScene *r, uint32_t frame,
   if (!r || !view || !camera || bg > 1 || !footprint || !fill) return false;
   ActionBgPlan plan;
   int camera_x[2];
+  if(r->scene.trunk_settings.enabled)skybox=kDioramaSky_Only;
   if (!EditorRoomScene_BgPolicy(r, camera->x, camera->y, frame, false, &plan, camera_x)) return false;
   const ActionBgLayerPlan *layer = &plan.layer[bg];
   *fill = bg == 1 && skybox == kDioramaSky_Only ? 2 :
@@ -873,6 +894,26 @@ bool EditorRoomScene_RenderFlat(EditorRoomScene *r, int x, int y, uint32_t clock
   return true;
 }
 
+static bool TrunkSplit(EditorRoomScene *r,int ox,int oy,bool fresh) {
+  if(!r->trunk||!r->scene.trunk_settings.enabled)return true;
+  for(unsigned i=0;i<3;++i)if(!r->trunk_pixels[i]) {
+    r->trunk_pixels[i]=calloc(640*352,sizeof(uint32_t));
+    if(!r->trunk_pixels[i])return false;
+    fresh=true;
+  }
+  if(fresh) {
+    const uint32_t *input[3]={0};
+    for(unsigned i=0;i<3;++i)if(r->surfaces.content[0]&(1u<<i))input[i]=r->surfaces.bands[0][i];
+    const size_t pitch[3]={r->surfaces.pitch_pixels,r->surfaces.pitch_pixels,r->surfaces.pitch_pixels};
+    ActionTrunk_Split(r->trunk,ox,oy,r->surfaces.pitch_pixels,r->surfaces.height,
+        r->surfaces.pitch_pixels,input,pitch,r->trunk_pixels,15);
+  }
+  r->pixels[SR_PPU_OVERLAY_BG1]=(const uint8_t *)r->trunk_pixels[0];
+  r->pixels[kDioramaPlane_Bg1Hi]=(const uint8_t *)r->trunk_pixels[1];
+  r->pixels[kDioramaPlane_Bg1Far]=(const uint8_t *)r->trunk_pixels[2];
+  return true;
+}
+
 bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
                             int extra_x, int budget, const EditorRoomCamera *camera) {
   if (!r || x < 0 || y < 0 || x > 65535 || y > 65535 || extra_x < 0 ||
@@ -934,7 +975,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   }
   ActionBgPlan plan;
   if (!BuildBgPlan(r, f, &plan) ||
-      !DioramaBgPolicy_Apply(r->terrain.bg_policy, &plan)) return false;
+      !DioramaTrunk_ApplyBgPolicy(s->group,s->map,&r->terrain,&plan)) return false;
   const DioramaCapture geometry = DioramaCameraPolicy_Capture(&plan, &r->terrain,
       x, y, extra_x, budget, camera->bg_apron_mask);
   const int top = geometry.authentic_y0, bottom = geometry.height - 224 - top;
@@ -948,7 +989,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   for (unsigned bg = 0; bg < 2; ++bg) {
     SrSceneBackground *b = &input.backgrounds[bg];
     *b = RasterBackground(r, bg, &plan.layer[bg]);
-    b->tiles.band_lookup = DioramaLayerOrder_VirtualLayerHasClassification(
+    b->tiles.band_lookup = !r->scene.trunk_settings.enabled && DioramaLayerOrder_VirtualLayerHasClassification(
         &r->terrain.virtual_layers[bg]) ? Band : NULL;
     b->edits = (SrPpuCaptureTileBinding){
       .lookup = r->terrain.stamp_layers[bg].count || r->terrain.pixel_layers[bg].count ||
@@ -967,7 +1008,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
           (1u << (bg ? kDioramaPlane_Bg2Far : kDioramaPlane_Bg1Far));
     }
     DioramaTransparentFill fill = kDioramaTransparentFill_None;
-    b->fill_configured = DioramaLayerOrder_ResolveTransparentFill(r->table, s->group, s->map,
+    b->fill_configured = !r->scene.trunk_settings.enabled && DioramaLayerOrder_ResolveTransparentFill(r->table, s->group, s->map,
         r->scene.layer_section, bg, &fill, &b->fill_cgram);
     b->fill_mode = (uint8_t)fill; r->fill_configured[bg] = b->fill_configured;
   }
@@ -977,6 +1018,12 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   r->environment.scenery_cache = &r->scenery_cache;
   ActionEffectRecipes_Apply(&r->recipes, s->group, s->map, r->assets.terrain_profile,
                             r->environment.clock, &r->environment, &r->effects);
+  DioramaTrunkSettings effects_settings=r->scene.trunk_settings;
+  effects_settings.enabled &= r->environmental_effects_enabled;
+  ActionTrunk_Capture(&r->trunk_observer,&r->effects,r->trunk,effects_settings,r->environment.clock,true);
+  r->scene.trunk_effects=r->environmental_effects_enabled?&r->effects:NULL;
+  r->scene.trunk_lighting=r->scene.trunk_particles=r->environmental_effects_enabled;
+  r->scene.native_bloom_clock=(uint16_t)frame;
   if (ActRaiserRoom_ProfileFor(s->group, s->map) == kActRaiserRoomProfile_AitosWaterfall &&
       plan.layer[1].source == kActionBgSource_NativeTilemap)
     input.native_page_mask = 2;
@@ -1007,7 +1054,8 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   memcpy(&raster_frame, f, sizeof(raster_frame));
   if (!r->layers[0].bubbles.characters || r->layers[0].bubbles.chance==0)
     raster_frame.game_frame = 0;
-  if (!RasterMatches(r, &raster_frame, camera, extra_x, budget)) {
+  const bool trunk_fresh=!RasterMatches(r,&raster_frame,camera,extra_x,budget);
+  if (trunk_fresh) {
     r->raster_valid = false;
     if (!sr_scene_renderer_render(r->renderer, &input, &r->surfaces)) return false;
     memcpy(&r->raster_frame, &raster_frame, sizeof(raster_frame));
@@ -1027,6 +1075,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       if (r->surfaces.content[bg] & (1u << band))
         r->pixels[planes[bg][band]] = (const uint8_t *)r->surfaces.bands[bg][band];
   }
+  if(!TrunkSplit(r,x-extra_x-64,y-top+1,trunk_fresh))return false;
   const int width = r->surfaces.width, height = r->surfaces.height;
   DioramaBgSourceBounds bounds = {0};
   if (plan.layer[1].source == kActionBgSource_WorldMap && !plan.layer[1].wrap_world_x) {
@@ -1220,7 +1269,7 @@ uint32_t EditorRoomScene_EffectHash(const EditorRoomScene *r) {
         e->clip_rect.x1,e->clip_rect.y1,e->tuning.intensity,e->tuning.reach,
         e->particle_style.size_min,e->particle_style.size_max,e->particle_style.travel_x,
         e->particle_style.travel_y,e->particle_style.wander,e->particle_style.spread,e->field_style.angle,e->field_style.fan,
-        e->field_style.softness,e->field_style.drift,e->field_style.amplitude,e->field_style.fade_in,e->field_style.twinkle,e->field_style.activity,
+        e->field_style.softness,e->field_style.drift,e->field_style.amplitude,e->field_style.fade_in,e->field_style.twinkle,e->field_style.activity,e->field_style.ground_depth,e->field_style.ground_width,
 #define CLOUD_PROPERTY(member,key,value,low,high) e->field_style.cloud.member,
 #include "action/action_cloud_light_properties.inc"
 #undef CLOUD_PROPERTY

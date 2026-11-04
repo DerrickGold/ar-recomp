@@ -16,6 +16,8 @@
 
 /* Room packets are small; authored scenery documents can exceed 1 MiB. */
 static uint8_t s_input[8 * 1024 * 1024 + 1];
+typedef struct ReceiverRoute {int mask,x[2],y[2];} ReceiverRoute;
+static ReceiverRoute s_receiver_route[100000];
 static ArRenderDevice s_device;
 static ArGpuEffectSource s_source;
 static SDL_GPUBuffer *s_motion;
@@ -98,6 +100,25 @@ static unsigned Read(const char *path) {
   s_input[n] = 0;
   SDL_free(data);
   return (unsigned)n;
+}
+/* Optional deterministic player/enemy paths for movement-response captures.
+ * One CSV row per measured frame: mask,player-x,player-feet-y,enemy-x,enemy-feet-y.
+ * Validate the entire route before opening a window; warmup follows it too. */
+static bool ReadReceiverRoute(const char *path,unsigned frames) {
+  if(!Read(path))return false;
+  char *p=(char *)s_input;
+  for(unsigned row=0;row<frames;++row) {
+    int values[5];
+    for(unsigned col=0;col<5;++col) {
+      char *end=NULL;errno=0;const long value=strtol(p,&end,10);
+      if(end==p||errno||value<(col?-2048:0)||value>(col?16384:3))return false;
+      values[col]=(int)value;p=end;
+      if(col<4) {if(*p++!=',')return false;}
+      else {if(*p=='\r')++p;if(*p=='\n')++p;else if(*p||row+1<frames)return false;}
+    }
+    s_receiver_route[row]=(ReceiverRoute){values[0],{values[1],values[3]},{values[2],values[4]}};
+  }
+  return !*p;
 }
 static bool Integer(const char *name, const char *text, int low, int high, int *out) {
   char *end = NULL;
@@ -199,6 +220,7 @@ int main(int argc, char **argv) {
             "AR_BENCH_PROFILE=path.csv adds owner-thread CPU and submission diagnostics.\n"
             "AR_BENCH_FRAME_PROBE=library enables the optional Vulkan timestamp probe.\n"
             "AR_BENCH_CAPTURE=directory captures every frame instead of timing.\n"
+            "AR_BENCH_RECEIVER_ROUTE=path.csv supplies mask,player-x,player-y,enemy-x,enemy-y per frame.\n"
             "AR_BENCH_FLAT=1 selects standard widescreen (requires effects=0, player-x=-1);\n"
             "flat mode ignores the Diorama layer/effect INIs.\n",
             argv[0]);
@@ -233,6 +255,11 @@ int main(int argc, char **argv) {
   const char *profile_path = EnvPath("AR_BENCH_PROFILE");
   const char *probe_path = EnvPath("AR_BENCH_FRAME_PROBE");
   const char *shot = EnvPath("AR_BENCH_SHOT");
+  const char *receiver_route=EnvPath("AR_BENCH_RECEIVER_ROUTE");
+  if(receiver_route&&(flat||!ReadReceiverRoute(receiver_route,(unsigned)frames))) {
+    fprintf(stderr,"[benchmark] invalid receiver route: expected %d rows of mask,x,y,x,y\n",frames);
+    return 2;
+  }
   if ((capture_dir && (probe_path || profile_path)) ||
       (profile_path && !strcmp(profile_path, argv[1])) ||
       (shot && (!strcmp(shot, argv[1]) || (profile_path && !strcmp(shot, profile_path))))) {
@@ -280,7 +307,7 @@ int main(int argc, char **argv) {
     if (!Sibling(path, sizeof(path), argv[4], name) || !Load(path, RoomPreview_LoadSkybox))
       goto cleanup;
   }
-  if (px >= 0) {
+  if (px >= 0 || receiver_route) {
     if (!Sibling(path, sizeof(path), argv[4], "player.bin") ||
         !Load(path, RoomPreview_LoadPlayer) || !RoomPreview_ReceiverStyle(1, 1))
       goto cleanup;
@@ -333,10 +360,18 @@ int main(int argc, char **argv) {
     float t =
         i < 0 ? (warmup > 1 ? (i + warmup) / (float)(warmup - 1) : 0) : i / (float)(frames - 1);
     int cx = Coordinate(x, ex, t), cy = Coordinate(y, ey, t);
-    uint32_t tick = (uint32_t)clock + (uint32_t)(t * (frames - 1)) * step;
+    /* Keep animation and receiver routes on the same integer frame. Float
+     * round-tripping can turn frame 46 into 45, moving a body at zero elapsed
+     * time and clearing its wake before jumping four ticks on the next frame. */
+    const unsigned route_frame=i>=0?(unsigned)i:warmup>1?
+        (unsigned)(((uint64_t)(i+warmup)*(frames-1)+(warmup-1)/2)/(warmup-1)):0;
+    uint32_t tick = (uint32_t)clock + route_frame * (uint32_t)step;
     result = 5;
     operation = "render frame";
-    if (px >= 0) {
+    if(receiver_route) {
+      const ReceiverRoute *r=&s_receiver_route[route_frame];
+      if(!RoomPreview_SetReceivers(r->mask,r->x[0],r->y[0],r->x[1],r->y[1]))goto cleanup;
+    } else if (px >= 0) {
       const int actor_x = (int)((int64_t)px + cx - x);
       const int actor_y = (int)((int64_t)py + cy - y);
       if (!RoomPreview_SetReceivers(1, actor_x, actor_y, 0, 0)) {

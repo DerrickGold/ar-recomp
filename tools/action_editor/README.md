@@ -50,6 +50,32 @@ menu on a selected map tile, or opens settings from another focused preview.
 
 ### Background policy
 
+Northwall interiors `06:06–07` have a **Tree enclosure** section. Their connected
+trunk owns its fill, background sources, tile bands, ordering, depth and skybox
+composition, independently of the ordinary BG controls. Those controls remain
+saved and become effective again when Enclosure is set to **Original layers**.
+Art edits and environmental emitters remain editable. Curvature and platform/
+actor recess are separate controls; the native bark rim stays at the front.
+
+**Curved-wall light**, **Opening gusts**, **Rim frost** and **Landing bark flakes**
+adjust the retained ambience. Lighting and particles also obey their normal
+global switches. A **Light fan** marked **Trunk opening** supplies the nearby wall
+light, frost and coordinated wind; ordinary fans do not. The twelve shipped
+opening fans remain single short beams with individually editable positions,
+colors, width, throw and receiver choices.
+
+The enclosure saves one room-level record, shared by all terrain profiles:
+
+```ini
+[layers:06:06]
+trunk = enabled:1 depth:0.38 recess:0.24 wrap:1 gust:1 frost:1 bark:1
+```
+
+`depth` accepts 0–0.4, `recess` 0–0.35, and the four ambience strengths 0–1.
+Apply, reset, undo/redo and project save/load use the same shared renderer in
+the editor and game. Assets derive from the loaded ROM and chosen terrain.
+Game scenery files load when the session starts; restart after exporting art edits.
+
 Death Heim room 1 has separate **1 A — faces** and **1 B — completion scenery**
 selections. Each displays only its own 256×256 background pages. Tile edits,
 depth, framing and background policies save independently: A keeps the existing
@@ -273,8 +299,8 @@ Resizing follows the source's meaning:
 
 | Family | Controls and behavior |
 | --- | --- |
-| Soft light / halo | Area, tint, intensity and independent light receivers; halo is a color/size preset. |
-| Motes / particle region | Count or density, radius, motion, seed, age tint and depth. Region patterns include dust, leaves, snow, sand, insects, scarabs and sparks. |
+| Soft light / halo | Area, tint, intensity, optional diffuse glow and independent light receivers; halo is a color/size preset. |
+| Motes / particle region | Count or density, radius, motion, seed, age tint and depth. Region patterns include dust, leaves, snow, sand, insects, scarabs, sparks and suspended ice crystals. |
 | Free mist / ground mist | Airborne soft volume or collision-supported floor slices. |
 | Light fan | Opening width, length, direction, fan angle, 1–32 strands and a soft backdrop. Zero degrees points down; the origin is the opening's center. |
 | Water surface | Animated crests and glints, amplitude, phase offset, cycle, particle radii and age tint. This is surface geometry, not distortion of submerged artwork. |
@@ -282,6 +308,115 @@ Resizing follows the source's meaning:
 | Cloud bank | Layered soft lobes with horizontal drift and vertical billow. This suggests volume; it is not a 3D volumetric ray marcher. |
 | Dimming region | A black alpha wash behind actors, plus separately selected player/enemy dimming. Native cave/castle dimming also exposes receiver choices. |
 | Wet rock contour | Up to 16 local path points. **Trace wet contour** draws a bounded stroke following a verified visible edge. |
+
+Soft lights expose **Diffuse glow** (`scatter`, 0–1). Zero preserves the previous
+material-only light. Positive values add a steady, feathered glow at the authored
+placement; the same footprint continues illuminating the selected scenery,
+player and enemy receivers. Diffusion changes only the visible glow, while
+`illumination` controls received light independently. Turning off all receiver
+flags can leave a purely atmospheric glow. The existing light and decoration
+batches handle both, without a new shader, texture or particle simulation.
+
+Northwall's caves `06:02–04` use these lights on the larger distant ice clusters:
+27, 36 and 11 sources per terrain, respectively. Although the clusters look like
+background windows, they belong to BG1's cave artwork; the lights use BG1 anchors
+and Playfield placement so the glow appears with that artwork and stays behind
+actors. Tint `8ecff7`, intensity 1.8, diffusion .65 and illumination 2 produce
+soft blue pools with dark gaps between clusters. All three terrain layouts have
+editable source positions. The largest room reserves 3492 of 4096 vertices per
+batch for its blue lighting.
+
+Selected ice faces also have small white, camera-facing glints: five in `06:02`,
+three in `06:03`, and three in `06:04`, per terrain. Each is a horizontal and
+vertical soft-light ellipse sharing the ice face's BG1 anchor. These billboard
+glows form a feathered four-point cross with tint `f4fbff`, diffusion 1 and no
+material receivers; the original blue sources continue lighting the cave.
+Horizontal components are 36–44×4 pixels at intensity 2.6; vertical components
+are 4×24–28 at intensity 1.8. They stay steady rather than blinking. Including
+the glints, the largest scenery-decoration batch reserves 4074/4096 vertices;
+additional lights in that room require a budget check.
+
+Each cave/terrain also has one full-map `exposure` region at brightness .82,
+with scenery enabled and player/enemy dimming disabled. The region extends 256
+pixels past each map edge so scrolling cannot cross a brightness boundary.
+This reduces base scenery brightness while retaining the blue illumination and
+white source glow. Exposure uses the existing scenery mesh; its conservative
+14-vertex reservation raises the largest recipe budget to 4088/4096.
+
+The water cave (`06:02`) adds five narrow `water-surface` reflection patches per
+terrain. The boss chamber (`06:04`) adds two. Reflections follow the native BG2
+waterlines with surface raster anchoring and `placement=background-high`;
+tint `9ddafa` to `e1f4ff`,
+intensity 1.05, subpixel wave amplitude .55 and varied 286–398-tick cycles keep
+them restrained. The earlier narrow waterline mist has been removed in favour
+of the hanging haze below. All source positions, sizes, colours, seeds and
+cycles remain editable. The climbing cave is unchanged, and the maximum room
+reservation remains 4088/4096.
+
+Above the pools, `06:02` has four faint airborne haze banks and `06:04` has
+three vertically overlapping banks, fading from intensity .09 near water to
+.045 near the ceiling. They use BG1/Playfield placement, rolling .35, light
+response .75, tint `7faec6` / `304e67`, small opposing drifts and long cycles.
+Four open-air regions in `06:02` and one in `06:04` each carry two sparse
+`pattern=ice-crystals` fields: 12 soft grains per 256×256-pixel cell behind actors,
+six sharper grains in front. Both use BG1 coordinates; the rear layer's
+softness .75 is an authored soft focus, not the distant BG2 DoF path. Slow
+16–24-pixel settling, independently seeded 900–1325-tick lifetimes and eased
+birth/death envelopes avoid synchronized blinking. These 51 additional records
+are repeated across all terrains; the climbing cave remains unchanged.
+
+Airborne **Light response** now samples soft-light illumination as well as the
+existing canopy/sunlight sources. Mist keeps its geometry and alpha while its
+colour catches the blue glow; crystals brighten smoothly inside the light.
+The shared radial light envelope respects the source plane, scenery receiver,
+illumination and global lighting switch. Visible diffusion does not change
+incident energy, and the zero-illumination white glints do not illuminate air.
+The new grains reuse alpha batches and the existing glow atlas; no texture,
+shader or persistent particle simulation is added.
+
+The pools cast broken, interlocking caustic highlights across nearby cave ice
+and rock: four `soft-light` regions in `06:02` and two in `06:04`, per terrain.
+With `ripple=1`, two overlapping patterns slowly deform and exchange brightness.
+They contain curved, irregular cell boundaries with fading gaps, replacing the
+rejected long parallel stripes. World anchoring, independently offset motion
+and source-specific orientations keep the pattern from following the camera
+or repeating the same arrangement in adjacent regions.
+
+The pattern is baked into eight softness variants in the shared effect atlas.
+Animation deforms texture coordinates on two 3×3 grids; it never regenerates or
+uploads the texture. The shared atlas grows by one 128-pixel row to 1024×896
+(512 KiB more RGBA storage), with no extra texture object, shader or render pass.
+Scenery and character lights use the same textured triangles. Airborne light
+sampling interpolates those triangles and the same quantized bilinear mask.
+The existing non-reflection masks keep their original pixel data.
+
+The regions are 288–416 pixels wide and 272–288 high, reaching into ceiling ice
+and nearby stone. Tint is `b9e7ff`, intensity 2.4, illumination 2.8, diffusion
+zero, softness .2, movement 14 pixels and cycles 286–398 ticks. An unclipped
+reflection uses 18 vertices; validation reserves 112 for worst-case triangle
+clipping. The water cave reserves 4051/4096 light vertices; the climbing cave
+is unchanged at 4088/4096. These are authored caustics, not traced water optics.
+
+The soft-light inspector exposes **Reflected water ripples**, **Ripple movement**
+(`amplitude`), **Ripple softness**, wave phase (`drift`) and cycle length.
+Lower softness sharpens the highlights; the eight levels preserve a stable
+pattern. Match phase/cycle values manually when pairing a reflection with a
+surface patch; there is no hidden emitter link. Turning ripples off restores
+the static soft-light footprint. Diffusion and receiver controls remain
+independent; copy/paste, reset, reload and export preserve the settings.
+
+Four isolated `drips` sources in `06:02` start at foreground icicle tips,
+with one drop per source, .4–.65-pixel radii, 463–769-tick cycles and .10–.13
+active fractions. Independent source phases leave long quiet intervals.
+Their lower edges sit on the pool borders at y644/y676. The boss room `06:04`
+has no authored drips: its blue ice blocks are distant decoration, even though
+they share BG1 with the foreground. Visual depth determines valid drip
+placement; a BG1 anchor alone does not make an ice block a nearby source.
+Water landing produces a small fading ring there. BG1 anchoring with
+`placement=background-high` retains the icicle coordinates and puts the
+landing over the high-priority BG2 water in every background mode. No native
+water collision or gameplay object is added. These 36 light/drip records are
+authored across all three terrains, with source tips checked against the art.
 
 The palette also provides temple dust, falling leaves, snow, blowing sand,
 insects, scarabs, lava embers and halo presets for later-stage authoring. They
@@ -425,6 +560,13 @@ camera and plane/skybox projection. The whole light or cloud uses the source
 row's transform, so independent water bands cannot split or bend it. Surface
 raster mode deliberately follows each band's mapping. Neither mode adds a
 rendering pass or creates textures; both use the existing shared geometry path.
+
+**On foreground BG2 water** (`placement=background-high`) attaches an effect
+after the high-priority water layer. BG2 anchors then use that layer's depth,
+independent of the distant plane/skybox setting; BG1 anchors retain their own
+coordinates. Reflective effects use its existing additive decoration batch,
+and clouds/mist use its existing alpha batch. This is useful for foreground
+water that would cover an effect placed behind the playfield.
 
 Right-clicking BG2 now adds BG2 effects (water ripples default to surface raster;
 other free effects to a fixed point). Their drag/resize markers live on the BG2
@@ -658,7 +800,7 @@ Overrides are terrain-specific even where scenery edits share
 equivalent US/EU layouts.
 
 Each room/terrain permits 96 enabled emitters and at most 4096 added vertices per render batch;
-the file holds at most 2048 records/512 KiB across all rooms and regional profiles.
+the file holds at most 2048 records/1 MiB across all rooms and regional profiles.
 The per-room instance and geometry limits are independent of that document capacity.
 Conservative costs are 97 vertices
 per light, four per mote and 296 per free-mist volume. Ground mist reserves
@@ -961,6 +1103,16 @@ Marahna's shipped fields occupy open foliage pockets, with roofs clipping their
 lower ends. Background placement draws behind BG1; playfield placement shows
 silhouettes over the native backdrop.
 
+**Bare woody fibers** (`bare=1`) replaces the leafy stencil with short tapered
+strands. The top of the region is their fixed attachment line; place it inside
+branch or bark artwork. Width, height, strand count and seed vary the cluster.
+Small **Tip sway** values move the ends while the roots remain attached. This
+variant uses six shaded geometry segments per strand and reserves 84 clipped
+vertices per strand; no texture or extra compositor pass is added. Textured
+silhouettes and terrain-shadow clipping are incompatible with bare fibers, and
+the editor clears those settings when switching. Existing leafy defaults are
+unchanged. Playfield placement draws the fibers behind characters.
+
 **Fireflies / bioluminescent points** (`fireflies`) is a bounded region with 1–32
 insects total. Each has a feathered bright core, a soft halo, an independent slow
 pulse and wandering motion. Size controls the core/halo; tint and end tint color
@@ -1012,7 +1164,7 @@ single render batch. Validation reserves each entire field in its draw pass and
 all possible material-light passes, including actor copies. Independent alpha
 foliage and additive lighting no longer consume each other's batch allowance;
 camera culling is never used to admit an over-budget pass. The shared immutable
-1024×768 atlas is built/uploaded at renderer startup and uses existing shaders.
+1024×896 atlas is built/uploaded at renderer startup and uses existing shaders.
 
 **Cloud volume** is available on textured, rolling `cloud-bank` emitters.
 A positive `volume` selects rounded cloud billows; its 0–1 value deepens the
@@ -1082,6 +1234,16 @@ The inspector enables rolling when needed and clears the response when rolling
 or texturing is disabled or a ground contour is added. Copy/paste, Shift-reset
 and project/INI export preserve the control. Budget validation reserves the
 maximum added geometry before admitting a bank.
+
+Particle regions and paths offer **Suspended ice crystals**
+(`pattern=ice-crystals`). **Crystal softness** (`softness`, 0–1) combines a
+small faceted core with a feathered halo from the existing atlas. Zero keeps a
+sharp core; higher values soften more distant-looking grains. Use long cycles,
+low travel and sparse counts for suspended ice. **Light response** controls
+how much incident soft-light, canopy and sunlight affect the grains, while
+**Grain glint strength** adds smooth, independently phased highlights. These
+controls support copy/paste, reload and INI export; recipe budgets include
+the maximum clipped halo and core geometry.
 
 Particle regions also offer **Water glints (flowing)** (`pattern=water-glints`).
 These small reflections follow the configured travel and twinkle, unlike the
@@ -1262,6 +1424,25 @@ intended effects; the CSV coordinates are **requested** camera positions, subjec
 to the normal room clamps. Actor stand-ins follow the route; this is not a
 benchmark of scripted enemies, game logic, interpolation, CRT or presentation pacing.
 
+`benchmark_northwall_routes.json` covers both Northwall acts (`06:01–08`),
+including the outdoor snow, upper/lower caves, ice arena, tree ascent and treetop.
+Its snow route moves both actor stand-ins over the authored ground profile;
+the other routes exercise camera travel and receiver lighting. The receiver
+CSV contains 240 frames and is resolved relative to the plan. The runner checks
+its length before starting and records its hash with the other inputs.
+
+```sh
+python3 tools/action_editor/benchmark_rooms.py \
+  --binary build-render-perf/actraiser_action_room_benchmark \
+  --rooms runs/sweep-assets --layers diorama-layers.ini --effects action-effects.ini \
+  --plan tools/action_editor/benchmark_northwall_routes.json --clock 360 \
+  --output runs/northwall-benchmark --drivers metal
+```
+
+Use `--profile` for a separate diagnostic run with owner-thread CPU time and
+effect upload/draw counters in each run's `cpu.csv`. Keep ordinary unprofiled
+runs for timing comparisons; `--capture` and `--profile` cannot be combined.
+
 Each execution warms the **entire camera route and animation interval**, seeks
 back and then records 240 frames. The runner repeats three times, alternates
 effects off/on and backend order, checks the backend and rejects late shader
@@ -1317,6 +1498,16 @@ omitting performance numbers. The animation step is two game ticks at 60 Hz per
 output frame (30 fps). Use identical routes, settings and frame counts for
 before/after captures. `AR_BENCH_SHOT=/path/final.png` optionally saves just the
 last frame after a timed run. `--mode on` or `off` selects one configuration.
+
+`AR_BENCH_RECEIVER_ROUTE=/path/route.csv` supplies deterministic movement for
+both preview stand-ins. Write one row per measured frame, with no header:
+`mask,player-x,player-feet-y,enemy-x,enemy-feet-y`. Mask 1 enables the player,
+2 the enemy, and 3 both. The camera still follows the ordinary CLI route;
+receiver coordinates are absolute BG1 world pixels. Warmup replays the same
+path. These are renderer previews, not recorded gameplay or enemy AI.
+Animation time and receiver positions use the same integer route frame. A
+360-frame capture at step 2 advances exactly two ticks per frame; camera
+interpolation cannot introduce repeated times or clear moving-body wakes.
 
 For a standard non-Diorama widescreen baseline, invoke the executable directly
 with `AR_BENCH_FLAT=1 AR_BENCH_EFFECTS=0` and player coordinates `-1 0`.
@@ -2066,6 +2257,177 @@ Move the player/enemy stand-ins while the shared preview plays to check wakes. P
 warping, changing rooms and seeking time clear their history. Native projectile children do not stir fog.
 The renderer reuses the shared mask atlas and alpha batch (two quads per bank, at most two wake quads
 per area); there is no fluid solver, per-frame texture generation or additional full-screen pass.
+
+**Snow drift / reactive powder** is a `cloud-bank` preset with an editable BG1
+ground path. Drift, carry, gust, billow and lifetime control wind lifting snow
+off the surface and settling it downwind. Optional grains follow the same path.
+`wake` also works on ground paths: nearby moving player/enemy feet must be within
+12 world pixels of the path to lift powder. Each bank admits one player and the
+strongest nearby enemy, with at most six rounded powder clumps and six fine
+grains per body. Dense clumps use the existing paired cloud masks, with cool
+shaded bodies and white crests; normal walking retains their opacity. Particle
+size controls their scale. Only the fine grains twinkle. Captured movement
+strength smooths integer-pixel step jitter; staggered clumps overlap with soft
+birth/settling fades, and fine grains receive one slow highlight per flight.
+On inclines, kicked-up powder makes a smaller hop, stays close to the ground
+and slides downhill as it settles. Clumps turn with a footprint-wide ground
+tangent, which blends across path corners; flat-ground motion is unchanged.
+This uses the existing path and masks without additional controls or state.
+The final cohort settles within 48 ticks; broad wakes fade within 90 ticks. Wakes share the
+captured actor observer, so teleports and timeline changes do not create bursts.
+
+`ground-depth` (0–12 game pixels) replaces the airy sheet with a steady, dense
+cover on a traced BG1 path. It requires Foreground placement, partially covers
+boots and compresses beneath standing or moving player/enemy feet. Jumping
+clears contact. The main tint shades the body; the end tint lights the crest.
+The snow-drift preset starts at 4 pixels; zero preserves the previous airy
+drift. Loose powder and grains retain their movement controls. Carry, cloud
+lobes and soft backdrop apply only to airy drift and are disabled in the
+inspector until depth returns to zero. Collision and gameplay remain unchanged.
+
+`ground-width` (0–24 game pixels) adds the visible top face behind the walking
+edge, for platforms whose artwork exposes a broad upper surface. It requires
+positive cover depth. The Snow drift preset and Northwall banks use width 8,
+independently of their 4-pixel thickness. The top face draws in the existing
+BG1 scenery alpha batch, behind actors; only the shallow lip and powder draw
+in front of them. Its rear edge stays stable while the front compresses under
+feet. A cool, partly transparent top preserves the original ice texture.
+Zero width preserves the original narrow lip.
+
+There is no renderer history, new texture, shader or compositor pass. Each
+surface has two mesh bands and reserves three additional contact columns per
+body, with at most one player and one enemy per bank. The parser budgets the
+entire foreground and scenery batches separately before admitting a room,
+including when particle wake is zero. The scenery batch never repeats grains.
+
+Particle regions also accept `wake` when anchored to BG1. Existing flakes move
+aside and lift around passing bodies; their density and seeds do not change.
+The snow pattern and ground grains use `canopy-response` to tint toward direct
+Cloud-break sunlight or authored light gradients. Their extra `twinkle` glints
+require that light; ordinary snow remains visible in shade. Zero response keeps
+the previous independent twinkle behavior. Light gradients sample the same
+triangles used for scenery/player/enemy illumination, including the illumination
+control. These effects use the shared native/WASM geometry and existing passes.
+
+Northwall `06:01` uses cool silver-blue illumination, sparse airborne flakes
+and five exposed snow banks in all three
+terrain profiles. The cave rooms retain their existing atmosphere. Ground path
+edits, copy/paste, reset and INI/project saves preserve cover depth/width, wake and
+light response. Changing to another placement or clearing the path clears cover
+depth and width; turning depth off also clears width.
+
+### Aurora and twilight reflections
+
+`aurora` draws slow northern-light curtains in the BG2 sky. It uses
+`anchor=bg2-point` and `placement=background`; the curtains enter the existing
+background source before its depth-of-field filtering. Terrain and actors stay
+in front. Width/height (4–512 pixels) frame the display, `strands` (1–3) controls
+curtain count, `amplitude` (0–32) shapes folds, `drift` (−128–128) adds lateral
+motion, `angle` (−70–70) leans the upper veil, and `softness` (0–1) spreads it.
+`color` and `color-end` tint the lower fold and upper veil; `seed` varies the
+shape. `lifetime` sets the repeating cycle in frames (default 1800).
+`gust` (0–1, shown as **Curtain activity**) adds traveling folds, sweeping upper
+veils and moving patches of light. The curtains move in opposite directions;
+their patterns have independent phases. Shorter cycles increase their speed.
+All time harmonics are whole multiples of the cycle, including at intermediate
+activity settings, so a faster display still loops continuously.
+`twinkle` (0–1, shown as **Slow brightness variation**) dims and brightens the
+whole curtain smoothly; zero keeps its brightness steady. Geometry and opacity
+join continuously at the cycle boundary and depend only on the captured clock,
+so pausing, seeking and native/WASM playback agree. No particles are spawned.
+
+An ordinary `light-gradient` now accepts the same `twinkle` control. Give it
+the aurora's cycle and variation to keep subtle reflected color in step on
+scenery, player and enemies. Existing gradients default to zero variation.
+The aurora itself has no foreground receiver flags; the reflection gradient
+remains independently editable. The editor exposes placement, colors and all
+motion controls, and preserves them through copy/paste and document saves.
+
+The Northwall outdoor composition uses two restrained cyan-green curtains,
+a deeper indigo backdrop, silver-blue ice light and a faint teal reflection.
+Its follow-up increases folding/drift and uses a 1440-frame cycle with .85
+curtain activity, keeping the same intensity. The reflection follows the new
+cycle; its brightness variation remains gentle.
+Its former warm daylight and dense glints are reduced. Snow cover, foot
+compression and movement powder retain their geometry and timing. The stronger,
+broader pink/red aurora is used for the Act 2 treetop boss, described below.
+
+Each curtain uses 32 fixed segments and three mesh bands, with at most 1344
+vertices after worst-case clipping. The parser budgets the existing 4096-vertex
+sky pass before accepting a document. Background source/filter textures are
+reused, though an animated aurora makes sky composition and filtering dynamic.
+
+`starfield` decorates the same sky source with fixed stars and optional faint
+blue-violet haze. It accepts BG2 point/background placement only. `particles`
+is the total star count (1–64), `size-min`/`size-max` set their radii, and `seed`
+sets their positions. Most stars stay steady; `twinkle` (0–1) slowly modulates
+the brighter minority at independent phases and rates within `lifetime`.
+The stars never drift, respawn or change size. `scatter` (shown as **Distant sky
+haze**) controls the faint haze; `angle` leans it and `color-end` supplies its
+tint. The main color tints the stars. Count, sizes, tint, haze, shimmer and cycle
+remain editable through the inspector and copy/paste/save.
+
+Optional `sky-palettes` (comma-separated indices 0–7) and `sky-colors` (indices
+1–15) identify clear pixels in the native BG2 art. A bounded weighted footprint
+samples that art using its actual row scroll, including edited characters and
+masks. The captured coverage makes stars/haze fade under other artwork without
+GPU readback or borrowed scene pointers in the renderer. `sky-colors=none`
+disables masking; when a mask is enabled but source facts are unavailable, the
+effect stays hidden. Northwall uses palettes 1/2, clear colors 7–15, 48 stars,
+subtle haze and gentle shimmer in all three regional profiles. This keeps the
+stars distinct from the foreground snowfall.
+
+Starfield shares the existing sky source, its blur and its retained textures.
+Its clipped budget is 14 vertices per star plus 448 for haze, so 64 stars and
+two aurora curtains fit together in the 4096-vertex sky pass. There is no new
+shader or compositor stage. Act 2's summit already has dense native stars, so
+its richer pink/red sky uses those instead of an additional starfield or haze.
+
+#### Northwall Act 2 progression
+
+The shipped `06:05–08` recipes cover US, Japanese and European terrain. The
+mountain approach uses a dimmer blue sky, cool reflected light and sparse snow
+at two depths. The lower trunk has a quieter cool wash and slow frost grains;
+the upper trunk introduces a single subdued green curtain through its native
+sky openings. Scenery exposure deepens the climb without dimming actors.
+
+The summit combines two green/cyan curtains and one rose/red curtain. Their
+1680/2160-frame cycles, opposing drift and separate seeds keep the folds moving
+independently. Each color's ordinary light gradient shares its brightness cycle
+and illuminates scenery, player and enemies. Fine foreground snow responds to
+movement and this reflected light. Native stars and the snowy canopy stay intact.
+
+All of these are existing editable emitters: select BG2 aurora markers for the
+sky, BG1 particle regions for airborne snow/frost, light gradients for reflected
+color, and Exposure for scenery brightness. Cloud-light regions with all visible
+ray components disabled control background ambience. Save project preserves the
+effects with the existing scenery settings.
+
+Three summit curtains reserve 4032 of the 4096 sky vertices. The parser rejects
+additional sky geometry beyond that bound; reduce curtain count before adding
+stars or another sky mesh. Lighting and snow use separate existing passes.
+
+The follow-up adds nine contact-snow banks in `06:05`, `06:06` and `06:08` and
+five airy spindrift paths. These are ordinary **Cloud bank** emitters with traced
+BG1 ground paths. Contact banks use depth 2.5 and top width 5 game pixels, a cool
+crest and player/enemy compression and powder. Selected flat snowy footholds
+retain their surrounding native contours; no snow blanket is placed over bare
+inner branches. Airy paths have zero cover depth and stronger drift toward the
+summit. Their distinct seeds and cycles keep nearby plumes varied.
+
+Fifteen **Soft light** markers in the lower trunk and five in the upper trunk
+follow native side openings. Their small source glow is separate from the blue
+or pale-green illumination on nearby bark, branches and actors. Their bounds
+keep the centre of the trunk shaded; positions and all receiver flags remain
+editable. The complete catalogue now needs the shared 1 MiB document allowance
+in the native loader, WASM preview and project ZIP transport. The 2048-record
+catalogue limit and per-room instance/geometry limits are unchanged.
+
+The tree-depth follow-up adds four broad, horizontally feathered Exposure regions
+along the inner walls, two shallow branch recesses and nine small bare-fiber
+clusters across `06:06–07`, copied to each regional terrain. Exposure affects
+scenery only. Fiber roots are placed in native branch artwork, with 22–38 pixel
+regions and 0.3–0.45 pixel tip sway. The shared 4096-vertex budgets remain in force.
 
 ### Shared preview scanout reuse
 

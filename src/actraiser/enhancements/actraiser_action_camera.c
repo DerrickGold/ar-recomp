@@ -85,7 +85,8 @@ static bool ActionCamera_ResolvePlayfield(ActionBgPlan *plan) {
   const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
   /* Atomic rejection leaves the canonical plan intact, matching frame-plan
    * rendering when an edited policy is invalid for the current topology. */
-  if (room) DioramaBgPolicy_Apply(room->bg_policy, plan);
+  if(Diorama_ModeIsOn())DioramaTrunk_ApplyBgPolicy(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],room,plan);
+  else if(room)DioramaBgPolicy_Apply(room->bg_policy,plan);
   return true;
 }
 
@@ -189,12 +190,16 @@ static bool ActionCamera_DioramaMargins(const ActionBgPlan *plan,
     .ignore_aspect_ratio = stretch, .visible_width = visible_width, .visible_height = visible_height,
     .viewport = ArPresentationLayout_ResolveViewport(output_width, output_height,
         stretch, crt, visible_width, visible_height)};
+  const DioramaTrunkSettings trunk=DioramaTrunk_Resolve(
+      g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],room);
   const DioramaRenderOptions options = {.layers = DioramaLayerManifest_Table(),
-    .visible_planes = g_settings.diorama_layer_bg1 ? (1u << SR_PPU_OVERLAY_BG1) | (1u << kDioramaPlane_Bg1Hi) : 0,
-    .skybox = g_settings.diorama_skybox};
+    .visible_planes = (trunk.enabled||g_settings.diorama_layer_bg1) ? (1u << SR_PPU_OVERLAY_BG1) | (1u << kDioramaPlane_Bg1Hi) : 0,
+    .skybox = trunk.enabled ? kDioramaSky_Only : g_settings.diorama_skybox};
   const DioramaScene scene = {.render = &options,
     .map_group = g_ram[kActRaiserWram_MapGroup], .map_number = g_ram[kActRaiserWram_CurrentMap],
-    .layer_section = room ? room->section : kDioramaLayerSection_Room};
+    .layer_section = room ? room->section : kDioramaLayerSection_Room,
+    .trunk_settings=trunk,.trunk=trunk.enabled?ActRaiserActionBg_TrunkAssets(
+        g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],room):NULL};
   int minimum, maximum;
   if (!Diorama_ResolveCaptureCameraRange(&capture, &view, &scene, x, &minimum, &maximum)) return false;
   *before = minimum > 0 ? minimum : 0;

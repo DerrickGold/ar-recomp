@@ -154,6 +154,10 @@ function loadIniText(text, name) {
     const values = iniWords(line.slice(eq+1));
     if(region!==undefined)values.terrain=region;
     if(!terrainMask(values.terrain))continue;
+    if(token==='trunk') {
+      if(region!==undefined||active.group!==6||![6,7].includes(active.map))throw Error('Trunk geometry belongs to Northwall’s two interior rooms.');
+      roomConfig(active).trunk=parseTrunk(values);continue;
+    }
     if(token==='native-bloom') {
       if(region!==undefined)throw Error('Native bloom belongs to the room.');
       roomConfig(active).nativeBloom=parseNativeBloom(values);continue;
@@ -328,7 +332,7 @@ function virtualIniLines(r) {
   }
   return lines;
 }
-const roomIniLines = r => [...bgPolicyIniLines(r),...sceneryGradeIniLines(r),...nativeBloomIniLines(r),...framingIniLines(r),...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r)];
+const roomIniLines = r => [...trunkIniLines(r),...bgPolicyIniLines(r),...sceneryGradeIniLines(r),...nativeBloomIniLines(r),...framingIniLines(r),...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r)];
 function ownedIniLine(line) {
   const match=stripIniComment(line).match(/^([^=\s]+)\s*=/);
   if(!match)return false;
@@ -336,7 +340,7 @@ function ownedIniLine(line) {
   if(!key)return false;
   const [token,region]=key;
   return /^bg[12]-policy(-band)?$/.test(token)&&region===undefined||
-    (token==='scenery-grade'||token==='native-bloom')&&region===undefined||
+    (token==='scenery-grade'||token==='native-bloom'||token==='trunk')&&region===undefined||
     EDITABLE_PLANE_TOKENS.has(token)&&region===undefined||
     token==='framing'&&!!terrainMask(region)||
     /^bg[12]-(virtual|pixels|stamp|map)$/.test(token)&&!!terrainMask(region);

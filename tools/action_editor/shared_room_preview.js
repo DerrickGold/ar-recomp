@@ -342,7 +342,7 @@ const SharedRoomPreview = (() => {
   function validateEffects(text) {
     ensureRoom();
     const bytes=new TextEncoder().encode(text);
-    if(bytes.length>ActionProjectArchive.limits['action-effects.ini'])throw Error('Effect document exceeds 512 KiB.');
+    if(bytes.length>ActionProjectArchive.limits['action-effects.ini'])throw Error('Effect document exceeds 1 MiB.');
     new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),bytes.length).set(bytes);
     if(!api.RoomPreview_ConfigureEffects(bytes.length)) {
       const start=api.RoomPreview_RecipeError(),memory=new Uint8Array(api.memory.buffer);

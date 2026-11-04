@@ -12,6 +12,7 @@ vm.runInContext(fs.readFileSync('tools/action_editor/shared_preview.js','utf8'),
 const encode=vm.runInContext('SharedActionPreview.encode',context);
 let api,target=0,effect=-1,creates=0,effectParams=null,viewport=[0,0,0,0];
 const textures=new Map(),uploads=[],draws=[];
+const isEffectAtlas=id=>{const t=textures.get(id);return t?.w===1024&&t?.h===896;};
 const ar={
   create(w,h,usage){let id=1;while(textures.has(id))id++;
     textures.set(id,{w,h,usage,pixels:new Uint32Array(w*h)});creates++;return id;},
@@ -99,9 +100,31 @@ assert.equal(added.length,2);
 const spriteId=added.find(id=>new Set(textures.get(id).pixels).size>10),texture=textures.get(spriteId);
 const attributeId=added.find(id=>id!==spriteId),attributes=textures.get(attributeId);
 function receiverDraw() {const d=draws.find(d=>d.effect===5&&d.params[16]===attributeId);assert(d,'projected actor material bound');return d;}
+function maskAlpha(t,u,v) {
+  const x=Math.max(0,Math.min(t.w-1,u*t.w-.5)),y=Math.max(0,Math.min(t.h-1,v*t.h-.5));
+  const ix=Math.floor(x),iy=Math.floor(y),nx=Math.min(ix+1,t.w-1),ny=Math.min(iy+1,t.h-1);
+  const a=x-ix,b=y-iy,p=(xx,yy)=>(t.pixels[yy*t.w+xx]>>>24)/255;
+  return (p(ix,iy)*(1-a)+p(nx,iy)*a)*(1-b)+(p(ix,ny)*(1-a)+p(nx,ny)*a)*b;
+}
 function energy(id) {
-  return draws.filter(d=>d.target===id&&!d.id).reduce((sum,d)=>{
-    for(let i=0;i<d.v.length;i+=8)sum+=(d.v[i+2]+d.v[i+3]+d.v[i+4])*d.v[i+5];
+  return draws.filter(d=>d.target===id&&(!d.id||isEffectAtlas(d.id))).reduce((sum,d)=>{
+    if(!d.id) {
+      for(let i=0;i<d.v.length;i+=8)sum+=(d.v[i+2]+d.v[i+3]+d.v[i+4])*d.v[i+5];
+      return sum;
+    }
+    // Textured caustics share a light batch with ordinary glows. Include the
+    // uploaded mask, not just vertex alpha or an untextured-draw count.
+    const t=textures.get(d.id),weights=[[1/3,1/3,1/3],[.6,.2,.2],[.2,.6,.2],[.2,.2,.6],
+      [.8,.1,.1],[.1,.8,.1],[.1,.1,.8]];
+    for(let i=0;i<d.indices.length;i+=3)for(const w of weights) {
+      let rgb=0,alpha=0,u=0,v=0;
+      for(let j=0;j<3;j++) {
+        const k=d.indices[i+j]*8;
+        rgb+=(d.v[k+2]+d.v[k+3]+d.v[k+4])*w[j];alpha+=d.v[k+5]*w[j];
+        u+=d.v[k+6]*w[j];v+=d.v[k+7]*w[j];
+      }
+      sum+=rgb*alpha*maskAlpha(t,u,v)/weights.length;
+    }
     return sum;
   },0);
 }
@@ -504,8 +527,7 @@ console.log('Scenery heat: shared WASM material, world-stable regions, disable a
 api.RoomPreview_EnableEffects(1);
 configure('[effects]\nversion=1\n[emitter:05:01:0:cloud-bank:1]\nx=128\ny=224\nwidth=512\nheight=128\ntextured=1\nrolling=.8\nwake=.8\nstrands=3\ncolor=b9b0aa\ncolor-end=aaa4af\n');
 camera=[0,96];
-const mistCount=()=>draws.filter(d=>d.effect===-1&&textures.get(d.id)?.w===1024&&
-  textures.get(d.id)?.h===768&&textures.get(d.id)?.pixels[0]===0xffffffff).reduce((n,d)=>n+d.v.length/8,0);
+const mistCount=()=>draws.filter(d=>d.effect===-1&&isEffectAtlas(d.id)&&textures.get(d.id)?.pixels[0]===0xffffffff).reduce((n,d)=>n+d.v.length/8,0);
 assert.equal(api.RoomPreview_SetReceivers(3,100,240,180,240),1);render(undefined,2000);
 const mistBase=mistCount();assert(mistBase>0,'rolling density masks submitted in the shared renderer');
 assert.equal(api.RoomPreview_SetReceivers(3,103,240,177,240),1);render(undefined,2001);
@@ -520,11 +542,69 @@ const highMist=mistCount();
 assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);render(undefined,2102);
 assert.equal(mistCount(),highMist,'bodies above the fog do not stir it');
 console.log('Rolling mist preview: player/enemy movement, pause, scrubbing and vertical exclusion passed.');
+configure('[effects]\nversion=1\n[emitter:05:01:0:cloud-bank:1]\nx=128\ny=240\nwidth=512\nheight=64\npoints=-256,0 256,0\nwake=.9\ncanopy-response=.7\ntwinkle=.9\nparticles=0\n');
+const powder=()=>draws.filter(d=>d.effect===-1&&(!d.id||
+  isEffectAtlas(d.id))).map(d=>[...d.v]);
+const powderCount=()=>powder().reduce((n,v)=>n+v.length/8,0);
+api.RoomPreview_SetReceivers(3,100,240,180,240);render(undefined,3000);
+api.RoomPreview_SetReceivers(3,103,240,177,240);render(undefined,3001);
+const movingPowder=powder(),movingPowderCount=powderCount();
+render(undefined,3001);assert.deepEqual(powder(),movingPowder,'pausing preserves the powder wake');
+api.RoomPreview_SetReceivers(0,0,0,0,0);render(undefined,3001);
+assert(movingPowderCount>powderCount(),'both native stand-in observers feed extra ground powder');
+api.RoomPreview_SetReceivers(3,100,180,180,180);render(undefined,3010);
+api.RoomPreview_SetReceivers(3,103,180,177,180);render(undefined,3011);
+const airbornePowder=powder();api.RoomPreview_SetReceivers(0,0,0,0,0);render(undefined,3011);
+assert.deepEqual(powder(),airbornePowder,'airborne bodies cannot kick powder off the ground path');
+api.RoomPreview_SetReceivers(3,100,240,180,240);render(undefined,3020);
+api.RoomPreview_SetReceivers(3,103,240,177,240);render(undefined,3021);
+render(undefined,3000);const scrubbedPowder=powder();
+api.RoomPreview_SetReceivers(0,0,0,0,0);render(undefined,3000);
+assert.deepEqual(powder(),scrubbedPowder,'reverse seeking discards body motion history');
+console.log('Snow powder: real player/enemy wakes, pause, airborne exclusion and reverse seeking passed.');
+const groundCoverRecipe='[effects]\nversion=1\n[emitter:05:01:0:cloud-bank:1]\nx=128\ny=240\nwidth=512\nheight=64\npoints=-256,0 256,0\nground-depth=4\nintensity=2\ncolor=d8e6f6\ncolor-end=fff5df\nparticles=0\n';
+configure(groundCoverRecipe);
+api.RoomPreview_SetReceivers(0,0,0,0,0);render(undefined,3100);
+const untouchedCover=powder(),coverCreates=creates;
+api.RoomPreview_SetReceivers(3,100,240,180,240);render(undefined,3100);
+const pressedCover=powder();assert.notDeepEqual(pressedCover,untouchedCover,'stationary feet compress solid cover');
+assert(draws.findIndex(d=>d.effect===5)<draws.findLastIndex(d=>d.effect===-1&&d.target===0&&
+  (!d.id||isEffectAtlas(d.id))),
+  'cover uses the foreground alpha pass after the actor material');
+render(undefined,3190);assert.deepEqual(powder(),pressedCover,'solid cover has no gust-clock flicker');
+render(undefined,3100);assert.deepEqual(powder(),pressedCover,'seeking preserves static contact');
+api.RoomPreview_SetReceivers(3,100,220,180,220);render(undefined,3101);
+assert.deepEqual(powder(),untouchedCover,'jumping feet clear the surface');
+assert.equal(creates,coverCreates,'ground cover allocates no additional textures');
+console.log('Ground snow: standing contact, actor occlusion order, jump, stable clocks and texture reuse passed.');
+const coverDraws=()=>draws.filter(d=>d.effect===-1&&d.target===0&&
+  (!d.id||isEffectAtlas(d.id)));
+api.RoomPreview_SetReceivers(3,100,240,180,240);render(undefined,3200);
+const lipOnly=[...coverDraws().at(-1).v],lipPasses=coverDraws().length;
+configure(groundCoverRecipe+'ground-width=8\n');render(undefined,3200);
+const surfaceDraws=coverDraws(),actorIndex=draws.findIndex(d=>d.effect===5&&d.target===0);
+assert.equal(surfaceDraws.length,lipPasses+1,'top uses one existing scenery alpha batch');
+assert(actorIndex>=0&&draws.indexOf(surfaceDraws[0])<actorIndex&&
+  draws.indexOf(surfaceDraws.at(-1))>actorIndex,'broad top behind actors, shallow lip in front');
+assert.deepEqual([...surfaceDraws.at(-1).v],lipOnly,'surface width cannot increase boot occlusion');
+const surfaceVertices=surfaceDraws.map(d=>[...d.v]);
+render(undefined,3260);assert.deepEqual(coverDraws().map(d=>[...d.v]),surfaceVertices);
+render(undefined,3200);assert.deepEqual(coverDraws().map(d=>[...d.v]),surfaceVertices);
+api.RoomPreview_SetReceivers(3,100,220,180,220);render(undefined,3201);
+const airborneSurface=coverDraws().map(d=>[...d.v]);
+api.RoomPreview_SetReceivers(0,0,0,0,0);render(undefined,3201);
+assert.deepEqual(coverDraws().map(d=>[...d.v]),airborneSurface,'jump clears both contact surfaces');
+assert.equal(creates,coverCreates,'top surface reuses existing textures');
+console.log('Ground top face: separate actor order, unchanged boot depth, stable contact/seek and texture reuse passed.');
 // Volumetric cloud banks share the existing atlas/batch in the actual WASM
 // renderer, including background-only anchoring and deterministic scrubbing.
 configure('[effects]\nversion=1\n[emitter:05:01:0:cloud-bank:1]\nx=128\ny=128\nwidth=512\nheight=192\nanchor=bg2-point\nplacement=background\ntextured=1\nrolling=.8\nvolume=1\nstrands=6\ncolor=f4e7d1\ncolor-end=68748c\n');
 camera=[0,96];render(undefined,1200);
-const volumeDraws=()=>draws.filter(d=>textures.get(d.id)?.w===1024&&textures.get(d.id)?.h===768);
+const volumeDraws=()=>{
+  const lightTargets=new Set(draws.flatMap(d=>d.effect===4?[d.params[176]]:
+    d.effect===5?[d.params[17],d.params[18]]:[]).filter(id=>id>0));
+  return draws.filter(d=>isEffectAtlas(d.id)&&!lightTargets.has(d.target));
+};
 assert(volumeDraws().length>0,'volume masks reach the shared background renderer');
 const volumeVertices=volumeDraws().map(d=>[...d.v]),volumeCreates=creates;
 render(undefined,1237);assert.equal(creates,volumeCreates);
@@ -535,6 +615,69 @@ console.log('Cloud volumes: actual WASM BG2 drawing, motion, seek and texture re
 // The shipped native definitions must fit the real WASM budget too. Moving
 // through every Marahna room exercises all glow variants and sparse dew cycles.
 const shippedEffects=fs.readFileSync('action-effects.ini','utf8');
+for(const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===6&&r.map===1);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);configure(shippedEffects);
+  const cells=api.RoomPreview_CollisionGrid(),columns=api.RoomPreview_Width()/16;
+  const collision=new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),cells).slice();
+  for(const block of shippedEffects.split(/(?=^\[)/m).filter(b=>b.startsWith(`[emitter:06:01:${terrain}:cloud-bank:`))) {
+    const r=Object.fromEntries([...block.matchAll(/^([a-z-]+)=([^\n]*)$/gm)].map(m=>[m[1],m[2]]));
+    const points=r.points.split(/\s+/).map(p=>p.split(',').map(Number));
+    for(let i=1;i<points.length;i++)for(let x=points[i-1][0]+4;x<points[i][0];x+=8) {
+      const wx=x+Number(r.x),column=Math.floor(wx/16);
+      let row=0;while(row<cells/columns&&!(collision[row*columns+column]&15))row++;
+      const mask=collision[row*columns+column]&15,offset=wx%16;
+      const floor=row*16+(mask===9?offset:mask===6?16-offset:0);
+      const t=(x-points[i-1][0])/(points[i][0]-points[i-1][0]);
+      const y=Number(r.y)+points[i-1][1]+t*(points[i][1]-points[i-1][1]);
+      assert(Math.abs(y-floor)<=1,`Northwall snow path must touch terrain ${terrain} at ${wx}: ${y} vs ${floor}`);
+    }
+  }
+  for(const [cx,cy,px,py] of [[0,288,64,448],[1152,496,1280,656],[2260,560,2400,688]]) {
+    camera=[cx,cy];api.RoomPreview_SetReceivers(3,px,py,px+24,py);render(undefined,3200);
+    api.RoomPreview_SetReceivers(3,px+3,py,px+21,py);render(undefined,3201);
+    render(undefined,3200);
+  }
+}
+console.log('Northwall snow: complete shipped room across three terrains, motion and scrubbing passed.');
+// Act 2 has several vertical routes through one column. Check the authored
+// contact against its local collision surface, not the first solid cell above.
+for(const terrain of [0,1,2])for(const map of [5,6,8]) {
+  const base=data.rooms.find(r=>r.group===6&&r.map===map);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);configure(shippedEffects);
+  const cells=api.RoomPreview_CollisionGrid(),columns=api.RoomPreview_Width()/16;
+  const collision=new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),cells).slice();
+  const header=`[emitter:06:${map.toString(16).padStart(2,'0')}:${terrain}:cloud-bank:`;
+  const covers=shippedEffects.split(/(?=^\[)/m).filter(b=>b.startsWith(header))
+    .map(b=>Object.fromEntries([...b.matchAll(/^([a-z-]+)=([^\n]*)$/gm)].map(m=>[m[1],m[2]])))
+    .filter(r=>Number(r['ground-depth'])>0);
+  assert(covers.length>0,'each snowy Act 2 room has contact cover');
+  for(const r of covers) {
+    const points=r.points.split(/\s+/).map(p=>p.split(',').map(Number));
+    for(let i=1;i<points.length;i++)for(let x=points[i-1][0]+4;x<points[i][0];x+=8) {
+      const wx=x+Number(r.x),column=Math.floor(wx/16),offset=wx%16;
+      const t=(x-points[i-1][0])/(points[i][0]-points[i-1][0]);
+      const y=Number(r.y)+points[i-1][1]+t*(points[i][1]-points[i-1][1]);
+      const rows=[Math.floor(y/16)-1,Math.floor(y/16)];
+      const supported=rows.some(row=>{
+        if(row<0||row>=cells/columns)return false;
+        const flags=collision[row*columns+column],mask=flags&15;
+        if(!(flags&16)&&mask!==6&&mask!==9)return false;
+        const floor=row*16+(mask===9?offset:mask===6?16-offset:0);
+        return Math.abs(y-floor)<=1;
+      });
+      assert(supported,`Act 2 snow must touch local terrain ${map}/${terrain} at ${wx},${y}`);
+    }
+  }
+  const positions={5:[448,192,552,320],6:[512,896,704,1056],8:[128,288,272,448]};
+  const [cx,cy,px,py]=positions[map];camera=[cx,cy];
+  api.RoomPreview_SetReceivers(3,px,py,px+16,py);render(undefined,3200);
+  api.RoomPreview_SetReceivers(3,px+3,py,px+13,py);render(undefined,3202);
+  render(undefined,3294);render(undefined,3200);
+}
+console.log('Northwall Act 2 snow: local platform contacts, three terrains, player/enemy movement, settling and scrubbing passed.');
 // Aitos Act 2 combines the shared extended lava source with placed atmosphere.
 // Validate the complete shipped document in every terrain, through scrolling
 // and reverse-time seeking, rather than checking only isolated field defaults.
@@ -580,7 +723,7 @@ for(const id of [1,2,3]) for(const terrain of [0,1,2]) {
   const created=creates;
   for(const clock of [1201,1500,1900,1200]) {render(undefined,clock);assert.equal(creates,created,'glow/dew animation reuses textures');}
   camera=[128,id===3?0:224];render(undefined,1200);
-  assert(draws.some(d=>textures.get(d.id)?.w===1024&&textures.get(d.id)?.h===768));
+  assert(draws.some(d=>isEffectAtlas(d.id)));
 }
 assert.equal(send(encode(data,blobs,data.rooms.find(r=>r.group===5&&r.map===1)),api.RoomPreview_Load),1);
 console.log('Marahna swamp life: shipped room budgets, shared render, timeline scrubbing and texture reuse passed.');
@@ -628,7 +771,7 @@ console.log('Wet-surface fields: portable catalogue, landing handles, member sav
 // expose editable handles. Check the shared light maps with real regional art.
 const shippedBlocks=shippedEffects.split(/(?=^\[)/m);
 const properties=block=>Object.fromEntries([...block.matchAll(/^([a-z0-9-]+)=([^\n]*)$/gm)].map(m=>[m[1],m[2]]));
-const sceneryEnergy=()=>draws.filter(d=>d.effect===4).reduce((sum,d)=>sum+energy(d.params[16]),0);
+const sceneryEnergy=()=>draws.filter(d=>d.effect===4).reduce((sum,d)=>sum+energy(d.params[176]),0);
 for(const id of [4,5,6,7,8]) for(const terrain of [0,1,2]) {
   const base=data.rooms.find(r=>r.group===5&&r.map===id);
   const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
@@ -718,6 +861,76 @@ for (const terrain of [0,1,2]) {
   }
 }
 console.log('Aitos lightning: real regional BG2 contacts, 16:9/16:10, missing-ground suppression, reverse seeking and texture reuse passed.');
+// Slow aurora folds share the native sky source and its depth of field. The
+// reflection is an ordinary editable gradient, never a second sky overlay.
+for(const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===6&&r.map===1);
+  const room={...base,terrainProfile:terrain,
+    bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);
+  const aurora=noEffects+shippedBlocks.filter(b=>b.startsWith(`[emitter:06:01:${terrain}:aurora:`)).join('');
+  const filtered=(id,start)=>draws.some((d,i)=>i>start&&d.id===id&&
+    ((d.effect===0||d.effect===2)||(d.target>0&&filtered(d.target,i))));
+  const curtains=()=>draws.filter((d,i)=>d.target>0&&!d.id&&d.effect===-1&&
+    d.v.length>32&&filtered(d.target,i));
+  camera=[0,288];baselineDistance=3.25;
+  for(const mode of [0,1,2]) {
+    const view=[640,400,1,0,0,mode,0];
+    configure(aurora);render(view,360);
+    const folds=curtains(),allocated=creates;
+    assert(folds.length>0,`aurora shares BG2 filtering in mode ${mode}, terrain ${terrain}`);
+    assert(folds.every(d=>d.target===folds[0].target),'curtains use one background source');
+    assert(!draws.some(d=>!d.target&&!d.id&&d.effect===-1&&d.v.length>32),
+      'source-composited aurora is not repeated over the foreground');
+    const geometry=folds.map(d=>[...d.v]);
+    render(view,361);assert.notDeepEqual(curtains().map(d=>[...d.v]),geometry,'folds move continuously');
+    render(view,360+Number(aurora.match(/^lifetime=(\d+)/m)[1]));
+    assert.deepEqual(curtains().map(d=>[...d.v]),geometry,'aurora cycles without a seam');
+    render(view,360);assert.deepEqual(curtains().map(d=>[...d.v]),geometry,'aurora seeks deterministically');
+    assert.equal(creates,allocated,'aurora motion reuses source and filtering textures');
+    configure(aurora.replace(/^x=.*$/gm,'x=8000'));render(view,360);
+    assert(!curtains().length,'offscreen aurora adds no background composition');
+  }
+  configure(shippedEffects);
+  for(const at of [[0,288],[1152,512],[2180,528]]) {
+    camera=at;render([640,400,1,0,0,1,0],360);
+    assert(api.RoomPreview_EffectVertices()>0,'the full Northwall composition fits its regional room budgets');
+  }
+}
+console.log('Northwall aurora: regional sky composition, source DoF, cycle/seek stability, camera travel and texture reuse passed.');
+for(const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===6&&r.map===1);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  const stars=noEffects+shippedBlocks.filter(b=>b.startsWith(`[emitter:06:01:${terrain}:starfield:`)).join('');
+  const filtered=(id,start)=>draws.some((d,i)=>i>start&&d.id===id&&
+    ((d.effect===0||d.effect===2)||(d.target>0&&filtered(d.target,i))));
+  const points=()=>draws.filter((d,i)=>d.target>0&&!d.id&&d.effect===-1&&d.v.length>32&&filtered(d.target,i));
+  const energy=()=>points().reduce((sum,d)=>sum+d.v.reduce((a,v,i)=>a+(i%8===5?v:0),0),0);
+  camera=[0,288];baselineDistance=3.25;
+  for(const mode of [0,1,2]) {
+    const view=[640,400,1,0,0,mode,0];
+    configure(stars);render(view,360);
+    const starsInGaps=points().map(d=>[...d.v]),maskedEnergy=energy(),allocated=creates;
+    assert(starsInGaps.length>0,'the real Northwall sky has visible stars');
+    render(view,540);render(view,360);
+    assert.deepEqual(points().map(d=>[...d.v]),starsInGaps,'cloud coverage and star shimmer seek deterministically');
+    assert.equal(creates,allocated,'star and haze animation reuse the existing sky textures');
+    configure(stars.replace(/^sky-colors=.*$/m,'sky-colors=none'));render(view,360);
+    assert(energy()>maskedEnergy,'native clouds attenuate stars and haze');
+    configure(stars.replace(/^sky-palettes=.*$/m,'sky-palettes=7'));render(view,360);
+    assert(!points().length,'no matching clear-sky artwork suppresses the whole starfield');
+  }
+  // With occlusion disabled, only brightness changes as time advances. Star
+  // positions never wander, drift like snow, respawn, or depend on seeking.
+  const fixed=stars.replace(/^sky-colors=.*$/m,'sky-colors=none').replace(/^scatter=.*$/m,'scatter=0');
+  configure(fixed);render([640,400,1,0,0,1,0],360);
+  const positions=()=>points().map(d=>[...d.v].filter((_,i)=>i%8<2));
+  const anchored=positions();render([640,400,1,0,0,1,0],480);
+  assert.deepEqual(positions(),anchored,'stars are fixed to the distant sky while native clouds move');
+}
+console.log('Northwall stars: native cloud masking, fixed positions, haze, all regional backgrounds, seeking and texture reuse passed.');
 // Boss-room flames are native BG2 artwork. Their added sparks must enter the
 // same source texture before filtering, in every background presentation.
 for (const terrain of [0,1,2]) {
@@ -759,8 +972,7 @@ for(const terrain of [0,1,2]) {
     /^plume=1$/m.test(b)&&/^anchor=bg2-point$/m.test(b)).join('');
   const filtered=(id,start)=>draws.some((d,i)=>i>start&&d.id===id&&
     ((d.effect===0||d.effect===2)||(d.target>0&&filtered(d.target,i))));
-  const puffs=()=>draws.filter((d,i)=>d.target>0&&textures.get(d.id)?.w===1024&&
-    textures.get(d.id)?.h===768&&d.effect===-1&&filtered(d.target,i));
+  const puffs=()=>draws.filter((d,i)=>d.target>0&&isEffectAtlas(d.id)&&d.effect===-1&&filtered(d.target,i));
   camera=[440,410];baselineDistance=3.25;
   for(const mode of [0,1,2])for(const height of [360,400]) {
     const view=[640,height,1,0,0,mode,0];configure(vents);render(view,180);
@@ -887,6 +1099,160 @@ for(const map of [2,3]) {
   }
 }
 console.log('Water/mist sparkles: both rooms, 16:9/16:10, all background modes, light gating, seek and texture reuse passed.');
+// Ice windows share one anchored footprint for visible diffusion and receiver
+// lighting. Changing the halo must never change material or actor illumination.
+for(const map of [2,3,4])for(const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===6&&r.map===map);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  const lights=shippedBlocks.filter(b=>b.startsWith(`[emitter:06:0${map}:${terrain}:soft-light:`));
+  assert(lights.length>0&&lights.length<=42,'bounded authored ice-window lights and camera-facing glints');
+  const p=properties(lights[0]),x=Number(p.x),y=Number(p.y);
+  const recipe=noEffects+lights.join('');
+  camera=[Math.max(0,x-128),Math.max(0,y-112)];baselineDistance=3.25;
+  assert.equal(api.RoomPreview_SetReceivers(3,x-8,y+24,x+8,y+24),1);
+  for(const height of [360,400])for(const mode of [0,1,2]) {
+    const view=[640,height,1,0,0,mode,0];
+    configure(recipe);render(view,180);
+    const a=draws.find(d=>d.effect===5);assert(a);
+    const received=[sceneryEnergy(),roleEnergy(a,0),roleEnergy(a,1)];
+    assert(received.every(n=>n>0),'ice lights reach scenery, player and enemy');
+    const visible=api.RoomPreview_EffectVertices();
+    configure(recipe.replace(/^scatter=.*$/gm,'scatter=0'));render(view,180);
+    const b=draws.find(d=>d.effect===5);assert(b);
+    assert.deepEqual([sceneryEnergy(),roleEnergy(b,0),roleEnergy(b,1)],received,
+      'diffusion control leaves receiver energy unchanged');
+    assert(api.RoomPreview_EffectVertices()<visible,'diffusion adds a visible light pool');
+    configure(recipe.replace(/^light-(scenery|player|enemies)=1$/gm,'light-$1=0'));render(view,180);
+    assert.equal(sceneryEnergy(),0,'receiver toggles leave a visual-only halo');
+    assert(api.RoomPreview_EffectVertices()>0);
+    configure(recipe);render(view,180);const allocated=creates;
+    render(view,227);render(view,180);
+    assert.equal(api.RoomPreview_EffectVertices(),visible,'static ice glow survives seeking');
+    assert.equal(creates,allocated,'ice diffusion reuses existing render targets');
+  }
+}
+console.log('Northwall ice windows: three caves/terrains, receiver-independent diffusion, aspects, background modes, seeking and texture reuse passed.');
+// Foreground water must retain its own depth when distant BG2 switches to a
+// skybox. Exercise the shipped patches through the real parser and compositor.
+for(const map of [2,4])for(const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===6&&r.map===map);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);
+  const blocks=shippedBlocks.filter(b=>b.startsWith(`[emitter:06:0${map}:${terrain}:`));
+  const water=blocks.filter(b=>b.includes(':water-surface:'));
+  const mist=blocks.filter(b=>b.includes(':cloud-bank:'));
+  assert(water.length&&mist.length,'water caves have both surface shimmer and hanging haze');
+  camera=map===2?[512,448]:[128,224];baselineDistance=3.25;
+  const surfaceGeometry=()=>draws.filter(d=>d.effect===-1&&d.target===0&&!d.id).map(d=>[...d.v]);
+  for(const height of [360,400])for(const mode of [0,1,2]) {
+    const view=[640,height,1,0,0,mode,0];
+    configure(noEffects+water.join(''));render(view,180);
+    assert(api.RoomPreview_EffectVertices()>0,'water survives every background mode');
+    const still=surfaceGeometry();assert(still.length);
+    render(view,227);assert.notDeepEqual(surfaceGeometry(),still,'surface reflections move');
+    render(view,180);assert.deepEqual(surfaceGeometry(),still,'seeking restores the exact water surface');
+    configure(noEffects+mist.join(''));render(view,180);
+    const banks=volumeDraws().map(d=>[...d.v]);assert(banks.length);
+    const allocated=creates;
+    render(view,227);assert.notDeepEqual(volumeDraws().map(d=>[...d.v]),banks,'hanging haze drifts');
+    render(view,180);assert.deepEqual(volumeDraws().map(d=>[...d.v]),banks,'mist is deterministic');
+    assert.equal(creates,allocated,'water mist reuses its mask atlas');
+    api.RoomPreview_EnableEffects(0);render(view,180);
+    assert.equal(api.RoomPreview_EffectVertices(),0,'environment switch disables water and mist');
+    api.RoomPreview_EnableEffects(1);
+  }
+}
+console.log('Northwall water: both rooms/all terrains, high water in all background modes, 16:9/16:10, motion, seeking, toggle and texture reuse passed.');
+// Airborne ice and haze receive the blue window light in the alpha pass.
+// Optical glare and visible diffusion must not masquerade as incident light.
+for(const map of [2,4])for(const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===6&&r.map===map);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  const blocks=shippedBlocks.filter(b=>b.startsWith(`[emitter:06:0${map}:${terrain}:`));
+  const lights=blocks.filter(b=>b.includes(':soft-light:')).join('');
+  const air=blocks.filter(b=>b.includes('pattern=ice-crystals')||/:cloud-bank:0602a/i.test(b)).join('');
+  assert(air.includes('pattern=ice-crystals')&&air.includes(':cloud-bank:'),'water caves include both air layers');
+  const recipe=noEffects+lights+air;
+  camera=map===2?[512,448]:[128,224];baselineDistance=3.25;
+  for(const height of [360,400])for(const mode of [0,1,2]) {
+    const view=[640,height,1,0,0,mode,0];
+    configure(recipe);render(view,180);
+    const lit=volumeDraws().map(d=>[...d.v]);assert(lit.length);
+    configure(noEffects+lights.replace(/^illumination=.*$/gm,'illumination=0')+air);render(view,180);
+    const dark=volumeDraws().map(d=>[...d.v]);
+    assert.notDeepEqual(lit,dark,'haze and crystals catch ice-window illumination');
+    configure(noEffects+lights.replace(/^scatter=.*$/gm,'scatter=0')+air);render(view,180);
+    assert.deepEqual(volumeDraws().map(d=>[...d.v]),lit,'diffusion does not alter airborne lighting');
+    configure(noEffects+lights.replace(/^light-scenery=1$/gm,'light-scenery=0')+air);render(view,180);
+    assert.deepEqual(volumeDraws().map(d=>[...d.v]),dark,'scenery receiver gates airborne lighting');
+    configure(recipe);render(view,180);const allocated=creates;
+    render(view,227);assert.notDeepEqual(volumeDraws().map(d=>[...d.v]),lit,'haze and ice drift slowly');
+    render(view,180);assert.deepEqual(volumeDraws().map(d=>[...d.v]),lit,'seeking restores ice and haze exactly');
+    assert.equal(creates,allocated,'air layers reuse the existing atlas and render targets');
+    api.RoomPreview_EnableEffects(0);render(view,180);assert.equal(api.RoomPreview_EffectVertices(),0);
+    api.RoomPreview_EnableEffects(1);
+  }
+}
+console.log('Northwall cave air: both rooms/all terrains, ice-window illumination, diffusion independence, aspects/modes, motion, seeking, toggle and texture reuse passed.');
+const dripTimes=new Map();
+for(const map of [2,4])for(const terrain of [0,1,2]) {
+  const base=data.rooms.find(r=>r.group===6&&r.map===map);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  const blocks=shippedBlocks.filter(b=>b.startsWith(`[emitter:06:0${map}:${terrain}:`));
+  const reflected=blocks.filter(b=>b.includes(':soft-light:')&&/^ripple=1$/m.test(b)).join('');
+  const drips=blocks.filter(b=>/:drips:0602d/i.test(b));
+  assert(reflected,'both water rooms retain reflected light');
+  assert.equal(drips.length,map===2?4:0,'visible drops belong to foreground cave icicles; distant boss-room ice has no drips');
+  // Use one source's footprint for actors; the full recipe still illuminates scenery.
+  const first=properties(blocks.find(b=>b.includes(':soft-light:')&&/^ripple=1$/m.test(b)));
+  const lx=Number(first.x),ly=Number(first.y);
+  camera=[Math.max(0,lx-128),Math.max(0,ly-112)];baselineDistance=3.25;
+  assert.equal(api.RoomPreview_SetReceivers(3,lx-8,ly+Number(first.height)*.12+8,lx+8,ly+Number(first.height)*.12+8),1);
+  const lightEnergy=()=>{const actor=draws.find(d=>d.effect===5);assert(actor);return [sceneryEnergy(),roleEnergy(actor,0),roleEnergy(actor,1)];};
+  for(const height of [360,400])for(const mode of [0,1,2]) {
+    const view=[640,height,1,0,0,mode,0];
+    configure(noEffects+reflected);render(view,180);const a=lightEnergy(),allocated=creates;
+    assert(a.every(n=>n>0),'reflected light reaches scenery, player and enemy');
+    render(view,227);assert.notDeepEqual(lightEnergy(),a,'reflected illumination wavers with the water cycle');
+    render(view,180);assert.deepEqual(lightEnergy(),a,'reflection seeking is exact');
+    configure(noEffects+reflected.replace(/^ripple=1$/gm,'ripple=0'));render(view,180);const fixed=lightEnergy();
+    render(view,227);assert.deepEqual(lightEnergy(),fixed,'motion off restores static soft lights');
+    assert.equal(creates,allocated,'ripple motion needs no new textures');
+  }
+  assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);
+  if(!drips.length)continue;
+  const drop=drips[0],d=properties(drop),bottom=Number(d.y)+Number(d.height)/2;
+  camera=[Math.max(0,Number(d.x)-128),Math.max(0,bottom-190)];
+  configure(noEffects+drop);
+  if(!dripTimes.has(map)) {
+    const times={};
+    for(let tick=0;tick<Number(d.lifetime);tick+=4) {
+      render([640,400,1,0,0,1,0],tick);
+      const state=api.RoomPreview_EffectVertices()===0?'quiet':volumeDraws().length?'ripple':'fall';
+      times[state]??=tick;
+      if(Object.keys(times).length===3)break;
+    }
+    assert.equal(Object.keys(times).length,3,'a sparse drip has separate quiet, falling and water-ring phases');
+    dripTimes.set(map,times);
+  }
+  const times=dripTimes.get(map);
+  for(const height of [360,400])for(const mode of [0,1,2]) {
+    const view=[640,height,1,0,0,mode,0];
+    render(view,times.quiet);assert.equal(api.RoomPreview_EffectVertices(),0);
+    render(view,times.fall);assert(api.RoomPreview_EffectVertices()>0);assert.equal(volumeDraws().length,0);
+    render(view,times.ripple);const ring=volumeDraws().map(d=>[...d.v]);assert(ring.length);
+    const allocated=creates;
+    render(view,times.quiet);render(view,times.ripple);
+    assert.deepEqual(volumeDraws().map(d=>[...d.v]),ring,'water landing survives all background modes and seeking');
+    assert.equal(creates,allocated,'water rings reuse the existing mask atlas');
+  }
+  api.RoomPreview_EnableEffects(0);render();assert.equal(api.RoomPreview_EffectVertices(),0);api.RoomPreview_EnableEffects(1);
+}
+console.log('Northwall reflected light/drips: all terrains/aspects/modes, moving illumination, foreground-only drip placement, static reset, quiet/fall/ripple phases, seek and texture reuse passed.',Object.fromEntries(dripTimes));
 assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);api.RoomPreview_Reset();
 assert.equal(textures.size,0,'room reset releases all preview textures');
 console.log('Shared player preview: native art, receiver masks, dimming/torch/rim, picking, mirroring and upload reuse passed.');

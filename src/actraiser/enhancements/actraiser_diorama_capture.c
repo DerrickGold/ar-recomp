@@ -290,7 +290,9 @@ static void ActRaiser_BindDioramaPriorityBands(size_t pitch) {
               g_ram[kActRaiserWram_DeathHeimProgress],
               frame->state.background_tilemap_control[0],
               frame->state.background_tilemap_control[1]);
-      if (!face_skybox && (!virtual_room || (!DioramaLayerOrder_VirtualLayerIsAuthored(
+      const bool trunk=DioramaTrunk_Resolve(g_ram[kActRaiserWram_MapGroup],
+          g_ram[kActRaiserWram_CurrentMap],virtual_room).enabled;
+      if (!trunk && !face_skybox && (!virtual_room || (!DioramaLayerOrder_VirtualLayerIsAuthored(
                                &virtual_room->virtual_layers[virtual_bg]) &&
                             !virtual_room->stamp_layers[virtual_bg].count)))
         continue;
@@ -321,7 +323,8 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
   int source_x0, source_x1;
   s_track_bg2_source_bounds = want_capture && ppu &&
       g_settings.diorama_margin_fix &&
-      g_settings.diorama_skybox != kDioramaSky_Off &&
+      (g_settings.diorama_skybox != kDioramaSky_Off || DioramaTrunk_Resolve(
+        g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],ActRaiser_CurrentVirtualLayerRoom()).enabled) &&
       ActRaiserActionBg_HorizontalSourceBounds(
           1, ppu->backgrounds[1].h_scroll, &source_x0, &source_x1);
   const bool pixel_edits_active = want_capture &&
@@ -445,7 +448,7 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
        * disabled: a named ROM skybox can source BG1/BG2 independently of the
        * current room's screen-enable bits. Geometry and fill setup are
        * deliberately order-independent within this per-frame policy. */
-      if (layer_room_live &&
+      if (layer_room_live && !DioramaTrunk_Resolve(layer_group,layer_map,room).enabled &&
           (src == SR_PPU_OVERLAY_BG1 || src == SR_PPU_OVERLAY_BG2)) {
         DioramaTransparentFill fill = kDioramaTransparentFill_None;
         uint8_t fill_cgram = 0;
@@ -675,8 +678,9 @@ ActRaiser_PrepareSkyboxView(const SrPpuFrameTransactionContext *context,
   SrPpuBackgroundViewRequest skybox_view = {0};
   const ActionBgLayerPlan *sky_layer = &ActRaiser_PendingActionBgPlan()->layer[1];
   const DioramaRoomOverride *sky_room = ActRaiser_CurrentVirtualLayerRoom();
+  const bool trunk=DioramaTrunk_Resolve(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],sky_room).enabled;
   const DioramaPlaneOverride *backdrop_override =
-      sky_room ? &sky_room->planes[kDioramaPlane_Backdrop] : NULL;
+      sky_room&&!trunk ? &sky_room->planes[kDioramaPlane_Backdrop] : NULL;
   const bool skybox_capable =
       scanout_ready &&
       scanout_api->struct_size >= SNES_RUNNER_API_PPU_BACKGROUND_VIEW_SIZE &&
@@ -703,7 +707,7 @@ ActRaiser_PrepareSkyboxView(const SrPpuFrameTransactionContext *context,
     };
   }
   if (skybox_capable && profile_diorama && g_settings.diorama_margin_fix &&
-      g_settings.diorama_skybox != kDioramaSky_Off && sky_layer->valid &&
+      (trunk || g_settings.diorama_skybox != kDioramaSky_Off) && sky_layer->valid &&
       sky_layer->source == kActionBgSource_WorldMap &&
       !sky_layer->wrap_world_x && sky_layer->band_count == 0 &&
       sky_layer->default_edge == kActionBgEdge_LiveWorld &&

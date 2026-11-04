@@ -2,6 +2,7 @@
 #include "action/action_floor_support.h"
 #include "action/action_light_kinds.h"
 #include "action/action_storm.h"
+#include "action/action_starfield_capture.h"
 #include <math.h>
 #include "support/test_assert.h"
 #include <stdio.h>
@@ -174,6 +175,74 @@ static void TestCloudLightParameters(void) {
     assert(Parse(text)==(i<=4));
   }
 }
+static void TestAuroraParameters(void) {
+  const char *header="[effects]\nversion=1\n[emitter:06:01:0:aurora:1]\n";
+  char text[1024];
+  assert(Parse(header));
+  const ActionEffectRecipe *r=&table.records[0];
+  assert(r->kind==kActionEffect_AuthoredAurora && r->anchor==kActionEffectAnchor_Bg2Point);
+  assert(r->lifetime==1800 && r->particles==0 && r->field_style.strands==2);
+  assert(r->field_style.gust==.65f);
+  assert(r->particle_style.seed==61202);
+  assert(r->field_style.placement==0 && r->particle_style.color_end==0x588eb1);
+  before=table;
+  const char *bad[]={"anchor=bg1\n","anchor=bg2-raster\n","placement=playfield\n",
+      "strands=0\n","strands=4\n","angle=71\n","softness=1.1\n","amplitude=33\n",
+      "drift=129\n","gust=1.1\n","twinkle=1.1\n","lifetime=0\n","seed=1\nseed=2\n",
+      "color-end=notacolor\n","actor-target=player\n","particles=1\n"};
+  for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);++i) {
+    snprintf(text,sizeof(text),"%s%s",header,bad[i]);
+    assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));
+  }
+  snprintf(text,sizeof(text),"%sstrands=3\nangle=-70\nsoftness=1\namplitude=32\n"
+      "drift=-128\ntwinkle=1\nlifetime=4096\nseed=4294967295\ncolor-end=ff8899\n",header);
+  assert(Parse(text)); /* Maximum clipped curtain budget fits one sky pass. */
+  before=table;
+  strcat(text,"[emitter:06:01:0:aurora:2]\nstrands=1\n");
+  assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));
+  assert(Parse("[effects]\nversion=1\n[emitter:06:01:0:light-gradient:1]\ntwinkle=.35\nlifetime=3600\n"));
+  assert(table.records[0].field_style.twinkle==.35f && table.records[0].lifetime==3600);
+}
+static void TestStarfield(void) {
+  const char *header="[effects]\nversion=1\n[emitter:06:01:0:starfield:1]\n";
+  char text[1024];assert(Parse(header));
+  assert(table.records[0].anchor==kActionEffectAnchor_Bg2Point&&table.records[0].particles==40);
+  assert(table.records[0].particle_style.travel_y==0&&table.records[0].particle_style.color_end==0x8479bc);
+  assert(table.records[0].particle_style.seed==61437);
+  before=table;
+  const char *bad[]={"particles=65\n","particles=0\n","sky-palettes=8\n","sky-palettes=1,1\n",
+      "sky-colors=0\n","sky-colors=16\n","sky-colors=7\nsky-colors=8\n",
+      "anchor=bg1\n","placement=foreground\n","actor-target=player\n","travel-y=1\n",
+      "scatter=1.1\n","angle=71\n","size-min=2\nsize-max=1\n"};
+  for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);++i) {
+    snprintf(text,sizeof(text),"%s%s",header,bad[i]);
+    assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));
+  }
+  snprintf(text,sizeof(text),"%sparticles=64\nsky-palettes=0,1,2\nsky-colors=7,8,9\n"
+      "[emitter:06:01:0:aurora:2]\nstrands=2\n",header);
+  assert(Parse(text)); /* Maximum starfield + two curtains fit one sky pass. */
+  ActionSceneEffectFrame captured={0};
+  ActionEffectRecipes_Apply(&table,6,1,0,360,NULL,&captured);
+  assert(captured.authored_count==2&&!captured.authored[0].sky_visibility.valid);
+  assert(ActionStarfield_Visibility(&captured.authored[0],0)==0);
+  /* A uniform clear sky, an opaque cloud and a scrolling cloud boundary. */
+  uint8_t map[256]={0},metatiles[2048]={0};static uint16_t vram[32768];
+  for(unsigned q=0;q<4;++q)metatiles[q*2+1]=4; /* palette 1, character 0 */
+  for(unsigned y=0;y<8;++y){vram[y]=0xffff;vram[y+8]=0x00ff;} /* index 7 */
+  ActionRoomSceneFrameState sky={0};
+  ActionEnvironmentScene scene={.vram=vram,.metatiles={NULL,metatiles},.word_mask={0xffff,0xffff},
+      .maps={{0},{.map=map,.map_size=sizeof(map),.pages_wide=1,.world_width=256,.world_height=256}}};
+  ActionEffectInstance *e=&captured.authored[0];
+  assert(ActionStarfield_Coverage(&scene,&sky,e,(ArRenderPointF){16,16})==255);
+  for(unsigned y=0;y<8;++y){vram[y]=0x00ff;vram[y+8]=0;} /* index 1 cloud */
+  assert(ActionStarfield_Coverage(&scene,&sky,e,(ArRenderPointF){16,16})==0);
+  for(unsigned y=0;y<8;++y){vram[y]=0xffff;vram[y+8]=0xf0;} /* 7 then 3 across tile */
+  const unsigned edge=ActionStarfield_Coverage(&scene,&sky,e,(ArRenderPointF){3,16});
+  assert(edge>0&&edge<255);
+  for(unsigned y=0;y<224;++y)sky.bg_hscroll[1][y]=4;
+  assert(ActionStarfield_Coverage(&scene,&sky,e,(ArRenderPointF){0,16})<
+      ActionStarfield_Coverage(&scene,&(ActionRoomSceneFrameState){0},e,(ArRenderPointF){0,16}));
+}
 static void TestStormParameters(void) {
   const char *header="[effects]\nversion=1\n[emitter:04:01:0:storm-lightning:1]\n";
   char text[512];
@@ -296,6 +365,16 @@ static void TestFieldsAndReceivers(void) {
     ++lights_checked;
   }
   assert(lights_checked==43);
+  assert(Parse("[effects]\nversion=1\n[emitter:06:02:0:soft-light:1]\n"));
+  assert(table.records[0].field_style.scatter==0); /* Existing lights keep their look. */
+  assert(Parse("[effects]\nversion=1\n[emitter:06:02:0:soft-light:1]\nscatter=.65\nplacement=playfield\n"));
+  assert(table.records[0].field_style.scatter==.65f);before=table;
+  assert(!Parse("[effects]\nversion=1\n[emitter:06:02:0:soft-light:1]\nscatter=1.01\n"));
+  assert(!memcmp(&table,&before,sizeof(table)));
+  assert(Parse("[effects]\nversion=1\n[emitter:06:02:0:soft-light:1]\n"
+      "ripple=1\namplitude=6\ndrift=-27\nlifetime=374\nscatter=0\n"));
+  assert(table.records[0].field_style.ripple==1&&table.records[0].field_style.amplitude==6);
+  assert(table.records[0].field_style.drift==-27&&table.records[0].lifetime==374);
   const char *lights[]={"[emitter:01:02:0:soft-light:1]","[emitter:01:02:0:light-gradient:1]",
       "[emitter:01:02:0:torch:1]","[source:01:02:0:wall-torch:0]","[member:01:01:0:forest-forward:1]"};
   for(unsigned i=0;i<sizeof(lights)/sizeof(lights[0]);++i) {
@@ -306,6 +385,35 @@ static void TestFieldsAndReceivers(void) {
     assert(!Parse(text));assert(!memcmp(&table,&before,sizeof(table)));
   }
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-area:1]\nx=8000\ny=8000\nwidth=16000\nheight=16000\nparticles=8\npattern=snow\n"));
+  assert(Parse("[effects]\nversion=1\n[emitter:06:01:0:particle-area:1]\npattern=snow\nwake=.8\ncanopy-response=.7\ntwinkle=.9\n"));
+  assert(table.records[0].field_style.wake==.8f);
+  assert(Parse("[effects]\nversion=1\n[emitter:06:01:0:cloud-bank:1]\npoints=-32,0 32,0\nwake=.9\ncanopy-response=.7\ntwinkle=.8\nparticles=24\n"));
+  assert(table.records[0].field_style.wake==.9f&&table.records[0].field_style.canopy_response==.7f);
+  assert(Parse("[effects]\nversion=1\n[emitter:06:01:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=4\n"));
+  assert(table.records[0].field_style.ground_depth==4&&table.records[0].field_style.placement==2);
+  assert(Parse("[effects]\nversion=1\n[emitter:06:01:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=4\nground-width=8\n"));
+  assert(table.records[0].field_style.ground_width==8);
+  {
+    char cover_budget[4096]="[effects]\nversion=1\n";
+    for(unsigned i=0;i<7;++i) {
+      char cover[256];snprintf(cover,sizeof(cover),"[emitter:06:01:0:cloud-bank:%x]\nground-depth=4\npoints=-30,0 -26,0 -22,0 -18,0 -14,0 -10,0 -6,0 -2,0 2,0 6,0 10,0 14,0 18,0 22,0 26,0 30,0\n",i);
+      strcat(cover_budget,cover);
+      assert(Parse(cover_budget)==(i<6)); /* Contact columns count even with wake=0. */
+    }
+  }
+  {
+    char top_budget[4096]="[effects]\nversion=1\n";
+    for(unsigned i=0;i<6;++i) {
+      char cover[256];snprintf(cover,sizeof(cover),"[emitter:06:01:0:cloud-bank:%x]\nground-depth=4\nground-width=8\npoints=-30,0 -26,0 -22,0 -18,0 -14,0 -10,0 -6,0 -2,0 2,0 6,0 10,0 14,0 18,0 22,0 26,0 30,0\n",i);
+      strcat(top_budget,cover);
+    }
+    assert(Parse(top_budget));
+    for(unsigned i=0;i<3;++i) {
+      char particles[256];snprintf(particles,sizeof(particles),"[emitter:06:01:0:particle-area:%x]\nplacement=playfield\npattern=snow\nparticles=16\nwidth=96\nheight=64\n",i);
+      strcat(top_budget,particles);
+      assert(Parse(top_budget)==(i<2)); /* Independent scenery pass: 4040 fits, 4296 does not. */
+    }
+  }
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nwake=.5\ncanopy-response=.8\n"));
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nvolume=.9\nanchor=bg2-point\n"));
   assert(table.records[0].field_style.volume==.9f);
@@ -316,10 +424,41 @@ static void TestFieldsAndReceivers(void) {
   assert(table.records[0].field_style.sparkle==.75f);
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-area:1]\nanchor=bg2-point\npattern=water-glints\ncanopy-response=1\n"));
   assert(table.records[0].field_style.pattern==kActionParticle_WaterGlints);
+  for(unsigned path=0;path<2;++path) {
+    char text[512];
+    snprintf(text,sizeof(text),"[effects]\nversion=1\n[emitter:06:02:0:%s:1]\n"
+        "pattern=ice-crystals\nsoftness=.75\ncanopy-response=.75\nplacement=playfield\n",
+        path?"particle-path":"particle-area");
+    assert(Parse(text));
+    ActionSceneEffectFrame frame={0};ActionEffectRecipes_Apply(&table,6,2,0,180,NULL,&frame);
+    assert(frame.authored_count==1&&frame.authored[0].field_style.pattern==kActionParticle_IceCrystals);
+    assert(frame.authored[0].field_style.softness==.75f);
+    assert(frame.authored[0].render_layer==kActionEffectRenderLayer_Bg1Mist);
+  }
+  /* A soft core uses the mask atlas as well as a diamond. Account for both
+   * before accepting the recipe, not after overflowing a render batch. */
+  assert(Parse("[effects]\nversion=1\n[emitter:06:02:0:particle-area:1]\n"
+      "pattern=ice-crystals\nwidth=16000\nheight=16000\nparticles=16\nsoftness=0\n"));
+  before=table;
+  assert(!Parse("[effects]\nversion=1\n[emitter:06:02:0:particle-area:1]\n"
+      "pattern=ice-crystals\nwidth=16000\nheight=16000\nparticles=16\nsoftness=.75\n"));
+  assert(!memcmp(&table,&before,sizeof(table)));
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-light:1]\nsun-depth=-35\n"));
   assert(table.records[0].field_style.cloud.sun_depth==-35);
   before=table;
   const char *bad[]={
+    "[emitter:06:02:0:soft-light:1]\nsoftness=nan\n",
+    "[emitter:06:02:0:soft-light:1]\nsoftness=1.01\n",
+    "[emitter:06:02:0:soft-light:1]\nripple=2\n",
+    "[emitter:06:02:0:soft-light:1]\nripple=1\nripple=0\n",
+    "[emitter:06:02:0:soft-light:1]\nripple=1\namplitude=32.1\n",
+    "[emitter:06:02:0:soft-light:1]\nripple=1\ndrift=nan\n",
+    "[emitter:06:02:0:particle-area:1]\npattern=ice-crystals\nsoftness=1.01\n",
+    "[emitter:06:02:0:particle-path:1]\npattern=ice-crystals\nsoftness=nan\n",
+    "[emitter:06:01:0:particle-area:1]\nwake=nan\n",
+    "[emitter:06:01:0:particle-area:1]\nwake=1.01\n",
+    "[emitter:06:01:0:particle-area:1]\nwake=.8\nanchor=bg2-point\n",
+    "[emitter:06:01:0:cloud-bank:1]\npoints=-32,0 32,0\nwake=.8\nrolling=.8\n",
     "[emitter:01:02:0:cloud-bank:1]\nsparkle=1\n",
     "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nsparkle=1\n",
     "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nsparkle=nan\n",
@@ -360,12 +499,26 @@ static void TestFieldsAndReceivers(void) {
     "[emitter:01:02:0:cloud-bank:1]\npoints=32,0 -32,0\n",
     "[emitter:01:02:0:cloud-bank:1]\npoints=0,0 0,8\n",
     "[emitter:01:02:0:cloud-bank:1]\ncarry=156\n",
+    "[emitter:01:02:0:cloud-bank:1]\nground-depth=4\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-width=8\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=4\nground-width=-1\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=4\nground-width=24.1\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=4\nground-width=nan\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=4\nground-width=8\nground-width=4\n",
+    "[emitter:01:02:0:particle-area:1]\nground-width=8\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=12.1\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=-1\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=nan\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=4\nground-depth=3\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=4\nplacement=background\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=4\nplacement=playfield\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nground-depth=4\nanchor=bg2-point\n",
+    "[emitter:01:02:0:particle-area:1]\nground-depth=4\n",
     "[emitter:01:02:0:cloud-bank:1]\nparticles=32\n",
     "[emitter:01:02:0:cloud-bank:1]\ntwinkle=.8\n",
     "[emitter:01:02:0:particle-path:1]\ntwinkle=1.1\n",
     "[emitter:01:02:0:particle-area:1]\ntwinkle=nan\n",
     "[emitter:01:02:0:particle-area:1]\ntwinkle=.5\ntwinkle=.8\n",
-    "[emitter:01:02:0:light-gradient:1]\ntwinkle=.5\n",
     "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\ncarry=513\n",
     "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\ncarry=nan\n",
     "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nparticles=129\n",
@@ -399,11 +552,11 @@ static void BenchmarkStorage(void) {
 }
 static void TestLayerAnchors(void) {
   const char *anchors[]={"bg1","bg2-point","bg2-raster"};
-  const char *depths[]={"background","playfield","foreground"};
+  const char *depths[]={"background","playfield","foreground","background-high"};
   const char *kinds[]={"soft-light","motes","free-mist","particle-area","light-fan","water-surface","drips","waterfall-spray","cloud-bank"};
   char text[512];
   for(unsigned k=0;k<sizeof(kinds)/sizeof(kinds[0]);++k)
-    for(unsigned a=0;a<3;++a)for(unsigned d=0;d<3;++d) {
+    for(unsigned a=0;a<3;++a)for(unsigned d=0;d<4;++d) {
       snprintf(text,sizeof(text),"[effects]\nversion=1\n[emitter:02:01:0:%s:123]\nx=112\ny=62\nanchor=%s\nplacement=%s\n",kinds[k],anchors[a],depths[d]);
       assert(Parse(text));
       ActionSceneEffectFrame frame={0};
@@ -411,10 +564,12 @@ static void TestLayerAnchors(void) {
       assert(frame.authored_count==1);
       const ActionEffectInstance *e=&frame.authored[0];
       assert(e->world_x==112&&e->world_y==62);
-      assert(e->projection_plane==(a?kActionEffectProjectionPlane_Bg2:kActionEffectProjectionPlane_Bg1));
+      assert(e->projection_plane==(a?(d==3?kActionEffectProjectionPlane_Bg2High:kActionEffectProjectionPlane_Bg2):kActionEffectProjectionPlane_Bg1));
       assert(!!(e->flags&kActionEffectFlag_StaticAnchor)==(a==1));
-      assert(ActionEffectRecipes_NeedsBgMask(&table,2,1,0,1)==(a!=0||d==0));
+      assert(ActionEffectRecipes_NeedsBgMask(&table,2,1,0,1)==(a!=0||d==0||d==3));
       assert(ActionEffectRecipes_NeedsBgMask(&table,2,1,0,0)==(a==0||d==1));
+      if(d==3)assert(e->render_layer==((k==2||k==7||k==8)?
+          kActionEffectRenderLayer_Bg2HighAlpha:kActionEffectRenderLayer_Bg2HighPlane));
       /* Retained sources don't borrow recipe data or follow the BG1 camera. */
       ActionSceneEffectFrame retained=frame;
       assert(Parse("[effects]\nversion=1\n"));
@@ -448,6 +603,10 @@ static void TestPerPassBudgets(void) {
   assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:fireflies:1]\nparticles=33\n"));
   assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\nshadows=1\n"));
   assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\ntextured=1\nshadows=1\nanchor=bg2-point\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\nbare=1\ntextured=1\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\nbare=2\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\nbare=1\nbare=0\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\nbare=1\n"));
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-path:1]\npattern=glints\ncanopy-response=1\n"));
   for(unsigned sparkles=0;sparkles<2;++sparkles) {
     char banks[1024]="[effects]\nversion=1\n";
@@ -466,6 +625,8 @@ int main(int argc,char **argv) {
   TestDocumentCapacity();
   TestSwampLifeParameters();
   TestCloudLightParameters();
+  TestAuroraParameters();
+  TestStarfield();
   TestStormParameters();
   TestSkyWeatherBudgets();
   TestPerPassBudgets();

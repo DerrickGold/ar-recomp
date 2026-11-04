@@ -279,6 +279,7 @@ static inline DioramaNativeBloom DioramaNativeBloom_Default(void) {
       .dust=.3f,.dust_scale=1,.dust_speed=1,.dust_blue=0x467ccf,.dust_rose=0xbc438b,.set=true};
 }
 
+#include "diorama_trunk_settings.h"
 typedef struct DioramaRoomOverride {
   bool used;
   uint8_t map_group;   /* $18 */
@@ -291,11 +292,39 @@ typedef struct DioramaRoomOverride {
   DioramaBgPolicyOverride bg_policy[2];
   DioramaSceneryGrade scenery_grade;
   DioramaNativeBloom native_bloom;
+  DioramaTrunkSettings trunk;
   struct {
     bool set;
     int16_t x, y; /* view offset in native pixels, relative to native scroll */
   } framing[kDioramaTerrainProfileCount];
 } DioramaRoomOverride;
+
+static inline DioramaTrunkSettings DioramaTrunk_Resolve(unsigned group,
+    unsigned number, const DioramaRoomOverride *room) {
+  DioramaTrunkSettings result=room&&room->trunk.set?room->trunk:DioramaTrunk_Default();
+  result.enabled=result.enabled&&DioramaTrunk_Room(group,number);
+  return result;
+}
+
+/* Resolve capture and camera policy together. Authored BG policies remain in
+ * the document and become effective again when this enclosure is disabled. */
+static inline bool DioramaTrunk_ApplyBgPolicy(unsigned group,unsigned number,
+    const DioramaRoomOverride *room,ActionBgPlan *plan) {
+  if(!plan)return false;
+  if(!DioramaTrunk_Resolve(group,number,room).enabled)
+    return !room||DioramaBgPolicy_Apply(room->bg_policy,plan);
+  ActionBgPlan next=*plan;
+  for(unsigned bg=0;bg<2;++bg) {
+    ActionBgLayerPlan *layer=&next.layer[bg];
+    layer->default_edge=bg?kActionBgEdge_Repeat:kActionBgEdge_LiveWorld;
+    layer->default_motion=kActionBgMotion_NormalScroll;
+    layer->horizontal_extent=(ActionBgHorizontalExtent){.mode=kActionBgExtent_Available};
+    layer->vertical_extent=(ActionBgVerticalExtent){.mode=kActionBgExtent_Available};
+    layer->band_count=0;memset(layer->bands,0,sizeof(layer->bands));
+  }
+  if(!ActionBgPlan_Validate(&next))return false;
+  *plan=next;return true;
+}
 
 /* Rooms/tables must start zero-initialized. Stamp buffers are owned: plain
  * struct assignment borrows/transfers them rather than making a deep copy.

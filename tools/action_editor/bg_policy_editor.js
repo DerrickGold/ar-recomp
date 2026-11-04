@@ -227,6 +227,7 @@ const BackgroundPolicyEditor=(()=>{
       }
       elements.forEach(e=>{if(e.tagName==='SELECT')e.disabled=false;});
       $('#bgPolicyPreview').disabled=false;$('#bgPolicyReset').disabled=false;$('#bgPolicyPainted').disabled=plan.source!==1;
+      if(trunkEnabled(room))status('The tree enclosure owns this layout. Saved BG policies apply when the enclosure is disabled.');
       $('#bgPolicyInfo').textContent=`BG${bgIndex+1} · ${['Unclassified','Playfield','Scene','Backdrop'][plan.role]} · ${['Native tilemap','World map','Authentic viewport'][plan.source]} · ${BG_POLICY_EDGE_LABELS[BG_POLICY_EDGES.indexOf(plan.edge)]}`;
     } catch(error) {
       elements.forEach(e=>{e.disabled=true;});

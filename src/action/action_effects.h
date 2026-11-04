@@ -15,6 +15,7 @@
 #include "action_surface_field.h"
 #include "action_actor_effects.h"
 #include "action_atmosphere_field.h"
+#include "diorama/diorama_trunk_settings.h"
 
 /* Presentation-only action-stage effects. The game-thread capture owns every
  * WRAM read and publishes this small value-copy through FrameSlot; present.c
@@ -103,6 +104,8 @@ typedef enum ActionEffectKind {
   kActionEffect_AuthoredFireflies,
   kActionEffect_AuthoredStorm,
   kActionEffect_AuthoredCloudLight,
+  kActionEffect_AuthoredAurora,
+  kActionEffect_AuthoredStarfield,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -350,9 +353,14 @@ typedef enum ActionParticlePattern {
   kActionParticle_Motes, kActionParticle_Dust, kActionParticle_Leaves,
   kActionParticle_Snow, kActionParticle_Sand, kActionParticle_Insects,
   kActionParticle_Scarabs, kActionParticle_Sparks, kActionParticle_Glints,
-  kActionParticle_WaterGlints, kActionParticle_Count,
+  kActionParticle_WaterGlints, kActionParticle_IceCrystals, kActionParticle_Count,
 } ActionParticlePattern;
-enum { kActionParticleCellSize=256, kActionParticleMaxCells=64, kActionContourMaxPoints=16 };
+enum { kActionParticleCellSize=256, kActionParticleMaxCells=64, kActionContourMaxPoints=16,
+  kActionFieldWakeCount=2, kActionGroundWakeGrains=12, kActionGroundWakePuffs=6,
+  kActionGroundCoverColumns=kActionContourMaxPoints+3*kActionFieldWakeCount,
+  kActionAuroraSegments=32, kActionAuroraMaxCurtains=3,
+  kActionSkyMaxStars=64, kActionSkyHazeSegments=16,
+  kActionSkySamples=kActionSkyMaxStars+(kActionSkyHazeSegments+1)*3 };
 typedef enum ActionGlowStyle {
   kActionGlow_Insects, kActionGlow_Wisps, kActionGlow_Moss, kActionGlow_Count,
 } ActionGlowStyle;
@@ -369,24 +377,29 @@ typedef struct ActionStormStyle {
 typedef struct ActionEffectFieldStyle {
   ActionCloudLightStyle cloud;
   ActionStormStyle storm;
+  struct { uint16_t colors; uint8_t palettes; } sky;
   float angle, fan, softness, drift, amplitude;
   float thickness; /* Fan strand width multiplier; zero retains legacy width. */
   float fade_in; /* Fan source feathering as a fraction of its reach; zero keeps a hard opening. */
-  float scatter, bounce; /* Canopy air scattering and short surface return. */
+  float scatter, bounce; /* Air scattering/sky haze; canopy short surface return. */
   uint8_t textured; /* Cloud bank uses the shared wispy density mask. */
+  uint8_t bare; /* Foliage: tapered woody fibers without leaves or atlas stencils. */
+  uint8_t opening; /* Fan is an authored enclosure aperture: light, frost and wind share it. */
   float rolling, wake, canopy_response; /* Textured floor mist: billows, body wakes, canopy scattering. */
   float volume; /* Rolling clouds: rounded, internally shaded billows; zero preserves wispy mist. */
   float rainbow; /* View/light-angle spectral response of spray; zero adds no geometry. */
   float sparkle; /* Small sunlit droplets following moving mist density; zero adds no geometry. */
   float carry; /* Ground dust: downwind distance over which lifted dust settles. */
+  float ground_depth; /* Dense, compressible cover above a traced path; zero keeps airy drift. */
+  float ground_width; /* Visible top face extending behind the walking edge, in game pixels. */
   float gust, activity; /* Shared wind envelope; active fraction of a particle cycle. */
   uint8_t plume; /* Textured clouds rise from the bottom centre in intermittent puffs. */
   uint8_t debris, landing; /* Falling grit; landing 0 none, 1 dust, 2 molten splash. */
-  float twinkle; /* Grain highlights or slow fan transmission; never changes geometry/motion. */
+  float twinkle; /* Grain/star highlights or slow light variation; never changes geometry/motion. */
   float chorus, trail; /* Glow clusters: loose answering pulses, short wisp trails. */
-  uint8_t glow_style, ripple; /* Explicit water landing at the bottom of a drip region. */
+  uint8_t glow_style, ripple; /* Drip water landing or soft-light water-ripple motion. */
   uint8_t shadows; /* Placed torch/fan spill uses the scenery shadow mask. */
-  uint8_t strands, pattern, placement, point_count;
+  uint8_t strands, pattern, placement, point_count; /* Placement: 0 background, 1 playfield, 2 foreground, 3 high BG2. */
   struct {float x,y;} points[kActionContourMaxPoints];
   /* Exposure boxes keep legacy intensity-based dimming when unset. */
   float brightness, fade[4]; /* left, top, right, bottom; world pixels */
@@ -438,6 +451,9 @@ typedef struct ActionEffectInstance {
   /* Captured first terrain intersections, measured in path segments. No
    * borrowed tile/VRAM data survives into a render packet. */
   struct { float end[4]; uint8_t valid; } storm_contact;
+  /* Owned clear-sky coverage at fixed stars and haze vertices. No artwork
+   * pointers or renderer history survive the environment capture. */
+  struct { uint8_t alpha[kActionSkySamples], valid; } sky_visibility;
 } ActionEffectInstance;
 
 /* Diagnostic payload: the raw identity of a cohort slot that was ACTIVE while
@@ -561,6 +577,26 @@ typedef struct ActionNativeBubbleEvent {
   int16_t x,y;
   uint8_t age,cadence;
 } ActionNativeBubbleEvent;
+typedef struct ActionTrunkBarkEvent {
+  float x,y;
+  uint16_t born;
+  uint32_t seed;
+  bool valid;
+} ActionTrunkBarkEvent;
+typedef struct ActionTrunkLandingTrack {
+  uint32_t generation;
+  int address,x,y,feet,fall,impact;
+} ActionTrunkLandingTrack;
+typedef struct ActionTrunkObserver {
+  bool valid;
+  uint8_t room;
+  uint16_t clock;
+  uint32_t revision;
+  unsigned count;
+  ActionTrunkLandingTrack tracks[kActionEffectActorMax];
+  ActionTrunkBarkEvent events[8];
+} ActionTrunkObserver;
+
 typedef struct ActionSceneEffectFrame {
   uint16_t game_frame;
   /* Convert foreground world samples to the fixed-point background light field. */
@@ -572,6 +608,8 @@ typedef struct ActionSceneEffectFrame {
   uint8_t overflow;
   uint8_t actor_count;
   ActionEffectActor actors[kActionEffectActorMax];
+  DioramaTrunkSettings trunk;
+  ActionTrunkBarkEvent trunk_bark[8];
   ActionEffectInstance effects[kActionSceneEffectMaxInstances];
   uint8_t decoration_count;
   uint8_t decoration_visible_count;
@@ -687,6 +725,7 @@ typedef struct ActionEffectObserver {
   uint32_t next_actor_generation;
   ActionEffectActorTrack actor_tracks[kActionEffectActorMax];
   ActionLandingDustState landing_dust;
+  ActionTrunkObserver trunk;
   ActionFireballSmoke fireball_smoke;
   ActionEffectObserverTrack tracks[kActionEffectObserverTrackCount];
   ActionEffectObserverTrack

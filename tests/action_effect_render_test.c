@@ -1,4 +1,5 @@
 #include "action/action_effect_receivers.h"
+#include "action/action_soft_light.h"
 #include "action/action_effect_source.h"
 #include <math.h>
 #include <stdlib.h>
@@ -2494,6 +2495,16 @@ static void TestBetweenBackgroundsProjection(void) {
 }
 
 static void TestCaveWaterUsesHighPlane(void) {
+  /* Draw attachment must request the high-water callback even when a mist
+   * or reflection deliberately keeps its BG1 source coordinates. */
+  for(unsigned alpha=0;alpha<2;++alpha) {
+    ActionSceneEffectFrame frame={.authored_count=1};
+    frame.authored[0]=(ActionEffectInstance){.flags=kActionEffectFlag_Visible,
+      .kind=kActionEffect_AuthoredWater,.projection_plane=kActionEffectProjectionPlane_Bg1,
+      .render_layer=alpha?kActionEffectRenderLayer_Bg2HighAlpha:kActionEffectRenderLayer_Bg2HighPlane};
+    CHECK(ActionEffectProjection_RequiredBgPlaneMask(NULL,&frame)==
+        ((1u<<SR_PPU_OVERLAY_BG1)|(1u<<kDioramaPlane_Bg2Hi)));
+  }
   DioramaProjection projection = RakedApronProjection();
   projection.texture_width = 1024;
   projection.texture_height = 768;
@@ -4166,6 +4177,332 @@ static void TestAuthoredEmitters(void) {
 static bool FloorClip(void *context, const ActionEffectInstance *effect, ActionEffectLocalRect *out) {
   (void)effect;*out=*(const ActionEffectLocalRect *)context;return true;
 }
+
+static void TestHighWaterGeometry(void) {
+  static ActionSceneEffectFrame frame;
+  static ActionSceneEffectRenderBatch first,other;
+  frame=(ActionSceneEffectFrame){.authored_count=1};
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredWater,
+    .flags=kActionEffectFlag_Visible,.projection_plane=kActionEffectProjectionPlane_Bg2High,
+    .render_layer=kActionEffectRenderLayer_Bg2HighPlane,.world_x=232,.world_y=458,
+    .particle_count=7,.particle_lifetime=310,.pulse_ticks=180,
+    .particle_style={.size_min=.35f,.size_max=.85f,.color_end=0xe1f4ff,.seed=602800},
+    .field_style={.placement=3,.amplitude=.55f,.drift=43},
+    .tuning={.active=1,.intensity=1.05f,.color=0x9ddafa},
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-48,-4,48,4}}};
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&first));
+  CHECK(first.vertex_count>0);
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg2Alpha,true,true,IdentityProjection,NULL,NULL,&other));
+  CHECK(other.vertex_count==0); /* The distant backdrop does not own the water. */
+  e->pulse_ticks=227;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&other));
+  CHECK(!SceneBatchesEqual(&first,&other));
+  e->pulse_ticks=180;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&other));
+  CHECK(SceneBatchesEqual(&first,&other));
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(other.vertex_count==0);
+  e->kind=kActionEffect_AuthoredCloud;e->particle_count=0;
+  e->render_layer=kActionEffectRenderLayer_Bg2HighAlpha;
+  e->geometry.data.rect=(ActionEffectLocalRect){-80,-12,80,12};
+  e->field_style.textured=1;e->field_style.rolling=.65f;e->field_style.strands=2;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&other));
+  CHECK(other.vertex_count>0); /* Both additive water and alpha mist admit the placement. */
+  e->field_style.placement=4;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&other));
+}
+
+static void TestDiffuseSoftLight(void) {
+  static ActionSceneEffectFrame frame;
+  static ActionSceneEffectRenderBatch material,diffuse,receiver;
+  frame=(ActionSceneEffectFrame){.authored_count=1};
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredLight,.generation=77,
+    .flags=kActionEffectFlag_Visible,.world_x=128,.world_y=160,
+    .projection_plane=kActionEffectProjectionPlane_Bg1,.render_layer=kActionEffectRenderLayer_Bg1Plane,
+    .particle_lifetime=240,.tuning={.active=1,.color=0x8ecff7,.intensity=1.8f,.reach=1,
+      .light_receivers=7,.light_receivers_set=1},
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-64,-48,64,48}}};
+#define BUILD_DIFFUSE(dst) CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&dst))
+  BUILD_DIFFUSE(material);
+  e->field_style.scatter=.5f;BUILD_DIFFUSE(diffuse);
+  CHECK(diffuse.vertex_count==material.vertex_count&&diffuse.vertex_count==97);
+  for(int i=0;i<diffuse.vertex_count;++i) {
+    CHECK(!memcmp(&diffuse.vertices[i].position,&material.vertices[i].position,sizeof(ArRenderPointF)));
+    CHECK(fabsf(diffuse.vertices[i].color.a-material.vertices[i].color.a*.5f)<.00001f);
+  }
+  for(unsigned target=1;target<=4;target*=2) {
+    frame.light_receiver=target;BUILD_DIFFUSE(receiver);
+    CHECK(SceneBatchesEqual(&material,&receiver)); /* Scattering cannot dim receiver light. */
+  }
+  frame.light_receiver=0;e->tuning.light_receivers=0;BUILD_DIFFUSE(receiver);
+  CHECK(SceneBatchesEqual(&diffuse,&receiver)); /* A visible halo can have no receivers. */
+  e->field_style.scatter=0;BUILD_DIFFUSE(receiver);CHECK(receiver.vertex_count==0);
+  e->field_style.scatter=1.1f;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&receiver));
+#undef BUILD_DIFFUSE
+}
+static void TestRippleSoftLight(void) {
+  static ActionSceneEffectFrame frame;
+  static ActionSceneEffectRenderBatch first,other;
+  frame=(ActionSceneEffectFrame){.authored_count=1};
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredLight,.flags=kActionEffectFlag_Visible,
+    .world_x=128,.world_y=144,.projection_plane=kActionEffectProjectionPlane_Bg1,
+    .render_layer=kActionEffectRenderLayer_Bg1Plane,.particle_lifetime=286,
+    .tuning={.active=1,.color=0x9bd9f3,.intensity=1.4f,.light_receivers=7,.light_receivers_set=1},
+    .field_style={.ripple=1,.amplitude=6,.drift=19},
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-72,-18,72,18}}};
+#define BUILD_RIPPLE(dst) CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&dst))
+  BUILD_RIPPLE(first);CHECK(first.vertex_count==18); /* Two small meshes carry the curved texture detail. */
+  for(unsigned tick=1;tick<=285;tick+=284) {
+    e->pulse_ticks=tick;BUILD_RIPPLE(other);CHECK(other.vertex_count==first.vertex_count);
+    for(int i=0;i<first.vertex_count;++i) {
+      CHECK(hypotf(other.vertices[i].position.x-first.vertices[i].position.x,
+          other.vertices[i].position.y-first.vertices[i].position.y)<.4f);
+      CHECK(fabsf(other.vertices[i].color.a-first.vertices[i].color.a)<.01f);
+    }
+  }
+  e->pulse_ticks=97;BUILD_RIPPLE(other);CHECK(!SceneBatchesEqual(&first,&other));
+  e->pulse_ticks=286;BUILD_RIPPLE(other);CHECK(SceneBatchesEqual(&first,&other));
+  e->pulse_ticks=0;BUILD_RIPPLE(other);CHECK(SceneBatchesEqual(&first,&other));
+  for(unsigned receiver=1;receiver<=4;receiver*=2) {
+    frame.light_receiver=receiver;BUILD_RIPPLE(first);
+    e->pulse_ticks=97;BUILD_RIPPLE(other);CHECK(!SceneBatchesEqual(&first,&other));
+    e->pulse_ticks=0;
+  }
+  frame.light_receiver=0;e->field_style.ripple=0;
+  BUILD_RIPPLE(first);e->pulse_ticks=97;BUILD_RIPPLE(other);CHECK(SceneBatchesEqual(&first,&other));
+  e->field_style.ripple=1;e->field_style.softness=.2f;e->field_style.amplitude=14;
+  e->geometry.data.rect=(ActionEffectLocalRect){-128,-96,128,96};
+  e->tuning.illumination_set=1;e->tuning.illumination=1;
+  BUILD_RIPPLE(first);
+  /* Compare independent object and atmospheric samplers, including the
+   * quantized mask and both overlapping layers across triangle boundaries. */
+  static ActionReceiverLighting receivers;
+  receivers=(ActionReceiverLighting){.frame=&frame,.player=first};
+  unsigned illuminated=0,samples=0;float peak=0;
+  for(int y=-95;y<96;y+=3)for(int x=-127;x<128;x+=4) {
+    const float wx=e->world_x+x,wy=e->world_y+y;
+    const ArRenderColorF incoming=ActionSoftLight_Sample(e,wx,wy);
+    float multiply[3],add[3];
+    ActionEffectReceivers_Sample(&receivers,kActionReceiver_Player,wx,wy,multiply,add);
+    CHECK(fabsf(multiply[0]-1-incoming.r)<.0005f);
+    CHECK(fabsf(multiply[1]-1-incoming.g)<.0005f);
+    CHECK(fabsf(multiply[2]-1-incoming.b)<.0005f);
+    CHECK(isfinite(incoming.a)&&incoming.a>=0);
+    peak=fmaxf(peak,incoming.a);illuminated+=incoming.a>.001f;++samples;
+  }
+  CHECK(peak>.1f&&illuminated>0&&illuminated<samples*3/4); /* Curved highlights and open dark areas. */
+  e->field_style.softness=1;unsigned softer=0;
+  for(int y=-95;y<96;y+=3)for(int x=-127;x<128;x+=4)
+    softer+=ActionSoftLight_Sample(e,e->world_x+x,e->world_y+y).a>.001f;
+  CHECK(softer>illuminated*1.2f);
+  e->field_style.softness=NAN;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  e->field_style.softness=.2f;
+  e->field_style.ripple=2;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  e->field_style.ripple=1;e->field_style.amplitude=NAN;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+#undef BUILD_RIPPLE
+}
+static void TestIceCrystalLighting(void) {
+  static ActionSceneEffectFrame frame;
+  static ActionSceneEffectRenderBatch lit,dark,changed;
+  frame=(ActionSceneEffectFrame){.authored_count=2};
+  ActionEffectInstance *e=&frame.authored[0],*light=&frame.authored[1];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredParticleArea,
+      .flags=kActionEffectFlag_Visible,.world_x=128,.world_y=128,
+      .render_layer=kActionEffectRenderLayer_Bg1Mist,.projection_plane=kActionEffectProjectionPlane_Bg1,
+      .particle_count=12,.particle_lifetime=1037,.pulse_ticks=180,
+      .tuning={.active=1,.color=0xb8dded,.intensity=1},
+      .particle_style={.size_min=.7f,.size_max=1.25f,.color_end=0x8ab7d4,.seed=621,
+          .wander=2,.spread=1,.travel_x=16,.travel_y=24},
+      .field_style={.pattern=kActionParticle_IceCrystals,.canopy_response=.75f,.twinkle=.35f},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-128,-128,128,128}}};
+  *light=(ActionEffectInstance){.kind=kActionEffect_AuthoredLight,.flags=kActionEffectFlag_Visible,
+      .world_x=128,.world_y=128,.render_layer=kActionEffectRenderLayer_Bg1Plane,
+      .projection_plane=kActionEffectProjectionPlane_Bg1,
+      .tuning={.active=1,.color=0x8ecff7,.intensity=1.8f,.illumination=2,.illumination_set=1,
+          .light_receivers=7,.light_receivers_set=1},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-256,-256,256,256}}};
+  /* Alpha matter renders with the lighting pass disabled. It still samples
+   * incident light; that pass flag is not the user's global lighting switch. */
+#define BUILD_ICE(dst) CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,IdentityProjection,NULL,NULL,&dst))
+  BUILD_ICE(lit);CHECK(lit.vertex_count>0);
+  light->tuning.illumination=0;BUILD_ICE(dark);
+  CHECK(lit.vertex_count==dark.vertex_count);
+  unsigned brighter=0;
+  for(int i=0;i<lit.vertex_count;++i) {
+    CHECK(!memcmp(&lit.vertices[i].position,&dark.vertices[i].position,sizeof(ArRenderPointF)));
+    brighter+=lit.vertices[i].color.a>dark.vertices[i].color.a+.01f;
+  }
+  CHECK(brighter>0); /* Decorative glare with zero illumination cannot light ice. */
+  light->tuning.illumination=2;light->field_style.scatter=1;BUILD_ICE(changed);
+  CHECK(SceneBatchesEqual(&lit,&changed)); /* Visible diffusion is independent. */
+  light->tuning.light_receivers=6;BUILD_ICE(changed);CHECK(SceneBatchesEqual(&dark,&changed));
+  light->tuning.light_receivers=7;light->flags|=kActionEffectFlag_LightingOff;
+  BUILD_ICE(changed);CHECK(SceneBatchesEqual(&dark,&changed));
+  light->flags&=~kActionEffectFlag_LightingOff;light->projection_plane=kActionEffectProjectionPlane_Bg2;
+  BUILD_ICE(changed);CHECK(SceneBatchesEqual(&dark,&changed));
+  light->projection_plane=kActionEffectProjectionPlane_Bg1;
+  e->pulse_ticks=181;BUILD_ICE(changed);CHECK(changed.vertex_count==lit.vertex_count);
+  for(int i=0;i<lit.vertex_count;++i) {
+    CHECK(hypotf(changed.vertices[i].position.x-lit.vertices[i].position.x,
+        changed.vertices[i].position.y-lit.vertices[i].position.y)<.1f);
+    CHECK(fabsf(changed.vertices[i].color.a-lit.vertices[i].color.a)<.01f);
+  }
+  e->pulse_ticks=180;BUILD_ICE(changed);CHECK(SceneBatchesEqual(&lit,&changed));
+  ActionEffectProjectionContext context={.visible_width=512,.snes_height=512,.viewport={0,0,512,512}};
+  light->tuning.illumination=0;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      ActionEffectProjection_ProjectPoint,NULL,&context,&dark));
+  CHECK(dark.vertex_count>0);
+  light->tuning.illumination=2;context.atmosphere_unlit=true;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      ActionEffectProjection_ProjectPoint,NULL,&context,&changed));
+  CHECK(SceneBatchesEqual(&dark,&changed)); /* Global lighting off leaves only the dim suspended grain. */
+  e->tuning.intensity=4;e->field_style.twinkle=1;BUILD_ICE(changed);
+  for(int i=0;i<changed.vertex_count;++i)CHECK(changed.vertices[i].color.a>=0&&changed.vertices[i].color.a<=1);
+  e->tuning.intensity=1;e->field_style.twinkle=.35f;
+  e->field_style.softness=.75f;BUILD_ICE(changed);CHECK(changed.vertex_count>lit.vertex_count);
+  e->field_style.softness=1.1f;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,IdentityProjection,NULL,NULL,&changed));
+  e->field_style.softness=.75f;e->kind=kActionEffect_AuthoredParticlePath;
+  e->field_style.activity=1;e->field_style.point_count=2;
+  e->field_style.points[0].x=-80;e->field_style.points[0].y=-60;
+  e->field_style.points[1].x=80;e->field_style.points[1].y=60;
+  BUILD_ICE(changed);CHECK(changed.vertex_count>0);
+  /* The same light transports into haze without changing its density/shape. */
+  e->kind=kActionEffect_AuthoredCloud;e->particle_count=0;e->field_style.point_count=0;
+  e->field_style.textured=1;e->field_style.rolling=.35f;e->field_style.strands=3;
+  e->field_style.drift=8;e->field_style.amplitude=2;e->tuning.intensity=.09f;
+  light->tuning.illumination=0;BUILD_ICE(dark);
+  light->tuning.illumination=2;BUILD_ICE(lit);CHECK(lit.vertex_count==dark.vertex_count&&lit.vertex_count>0);
+  brighter=0;
+  for(int i=0;i<lit.vertex_count;++i) {
+    CHECK(!memcmp(&lit.vertices[i].position,&dark.vertices[i].position,sizeof(ArRenderPointF)));
+    CHECK(lit.vertices[i].color.a==dark.vertices[i].color.a);
+    brighter+=lit.vertices[i].color.b>dark.vertices[i].color.b+.001f;
+  }
+  CHECK(brighter>0);
+  light->field_style.scatter=0;BUILD_ICE(changed);CHECK(SceneBatchesEqual(&lit,&changed));
+  light->field_style.ripple=1;light->field_style.amplitude=6;light->field_style.drift=19;
+  light->particle_lifetime=286;light->geometry.data.rect=(ActionEffectLocalRect){-256,-64,256,64};
+  light->field_style.softness=.2f;light->pulse_ticks=0;BUILD_ICE(lit);
+  bool crossed=false;
+  for(unsigned tick=7;tick<286;tick+=7) {
+    light->pulse_ticks=tick;BUILD_ICE(changed);
+    crossed|=!SceneBatchesEqual(&lit,&changed);
+  }
+  CHECK(crossed); /* Thin bands can miss a sparse haze patch at a given instant. */
+  light->pulse_ticks=286;BUILD_ICE(changed);CHECK(SceneBatchesEqual(&lit,&changed));
+#undef BUILD_ICE
+}
+static void TestStarfieldGeometry(void) {
+  ActionSceneEffectFrame frame={.authored_count=1};
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredStarfield,
+      .flags=kActionEffectFlag_Visible|kActionEffectFlag_StaticAnchor,
+      .projection_plane=kActionEffectProjectionPlane_Bg2,.render_layer=kActionEffectRenderLayer_Bg2Weather,
+      .particle_count=64,.particle_lifetime=1200,.tuning={.active=1,.color=0xcbdcf8,.intensity=2,.reach=1},
+      .particle_style={.active=1,.size_min=.45f,.size_max=1.2f,.spread=1,.seed=61437,.color_end=0x7982b9},
+      .field_style={.twinkle=.25f},.geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-192,-48,192,48}}};
+  static ActionSceneEffectRenderBatch first,other;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&first));
+  CHECK(first.vertex_count>0);
+  e->pulse_ticks=300;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(other.vertex_count==first.vertex_count && other.index_count==first.index_count);
+  unsigned changed=0;
+  for(int i=0;i<first.vertex_count;++i) {
+    CHECK(!memcmp(&first.vertices[i].position,&other.vertices[i].position,sizeof(ArRenderPointF)));
+    changed+=first.vertices[i].color.a!=other.vertices[i].color.a;
+  }
+  CHECK(changed>0&&changed<(unsigned)first.vertex_count/2); /* Most stars remain steady. */
+  e->pulse_ticks=1200;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(SceneBatchesEqual(&first,&other));
+  e->field_style.sky.colors=128;e->field_style.scatter=.2f;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(!other.vertex_count); /* Missing artwork facts never reveal masked stars/haze. */
+  e->sky_visibility.valid=1;memset(e->sky_visibility.alpha,255,sizeof(e->sky_visibility.alpha));
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(other.vertex_count>first.vertex_count);
+  memset(e->sky_visibility.alpha,0,sizeof(e->sky_visibility.alpha));
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(!other.vertex_count);
+  e->field_style.sky.colors=0;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,IdentityProjection,NULL,NULL,&other));
+  CHECK(!other.vertex_count);
+}
+static void TestAurora(void) {
+  ActionSceneEffectFrame frame={.authored_count=1};
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredAurora,
+      .flags=kActionEffectFlag_Visible|kActionEffectFlag_StaticAnchor,
+      .projection_plane=kActionEffectProjectionPlane_Bg2,
+      .render_layer=kActionEffectRenderLayer_Bg2Weather,.particle_lifetime=3600,
+      .tuning={.active=1,.color=0x73c6ae,.intensity=1.6f,.reach=1},
+      .particle_style={.seed=61202,.color_end=0x588eb1},
+      .field_style={.strands=2,.amplitude=12,.drift=6,.angle=-10,.softness=.6f,.twinkle=.35f,.gust=.85f},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-192,-52,192,52}}};
+  static ActionSceneEffectRenderBatch first,other;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&first));
+  CHECK(first.vertex_count>0 && first.vertex_count<1024);
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(SceneBatchesEqual(&first,&other));
+  e->pulse_ticks=3600;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(SceneBatchesEqual(&first,&other));
+  /* Slow, continuous folds and brightness, including the loop boundary. */
+  for(unsigned tick=1;tick<=3599;tick+=3598) {
+    e->pulse_ticks=tick;
+    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+    CHECK(other.vertex_count==first.vertex_count && other.index_count==first.index_count);
+    for(int i=0;i<first.vertex_count;++i) {
+      CHECK(hypotf(first.vertices[i].position.x-other.vertices[i].position.x,
+          first.vertices[i].position.y-other.vertices[i].position.y)<.1f);
+      /* Traveling light patches are faster than the former broad envelope,
+       * but remain below one 8-bit alpha step per update at this cycle. */
+      CHECK(fabsf(first.vertices[i].color.a-other.vertices[i].color.a)<.003f);
+      CHECK(other.vertices[i].color.a>=0 && other.vertices[i].color.a<=.75f);
+    }
+  }
+  e->pulse_ticks=900;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(!SceneBatchesEqual(&first,&other));
+  e->pulse_ticks=0;e->particle_style.seed++;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(!SceneBatchesEqual(&first,&other));
+  ActionEffectLocalRect clip={-80,-10,80,30};
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,FloorClip,&clip,&other));
+  CHECK(other.vertex_count>0);
+  for(int i=0;i<other.vertex_count;++i) {
+    CHECK(other.vertices[i].position.x>=clip.x0 && other.vertices[i].position.x<=clip.x1);
+    CHECK(other.vertices[i].position.y>=clip.y0 && other.vertices[i].position.y<=clip.y1);
+  }
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,IdentityProjection,NULL,NULL,&other));
+  CHECK(other.vertex_count==0);
+  /* Reflected gradients use the same slow envelope; steady gradients retain
+   * their old appearance. The spatial shape must not move with the light. */
+  e->kind=kActionEffect_AuthoredGradient;e->render_layer=kActionEffectRenderLayer_WorldOverlay;
+  e->projection_plane=kActionEffectProjectionPlane_Bg1;e->field_style.angle=0;
+  e->pulse_ticks=0;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&first));
+  e->pulse_ticks=1800;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(first.vertex_count>0 && other.vertex_count==first.vertex_count);
+  for(int i=0;i<first.vertex_count;++i) {
+    CHECK(!memcmp(&first.vertices[i].position,&other.vertices[i].position,sizeof(ArRenderPointF)));
+    CHECK(fabsf(other.vertices[i].color.a-first.vertices[i].color.a*.65f)<.00001f);
+  }
+  e->field_style.twinkle=0;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,IdentityProjection,NULL,NULL,&other));
+  CHECK(SceneBatchesEqual(&first,&other));
+}
 static bool DriftingMoteClip(void *context, const ActionEffectInstance *effect, ActionEffectLocalRect *out) {
   (void)context;
   /* Birth area [-8,8] is offscreen; the rightward drift must still be built. */
@@ -4262,6 +4599,221 @@ static void TestAuthoredFloorMist(void) {
   frame.authored_floor[0].spans[0].height=NAN;
   CHECK(!ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Mist,false,true,
       IdentityProjection,FloorClip,&clip,&b));CHECK(!b.vertex_count && !b.index_count);
+}
+
+static void TestGroundSnowCover(void) {
+  static ActionSceneEffectFrame frame;
+  static ActionSceneEffectRenderBatch still,pressed,changed,clipped,top,top_pressed;
+  frame=(ActionSceneEffectFrame){.authored_count=1};
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredCloud,.generation=77,
+      .flags=kActionEffectFlag_Visible,.world_x=128,.world_y=200,
+      .render_layer=kActionEffectRenderLayer_WorldDust,.projection_plane=kActionEffectProjectionPlane_Bg1,
+      .particle_lifetime=240,.pulse_ticks=180,
+      .tuning={.active=1,.color=0xd8e6f6,.intensity=2,.reach=1},
+      .particle_style={.size_min=.5f,.size_max=1,.color_end=0xfff4df,.seed=621,.spread=1},
+      .field_style={.strands=4,.placement=2,.ground_depth=4,
+          .point_count=4,.points={{-128,0},{0,0},{32,32},{128,32}}},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-128,-8,128,40}}};
+#define BUILD_COVER(dst) CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldDust,false,true,IdentityProjection,NULL,NULL,&dst))
+  BUILD_COVER(still);
+  CHECK(SampleForestLight(&still,80,197,false)>.9f);
+  CHECK(SampleForestLight(&still,80,195,false)==0);
+  CHECK(SampleForestLight(&still,144,214,false)>.9f); /* Follows the slope. */
+  CHECK(SampleForestLight(&still,80,202,false)==0);
+  frame.actor_count=2;
+  frame.actors[0]=(ActionEffectActor){.player=1,.visible=1,.body_radius=8,.x=80,.feet_y=200};
+  frame.actors[1]=(ActionEffectActor){.visible=1,.body_radius=8,.x=200,.feet_y=232};
+  BUILD_COVER(pressed);
+  CHECK(SampleForestLight(&pressed,80,197,false)==0);
+  CHECK(SampleForestLight(&pressed,80,199,false)>.9f); /* Boots stay partly buried. */
+  CHECK(SampleForestLight(&pressed,200,229,false)==0);
+  CHECK(SampleForestLight(&pressed,200,231,false)>.9f);
+  CHECK(fabsf(SampleForestLight(&pressed,112,197,false)-SampleForestLight(&still,112,197,false))<.001f);
+  e->pulse_ticks=999;BUILD_COVER(changed);CHECK(SceneBatchesEqual(&pressed,&changed));
+  e->pulse_ticks=0;BUILD_COVER(changed);CHECK(SceneBatchesEqual(&pressed,&changed));
+  ActionEffectLocalRect clip={-60,-6,88,35};
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldDust,false,true,
+      IdentityProjection,FloorClip,&clip,&clipped));
+  for(float x=70;x<210;x+=3)for(float y=195;y<234;y+=.7f)
+    CHECK(fabsf(SampleForestLight(&pressed,x,y,false)-SampleForestLight(&clipped,x,y,false))<.001f);
+  frame.actors[0].feet_y-=20;frame.actors[1].feet_y-=20;
+  BUILD_COVER(changed);CHECK(SceneBatchesEqual(&still,&changed)); /* Jump clears contact. */
+  frame.actors[0].feet_y=200;frame.actors[0].visible=0;
+  BUILD_COVER(changed);CHECK(SceneBatchesEqual(&still,&changed));
+  /* Painted platforms expose a broad top behind the walking edge. It must
+   * occupy the scenery alpha pass without changing foreground boot overlap. */
+#define BUILD_TOP(dst) CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Mist,false,true,IdentityProjection,NULL,NULL,&dst))
+  BUILD_TOP(top);CHECK(!top.vertex_count);
+  e->field_style.ground_width=8;
+  BUILD_COVER(changed);CHECK(SceneBatchesEqual(&still,&changed));
+  BUILD_TOP(top);
+  CHECK(SampleForestLight(&top,80,191,false)>.5f);
+  CHECK(SampleForestLight(&top,80,187,false)==0);
+  CHECK(SampleForestLight(&top,144,207,false)>.5f); /* Same slope, offset rear edge. */
+  CHECK(SampleForestLight(&top,80,199,false)==0); /* Front lip owns this band. */
+  frame.actors[0].visible=1;frame.actors[1].feet_y=232;
+  BUILD_COVER(changed);CHECK(SceneBatchesEqual(&pressed,&changed));
+  BUILD_TOP(top_pressed);CHECK(!SceneBatchesEqual(&top,&top_pressed));
+  CHECK(SampleForestLight(&top_pressed,80,197,false)>.5f); /* Depression meets lip. */
+  clip=(ActionEffectLocalRect){-60,-16,88,35};
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Mist,false,true,
+      IdentityProjection,FloorClip,&clip,&clipped));
+  for(float x=70;x<210;x+=3)for(float y=185;y<234;y+=.7f)
+    CHECK(fabsf(SampleForestLight(&top_pressed,x,y,false)-SampleForestLight(&clipped,x,y,false))<.001f);
+  e->pulse_ticks=900;BUILD_TOP(changed);CHECK(SceneBatchesEqual(&top_pressed,&changed));
+  frame.actors[0].feet_y-=20;frame.actors[1].feet_y-=20;
+  BUILD_TOP(changed);CHECK(SceneBatchesEqual(&top,&changed));
+  e->field_style.wake=1;e->particle_count=24;
+  BUILD_TOP(changed);CHECK(SceneBatchesEqual(&top,&changed)); /* No duplicate grains. */
+  e->field_style.ground_width=25;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Mist,false,true,
+      IdentityProjection,NULL,NULL,&changed));
+  e->field_style.ground_width=8;
+  e->field_style.ground_depth=13;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldDust,false,true,
+      IdentityProjection,NULL,NULL,&changed));
+#undef BUILD_COVER
+#undef BUILD_TOP
+}
+static void TestSlopePowder(void) {
+  static ActionSceneEffectFrame frame;
+  static ActionSceneEffectRenderBatch first,next;
+  frame=(ActionSceneEffectFrame){.authored_count=1,.actor_count=1};
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredCloud,.generation=77,.pulse_generation=77,
+      .flags=kActionEffectFlag_Visible,.world_x=128,.world_y=200,
+      .render_layer=kActionEffectRenderLayer_WorldDust,.projection_plane=kActionEffectProjectionPlane_Bg1,
+      .particle_lifetime=240,.pulse_ticks=180,.tuning={.active=1,.color=0xd8e6f6,.intensity=2,.reach=1},
+      .particle_style={.size_min=.6f,.size_max=.6f,.color_end=0xffffff,.seed=621,.spread=1},
+      .field_style={.strands=1,.wake=1,.placement=2,.ground_depth=4,.point_count=2,.points={{-128,128},{128,-128}}},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-128,-128,128,128}}};
+  frame.actors[0]=(ActionEffectActor){.generation=3,.player=1,.visible=1,.body_radius=8,
+      .wake={.x=128,.y=200,.dx=2,.strength=.55f}};
+  for(int direction=-1;direction<=1;direction+=2) {
+    e->field_style.points[0].y=-direction*128;e->field_style.points[1].y=direction*128;
+    frame.actors[0].wake.dx=-direction*2; /* Uphill in either direction. */
+    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&first));
+    ArRenderPointF corners[4];unsigned corner=0,puffs=0;
+    for(int i=0;i<first.vertex_count;++i) {
+      const ArRenderVertex2D *v=&first.vertices[i];
+      if(v->tex_coord.y<=2.f/3||v->tex_coord.y>=5.f/6)continue;
+      corners[corner++]=v->position;
+      if(corner<4)continue;
+      corner=0;++puffs;
+      float x=0,y=0;for(unsigned j=0;j<4;++j){x+=corners[j].x*.25f;y+=corners[j].y*.25f;}
+      const float surface=200+direction*(x-128),clearance=(surface-y)/sqrtf(2);
+      CHECK(clearance>0&&clearance<18); /* Powder stays close to the slope. */
+      const float slope=(corners[1].y-corners[0].y)/(corners[1].x-corners[0].x);
+      CHECK(direction*slope>.5f&&direction*slope<1.01f);
+    }
+    CHECK(puffs==kActionGroundWakePuffs&&corner==0);
+    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&next));
+    CHECK(SceneBatchesEqual(&first,&next));
+    /* Normal offsets near a downhill path end must not create negative fades. */
+    for(unsigned tick=0;tick<48;++tick) {
+      e->pulse_ticks=180+tick;frame.actors[0].wake.x=128+direction*(90+(int)(tick%38));
+      frame.actors[0].wake.y=200+direction*(frame.actors[0].wake.x-128);
+      CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&next));
+      for(int i=0;i<next.vertex_count;++i)
+        CHECK(next.vertices[i].color.a>=0&&next.vertices[i].color.a<=1);
+    }
+    e->pulse_ticks=180;frame.actors[0].wake.x=128;frame.actors[0].wake.y=200;
+  }
+  /* At an authored crest the tangent blends across a footprint, instead of
+   * rotating a whole clump abruptly when its centre crosses one path point. */
+  e->field_style.point_count=3;
+  e->field_style.points[0].y=0;e->field_style.points[1].x=0;e->field_style.points[1].y=0;
+  e->field_style.points[2].x=128;e->field_style.points[2].y=-128;
+  for(unsigned tick=0;tick<48;++tick) {
+    e->pulse_ticks=180+tick;frame.actors[0].wake.x=105+tick;
+    frame.actors[0].wake.y=200-fmaxf(0,(float)tick-23);frame.actors[0].wake.dx=1;
+    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,IdentityProjection,NULL,NULL,&next));
+    for(int i=0;i<next.vertex_count;++i)
+      CHECK(isfinite(next.vertices[i].position.x)&&isfinite(next.vertices[i].position.y));
+  }
+}
+static void TestReactiveSnow(void) {
+  static ActionSceneEffectFrame frame;
+  static ActionSceneEffectRenderBatch still,player,both,changed,unlit;
+  frame=(ActionSceneEffectFrame){.authored_count=2,.actor_count=2};
+  ActionEffectInstance *e=&frame.authored[0],*sun=&frame.authored[1];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredCloud,.generation=77,.pulse_generation=77,
+      .flags=kActionEffectFlag_Visible,.world_x=128,.world_y=200,
+      .render_layer=kActionEffectRenderLayer_WorldDust,.projection_plane=kActionEffectProjectionPlane_Bg1,
+      .particle_count=24,.particle_lifetime=240,.pulse_ticks=180,
+      .tuning={.active=1,.color=0xd8e6f6,.intensity=1,.reach=1},
+      .particle_style={.size_min=.5f,.size_max=1,.color_end=0xfff4df,.seed=621,.wander=3,.spread=1},
+      .field_style={.strands=4,.softness=.8f,.drift=48,.amplitude=6,.wake=1,.canopy_response=.7f,.twinkle=.9f,
+          .point_count=2,.points={{-128,0},{128,0}}},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-128,-32,128,32}}};
+  *sun=(ActionEffectInstance){.kind=kActionEffect_AuthoredGradient,.flags=kActionEffectFlag_Visible,
+      .world_x=128,.world_y=144,.render_layer=kActionEffectRenderLayer_Bg1Plane,
+      .projection_plane=kActionEffectProjectionPlane_Bg1,
+      .tuning={.active=1,.color=0xfff3cf,.intensity=1,.illumination=1,.illumination_set=1},
+      .particle_style={.color_end=0xfff3cf},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-256,-128,256,128}}};
+#define BUILD_SNOW(dst,lit) CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldDust,lit,true,IdentityProjection,NULL,NULL,&dst))
+  BUILD_SNOW(still,true);CHECK(still.vertex_count>0);
+  frame.actors[0]=(ActionEffectActor){.generation=3,.player=1,.visible=1,.body_radius=8,
+      .wake={.x=80,.y=200,.dx=3,.strength=1}};
+  BUILD_SNOW(player,true);CHECK(player.vertex_count>still.vertex_count);
+  frame.actors[1]=(ActionEffectActor){.generation=4,.visible=1,.body_radius=8,
+      .wake={.x=180,.y=200,.dx=-3,.strength=1}};
+  BUILD_SNOW(both,true);CHECK(both.vertex_count>player.vertex_count);
+  CHECK(both.vertex_count<=still.vertex_count+kActionFieldWakeCount*(16*kActionGroundWakePuffs+
+      4*(kActionGroundWakeGrains-kActionGroundWakePuffs))+24*4);
+  BUILD_SNOW(changed,true);CHECK(SceneBatchesEqual(&both,&changed));
+  frame.actors[0].wake.strength=frame.actors[1].wake.strength=.3f;
+  BUILD_SNOW(changed,true);
+  /* Ordinary walking must retain dense powder cores, not just enlarge faint
+   * diamonds. Cloud-body UVs occupy the second-last row of the shared atlas. */
+  unsigned opaque_powder=0;
+  for(int i=0;i<changed.vertex_count;++i) {
+    const ArRenderVertex2D *v=&changed.vertices[i];
+    if(v->tex_coord.y>2.f/3&&v->tex_coord.y<5.f/6&&v->color.a>.9f)++opaque_powder;
+  }
+  CHECK(opaque_powder>=4);
+  /* Staggered clumps must overlap throughout a complete cycle, with gradual
+   * coverage changes at the 30fps preview cadence instead of a flashing mass. */
+  frame.actor_count=1;
+  float previous_coverage=0;
+  for(unsigned i=0;i<48;++i) {
+    e->pulse_ticks=180+i*2;BUILD_SNOW(changed,true);
+    float coverage=0;
+    for(int j=0;j<changed.vertex_count;++j) {
+      const ArRenderVertex2D *v=&changed.vertices[j];
+      if(v->tex_coord.y>2.f/3&&v->tex_coord.y<5.f/6)coverage+=v->color.a;
+    }
+    CHECK(coverage>8);
+    if(i)CHECK(fabsf(coverage-previous_coverage)<previous_coverage*.16f);
+    previous_coverage=coverage;
+  }
+  e->pulse_ticks=180;frame.actor_count=2;
+  frame.actors[0].wake.age=frame.actors[1].wake.age=kActionActorWakeTicks;
+  BUILD_SNOW(changed,true);CHECK(SceneBatchesEqual(&still,&changed));
+  frame.actors[0].wake.age=frame.actors[1].wake.age=0;
+  frame.actors[0].wake.y=frame.actors[1].wake.y=150;
+  BUILD_SNOW(changed,true);CHECK(SceneBatchesEqual(&still,&changed));
+  frame.actor_count=0;
+  BUILD_SNOW(unlit,false);CHECK(!SceneBatchesEqual(&still,&unlit));
+  sun->flags|=kActionEffectFlag_LightingOff;
+  BUILD_SNOW(changed,true);CHECK(SceneBatchesEqual(&unlit,&changed));
+  sun->flags&=~kActionEffectFlag_LightingOff;sun->tuning.illumination=0;
+  BUILD_SNOW(changed,true);CHECK(SceneBatchesEqual(&unlit,&changed));
+  e->field_style.twinkle=0;
+  BUILD_SNOW(changed,false);CHECK(SceneBatchesEqual(&unlit,&changed));
+  /* Airborne flakes respond around a body, independently of floor contact. */
+  e->kind=kActionEffect_AuthoredParticleArea;e->particle_count=16;
+  e->field_style.point_count=0;e->field_style.pattern=kActionParticle_Snow;
+  e->geometry.data.rect=(ActionEffectLocalRect){-128,-128,128,128};
+  BUILD_SNOW(still,false);CHECK(still.vertex_count>=4);
+  float x=0,y=0;for(unsigned i=0;i<4;++i){x+=still.vertices[i].position.x*.25f;y+=still.vertices[i].position.y*.25f;}
+  frame.actor_count=1;frame.actors[0].wake=(ActionActorWake){.x=x,.y=y+20,.dx=3,.strength=1};
+  BUILD_SNOW(changed,false);CHECK(!SceneBatchesEqual(&still,&changed));
+  frame.actors[0].wake.age=kActionActorWakeTicks;
+  BUILD_SNOW(changed,false);CHECK(SceneBatchesEqual(&still,&changed));
+#undef BUILD_SNOW
 }
 
 /* A wrapper deliberately takes the uncached callback contract, while using
@@ -4418,8 +4970,17 @@ int main(void) {
   TestRetainedShadowParity();
   TestAuthoredTorchReach();
   TestAuthoredEmitters();
+  TestHighWaterGeometry();
+  TestDiffuseSoftLight();
+  TestRippleSoftLight();
+  TestIceCrystalLighting();
+  TestAurora();
+  TestStarfieldGeometry();
   TestAuthoredMoteStyle();
   TestAuthoredFloorMist();
+  TestGroundSnowCover();
+  TestReactiveSnow();
+  TestSlopePowder();
   TestDistantWaveCapsFollowRaster();
   TestMoonCloudStaysContinuousAcrossSkyboxBands();
   TestMoonRaysStayContinuousAcrossSkyboxBands();

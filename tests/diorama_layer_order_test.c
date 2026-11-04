@@ -2090,7 +2090,36 @@ static void TestNativeBloom(void) {
   CHECK(DioramaLayerOrder_RoomIsActive(&copy));
 }
 
+static void TestTrunkSettings(void) {
+  DioramaRoomOverride room={.used=true,.map_group=6,.map_number=6};
+  const char *line="trunk = enabled:1 depth:0.38 recess:0.24 wrap:1 gust:0.6 frost:0.4 bark:0";
+  CHECK(DioramaLayerOrder_ParseLine(&room,line,NULL));
+  CHECK(room.trunk.set&&room.trunk.enabled&&room.trunk.gust==.6f);
+  char text[512];CHECK(DioramaLayerOrder_FormatRoom(&room,text,sizeof(text))<sizeof(text));
+  const char *record=strstr(text,"trunk = ");CHECK(record!=NULL);
+  DioramaRoomOverride copy={.used=true,.map_group=6,.map_number=6};
+  CHECK(record&&DioramaLayerOrder_ParseLine(&copy,record,NULL));
+  CHECK(!memcmp(&room.trunk,&copy.trunk,sizeof(room.trunk)));
+  const char *invalid[]={
+    "trunk = enabled:1 depth:nan recess:0.24 wrap:1 gust:1 frost:1 bark:1",
+    "trunk = enabled:1 depth:0.5 recess:0.24 wrap:1 gust:1 frost:1 bark:1",
+    "trunk = enabled:1 depth:0.38 recess:0.4 wrap:1 gust:1 frost:1 bark:1",
+    "trunk = enabled:2 depth:0.38 recess:0.24 wrap:1 gust:1 frost:1 bark:1",
+    "trunk:jp = enabled:1 depth:0.38 recess:0.24 wrap:1 gust:1 frost:1 bark:1"};
+  for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);++i) {
+    CHECK(!DioramaLayerOrder_ParseLine(&copy,invalid[i],NULL));
+    CHECK(!memcmp(&room.trunk,&copy.trunk,sizeof(room.trunk)));
+  }
+  copy.map_number=5;CHECK(!DioramaLayerOrder_ParseLine(&copy,line,NULL));
+  CHECK(!DioramaTrunk_Resolve(6,5,&copy).enabled);
+  CHECK(DioramaTrunk_Resolve(6,7,NULL).enabled);
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "trunk = enabled:0 depth:0.38 recess:0.24 wrap:1 gust:1 frost:1 bark:1",NULL));
+  CHECK(!DioramaTrunk_Resolve(6,6,&room).enabled);
+}
+
 int main(void) {
+  TestTrunkSettings();
   TestNativeBloom();
   TestSceneryGrade();
   TestDeathHeimIndependentScenes();

@@ -43,6 +43,10 @@ vec3 cloud_lighting(vec3 original,vec2 uv,vec4 source,vec4 meta,vec4 background_
         int at=i*6;
         vec4 bounds=CLOUD_REGIONS[at],core=CLOUD_REGIONS[at+1],shape=CLOUD_REGIONS[at+2];
         vec4 motion=CLOUD_REGIONS[at+3],color=CLOUD_REGIONS[at+4],spill=CLOUD_REGIONS[at+5];
+        // Dimming-only regions still participate above, but have no opening
+        // light to evaluate. This uniform branch skips the expensive field
+        // without changing its feather, overlap or any active light channel.
+        if(color.a==0.0||all(equal(core,vec4(0.0))))continue;
         vec2 p=(world-bounds.xy)/bounds.zw;
         if(any(lessThanEqual(p,vec2(0)))||any(greaterThanEqual(p,vec2(1))))continue;
         CloudLightSample s=CloudLightWeights(p.x,p.y,bounds.w/bounds.z,

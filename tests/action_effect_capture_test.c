@@ -8,10 +8,22 @@
 #include "actraiser_game.h"
 #include "app/settings.h"
 #include "diorama/diorama_layer_order.h"
+#include "diorama/diorama_layer_manifest.h"
+#include "action/action_trunk.h"
 #include "present/frame_timing.h"
 #include "present/present.h"
 
 Settings g_settings;
+bool g_diorama_frame_active;
+static DioramaLayerOrderTable layers;
+const DioramaLayerOrderTable *DioramaLayerManifest_Table(void) { return &layers; }
+const DioramaRoomOverride *DioramaLayerManifest_TerrainRoom(const DioramaRoomOverride *room,unsigned profile) {
+  assert(profile==0);return room;
+}
+unsigned ActRaiserActionBg_TerrainProfile(void) { return 0; }
+const ActionTrunkAssets *ActRaiserActionBg_TrunkAssets(unsigned group,unsigned room,const DioramaRoomOverride *edits) {
+  (void)group;(void)room;(void)edits;return NULL;
+}
 uint8 g_ram[kActRaiserWramSize];
 static FrameSlot frame;
 static ActionSceneEffectFrame scene;

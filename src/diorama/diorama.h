@@ -391,9 +391,15 @@ typedef struct DioramaView {
 
 struct SceneryShadingField;
 
+struct ActionTrunkAssets;
+struct ActionSceneEffectFrame;
 typedef struct DioramaScene {
   const DioramaRenderOptions *render; /* Required immutable policy for this draw. */
   uint8_t map_group, map_number, layer_section;
+  const struct ActionTrunkAssets *trunk;
+  DioramaTrunkSettings trunk_settings;
+  const struct ActionSceneEffectFrame *trunk_effects;
+  bool trunk_lighting, trunk_particles;
   uint32_t additive_plane_mask;
   /* 0 leaves authored color intact; 1 darkens BG1 low/high/far to black.
    * Applied to existing face/depth geometry, without changing layer alpha. */

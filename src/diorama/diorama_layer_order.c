@@ -503,7 +503,7 @@ int DioramaLayerOrder_VirtualBand(const DioramaRoomOverride *room, int bg,
 
 bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   if (!room || !room->used) return false;
-  if (room->scenery_grade.set || room->native_bloom.set) return true;
+  if (room->scenery_grade.set || room->native_bloom.set || room->trunk.set) return true;
   for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++)
     if (room->framing[profile].set) return true;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
@@ -1353,6 +1353,22 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
     if (out_error) *out_error = "bad terrain suffix (us, jp, eu or ge)";
     return false;
   }
+  if (!strcmp(token, "trunk")) {
+    DioramaTrunkSettings t=DioramaTrunk_Default();
+    unsigned enabled; int used=0; char tail;
+    if(scoped || !DioramaTrunk_Room(room->map_group,room->map_number) ||
+        sscanf(equals+1," enabled:%u depth:%f recess:%f wrap:%f gust:%f frost:%f bark:%f %n",
+          &enabled,&t.depth,&t.recess,&t.wrap,&t.gust,&t.frost,&t.bark,&used)!=7 ||
+        !used || sscanf(equals+1+used," %c",&tail)==1 || enabled>1 ||
+        !isfinite(t.depth)||t.depth<0||t.depth>.4f ||
+        !isfinite(t.recess)||t.recess<0||t.recess>.35f ||
+        !isfinite(t.wrap)||t.wrap<0||t.wrap>1 || !isfinite(t.gust)||t.gust<0||t.gust>1 ||
+        !isfinite(t.frost)||t.frost<0||t.frost>1 || !isfinite(t.bark)||t.bark<0||t.bark>1) {
+      if(out_error)*out_error="invalid trunk enclosure settings";
+      return false;
+    }
+    t.enabled=enabled!=0;t.set=true;room->trunk=t;return true;
+  }
   if (!strcmp(token, "native-bloom")) {
     DioramaNativeBloom b = DioramaNativeBloom_Default();
     int consumed = 0;
@@ -1695,6 +1711,11 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
            section);
   else
     APPEND("[layers:%02X:%02X]\n", room->map_group, room->map_number);
+  if (room->trunk.set) {
+    const DioramaTrunkSettings *t=&room->trunk;
+    APPEND("trunk = enabled:%u depth:%.6g recess:%.6g wrap:%.6g gust:%.6g frost:%.6g bark:%.6g\n",
+        t->enabled,t->depth,t->recess,t->wrap,t->gust,t->frost,t->bark);
+  }
   if (room->native_bloom.set) {
     const DioramaNativeBloom *b=&room->native_bloom;
     APPEND("native-bloom = strength:%.6g radius:%.6g threshold:%.6g saturation:%.6g contrast:%.6g light:%.6g receivers:%u dust:%.6g dust-scale:%.6g dust-speed:%u dust-blue:%06x dust-rose:%06x\n",

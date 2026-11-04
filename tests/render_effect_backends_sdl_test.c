@@ -406,7 +406,7 @@ static void TestCloudLighting(ArRenderDevice *device,SDL_Renderer *renderer) {
     const float grain=.05f+.95f*CloudLightSmooth(.06f,.34f,luma);
     unsigned changed=0;
     for(unsigned compact=0;compact<2;++compact)for(unsigned phase=0;phase<3;++phase)
-        for(unsigned dim_mode=0;dim_mode<3;++dim_mode) {
+        for(unsigned dim_mode=0;dim_mode<5;++dim_mode) {
       DioramaCloudLight field={.source={1000,2000,32,32},.meta={1},.regions={{
         .bounds={1004,2004,24,24},.core={9,1.3f,1.7f,.55f},
         .shape={.65f,.55f,.15f,.8f},
@@ -428,6 +428,10 @@ static void TestCloudLighting(ArRenderDevice *device,SDL_Renderer *renderer) {
         field.regions[0].core[1]=0;
         field.regions[0].core[3]=0;
       }
+      /* Zero light still dims the original artwork. Keep the independent
+       * reference calculation below, including its full opening evaluation. */
+      if(dim_mode==3)memset(field.regions[0].core,0,sizeof(field.regions[0].core));
+      if(dim_mode==4)field.regions[0].color[3]=0;
       DioramaSceneryLightEffectParams p={
           .illumination=black,.shade={1,1,1,1},.cloud_light=field};
       if(compact) {
@@ -476,7 +480,7 @@ static void TestCloudLighting(ArRenderDevice *device,SDL_Renderer *renderer) {
   DioramaEffectBackend_Reset(device);
   ArRenderDevice_DestroyTexture(device,art);
   ArRenderDevice_DestroyTexture(device,black);
-  puts("Cloud material: GPU/C parity, dim-before-light, feathered overlap, warm/dark scattering, compact mapping and alpha passed.");
+  puts("Cloud material: GPU/C parity, dim-before-light, dimming-only/zero intensity, feathered overlap, warm/dark scattering, compact mapping and alpha passed.");
 }
 
 static void TestSceneryIllumination(ArRenderDevice *device, SDL_Renderer *renderer) {

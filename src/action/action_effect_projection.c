@@ -122,7 +122,8 @@ static void AddRequiredBgPlanes(
         effect->render_layer == kActionEffectRenderLayer_Bg1Plane ||
         effect->render_layer == kActionEffectRenderLayer_Bg1Light)
       *mask |= 1u << SR_PPU_OVERLAY_BG1;
-    if (effect->render_layer == kActionEffectRenderLayer_Bg2HighAlpha)
+    if (effect->render_layer == kActionEffectRenderLayer_Bg2HighAlpha ||
+        effect->render_layer == kActionEffectRenderLayer_Bg2HighPlane)
       *mask |= 1u << kDioramaPlane_Bg2Hi;
     if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
       *mask |= 1u << SR_PPU_OVERLAY_BG1;
