@@ -2023,9 +2023,11 @@ if(BUILD_TESTING)
     add_executable(actraiser_action_effect_capture_test
         tests/action_effect_capture_test.c
         src/action/action_effect_capture.c src/action/action_effect_clock.c
-        src/action/action_trunk_life.c src/diorama/diorama_layer_order.c)
+        src/action/action_trunk_life.c src/action/action_field_motion.c src/action/action_woodland.c
+        src/diorama/diorama_layer_order.c)
     target_include_directories(actraiser_action_effect_capture_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_action_effect_capture_test PRIVATE actraiser_math)
     add_test(NAME actraiser_action_effect_capture COMMAND actraiser_action_effect_capture_test)
 
     add_executable(actraiser_action_trunk_test tests/action_trunk_test.c src/action/action_trunk_life.c)
@@ -2297,6 +2299,7 @@ if(BUILD_TESTING)
         src/action/action_authored_effect_render.c
         src/action/action_scenery_shadow.c
         src/action/action_authored_fields.c
+        src/action/action_field_motion.c src/action/action_woodland.c
         src/action/action_effect_members.c
         src/action/action_effect_receivers.c
         src/action/action_effect_preview.c

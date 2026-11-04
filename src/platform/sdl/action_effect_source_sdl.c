@@ -36,8 +36,10 @@ enum {
   kPrimitiveBytes = kActionSourceMaximumPrimitives * sizeof(ActionEffectSourcePrimitive),
   kOccluderBytes = (kActionMoonlightMaxOccluders + 1) * 16,
   kOutputBytes = kActionSourceMaximumPrimitives * kActionSourceVerticesPerPrimitive * 32,
-  kUploadBytes = kPrimitiveBytes + kOccluderBytes +
-      kActionSourceMaxLightJobs * (sizeof(ActionEffectSourceLightData) + kOccluderBytes)
+  kFrameUploadBytes = kPrimitiveBytes + kOccluderBytes +
+      kActionSourceMaxLightJobs * (sizeof(ActionEffectSourceLightData) + kOccluderBytes),
+  kMaskUploadBytes = kActionMaskAtlasWidth*kActionMaskAtlasHeight*sizeof(uint32_t),
+  kUploadBytes = kFrameUploadBytes > kMaskUploadBytes ? kFrameUploadBytes : kMaskUploadBytes
 };
 _Static_assert(kUploadBytes >= kActionMaskAtlasWidth*kActionMaskAtlasHeight*sizeof(uint32_t),
                "effect upload buffer holds the startup mask atlas");

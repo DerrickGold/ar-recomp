@@ -46,11 +46,7 @@ static float ForestRaySlope(const ActionRayField *field, const ActionRayOpening 
   return (origin.x - opening->x) / -origin.y;
 }
 
-typedef struct ForestRayState {
-  float slope, sway, root_y, reach;
-  ActionRayOpening opening;
-  const ActionNativeMember *member;
-} ForestRayState;
+typedef ActionForestRayState ForestRayState;
 
 static ForestRayState ForestRayAt(const ActionEffectInstance *effect, const ActionRayField *field,
                                   const ActionNativeMembers *members, unsigned i, float sway) {
@@ -105,22 +101,61 @@ static float ForestRayWidth(const ActionRayField *field, const ActionRayOpening 
   return opening->half_width * (P(WidthBase) + P(WidthGrowth) * fmaxf(0, fminf(P(WidthGrowthLimit), world_y)));
 }
 
-static float ForestLightAmount(
-    const ActionEffectInstance *effect, const ActionRayField *field, const ForestRayState *rays, float x, float y) {
-  const float world_x = effect->world_x + x;
-  const float world_y = effect->world_y + y;
-  float light = 0;
-  for (unsigned i = 0; i < field->ray_count; i++) {
-    const ActionRayOpening *opening = &rays[i].opening;
-    const float centre = opening->x - rays[i].slope * (world_y - rays[i].root_y) + rays[i].sway;
-    const float width = ForestRayWidth(field, opening, (world_y - rays[i].root_y) / rays[i].reach);
-    if (width <= 0) continue;
-    const float amount =
-        opening->strength *
-        ForestSoftRamp(1 - fabsf(world_x - centre) / width);
-    light = fmaxf(light, amount);
-  }
+static float ForestRayAmount(const ActionRayField *field,const ForestRayState *ray,float x,float y) {
+  const ActionRayOpening *opening=&ray->opening;
+  const float centre=opening->x-ray->slope*(y-ray->root_y)+ray->sway;
+  const float width=ForestRayWidth(field,opening,(y-ray->root_y)/ray->reach);
+  return width>0?opening->strength*ForestSoftRamp(1-fabsf(x-centre)/width):0;
+}
+static float ForestLightAmount(const ActionEffectInstance *effect,const ActionRayField *field,
+    const ForestRayState *rays,float x,float y) {
+  float light=0;
+  for(unsigned i=0;i<field->ray_count;++i)
+    light=fmaxf(light,ForestRayAmount(field,&rays[i],effect->world_x+x,effect->world_y+y));
   return light;
+}
+
+void ActionForestLight_Prepare(const ActionSceneEffectFrame *frame,ActionForestLightState *out) {
+  *out=(ActionForestLightState){0};
+  if(!frame)return;
+  for(unsigned i=0;i<frame->decoration_count;++i) {
+    const ActionEffectInstance *e=&frame->decorations[i];
+    if(e->kind!=kActionEffect_ForestForwardLight||!(e->flags&kActionEffectFlag_Visible)||
+        (e->flags&kActionEffectFlag_LightingOff)||
+        !(ActionEffectReceivers_FamilyMask(e,&frame->members)&kActionReceiver_Scenery))continue;
+    out->field=frame->ray_field_valid?&frame->ray_field:ActionRayField_Bundled();
+    if(!out->field||!(out->field->components&8))return;
+    out->effect=e;out->bg1_to_field_x=frame->bg1_to_bg2_x*.5f;out->bg1_to_field_y=frame->bg1_to_bg2_y*.5f;
+    ForestRayStates(e,out->field,&frame->members,out->rays);
+    for(unsigned r=0;r<out->field->ray_count;++r)
+      if(!ActionEffectReceivers_Member(e,out->rays[r].member,kActionReceiver_Scenery))out->rays[r].opening.strength=0;
+    return;
+  }
+}
+ArRenderColorF ActionForestLight_Sample(const ActionForestLightState *state,float x,float y) {
+  if(!state->effect)return (ArRenderColorF){0};
+  const ActionEffectInstance *e=state->effect;
+  x+=state->bg1_to_field_x;y+=state->bg1_to_field_y;
+  const float local_y=y-e->world_y;
+  const ActionEffectLocalRect *rect=&e->geometry.data.rect;
+  if(x-e->world_x<rect->x0||x-e->world_x>rect->x1||local_y<rect->y0||local_y>rect->y1)
+    return (ArRenderColorF){0};
+  const float gain=e->tuning.intensity*(e->tuning.illumination_set?e->tuning.illumination:2);
+  ArRenderColorF out={0};
+  for(unsigned i=0;i<state->field->ray_count;++i) {
+    const ForestRayState *ray=&state->rays[i];
+    if(ray->member&&y>ray->root_y+state->field->values[kActionRay_WidthGrowthLimit]*ray->reach)continue;
+    const ActionRayProfile *profile=&state->field->profiles[ray->opening.profile];
+    if(local_y<profile->rows[0]||local_y>profile->rows[kForestRayRows-1])continue;
+    const float amount=ForestRayAmount(state->field,ray,x,y)*
+        ForestSoftRamp((local_y-profile->front_start)/profile->front_range)*profile->front.a*gain;
+    const uint32_t color=ray->member?ray->member->color:e->tuning.color;
+    const float r=profile->front.r*((color>>16)&255)/255.f,
+                g=profile->front.g*((color>>8)&255)/255.f,b=profile->front.b*(color&255)/255.f;
+    out.r+=r*amount;out.g+=g*amount;out.b+=b*amount;
+    out.a+=fmaxf(r,fmaxf(g,b))*amount;
+  }
+  return out;
 }
 
 static bool ForestRayIntersectsField(const ActionEffectInstance *effect, const ActionRayField *field, ForestRayState ray) {

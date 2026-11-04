@@ -14,6 +14,7 @@
 #include "action_projectile_field.h"
 #include "action_surface_field.h"
 #include "action_actor_effects.h"
+#include "action_woodland_state.h"
 #include "action_atmosphere_field.h"
 #include "diorama/diorama_trunk_settings.h"
 
@@ -295,6 +296,8 @@ enum {
   kActionAuthoredMaxInstances = 96,
   kActionAuthoredMaxVertices = 4096,
   kActionAuthoredMaxIndices = 24576,
+  kActionFlowerMaxPlants = 24,
+  kActionFlowerVerticesPerPlant = 42, /* Stem, bloom and optional centre: three clipped quads. */
   kActionMistRainbowColumns = 8, kActionMistRainbowRows = 6,
   kActionMistSparklesPerStrand = 4,
   kActionSceneEffectObserverTrackCount = 80,
@@ -353,7 +356,7 @@ typedef enum ActionParticlePattern {
   kActionParticle_Motes, kActionParticle_Dust, kActionParticle_Leaves,
   kActionParticle_Snow, kActionParticle_Sand, kActionParticle_Insects,
   kActionParticle_Scarabs, kActionParticle_Sparks, kActionParticle_Glints,
-  kActionParticle_WaterGlints, kActionParticle_IceCrystals, kActionParticle_Count,
+  kActionParticle_WaterGlints, kActionParticle_IceCrystals, kActionParticle_Butterflies, kActionParticle_Count,
 } ActionParticlePattern;
 enum { kActionParticleCellSize=256, kActionParticleMaxCells=64, kActionContourMaxPoints=16,
   kActionFieldWakeCount=2, kActionGroundWakeGrains=12, kActionGroundWakePuffs=6,
@@ -384,6 +387,10 @@ typedef struct ActionEffectFieldStyle {
   float scatter, bounce; /* Air scattering/sky haze; canopy short surface return. */
   uint8_t textured; /* Cloud bank uses the shared wispy density mask. */
   uint8_t bare; /* Foliage: tapered woody fibers without leaves or atlas stencils. */
+  uint8_t flowers; /* Foliage: small plants rooted in captured BG1 floor spans. */
+  uint8_t flower_style; /* 0 mixed, 1 open flowers, 2 bells, 3 buds. */
+  uint8_t petals; /* Release a bounded pair when a moving body brushes flowers. */
+  uint8_t crown; /* Textured foliage uses broad leaf crowns instead of vines. */
   uint8_t opening; /* Fan is an authored enclosure aperture: light, frost and wind share it. */
   float rolling, wake, canopy_response; /* Textured floor mist: billows, body wakes, canopy scattering. */
   float volume; /* Rolling clouds: rounded, internally shaded billows; zero preserves wispy mist. */
@@ -610,6 +617,7 @@ typedef struct ActionSceneEffectFrame {
   ActionEffectActor actors[kActionEffectActorMax];
   DioramaTrunkSettings trunk;
   ActionTrunkBarkEvent trunk_bark[8];
+  ActionWoodlandEvent woodland[kActionWoodlandMaxEvents];
   ActionEffectInstance effects[kActionSceneEffectMaxInstances];
   uint8_t decoration_count;
   uint8_t decoration_visible_count;
@@ -726,6 +734,7 @@ typedef struct ActionEffectObserver {
   ActionEffectActorTrack actor_tracks[kActionEffectActorMax];
   ActionLandingDustState landing_dust;
   ActionTrunkObserver trunk;
+  ActionWoodlandObserver woodland;
   ActionFireballSmoke fireball_smoke;
   ActionEffectObserverTrack tracks[kActionEffectObserverTrackCount];
   ActionEffectObserverTrack

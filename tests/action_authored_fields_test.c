@@ -1,3 +1,4 @@
+#include "action/action_woodland.h"
 #include "action/action_effect_recipes.h"
 #include "action/action_effect_masks.h"
 #include "action/action_heat.h"
@@ -401,6 +402,210 @@ static void TorchShadows(void) {
   for(unsigned i=0;i<count;++i)if(primitives[i].meta[3])++shadowed;
   assert(shadowed&&shadowed<count); /* Resident rendering retains the same split. */
 }
+static void RootedFlowers(void) {
+  uint8_t map[256]={0};
+  ActionEnvironmentScene scene={.group=1,.room=2,
+    .maps={{map,sizeof(map),256,256,1}},.collision={[1]=15}};
+  for(unsigned x=0;x<8;++x)map[8*16+x]=1;
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\n"
+    "x=64\ny=116\nwidth=128\nheight=24\nflowers=1\nstrands=24\nplacement=playfield\n"
+    "intensity=1\namplitude=1\nlifetime=960\ncolor=d5c6a0\ncolor-end=b58b9a\nseed=110301\n");
+  ActionEffectRecipes_Apply(&recipes,1,2,0,37,&scene,&frame);
+  const unsigned layer=frame.authored[0].render_layer;
+  assert(layer==kActionEffectRenderLayer_Bg1Mist);
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&a));Valid(&a);
+  assert(a.vertex_count>0&&a.vertex_count<=24*kActionFlowerVerticesPerPlant);
+  const int original=a.vertex_count;
+  for(unsigned tick=37;tick<1000;tick+=101) {
+    frame.authored[0].pulse_ticks=tick;
+    assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));Valid(&b);
+    assert(b.vertex_count==original);
+    unsigned roots=0;
+    for(int i=0;i<a.vertex_count;++i)if(a.vertices[i].position.y==128) {
+      assert(!memcmp(&a.vertices[i],&b.vertices[i],sizeof(a.vertices[i])));++roots;
+    }
+    assert(roots>=48); /* Every stem's base stays fixed as its tip bends. */
+  }
+  frame.authored[0].pulse_ticks=37;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  assert(!memcmp(a.vertices,b.vertices,original*sizeof(a.vertices[0]))); /* Reverse seek. */
+  const ActionEffectLocalRect crop={32,100,96,130};
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,Clip,(void *)&crop,&b));Valid(&b);
+  for(int i=0;i<b.vertex_count;++i) {
+    const ArRenderVertex2D *v=&b.vertices[i];
+    if(v->position.x<=crop.x0||v->position.x>=crop.x1)continue;
+    bool found=false;
+    for(int j=0;j<a.vertex_count;++j)if(!memcmp(v,&a.vertices[j],sizeof(*v)))found=true;
+    assert(found); /* View changes clip plants without regenerating their layout. */
+  }
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,false,Project,NULL,NULL,&b));assert(!b.vertex_count);
+  /* Captured player/enemy passage bends tips, never the root line. Airborne
+   * bodies do not push ground flowers; an expired wake restores the same pose. */
+  frame.authored[0].field_style.wake=1;frame.actor_count=1;
+  frame.actors[0]=(ActionEffectActor){.visible=1,.body_radius=12,.player=1,
+      .wake={.x=64,.y=128,.dx=3,.strength=1}};
+  for(unsigned player=0;player<2;++player) {
+    frame.actors[0].player=player;
+    assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+    assert(a.vertex_count==b.vertex_count&&memcmp(a.vertices,b.vertices,original*sizeof(a.vertices[0])));
+    for(int i=0;i<a.vertex_count;++i)if(a.vertices[i].position.y==128)
+      assert(!memcmp(&a.vertices[i],&b.vertices[i],sizeof(a.vertices[i])));
+  }
+  frame.actors[0].wake.y=64;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  assert(!memcmp(a.vertices,b.vertices,original*sizeof(a.vertices[0])));
+  frame.actors[0].wake.y=128;frame.actors[0].wake.age=kActionActorWakeTicks;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  assert(!memcmp(a.vertices,b.vertices,original*sizeof(a.vertices[0])));
+  frame.actor_count=0;
+  for(unsigned x=0;x<4;++x)map[8*16+x]=0;
+  ActionEffectRecipes_Apply(&recipes,1,2,0,37,&scene,&frame);
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  assert(b.vertex_count>0&&b.vertex_count<original);
+  for(int i=0;i<b.vertex_count;++i)if(b.vertices[i].position.y==128)assert(b.vertices[i].position.x>64);
+  memset(map,0,sizeof(map));ActionEffectRecipes_Apply(&recipes,1,2,0,37,&scene,&frame);
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));assert(!b.vertex_count);
+}
+static ArRenderPointF ButterflyBody(const ActionSceneEffectRenderBatch *batch) {
+  assert(batch->vertex_count==12);ArRenderPointF center={0};
+  for(int i=8;i<12;++i){center.x+=batch->vertices[i].position.x*.25f;center.y+=batch->vertices[i].position.y*.25f;}
+  return center;
+}
+static void RestingButterflies(void) {
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-path:1]\n"
+    "x=128\ny=100\nwidth=128\nheight=96\npoints=-32,10 28,7\npattern=butterflies\n"
+    "particles=1\nactivity=.4\nlifetime=1024\nsize-min=2\nsize-max=2\nwander=18\nintensity=1\nseed=1710\n");
+  ActionEffectInstance *e=&frame.authored[0];const unsigned layer=e->render_layer;
+  assert(layer==kActionEffectRenderLayer_WorldDust);
+  const uint32_t seed=DeterministicHash_Mix32(e->particle_style.seed^71u);
+  const unsigned start=1024-seed%1024;
+  e->pulse_ticks=start;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&a));Valid(&a);
+  const ArRenderPointF rest=ButterflyBody(&a);
+  for(unsigned tick=0;tick<500;tick+=79) {
+    e->pulse_ticks=start+tick;
+    assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));Valid(&b);
+    const ArRenderPointF p=ButterflyBody(&b);assert(fabsf(p.x-rest.x)<.0001f&&fabsf(p.y-rest.y)<.0001f);
+    for(int i=0;i<b.vertex_count;++i)assert(b.vertices[i].color.a==1); /* Resting is not a fade-out. */
+  }
+  e->pulse_ticks=start+780;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  const ArRenderPointF flying=ButterflyBody(&b);assert(hypotf(flying.x-rest.x,flying.y-rest.y)>8);
+  e->pulse_ticks=start;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  assert(!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(a.vertices[0])));
+  e->pulse_ticks=start+1023;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&a));
+  e->pulse_ticks=start+1024;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  const ArRenderPointF end=ButterflyBody(&a),next=ButterflyBody(&b);
+  assert(hypotf(end.x-next.x,end.y-next.y)<.01f); /* Lands where the next rest begins. */
+  e->field_style.point_count=3;e->field_style.points[2].x=0;e->field_style.points[2].y=0;
+  e->particle_lifetime=1107;e->pulse_ticks=65535;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&a));
+  e->pulse_ticks=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  const ArRenderPointF wrap_a=ButterflyBody(&a),wrap_b=ButterflyBody(&b);
+  assert(hypotf(wrap_a.x-wrap_b.x,wrap_a.y-wrap_b.y)<1);
+
+}
+static void WoodlandTick(ActionWoodlandObserver *observer,unsigned clock) {
+  for(unsigned i=0;i<frame.authored_count;++i)frame.authored[i].pulse_ticks=(uint16_t)clock;
+  ActionWoodland_Capture(observer,&frame,1,2,0,clock,true);
+}
+static unsigned WoodlandEvents(void) {
+  unsigned n=0;for(unsigned i=0;i<kActionWoodlandMaxEvents;++i)n+=frame.woodland[i].valid;return n;
+}
+static void WoodlandReactions(void) {
+  uint8_t map[256]={0};for(unsigned x=0;x<8;++x)map[8*16+x]=1;
+  ActionEnvironmentScene scene={.group=1,.room=2,.maps={{map,sizeof(map),256,256,1}},.collision={[1]=15}};
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\n"
+      "x=64\ny=116\nwidth=128\nheight=24\nflowers=1\nstrands=24\nplacement=playfield\n"
+      "wake=.8\npetals=1\nintensity=1\namplitude=1\nseed=110301\n");
+  ActionEffectRecipes_Apply(&recipes,1,2,0,100,&scene,&frame);
+  ActionEffectInstance *e=&frame.authored[0];const unsigned layer=e->render_layer;
+  frame.actor_count=1;frame.actors[0]=(ActionEffectActor){.x=64,.y=104,.feet_y=128,.player=1,
+      .visible=1,.body_radius=8,.generation=1,.wake={.x=64,.y=128,.dx=3,.strength=1}};
+  ActionWoodlandObserver state={0};WoodlandTick(&state,100);assert(!WoodlandEvents());
+  WoodlandTick(&state,101);assert(WoodlandEvents()==1);
+  const ActionWoodlandEvent born=*ActionWoodland_Event(&frame,e,0);
+  ActionFlowerMotion motion=ActionWoodland_FlowerMotion(&frame,e);bool on_head=false;
+  for(unsigned i=0;i<e->field_style.strands;++i) {
+    ActionFlowerPose p;if(!ActionWoodland_Flower(e,&frame.authored_floor[0],i,&motion,&p))continue;
+    if(fabsf(born.x-e->world_x-p.tip_x)<.0001f&&fabsf(born.y-e->world_y-p.tip_y)<.0001f) {
+      on_head=true;assert(born.color==p.color&&p.species!=2);
+      assert(born.end_x>p.floor_x0&&born.end_x<p.floor_x1);
+    }
+  }
+  assert(on_head);
+  const ActionWoodlandObserver paused=state;
+  WoodlandTick(&state,101);assert(!memcmp(&paused,&state,sizeof(state)));
+  frame.actors[0].x=100;frame.actors[0].wake.x=100;
+  for(unsigned tick=102;tick<=121;++tick)WoodlandTick(&state,tick);
+  assert(WoodlandEvents()==1&&!memcmp(&born,ActionWoodland_Event(&frame,e,0),sizeof(born)));
+  e->field_style.petals=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&a));
+  e->field_style.petals=1;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));Valid(&b);
+  assert(b.vertex_count==a.vertex_count+4*kActionFlowerPetals);
+  /* The retained event, not the body's current position, owns the falling pair. */
+  for(unsigned tick=122;tick<=250;++tick)WoodlandTick(&state,tick);
+  assert(WoodlandEvents()==1&&ActionWoodland_Event(&frame,e,0)->born==101);
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&b));
+  e->field_style.petals=0;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,false,true,Project,NULL,NULL,&a));
+  assert(a.vertex_count==b.vertex_count);e->field_style.petals=1;
+  WoodlandTick(&state,1000);assert(!WoodlandEvents()); /* Seek clears history, without an immediate burst. */
+  frame.actors[0].feet_y=64;frame.actors[0].wake.y=64;
+  WoodlandTick(&state,1001);assert(!WoodlandEvents()); /* Airborne above this bed. */
+  frame.actors[0].feet_y=128;frame.actors[0].wake.y=128;frame.actors[0].wake.dx=0;
+  WoodlandTick(&state,1002);assert(!WoodlandEvents());
+  frame.actors[0].wake.dx=3;frame.actors[0].player=0;
+  WoodlandTick(&state,1003);assert(WoodlandEvents()==1); /* Enemies brush flowers too. */
+  e->flags&=~kActionEffectFlag_Visible;WoodlandTick(&state,1003);assert(!WoodlandEvents());
+  e->flags|=kActionEffectFlag_Visible;
+  WoodlandTick(&state,65534);assert(!WoodlandEvents());
+  WoodlandTick(&state,65535);assert(WoodlandEvents()==1);
+  WoodlandTick(&state,0);assert(WoodlandEvents()==1&&ActionWoodland_Event(&frame,e,0)->born==65535);
+  ActionWoodland_Capture(&state,&frame,1,2,1,1,true);assert(!WoodlandEvents());
+  WoodlandTick(&state,2);assert(!WoodlandEvents()); /* Regional change resets, too. */
+  WoodlandTick(&state,3);assert(WoodlandEvents()==1);
+  ActionWoodland_Capture(&state,&frame,1,2,0,3,false);assert(!WoodlandEvents()&&!state.valid);
+
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-path:1]\n"
+      "x=64\ny=104\nwidth=128\nheight=96\npoints=-16,4 16,4\npattern=butterflies\n"
+      "particles=1\nactivity=.4\nlifetime=1024\nsize-min=2\nsize-max=2\nwander=18\nintensity=1\nseed=1710\nwake=1\n");
+  e=&frame.authored[0];state=(ActionWoodlandObserver){0};
+  const unsigned start=1024-DeterministicHash_Mix32(e->particle_style.seed^71u)%1024;
+  e->pulse_ticks=start;const ActionButterflyPose perch=ActionWoodland_Butterfly(e,0,NULL);
+  frame.actor_count=1;frame.actors[0]=(ActionEffectActor){.x=e->world_x+perch.x-20,
+      .y=e->world_y+perch.y-8,.feet_y=e->world_y+perch.y+16,.visible=1,.body_radius=8,
+      .player=1,.generation=1,.wake={.dx=3,.strength=1}};
+  WoodlandTick(&state,start);assert(!WoodlandEvents());
+  WoodlandTick(&state,start+1);assert(WoodlandEvents()==1);
+  const ActionButterflyPose first=ActionWoodland_Butterfly(e,0,&frame);
+  assert(fabsf(first.x-perch.x)<.001f&&fabsf(first.y-perch.y)<.001f);
+  for(unsigned tick=start+2;tick<=start+41;++tick)WoodlandTick(&state,tick);
+  const ActionButterflyPose flight=ActionWoodland_Butterfly(e,0,&frame);
+  assert(flight.x>perch.x+8&&flight.y<perch.y-10&&flight.flight>.9f);
+  assert(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,Project,NULL,NULL,&a));Valid(&a);
+  const ActionWoodlandEvent retained[kActionWoodlandMaxEvents]={frame.woodland[0]};
+  for(unsigned tick=start+42;tick<=start+150;++tick)WoodlandTick(&state,tick);
+  const ActionButterflyPose landing=ActionWoodland_Butterfly(e,0,&frame);
+  WoodlandTick(&state,start+151);
+  const ActionButterflyPose arrived=ActionWoodland_Butterfly(e,0,&frame),ordinary=ActionWoodland_Butterfly(e,0,NULL);
+  assert(hypotf(landing.x-arrived.x,landing.y-arrived.y)<1);
+  assert(arrived.x==ordinary.x&&arrived.y==ordinary.y&&arrived.flight==ordinary.flight);
+  ActionWoodland_Capture(&state,&frame,1,2,0,start+151,false);
+  memcpy(frame.woodland,retained,sizeof(retained));e->pulse_ticks=start+41;
+  assert(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&!memcmp(a.vertices,b.vertices,a.vertex_count*sizeof(a.vertices[0])));
+  /* Moving away from an unoccupied perch does not startle it. */
+  state=(ActionWoodlandObserver){0};frame.actors[0].x=e->world_x+perch.x+20;
+  WoodlandTick(&state,start);WoodlandTick(&state,start+1);assert(!WoodlandEvents());
+  puts("Woodland reactions: actual bloom origins, grounded brushing, player/enemy, rest-to-flight continuity, cooldown, pause, seeking, wrap, regional/toggle resets and retained frames passed.");
+}
+
 static void BareFibers(void) {
   frame=(ActionSceneEffectFrame){0};
   Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:123]\n"
@@ -1568,6 +1773,28 @@ static void NativeDaylightReceivers(void) {
   ActionEffectInstance *front=&frame.decorations[2];
   assert(front->kind==kActionEffect_ForestForwardLight&&ActionEffectReceivers_Mask(front)==7);
   assert(!ActionEffectReceivers_Mask(&frame.decorations[0])); /* Rear volume is the same sunlight. */
+  ActionForestLightState plant_light;ActionForestLight_Prepare(&frame,&plant_light);
+  ArRenderColorF brightest={0};ArRenderPointF point={0};
+  for(int x=0;x<4096;x+=32)for(int y=0;y<768;y+=32) {
+    const ArRenderColorF sample=ActionForestLight_Sample(&plant_light,x,y);
+    if(sample.a>brightest.a){brightest=sample;point=(ArRenderPointF){x,y};}
+  }
+  assert(brightest.a>.001f&&brightest.r>brightest.b);
+  frame.bg1_to_bg2_x=120;frame.bg1_to_bg2_y=-64;ActionForestLight_Prepare(&frame,&plant_light);
+  const ArRenderColorF moved=ActionForestLight_Sample(&plant_light,point.x-60,point.y+32);
+  assert(fabsf(moved.a-brightest.a)<.0001f); /* Same midpoint-ray coordinates. */
+  frame.bg1_to_bg2_x=frame.bg1_to_bg2_y=0;
+  front->tuning.light_receivers_set=1;front->tuning.light_receivers=0;
+  ActionForestLight_Prepare(&frame,&plant_light);assert(!ActionForestLight_Sample(&plant_light,point.x,point.y).a);
+  frame.members.count=1;
+  frame.members.records[0]=(ActionNativeMember){.kind=kActionEffect_ForestForwardLight,.id=1,
+      .enabled=1,.length_scale=1,.width_scale=1,.intensity=1,.color=0xffffff,
+      .light_receivers_set=1,.light_receivers=kActionReceiver_Scenery};
+  ActionForestLight_Prepare(&frame,&plant_light);
+  assert(plant_light.effect==front&&plant_light.rays[0].opening.strength>0);
+  for(unsigned i=1;i<plant_light.field->ray_count;++i)assert(!plant_light.rays[i].opening.strength);
+  frame.members.count=0;
+  front->tuning.light_receivers=7;
   ActionEffectProjectionContext context={.visible_width=512,.snes_height=448,
       .capture_height=448,.viewport={0,0,1024,896},.scenery_lighting_only=true};
   assert(SourceBuild(kActionEffectRenderLayer_Bg1Light,true,false,&context)>0);
@@ -2621,7 +2848,7 @@ int main(int argc, char **argv) {
   HighIntensityGeometry();
   SurfaceLightingSplit();
   CastleSkyDepth();
-  DeferredAuthored();TorchShadows();BareFibers();CanopyFields();TexturedCanopy();DeferredParticleArea();
+  DeferredAuthored();TorchShadows();RootedFlowers();RestingButterflies();WoodlandReactions();BareFibers();CanopyFields();TexturedCanopy();DeferredParticleArea();
   LayerAnchors();
   Geometry();GroundDust();MovingGlints();HeatAndParticlePaths();HaloAndGradient();
   Receivers();TorchReceivers();ReceiverIllumination();ExposureBoxes();ExposureMeshScroll();ExposureGroupCapacity();

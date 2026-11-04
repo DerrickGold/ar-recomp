@@ -1,4 +1,5 @@
 #include "action/action_trunk_life.h"
+#include "action/action_woodland.h"
 /* Whole-room adapter. Pixel sampling, priority splitting, edit application and
  * margin scanout run through the native PPU, never a browser approximation. */
 #include "room_scene.h"
@@ -70,6 +71,7 @@ struct EditorRoomScene {
   unsigned raster_count;
   ActionTrunkAssets *trunk;
   ActionTrunkObserver trunk_observer;
+  ActionWoodlandObserver woodland_observer;
   uint32_t *trunk_pixels[3];
 };
 const ActionSurfaceField *EditorRoomScene_SurfaceField(const EditorRoomScene *r,unsigned index){
@@ -681,6 +683,7 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
   if (ok) {
     free(r->trunk);r->trunk=trunk;r->scene.trunk=trunk;r->scene.trunk_settings=settings;
     memset(&r->trunk_observer,0,sizeof(r->trunk_observer));
+    memset(&r->woodland_observer,0,sizeof(r->woodland_observer));
     for (unsigned bg = 0; bg < 2; ++bg) { free(r->layers[bg].bands); r->layers[bg].bands = bands[bg]; }
     if (r->table) { DioramaLayerOrder_ClearTable(r->table); free(r->table); }
     DioramaLayerOrder_ClearRoom(&r->terrain);
@@ -1018,6 +1021,8 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   r->environment.scenery_cache = &r->scenery_cache;
   ActionEffectRecipes_Apply(&r->recipes, s->group, s->map, r->assets.terrain_profile,
                             r->environment.clock, &r->environment, &r->effects);
+  ActionWoodland_Capture(&r->woodland_observer,&r->effects,s->group,s->map,
+      r->assets.terrain_profile,r->environment.clock,r->environmental_effects_enabled);
   DioramaTrunkSettings effects_settings=r->scene.trunk_settings;
   effects_settings.enabled &= r->environmental_effects_enabled;
   ActionTrunk_Capture(&r->trunk_observer,&r->effects,r->trunk,effects_settings,r->environment.clock,true);
@@ -1130,6 +1135,7 @@ bool EditorRoomScene_ConfigureEffects(EditorRoomScene *r, const char *text, size
   const bool valid=ActionEffectRecipes_ParseWithError(&r->recipes,text,size,&r->recipe_error);
   if(line)*line=r->recipe_error.line;
   if(!valid)return false;
+  memset(&r->woodland_observer,0,sizeof(r->woodland_observer));
   float bubble_after[6]={0};
   bubble=ActionEffectRecipes_NativeBubbleField(&r->recipes,
       r->assets.scene.group,r->assets.scene.map,r->assets.terrain_profile);

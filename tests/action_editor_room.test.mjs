@@ -10,6 +10,10 @@ const html=fs.readFileSync(htmlFile,'utf8');
 const data=JSON.parse(html.match(/window\.__ACTION_BG__=(.*?);<\/script>/s)[1]);
 const ini=JSON.parse(html.match(/window\.__DIORAMA_LAYERS__=(.*?);window\.__DIORAMA_LAYERS_NAME__/s)[1]);
 const iniFile=path.join(directory,'layers.ini');
+const shipped=JSON.parse(html.match(/window\.__ACTION_EFFECTS__=(.*?);window\.__ACTION_ACTORS__/s)[1]);
+assert.equal(shipped,fs.readFileSync('action-effects.ini','utf8'),'editor embeds the shipped effects document');
+const shippedBytes=Buffer.from(shipped),effectsFile=path.join(directory,'shipped-effects.ini');
+fs.writeFileSync(effectsFile,shipped);
 // The UI sends only the selected room to the bounded WASM configuration API.
 // A complete project's unrelated rooms can exceed its 1 MiB transport limit.
 // Keep named sections too, and send the same room document to the native oracle.
@@ -219,11 +223,9 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
 
  // The distributed room compositions must use exactly the same recipes in
  // native rendering and the editor, across regional terrain and camera edges.
- if(base.group===3||(base.group===6&&base.map>=5&&base.map<=8)) {
-   const shipped=JSON.parse(html.match(/window\.__ACTION_EFFECTS__=(.*?);window\.__ACTION_ACTORS__/s)[1]);
-   assert.equal(shipped,fs.readFileSync('action-effects.ini','utf8'),'editor embeds the shipped effects document');
-   const effectsFile=path.join(directory,'shipped-effects.ini');fs.writeFileSync(effectsFile,shipped);
-   assert.equal(send(Buffer.from(shipped),api.RoomPreview_ConfigureEffects),1,'shipped recipes fit their instance/geometry budgets');
+ if((base.group===1&&base.map>=2&&base.map<=4)||
+    base.group===3||(base.group===6&&base.map>=5&&base.map<=8)) {
+   assert.equal(send(shippedBytes,api.RoomPreview_ConfigureEffects),1,'shipped recipes fit their instance/geometry budgets');
    const enhanced=[];
    for(const request of requests) {
      assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
@@ -243,13 +245,13 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
        original.replace(/^x=.*$/m,'x=752').replace(/^y=.*$/m,'y=1392');
      assert.equal(send(Buffer.from(pasted),api.RoomPreview_ConfigureEffects),1,
        `Kassandora room 5 accepts copied soft lights beyond the old 16-instance limit: ${cstring(api.RoomPreview_RecipeError())}`);
-     fs.writeFileSync(effectsFile,pasted);
+     const pastedFile=path.join(directory,'pasted-effects.ini');fs.writeFileSync(pastedFile,pasted);
      const pastedHashes=[];
      for(const request of requests) {
        assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
        pastedHashes.push([api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0]);
      }
-     const nativePasted=execFileSync(replay,[file,iniFile,effectsFile],{
+     const nativePasted=execFileSync(replay,[file,iniFile,pastedFile],{
        input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'
      }).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
      assert.deepEqual(pastedHashes,nativePasted,'pasted soft lights render identically in native and WASM');

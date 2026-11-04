@@ -23,6 +23,46 @@ static void BakeCloud(unsigned variant,uint8_t *atlas) {
 static float Density(unsigned cell,float u,float v) {
   if(!cell)return 1;
   const uint32_t seed=cell*0x91e10da5u;
+  if(cell>=kActionMaskFlowerStem) {
+    /* Small pixel-shaped silhouettes are baked once. One stem strip and a
+     * bloom replace many tiny clipped petal/leaf triangles. */
+    const float x=u*2-1,y=v*2-1;
+    if(cell==kActionMaskFlowerStem) {
+      float a=fabsf(x)<.075f&&v>.03f?1:0;
+      const float roots[2]={.45f,.72f};
+      for(unsigned i=0;i<2;++i) {
+        const float t=x*(i?1:-1);
+        if(t>0&&t<.91f&&fabsf(v-roots[i]+t*.18f)<.10f*sinf(t*3.45f))a=1;
+      }
+      return a;
+    }
+    if(cell>=kActionMaskFlowerFirst&&cell<kActionMaskFlowerFirst+kActionMaskFlowerCount) {
+      const int px=(int)floorf(u*12),py=(int)floorf(v*12);
+      static const uint16_t silhouettes[3][12]={
+        {0x000,0x060,0x0f0,0x1f8,0x7fe,0x7fe,0x7fe,0x3fc,0x0f0,0x060,0x000,0x000},
+        {0x000,0x060,0x0f0,0x0f0,0x1f8,0x1f8,0x3fc,0x3fc,0x7fe,0x5aa,0x000,0x000},
+        {0x000,0x060,0x0f0,0x1f8,0x1f8,0x1f8,0x0f0,0x060,0x060,0x000,0x000,0x000}};
+      return px<12&&py<12&&(silhouettes[cell-kActionMaskFlowerFirst][py]&(1u<<px))?1:0;
+    }
+    if(cell==kActionMaskButterflyWing) {
+      const float upper=(x-.12f)*(x-.12f)/.61f+(y+.30f)*(y+.30f)/.37f;
+      const float lower=(x+.16f)*(x+.16f)/.44f+(y-.42f)*(y-.42f)/.22f;
+      return 1-CloudNoise_Ramp(.78f,1,fminf(upper,lower));
+    }
+    if(cell==kActionMaskCrown) {
+      /* Overlapping broad leaves form a broken crown, not hanging vines. */
+      float a=0;
+      for(unsigned i=0;i<13;++i) {
+        const float cx=CloudNoise_Seed(i*71+39)*1.8f-.9f,cy=CloudNoise_Seed(i*97+21)*1.7f-.85f;
+        const float turn=CloudNoise_Seed(i*53+11)*6.2831853f,cs=cosf(turn),sn=sinf(turn);
+        const float dx=(x-cx)*cs+(y-cy)*sn,dy=-(x-cx)*sn+(y-cy)*cs;
+        const float half=.14f*fmaxf(0,1-dx*dx/.16f);
+        a=fmaxf(a,(1-CloudNoise_Ramp(half*.65f,half+.025f,fabsf(dy)))*(1-CloudNoise_Ramp(.32f,.42f,fabsf(dx))));
+      }
+      return a*CloudNoise_Ramp(0,.16f,1-fabsf(x))*CloudNoise_Ramp(0,.16f,1-fabsf(y));
+    }
+    return 0;
+  }
   if(cell>=kActionMaskCausticFirst) {
     /* Warped cellular boundaries form rounded, interlocking light arcs.
      * All eight cells share the pattern with progressively softer ridges.

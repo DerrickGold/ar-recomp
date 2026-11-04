@@ -12,7 +12,10 @@ vm.runInContext(fs.readFileSync('tools/action_editor/shared_preview.js','utf8'),
 const encode=vm.runInContext('SharedActionPreview.encode',context);
 let api,target=0,effect=-1,creates=0,effectParams=null,viewport=[0,0,0,0];
 const textures=new Map(),uploads=[],draws=[];
-const isEffectAtlas=id=>{const t=textures.get(id);return t?.w===1024&&t?.h===896;};
+const maskHeader=fs.readFileSync('src/action/action_effect_masks.h','utf8');
+const maskDimension=name=>Number(maskHeader.match(new RegExp(name+'=(\\d+)'))[1]);
+const maskWidth=maskDimension('kActionMaskAtlasWidth'),maskHeight=maskDimension('kActionMaskAtlasHeight');
+const isEffectAtlas=id=>{const t=textures.get(id);return t?.w===maskWidth&&t?.h===maskHeight;};
 const ar={
   create(w,h,usage){let id=1;while(textures.has(id))id++;
     textures.set(id,{w,h,usage,pixels:new Uint32Array(w*h)});creates++;return id;},

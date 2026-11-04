@@ -384,8 +384,8 @@ or repeating the same arrangement in adjacent regions.
 
 The pattern is baked into eight softness variants in the shared effect atlas.
 Animation deforms texture coordinates on two 3×3 grids; it never regenerates or
-uploads the texture. The shared atlas grows by one 128-pixel row to 1024×896
-(512 KiB more RGBA storage), with no extra texture object, shader or render pass.
+uploads the texture. The caustic masks occupy one 128-pixel row of the shared atlas
+(512 KiB of RGBA storage), with no extra texture object, shader or render pass.
 Scenery and character lights use the same textured triangles. Airborne light
 sampling interpolates those triangles and the same quantized bilinear mask.
 The existing non-reflection masks keep their original pixel data.
@@ -1113,6 +1113,79 @@ silhouettes and terrain-shadow clipping are incompatible with bare fibers, and
 the editor clears those settings when switching. Existing leafy defaults are
 unchanged. Playfield placement draws the fibers behind characters.
 
+**Forest flowers** is an Add-menu preset for `foliage-shadow` with `flowers=1`.
+It creates small plants on flat BG1 collision surfaces inside the saved area;
+place the bottom of the region on grassy ground. Unsupported roots disappear
+when terrain is removed. Width (up to 512), height (4–64), count (1–24), seed,
+petal color and secondary petal tint control each patch. **Bloom style** chooses
+mixed, open, bells or buds (`flower-style`). **Bed depth** (`ground-width`) sets
+shallow variation across the painted ground top, capped by available clearance.
+Collision identifies support, not the grass material; author beds on grassy art.
+
+Roots stay fixed while a traveling wind wave bends the stems. **Shared wind influence**
+controls wind variation; **Body wake** uses the existing captured player
+and enemy wakes, ignoring airborne bodies above the bed. **Light response** tints
+opaque petals and stems from authored canopy, sky and native forest sunlight.
+Native ray sampling reuses the ray state and member receiver settings; it is an
+analytic incident-light approximation, not a per-petal shadow-map lookup. Plants
+remain visible when lighting is disabled. Plants draw behind characters and
+cannot rotate, attach to actors, use BG2, or combine with other foliage variants.
+
+**Shed petals when brushed** (`petals=1`) releases two small petals from the
+nearest brushed open flower or bell. They use that flower's posed head and tint,
+flutter briefly, settle on its supported ground, then fade. Body wake must be
+enabled. Each bed has a six-second cooldown shared by player and enemies;
+standing still and walking above the patch do not emit petals. The pair reserves
+eight extra vertices before any interaction, so a burst cannot overflow a batch.
+
+Each plant reserves at most 42 clipped vertices, using one sheared stem/leaves
+strip, one bloom silhouette and an optional centre. The small stems keep fixed
+roots and moving tips without needing a second strip. Fillmore ships 12 patches /
+91 plants per terrain: three concentrated 20-plant beds, with smaller clusters
+between them. The thicker beds use narrower areas and more root depth so blooms
+overlap. Japanese entrance heights follow its own collision layout. Flowers
+reserve 3,822 vertices; butterflies and ground crowns bring the existing alpha
+pass to 4,032. The three dense beds enable petals, bringing the total to 4,056
+of its unchanged 4,096-vertex budget.
+
+**Resting butterflies** adds a `particle-path` with `pattern=butterflies` on BG1.
+Saved path points are perches: one to four butterflies rest, then follow short
+curved flights between them, wrapping to the first perch. **Flight fraction**
+(`activity`) sets the moving fraction of each leg; **Wander** controls the flight
+arc, and size controls the wings. Perched wings fold slowly; flying wings beat
+rapidly. Seed staggers timing and tint. The route and flower wind cycle are
+adjusted to complete whole cycles across the native 16-bit clock, preserving
+continuity when it wraps. Each butterfly reserves 42 clipped vertices; it uses
+no particle simulation or per-insect draw. Fillmore places one butterfly and
+three occasional sunlit pollen motes at each large bed.
+
+Butterfly **Body wake** (`wake`, 0–1) enables a short flight away from approaching
+player/enemy movement. Only perched insects react, then return smoothly to their
+ordinary route over 2.5 seconds. Each insect has a six-second cooldown. It requires
+BG1 and cannot attach to an actor. Switching another path to butterflies clamps
+the count to four; switching away clears the butterfly-only wake setting.
+
+Woodland reactions are captured on game ticks into a fixed 16-event observer
+and copied into completed frames. Rendering cannot advance or retrigger them.
+Pauses retain events; room/terrain changes, disabling effects and timeline jumps
+reset them. The editor uses the same capture and pose code as the game. Shared
+field-motion helpers keep flower bending, snow and mist on the same wind/wake
+calculations, without a second actor tracker or per-frame allocations.
+
+**Leaf crown stencil** is a broad, broken leaf silhouette (`foliage-shadow`,
+`textured=1`, `crown=1`). It shares the existing foliage wind, opacity and clipping
+controls. BG2 crowns with background placement enter the source texture before
+DoF, so their blur follows the native canopy. Black playfield crowns can provide
+subtle ground shadows; position these over existing ground artwork. They are
+ordinary alpha stencils, not geometry that automatically projects onto terrain.
+Fillmore combines these with collision-clipped warm canopy light and gentle
+ambient dimming, retaining its clear daytime woodland palette.
+
+These variants add one 128-pixel row to the shared mask atlas (1024 × 1024;
+512 KiB more RGBA texture storage, plus 128 KiB CPU alpha storage). They reuse
+existing alpha/light batches, with no new shaders, render targets or compositor
+passes. The shared upload buffer accommodates the enlarged startup texture.
+
 **Fireflies / bioluminescent points** (`fireflies`) is a bounded region with 1–32
 insects total. Each has a feathered bright core, a soft halo, an independent slow
 pulse and wandering motion. Size controls the core/halo; tint and end tint color
@@ -1164,7 +1237,7 @@ single render batch. Validation reserves each entire field in its draw pass and
 all possible material-light passes, including actor copies. Independent alpha
 foliage and additive lighting no longer consume each other's batch allowance;
 camera culling is never used to admit an over-budget pass. The shared immutable
-1024×896 atlas is built/uploaded at renderer startup and uses existing shaders.
+1024×1024 atlas is built/uploaded at renderer startup and uses existing shaders.
 
 **Cloud volume** is available on textured, rolling `cloud-bank` emitters.
 A positive `volume` selects rounded cloud billows; its 0–1 value deepens the
@@ -2218,6 +2291,19 @@ when its surface definition changes. Castle-window members likewise use the
 active source positions and count. Group controls without their own spatial
 region stay in the source selector instead of adding placeholder map markers.
 Clicking a linked region keeps **Apply & Preview** centred on that region.
+
+### Fillmore Act 2 cave and temple accents
+
+Rooms `01:02–04` share the second-pass composition across US, JP and EU terrain.
+The cave has four **Soft light** regions with **Reflected water ripples** and
+zero **Diffuse glow**, so moving highlights stay on stone and actor receivers.
+Their independent phases and cycles avoid synchronized reflections. The column
+pair uses a narrower, brighter region; the cave walls retain softer highlights.
+Five small **Luminous moss patches** sit on painted damp rock; their positions stay fixed.
+The temple has three cool opening lights, and the boss room has three restrained
+window halos alongside its native blue shafts. All fifteen sources per terrain
+remain ordinary editable emitters in `action-effects.ini`, using the existing
+light-receiver, intensity, size and animation controls.
 
 ### Light boxes and native dimming
 

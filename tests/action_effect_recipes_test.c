@@ -607,6 +607,38 @@ static void TestPerPassBudgets(void) {
   assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\nbare=2\n"));
   assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\nbare=1\nbare=0\n"));
   assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\nbare=1\n"));
+  const char *flower_errors[]={"bare=1\n","textured=1\n","shadows=1\n","anchor=bg2-point\n",
+    "angle=1\n","width=513\n","height=65\n","placement=foreground\n","flowers=1\n","strands=25\n","petals=2\n"};
+  for(unsigned i=0;i<sizeof(flower_errors)/sizeof(flower_errors[0]);++i) {
+    snprintf(text,sizeof(text),"[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\n"
+      "flowers=1\nheight=24\nplacement=playfield\n%s",flower_errors[i]);
+    assert(!Parse(text));
+  }
+  strcpy(text,"[effects]\nversion=1\n");
+  for(unsigned i=0;i<5;++i) {
+    char row[200];snprintf(row,sizeof(row),"[emitter:01:02:0:foliage-shadow:%x]\nflowers=1\nheight=24\nstrands=24\nplacement=playfield\n",i);
+    strcat(text,row);assert(Parse(text)==(i<4)); /* No camera-dependent budget escape. */
+  }
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\ntextured=1\nstrands=9\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\nflower-style=bells\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\npetals=1\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-path:1]\npattern=motes\nwake=1\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-path:1]\npattern=butterflies\nanchor=bg2-point\nwake=1\n"));
+  for(unsigned petals=0;petals<2;++petals) {
+    strcpy(text,"[effects]\nversion=1\n");
+    for(unsigned i=0;i<4;++i) {
+      char row[220];snprintf(row,sizeof(row),"[emitter:01:02:0:foliage-shadow:%x]\nflowers=1\nheight=24\nstrands=24\nplacement=playfield\npetals=%u\n",i,petals);
+      strcat(text,row);
+    }
+    strcat(text,"[emitter:01:02:0:particle-path:ff]\npattern=butterflies\nparticles=1\nplacement=playfield\n");
+    assert(Parse(text)==!petals); /* Reserve the full petal pair even before a brush. */
+  }
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\ncrown=1\n"));
+  assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:foliage-shadow:1]\ncrown=1\ntextured=1\nanchor=bg2-point\nplacement=background\n"));
+  ActionSceneEffectFrame crown_frame={0};ActionEffectRecipes_Apply(&table,1,2,0,37,NULL,&crown_frame);
+  assert(crown_frame.authored[0].render_layer==kActionEffectRenderLayer_Bg2SourceAlpha);
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-area:1]\npattern=butterflies\n"));
+  assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-path:1]\npattern=butterflies\nparticles=5\npoints=0,0 32,0\n"));
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-path:1]\npattern=glints\ncanopy-response=1\n"));
   for(unsigned sparkles=0;sparkles<2;++sparkles) {
     char banks[1024]="[effects]\nversion=1\n";

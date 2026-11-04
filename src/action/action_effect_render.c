@@ -77,7 +77,7 @@ static void RectUnion(ActionEffectLocalRect *into,
 
 /* Hash -> 0..1. */
 float HashUnit(uint32_t value) {
-  return (float)(DeterministicHash_Mix32(value) & 0xFFFFu) / 65535.0f;
+  return DeterministicHash_Unit32(value);
 }
 
 ActionEffectGeometryWriter GeometryWriter(

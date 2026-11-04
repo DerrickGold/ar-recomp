@@ -5,7 +5,7 @@
 /* One immutable atlas shared by fog, canopy light, foliage, water caustics and small glows. Cell zero is
  * white, so existing untextured vertices keep their original appearance. */
 enum { kActionMaskCellSize=128, kActionMaskAtlasColumns=8,
-       kActionMaskAtlasWidth=1024, kActionMaskAtlasHeight=896,
+       kActionMaskAtlasWidth=1024, kActionMaskAtlasHeight=1024,
        kActionMaskFogFirst=1, kActionMaskFogCount=7,
        kActionMaskCanopyFirst=8, kActionMaskCanopyCount=8,
        kActionMaskVineFirst=16, kActionMaskVineCount=8, kActionMaskGlow=24, kActionMaskFirefly=25, kActionMaskLeaf=26,
@@ -13,7 +13,9 @@ enum { kActionMaskCellSize=128, kActionMaskAtlasColumns=8,
        /* Matched density/illumination masks keep cloud shading in the same
         * ordinary alpha batch, without another shader or render target. */
        kActionMaskCloudBodyFirst=32, kActionMaskCloudLightFirst=40, kActionMaskCloudCount=8,
-       kActionMaskCausticFirst=48, kActionMaskCausticCount=8 };
+       kActionMaskCausticFirst=48, kActionMaskCausticCount=8,
+       kActionMaskFlowerStem=56, kActionMaskFlowerFirst=57, kActionMaskFlowerCount=3,
+       kActionMaskButterflyWing=60, kActionMaskCrown=61 };
 ArRenderPointF ActionEffectMasks_Uv(unsigned cell,float u,float v);
 uint32_t ActionEffectMasks_Pixel(unsigned x,unsigned y);
 void ActionEffectMasks_Build(uint32_t *pixels);

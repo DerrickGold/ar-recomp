@@ -46,6 +46,17 @@ typedef struct ActionSceneryShadow {
   bool valid;
 } ActionSceneryShadow;
 #include "action_cloud_light.h"
+typedef struct ActionForestRayState {
+  float slope, sway, root_y, reach;
+  ActionRayOpening opening;
+  const ActionNativeMember *member;
+} ActionForestRayState;
+typedef struct ActionForestLightState {
+  const ActionEffectInstance *effect;
+  const ActionRayField *field;
+  float bg1_to_field_x, bg1_to_field_y;
+  ActionForestRayState rays[kActionRayFieldMaxRays];
+} ActionForestLightState;
 typedef struct ActionEffectGeometryWriter {
   ArRenderVertex2D *vertices;
   int32_t *indices;
@@ -61,7 +72,12 @@ typedef struct ActionEffectGeometryWriter {
   bool cloud_light_ready;
   DioramaCloudLight cloud_light;
   float sun_directions[3][4];
+  bool forest_light_ready;
+  ActionForestLightState forest_light;
 } ActionEffectGeometryWriter;
+/* Reuse native ray transport for grounded plants; prepare once per batch. */
+void ActionForestLight_Prepare(const ActionSceneEffectFrame *,ActionForestLightState *);
+ArRenderColorF ActionForestLight_Sample(const ActionForestLightState *,float,float);
 bool ActionSceneryShadow_Prepare(ActionSceneryShadow *shadow, ActionSceneryShadowCache *cache,
                                  const ActionMoonlightOcclusion *occlusion,
                                  ActionEffectProjectPointFn project, ActionEffectClipBoundsFn clip,

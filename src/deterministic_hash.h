@@ -20,6 +20,11 @@ static inline uint32_t DeterministicHash_Mix32(uint32_t value) {
   return value ^ (value >> 16);
 }
 
+/* Stable normalized variation for captured layouts and their renderers. */
+static inline float DeterministicHash_Unit32(uint32_t value) {
+  return (float)(DeterministicHash_Mix32(value) & 0xFFFFu) / 65535.0f;
+}
+
 static inline uint32_t DeterministicHash_Fnv1a32Byte(
     uint32_t hash, uint8_t value) {
   return (hash ^ value) * UINT32_C(16777619);

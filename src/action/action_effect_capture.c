@@ -1,6 +1,7 @@
 #include "action/action_effect_capture.h"
 #include "action/action_effect_manifest.h"
 #include "action/action_trunk_life.h"
+#include "action/action_woodland.h"
 #include "actraiser/actraiser_action_bg.h"
 
 #include <stdio.h>
@@ -210,6 +211,9 @@ static void PreparePendingFrame(void) {
     for (unsigned i = 0; i < s_pending.scene.effect_count; ++i)
       s_pending.scene.effects[i].flags |= kActionEffectFlag_LightingOff;
   const unsigned group=g_ram[kActRaiserWram_MapGroup],room=g_ram[kActRaiserWram_CurrentMap];
+  ActionWoodland_Capture(&s_pending.observer.woodland,&s_pending.scene,group,room,
+      ActRaiserActionBg_TerrainProfile(),s_pending.observer.scene_clock,
+      g_settings.action_environmental_effects&&g_settings.action_effect_particles);
   const DioramaRoomOverride *trunk_room=CurrentTrunkRoom();
   DioramaTrunkSettings trunk=DioramaTrunk_Resolve(group,room,trunk_room);
   trunk.enabled &= g_diorama_frame_active&&g_settings.action_environmental_effects;

@@ -9,6 +9,8 @@ src/action/action_effect_render.c
 src/action/action_scene_effect_render.c
 src/action/action_authored_effect_render.c
 src/action/action_authored_fields.c
+src/action/action_field_motion.c
+src/action/action_woodland.c
 src/action/action_effect_receivers.c
 src/action/action_effect_preview.c
 src/action/action_ray_field_render.c
