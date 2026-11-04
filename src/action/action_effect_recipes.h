@@ -7,9 +7,10 @@
  * generation, never an array index or a transient actor address. */
 /* Catalogue capacity is independent of the unchanged per-room instance and
  * geometry budgets. Regional copies of authored scenes share this table.
- * Match the editor's project-archive limit; full regional compositions now
- * exceed 512 KiB while remaining below the record and per-room budgets. */
-enum { kActionEffectRecipeMax = 2048, kActionEffectRecipeMaxBytes = 1024 * 1024 };
+ * Keep the byte limit in sync with the editor's project archive. The second
+ * environmental pass needs more records across its three regional profiles;
+ * this does not increase the number of effects captured for any one room. */
+enum { kActionEffectRecipeMax = 4096, kActionEffectRecipeMaxBytes = 1024 * 1024 };
 /* Draw placement is independent of the source coordinate system. */
 typedef enum ActionEffectAnchor {
   kActionEffectAnchor_Bg1, kActionEffectAnchor_Bg2Point, kActionEffectAnchor_Bg2Raster,

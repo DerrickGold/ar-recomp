@@ -344,8 +344,11 @@ The GPU renderer provides individually adjustable effects:
   magic in both flat and 3D views.
 - **Environmental effects:** Fillmore's forest and caves gain canopy light,
   leaves, flowers, mist, drips, moving water reflections, damp moss, and cool
-  temple opening light; Bloodpool gains moonlight, water reflections, castle
-  window light, and torch glow. These work in flat and
+  temple opening light; Bloodpool gains moonlight with drifting cloud veils,
+  rose water reflections on timber, marsh fog, castle window light, torch glow,
+  damp-stone reflections, and occasional ivy drips. Castle ambient darkness and
+  local light also reach the player, enemies, pickups and sprite-based props.
+  These work in flat and
   Diorama views and are controlled separately under
   **Video → Effects → Environmental effects** (on by default). Adding unique
   treatments across the remaining levels is ongoing.

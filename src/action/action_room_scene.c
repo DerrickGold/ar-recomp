@@ -638,6 +638,22 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
   }
 }
 
+/* $02:BB4C's timed fixed-color mode, uploaded by $02:ADE2. The counter
+ * reverses before reaching the upper bound and waits BF+1 ticks per step.
+ * $02:BED3 multiplies each channel gain, then the PPU keeps its low five bits.
+ * Use a closed phase so seeking/pausing never advances retained game state.
+ * Camera-driven fade modes and transition master brightness stay live-owned. */
+static uint16_t ResolveFixedColorCycle(const uint8_t *profile, uint32_t frame) {
+  const unsigned limit = profile[17], cadence = (unsigned)profile[16] + 1u;
+  if (profile[18] != 0x40 || limit < 2 || limit > 128 || cadence > 128) return 0;
+  const unsigned peak = limit - 1, period = peak * 2;
+  const unsigned step = (frame / cadence + (frame % cadence != 0)) % period;
+  const unsigned value = step <= peak ? step : period - step;
+  return (uint16_t)(((value * profile[14]) & 31u) |
+      (((value * profile[13]) & 31u) << 5) |
+      (((value * profile[15]) & 31u) << 10));
+}
+
 bool ActionRoomScene_BuildFrameState(
     const ActionRoomScene *scene,
     const ActionRoomSceneFrameRequest *request,
@@ -670,6 +686,7 @@ bool ActionRoomScene_BuildFrameState(
     state->bgsc[1] = 0x70;
   state->bgmode = scene->video_profile[6];
   state->brightness = 15;
+  state->fixed_color = ResolveFixedColorCycle(scene->video_profile, request->game_frame);
   state->raster_effect = scene->raster_effect;
   state->animation_phase = (uint8_t)
       ActionRoomScene_ResolveCharacterAnimationPhase(

@@ -223,7 +223,7 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
 
  // The distributed room compositions must use exactly the same recipes in
  // native rendering and the editor, across regional terrain and camera edges.
- if((base.group===1&&base.map>=2&&base.map<=4)||
+ if((base.group===1&&base.map>=2&&base.map<=4)||base.group===2||
     base.group===3||(base.group===6&&base.map>=5&&base.map<=8)) {
    assert.equal(send(shippedBytes,api.RoomPreview_ConfigureEffects),1,'shipped recipes fit their instance/geometry budgets');
    const enhanced=[];
@@ -238,6 +238,31 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    assert.deepEqual(enhanced,nativeEffects,`shipped effects ${base.group}:${base.map}/${terrain.profile}`);
    assert(enhanced.some((h,i)=>h[1]!==effectHashes[i]),'each authored room receives its composition');
    assert.deepEqual(enhanced[1],enhanced[3],'authored animation is deterministic when scrubbing backwards');
+   if(base.group===2&&base.map===4) {
+     const cycle=[0,1,19,20,267,285,286,552,570,571,267,0].map(t=>[0,0,t,120,64]);
+     const colors=[];
+     for(const request of cycle) {
+       assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+       colors.push([api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0]);
+       if(request[2]===19)assert.equal(api.RoomPreview_Uploads(),0,'unchanged native color step reuses pixels');
+     }
+     assert.notEqual(colors[0][0],colors[4][0],'native ivy light reaches distinct bright and dark phases');
+     assert.equal(colors[4][0],colors[5][0],'native peak holds for its full cadence');
+     assert.notEqual(colors[5][0],colors[6][0],'native light reverses at the peak');
+     assert.equal(colors[0][0],colors[8][0],'native light completes its 570-tick cycle');
+     assert.deepEqual(colors[4],colors[10],'reverse seeking restores the native color and effect clock');
+     assert.deepEqual(colors[0],colors[11]);
+     const nativeCycle=execFileSync(replay,[file,iniFile,effectsFile],{
+       input:cycle.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'
+     }).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
+     assert.deepEqual(colors,nativeCycle,'all regional ivy cycle phases match native rendering');
+     api.RoomPreview_EnableEffects(0);
+     assert.equal(api.RoomPreview_Render(...cycle[0],960,600,1,0,0,1,0),1);
+     const bright=api.RoomPreview_Hash();
+     assert.equal(api.RoomPreview_Render(...cycle[4],960,600,1,0,0,1,0),1);
+     assert.notEqual(api.RoomPreview_Hash(),bright,'native color cycling remains with enhancements off');
+     api.RoomPreview_EnableEffects(1);
+   }
    if(base.group===3&&base.map===5) {
      const original=[...shipped.matchAll(new RegExp(`\\[emitter:03:05:${terrain.profile}:soft-light:[^\\]]+\\]([^\\[]+)`,'g'))]
        .find(match=>/^y=1424$/m.test(match[1]))[1];

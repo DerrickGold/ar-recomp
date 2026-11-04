@@ -534,6 +534,47 @@ other rooms; BG2 placement uses the clicked point. From BG1 it starts at the BG2
 map centre because a static background has no unique inverse foreground position.
 If the room has no native water-row animation, only those wave caps are omitted.
 Apply/Cancel, undo, disable/reset and export/reload work like other definitions.
+
+Bloodpool Act 1's second pass (`02:01`, all three terrains) adds seven low,
+rose-colored **Soft light** ripple regions along the pilings and five separated
+**Cloud bank** mist pockets. They use existing textures and kernels, with varied
+cycles and seeds. Reflected light reaches scenery and actors; its zero scatter
+keeps the effect on materials. Native shoreline mist, wet timber, insects and
+water glints remain active. The linked moon override slightly strengthens the
+cloud veil and shortens its cycle, preserving the shared moon/ray/reflection
+clock and the lake's red palette. All placements remain editable on BG1, while
+the linked moon keeps its native BG2 anchor and source-art validation.
+
+Bloodpool Act 2's second pass (`02:02–08`, all three terrains) adds local warm
+and cool **Soft light** returns on stone, three animated ripple-light regions
+beside the room-5 moat, a rolling moat **Cloud bank**, and sparse **Drips** from
+nearby ivy. Drops in the ivy shaft end at stone; the three moat drops end at
+exposed water and produce small rings. Each source has its own seed and cycle.
+Four distant cloud banks use **BG2 · fixed point**, so they receive background
+depth of field behind the castle openings. The gallery accents touch the jambs,
+preserving its native pillar shadows and shaped window light. The 31 emitters
+per terrain reuse existing kernels and textures, within the unchanged
+4,096-vertex room budget. No castle-field
+override or background-policy change is needed.
+
+Four full-map **Exposure** regions per terrain lower ambient light in
+the torch hall (`02:03`, .82), moat (`02:05`, .86), gallery (`02:07`, .86) and
+boss chamber (`02:08`, .90). Each extends 256 pixels past the map edges and dims
+scenery, the player and non-player objects through the existing exposure kernel.
+Bundled castle fields also target all three receiver groups for their base
+dimming and window/torch light (`receivers=7 7`). The non-player group includes
+enemies, pickups and sprite-based platforms/props, using native object ownership.
+Matching light maps share the existing target; sprite palettes remain intact.
+Explicit saved receiver choices and legacy complete-field imports retain their
+prior behavior. The ivy
+shaft (`02:04`) retains its native lighting cycle without extra exposure.
+Both flat and Diorama previews reproduce that room's BG1 fixed-color subtraction
+from video profile `$0B`: sixteen color steps, nineteen ticks per step, reversing
+over 570 ticks (9.5 seconds). The preview clock starts at the native initial phase;
+live room entry can have a different phase. Seeking is deterministic, and the
+cycle remains active when environmental enhancements are disabled. Master
+brightness and actor sprites are not part of this native scenery cycle.
+
 **Complete marsh and castle fields:** the corresponding native sources now offer
 **Edit complete marsh-field definition…** or **Edit complete castle-field definition…**.
 The palette can add either group to another room. Marsh controls include water
@@ -800,7 +841,7 @@ Overrides are terrain-specific even where scenery edits share
 equivalent US/EU layouts.
 
 Each room/terrain permits 96 enabled emitters and at most 4096 added vertices per render batch;
-the file holds at most 2048 records/1 MiB across all rooms and regional profiles.
+the file holds at most 4096 records/1 MiB across all rooms and regional profiles.
 The per-room instance and geometry limits are independent of that document capacity.
 Conservative costs are 97 vertices
 per light, four per mote and 296 per free-mist volume. Ground mist reserves
@@ -2506,8 +2547,9 @@ follow native side openings. Their small source glow is separate from the blue
 or pale-green illumination on nearby bark, branches and actors. Their bounds
 keep the centre of the trunk shaded; positions and all receiver flags remain
 editable. The complete catalogue now needs the shared 1 MiB document allowance
-in the native loader, WASM preview and project ZIP transport. The 2048-record
-catalogue limit and per-room instance/geometry limits are unchanged.
+in the native loader, WASM preview and project ZIP transport. Bloodpool's second
+pass later increased the catalogue limit to 4096 records; the per-room
+instance/geometry limits remain unchanged.
 
 The tree-depth follow-up adds four broad, horizontally feathered Exposure regions
 along the inner walls, two shallow branch recesses and nine small bare-fiber

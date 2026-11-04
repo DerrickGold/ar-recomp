@@ -330,8 +330,19 @@ function nativeFrameState(r) {
         bg1w.write(2,inheritedMode2(0x800+i*3+2,u8(-wave+0x40)));}
       bg1w.finish();bg2w.finish();break; }
   }
+  // Native timed fixed-color subtraction ($02:BB4C / $02:ADE2). This is
+  // scenery color math, independent of the environmental-effects toggle.
+  let fixedColor=0;
+  const limit=r.video[17],cadence=r.video[16]+1;
+  if(r.video[18]===0x40&&limit>=2&&limit<=128&&cadence<=128){
+    const peak=limit-1,period=peak*2;
+    const step=(Math.floor(frame/cadence)+(frame%cadence!==0?1:0))%period;
+    const value=step<=peak?step:period-step;
+    fixedColor=((value*r.video[14])&31)|(((value*r.video[13])&31)<<5)|
+      (((value*r.video[15])&31)<<10);
+  }
   return {h,v,mosaic,tm:r.video[0],ts:r.video[1],cgwsel:r.video[2],
-    cgadsub:r.video[3],bgmode:r.video[6],fixedColor:0,brightness:15,
+    cgadsub:r.video[3],bgmode:r.video[6],fixedColor,brightness:15,
     page:bg2PageIndex(r)};
 }
 function nativeTileAt(r,state,layers,bg,pixelX,pixelY) {

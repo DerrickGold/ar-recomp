@@ -3,6 +3,7 @@
 #include "action/action_environment_scene.h"
 #include "action/action_effect_recipes.h"
 #include "action/action_environment_exposure.h"
+#include "action/action_effect_receivers.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -41,13 +42,14 @@ static void LegacyOracle(bool masonry){unsigned long vertices=0,indices=0;clock_
  }
  assert(vertices==260256&&indices==906489);
 #if defined(__OPTIMIZE__)
- assert(hash==0xd6a30baau);
+ assert(hash==0xcbe12f8au);
 #endif
  printf("%08x %lu %lu %.6f ms/frame\n",hash,vertices,indices,(double)(clock()-start)*1000/CLOCKS_PER_SEC/840);
 }
 
 static ActionEffectRecipes recipes,previous;
 static ActionSceneEffectFrame native_frame;
+static ActionReceiverLighting receiver_lighting;
 static uint8_t map[32768],sky[32768],words[2048];
 static char text[16384],roundtrip[16384];
 static unsigned At(unsigned x,unsigned y,unsigned width){return ((y/256)*(width/256)+x/256)*256+(y%256)/16*16+(x%256)/16;}
@@ -121,12 +123,24 @@ int main(void){
       if(strncmp(at,"dimming=",8)&&strncmp(at,"dimming-ramp=",13)&&strncmp(at,"receivers=",10)){memcpy(roundtrip+used,at,count);used+=count;}
       at+=count;}
     roundtrip[used]=0;assert(ActionEffectRecipes_Parse(&recipes,roundtrip,used,&line));
-    assert(!memcmp(&recipes.castle_fields[0],f,sizeof(*f))); /* version-1 upgrade */
+    ActionCastleField legacy=*f;
+    legacy.Receivers[0]=legacy.Receivers[1]=1;
+    assert(!memcmp(&recipes.castle_fields[0],&legacy,sizeof(legacy))); /* Preserve saved version-1 appearance. */
+    assert(ActionEffectRecipes_Parse(&recipes,text,n,&line));
     assert(ActionCastleField_Write(f,roundtrip,sizeof(roundtrip)));ActionCastleField copy={0};
     for(char *at=roundtrip;*at;){char *end=strchr(at,'\n');assert(end);*end=0;char *eq=strchr(at,'=');assert(eq);*eq=0;assert(ActionCastleField_Set(&copy,at,eq+1));at=end+1;}
     assert(ActionCastleField_Valid(&copy));ActionCastleField_Prepare(&copy);assert(!memcmp(&copy,f,sizeof(copy)));
     ActionEnvironmentScene scene;ConfigureScene(&scene,f,room);memset(&native_frame,0,sizeof(native_frame));
     ActionCastleField_Capture(&scene,&native_frame,f,0xca000000u|room);assert(native_frame.castle_field_valid);
+    if(f->Dimming[0]>0){
+      assert(ActionEffectReceivers_HasActors(&native_frame,false));
+      assert(ActionEffectReceivers_Prepare(&native_frame,2,room,112,96,0,0,false,&receiver_lighting));
+      for(unsigned role=kActionReceiver_Player;role<=kActionReceiver_Enemies;role<<=1){
+        float multiply[3],add[3];
+        ActionEffectReceivers_Sample(&receiver_lighting,role,200,200,multiply,add);
+        for(unsigned c=0;c<3;++c){assert(fabsf(multiply[c]-(1-f->Dimming[0]))<.00001f);assert(add[c]==0);}
+      }
+    }
     memset(&frame,0,sizeof(frame));scene.suppress_default_castle_field=true;
     ActionEffectRecipes_Apply(&recipes,2,room,0,743,&scene,&frame);
     assert(frame.castle_field_valid&&frame.decoration_count==native_frame.decoration_count);

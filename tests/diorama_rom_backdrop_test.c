@@ -401,6 +401,37 @@ static void InitFrameScene(ActionRoomScene *scene) {
   }
 }
 
+static void TestCastleFixedColorCycle(void) {
+  ActionRoomScene scene;
+  InitFrameScene(&scene);
+  /* Native Bloodpool 02:04 profile $0B. Master brightness stays full; BG1
+   * subtracts the independently varying RGB fixed color. */
+  const uint8_t profile[] = {1, 2, 2, 18, 16, 0x40};
+  memcpy(scene.video_profile + 13, profile, sizeof(profile));
+  ActionRoomSceneFrameRequest request = {.animation_phase = -1, .page_phase = -1};
+  ActionRoomSceneFrameState state;
+  const struct { uint32_t tick; uint16_t color; } samples[] = {
+    {0, 0}, {1, 0x0822}, {19, 0x0822}, {20, 0x1044},
+    {267, 0x79FE}, {285, 0x79FE}, {286, 0x71DC},
+    {551, 0x0822}, {552, 0}, {570, 0}, {571, 0x0822},
+    {267, 0x79FE}, {0, 0}, {UINT32_MAX, 0x5976},
+  };
+  for (unsigned i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) {
+    request.game_frame = samples[i].tick;
+    CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+    CHECK(state.fixed_color == samples[i].color);
+    CHECK(state.brightness == 15);
+  }
+  scene.video_profile[18] = 0;
+  request.game_frame = 267;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.fixed_color == 0);
+  scene.video_profile[18] = 0x40;
+  scene.video_profile[17] = 1;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.fixed_color == 0);
+}
+
 static void TestFrameStateAndRasterEffects(void) {
   ActionRoomScene scene;
   InitFrameScene(&scene);
@@ -739,6 +770,7 @@ int main(int argc, char **argv) {
   TestOverlappingDictionaryCopyAndTruncation();
   TestGenericRoomScriptAndInheritance();
   TestScenePhaseResolvers();
+  TestCastleFixedColorCycle();
   TestFrameStateAndRasterEffects();
   TestNativeFrameCompositor();
   /* Optional local census against a legally supplied stock ROM. CTest invokes

@@ -131,4 +131,4 @@
 "moon-seeds=45313 45514\n"
 "dimming=0.42\n"
 "dimming-ramp=0 0 0 0\n"
-"receivers=1 1\n"
+"receivers=7 7\n"

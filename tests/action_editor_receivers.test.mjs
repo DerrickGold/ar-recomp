@@ -775,6 +775,43 @@ console.log('Wet-surface fields: portable catalogue, landing handles, member sav
 const shippedBlocks=shippedEffects.split(/(?=^\[)/m);
 const properties=block=>Object.fromEntries([...block.matchAll(/^([a-z0-9-]+)=([^\n]*)$/gm)].map(m=>[m[1],m[2]]));
 const sceneryEnergy=()=>draws.filter(d=>d.effect===4).reduce((sum,d)=>sum+energy(d.params[176]),0);
+// Castle darkness and opening/torch light reach real OBJ material attributes,
+// including the non-player role used by enemies, pickups and sprite platforms.
+for(const [map,cx,cy,px,py,dim,exposure] of [
+  [3,96,384,248,592,.36,.82],[4,128,0,256,160,.36,1],
+  [5,1056,768,1160,944,.42,.86],[7,512,0,584,208,.36,.86],
+  [8,0,0,92,208,.3,.9]
+])for(const terrain of [0,1,2]){
+  const base=data.rooms.find(r=>r.group===2&&r.map===map);
+  const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};
+  assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
+  camera=[cx,cy];baselineDistance=3.25;
+  assert.equal(api.RoomPreview_SetReceivers(3,px,py,px+64,py),1);
+  api.RoomPreview_EnableEffects(1);
+  let attributeTexture;
+  for(const [config,factor] of [[noEffects,1],[shippedEffects,exposure]]){
+    configure(config);render(undefined,1200);
+    const actor=draws.find(d=>d.effect===5);assert(actor,'castle sprites use the illuminated material');
+    assert(roleEnergy(actor,0)>0&&roleEnergy(actor,1)>0,'castle light reaches both sprite roles');
+    assert.equal(actor.params[17],actor.params[18],'identical castle receiver maps share one target');
+    const attributes=textures.get(actor.params[16]);
+    attributeTexture=attributes;
+    const expected=Math.round((1-dim)*factor*64),roles=new Set();
+    for(const p of attributes.pixels)if(p){
+      assert.equal((p>>>16)&255,expected,'sprite ambient matches castle scenery exposure');
+      roles.add(p&0xffff);
+    }
+    assert.deepEqual(roles,new Set([0xff00,0xff]),'both multipart actors retain their receiver identity');
+    const allocated=creates;render(undefined,1200);
+    assert.equal(uploads.length,0,'paused castle lighting reuses sprite pixels and attributes');
+    assert.equal(creates,allocated);
+  }
+  api.RoomPreview_EnableEffects(0);render(undefined,1200);
+  assert(!draws.some(d=>d.effect===5),'effects off uses the unlit sprite material');
+  for(const p of attributeTexture.pixels)if(p)assert.equal((p>>>16)&255,64);
+  api.RoomPreview_EnableEffects(1);
+}
+console.log('Castle receivers: five interiors/all terrains, native and authored ambient, opening/torch light, both sprite roles, toggle and resource reuse passed.');
 for(const id of [4,5,6,7,8]) for(const terrain of [0,1,2]) {
   const base=data.rooms.find(r=>r.group===5&&r.map===id);
   const room={...base,terrainProfile:terrain,bg:[base.terrainVariants.find(v=>v.profile===terrain).bg1,base.bg[1]]};

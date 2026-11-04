@@ -1005,6 +1005,9 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
     b->clip_bottom = Min(Max(0, plan.layer[bg].world_height - 225 - f->layer_camera_y[bg]), Max(top, bottom));
     if (DioramaCaptureBlend_LayerIsHalfAdded(f->cgwsel, f->cgadsub, input.sub_screen, 1u << bg))
       b->capture_flags |= SR_PPU_OVERLAY_MARK_BG_HALF_ADD;
+    if (DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+            f->cgwsel, f->cgadsub, f->fixed_color, 1u << bg))
+      b->capture_flags |= SR_PPU_OVERLAY_APPLY_BG_FIXED_COLOR_SUBTRACT;
     if (additive & (1u << bg)) {
       b->capture_flags |= SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN;
       r->scene.additive_plane_mask |= (1u << bg) | (1u << (bg ? kDioramaPlane_Bg2Hi : kDioramaPlane_Bg1Hi)) |

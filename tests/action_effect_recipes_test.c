@@ -71,7 +71,12 @@ static void TestDocumentCapacity(void) {
   assert(Parse(text) && table.count == kActionEffectRecipeMax);
   before = table;
   strcat(text, "[source:01:02:0:cave-light:ffffffff]\n");
-  assert(!Parse(text) && !memcmp(&table, &before, sizeof(table)));
+  ActionEffectRecipeError error;
+  assert(!ActionEffectRecipes_ParseWithError(&table, text, strlen(text), &error));
+  char limit[64];
+  snprintf(limit, sizeof(limit), "%u-record limit", kActionEffectRecipeMax);
+  assert(error.line == 3 + 2 * kActionEffectRecipeMax && strstr(error.message, limit));
+  assert(!memcmp(&table, &before, sizeof(table)));
   const char header[] = "[effects]\nversion=1\n";
   memcpy(text, header, sizeof(header) - 1);
   memset(text + sizeof(header) - 1, '\n', sizeof(text) - sizeof(header) + 1);
