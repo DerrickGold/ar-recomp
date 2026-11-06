@@ -15,6 +15,7 @@
 #include "snes/apu.h"
 #include "snes/cart.h"
 #include "snes/cart_map.h"
+#include "snes/cpu.h"
 #include "snes/dsp.h"
 #include "snes/msu1.h"
 #include "snes/ppu.h"
@@ -316,6 +317,51 @@ static void file_saveload(SaveLoadInfo *base, void *data, size_t size) {
     base->failed = transferred != size;
 }
 
+/* In-memory stream for the pre-load backup. Saving grows the buffer; loading
+ * reads it back with the same failure contract as the file stream. */
+typedef struct MemorySaveLoad {
+    SaveLoadInfo base;
+    uint8 *bytes;
+    size_t size, capacity, offset;
+} MemorySaveLoad;
+
+static void memory_saveload(SaveLoadInfo *base, void *data, size_t size) {
+    MemorySaveLoad *state = (MemorySaveLoad *)base;
+    if (base->failed) return;
+    if (base->saving) {
+        if (size > state->capacity - state->size) {
+            size_t capacity = state->capacity ? state->capacity : 1u << 20;
+            uint8 *bytes;
+            while (size > capacity - state->size) capacity *= 2u;
+            bytes = (uint8 *)realloc(state->bytes, capacity);
+            if (bytes == NULL) {
+                base->failed = true;
+                return;
+            }
+            state->bytes = bytes;
+            state->capacity = capacity;
+        }
+        memcpy(state->bytes + state->size, data, size);
+        state->size += size;
+    } else {
+        if (size > state->size - state->offset) {
+            base->failed = true;
+            return;
+        }
+        memcpy(data, state->bytes + state->offset, size);
+        state->offset += size;
+    }
+}
+
+static void memory_saveload_begin(MemorySaveLoad *state, bool saving) {
+    state->base.func = memory_saveload;
+    state->base.saving = saving;
+    state->base.portable = true;
+    state->base.failed = false;
+    state->base.format_version = RTL_SNAPSHOT_VERSION;
+    state->offset = 0u;
+}
+
 void RtlReset(int mode) {
     snes_frame_counter = 0;
     g_main_cpu_cycles_estimate = 0u;
@@ -440,10 +486,12 @@ void RtlSaveSnapshot(const char *filename) {
 bool RtlLoadSnapshot(const char *filename) {
     uint8 header[8];
     bool portable;
+    bool live_emulation;
     uint32 legacy_version;
     uint32 portable_version;
     FILE *file;
     FileSaveLoad state;
+    MemorySaveLoad backup;
     if (filename == NULL || g_snes == NULL) return false;
     file = sr_fopen(filename, "rb");
     if (file == NULL) return false;
@@ -468,11 +516,38 @@ bool RtlLoadSnapshot(const char *filename) {
         ~RTL_SNAPSHOT_EXTENDED_AUDIO;
     state.file = file;
     RtlApuLock();
+    live_emulation = g_snes->cpu->e;
+    /* A stream that fails partway (truncation, a bad section header, an
+     * invalid field) has already overwritten the sections before it. Keep the
+     * live state in memory first so a failed load leaves the game as it was. */
+    memset(&backup, 0, sizeof(backup));
+    memory_saveload_begin(&backup, true);
+    snes_saveload(g_snes, &backup.base);
+    if (backup.base.failed) {
+        RtlApuUnlock();
+        fclose(file);
+        free(backup.bytes);
+        fprintf(stderr, "Unable to back up live state; %s not loaded\n",
+                filename);
+        return false;
+    }
     snes_saveload(g_snes, &state.base);
-    if (!state.base.failed)
+    if (!state.base.failed) {
         rtl_game_audio_state_loaded(g_snes->apu);
+    } else {
+        memory_saveload_begin(&backup, false);
+        snes_saveload(g_snes, &backup.base);
+        /* Ordinary loads select native mode; a rollback must keep the mode
+         * the running machine had before the rejected load. */
+        g_snes->cpu->e = live_emulation;
+        fprintf(stderr, backup.base.failed
+                ? "Snapshot %s is invalid and live state could not be "
+                  "restored\n"
+                : "Snapshot %s is invalid; live state was kept\n", filename);
+    }
     RtlApuUnlock();
     fclose(file);
+    free(backup.bytes);
     return !state.base.failed;
 }
 

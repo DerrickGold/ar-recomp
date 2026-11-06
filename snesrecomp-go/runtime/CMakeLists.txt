@@ -188,6 +188,10 @@ if(BUILD_TESTING)
     target_link_libraries(snesrecomp_runtime_audio_timing_test PRIVATE snesrecomp_runtime)
     add_test(NAME snesrecomp_runtime_audio_timing COMMAND snesrecomp_runtime_audio_timing_test)
 
+    add_executable(snesrecomp_runtime_snapshot_load_test tests/snapshot_load_test.c)
+    target_link_libraries(snesrecomp_runtime_snapshot_load_test PRIVATE snesrecomp_runtime)
+    add_test(NAME snesrecomp_runtime_snapshot_load COMMAND snesrecomp_runtime_snapshot_load_test)
+
     add_executable(snesrecomp_runtime_ppu_diagnostics_test
         tests/ppu_diagnostics_test.c)
     target_link_libraries(snesrecomp_runtime_ppu_diagnostics_test PRIVATE
@@ -530,6 +534,7 @@ if(BUILD_TESTING)
         snesrecomp_runtime_contract_test
         snesrecomp_runtime_abi_test
         snesrecomp_runtime_audio_timing_test
+        snesrecomp_runtime_snapshot_load_test
         snesrecomp_runtime_cart_test
         snesrecomp_runtime_rom_test
         snesrecomp_runtime_dma_test
