@@ -575,6 +575,28 @@ static const char *const kDioramaCamModeLabels[] = {
   "Dynamic Cam",
 };
 
+/* Persist stable mode names; the UI catalog marks Voxel 3D as WIP. */
+static const char *const kAction3DModeLabels[] = {"Off", "Diorama", "Voxel 3D"};
+
+static bool ParseAction3DMode(const char *text, void *field) {
+  if (!text || !text[0]) return false;
+  for (int i = 0; i < kAction3D_Count; ++i) {
+    if (!strcmp(text, kAction3DModeLabels[i]) ||
+        (text[0] == '0' + i && !text[1])) {
+      *(int *)field = i;
+      return true;
+    }
+  }
+  /* Saved boolean labels remain loadable; the next save uses mode names. */
+  const char *const off[] = {"off", "false", "False", "no", "No"};
+  const char *const on[] = {"On", "on", "true", "True", "yes", "Yes"};
+  for (unsigned i = 0; i < sizeof(off) / sizeof(*off); ++i)
+    if (!strcmp(text, off[i])) { *(int *)field = kAction3D_Off; return true; }
+  for (unsigned i = 0; i < sizeof(on) / sizeof(*on); ++i)
+    if (!strcmp(text, on[i])) { *(int *)field = kAction3D_Diorama; return true; }
+  return false;
+}
+
 static const char *const kSimCamModeLabels[] = {
   "Free Cam",
   "Dynamic Cam",
@@ -1996,10 +2018,14 @@ const SettingDesc g_setting_descs[] = {
   ACTION_SETTING("sim3d_reset_camera", kSettingAction_SimCameraReset,
                  kSettingCat_SimCamera, Sim3D_ModeIsOn, false, "Reset camera",
                      "Return the camera mode in use to its default pitch, yaw, and distance."),
-  BOOL_SETTING(diorama_mode, NULL, "Diorama 3D",
-               "Render action-stage layers as tilted 3D planes (action stages only; needs the new renderer).",
-               kSettingCat_Presentation, 0, false, NULL,
-               DioramaModeChanged),
+  { "diorama_mode", NULL, "Action 3D",
+    "Off uses the flat view. Diorama is the default 3D mode and adds depth "
+    "between layers. Voxel 3D is a work in progress, adding modeled "
+    "environments in supported rooms.",
+    kSettingType_Enum, kApply_Callback, kSettingCat_Presentation,
+    &g_settings.diorama_mode, kAction3D_Off, kAction3D_Off, kAction3D_Voxel,
+    1, false, kAction3DModeLabels, kAction3D_Count, NULL,
+    DioramaModeChanged, ParseAction3DMode, NULL },
   /* Free and Dynamic cameras own independent poses. Dynamic applies velocity
    * lean and event kicks around its baseline; switching modes restores the
    * selected mode's own camera instead of carrying the other pose across. */

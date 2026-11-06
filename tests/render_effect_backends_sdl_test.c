@@ -294,6 +294,77 @@ static void TestActorBlurExposure(ArRenderDevice *device, SDL_Renderer *renderer
   puts("actor blur: dimmed body and transparent fringes keep identical exposure");
 }
 
+/* Alternate scenery/actor illumination in one queued batch, including cache
+ * eviction, mutable light maps and texture recreation. Read the final pixels
+ * so stale samplers or uniforms cannot pass merely by returning success. */
+static void TestSceneryLightBindings(ArRenderDevice *device, SDL_Renderer *renderer) {
+  SDL_Texture *previous_target = SDL_GetRenderTarget(renderer);
+  SDL_Texture *target = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+      SDL_TEXTUREACCESS_TARGET, 64, 64);
+  CHECK(target && SDL_SetRenderTarget(renderer, target));
+  if (!target) return;
+  const ArRenderTextureDesc desc = {1, 1, kArRenderPixelFormat_Argb8888,
+      kArRenderTextureUsage_Static, kArRenderFilter_Nearest, kArRenderBlendMode_Alpha};
+  ArRenderTexture art = {0}, maps[12] = {0};
+  const uint32_t white = 0xffffffffu;
+  CHECK(ArRenderDevice_CreateTexture(device, &desc, &art));
+  CHECK(ArRenderDevice_UpdateTexture(device, art, NULL, &white, 4));
+  for (unsigned i = 0; i < 12; ++i)
+    CHECK(ArRenderDevice_CreateTexture(device, &desc, &maps[i]));
+  for (unsigned round = 0; round < 3; ++round) {
+    if (round == 1) {
+      ArRenderDevice_DestroyTexture(device, maps[0]);
+      CHECK(ArRenderDevice_CreateTexture(device, &desc, &maps[0]));
+    }
+    if (round == 2) DioramaEffectBackend_Reset(device);
+    uint32_t colors[12];
+    for (unsigned i = 0; i < 12; ++i) {
+      colors[i] = 0xff000000u | ((4 + i * 2 + round) << 16) |
+          ((30 - i + round) << 8) | (6 + i + round * 2);
+      CHECK(ArRenderDevice_UpdateTexture(device, maps[i], NULL, &colors[i], 4));
+    }
+    CHECK(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) && SDL_RenderClear(renderer));
+    for (unsigned cell = 0; cell < 64; ++cell) {
+      const unsigned index = cell < 12 ? cell : cell % 3 ? cell % 4 : (cell * 7) % 12;
+      const float shade = cell % 2 ? .5f : 1.f;
+      const float x = (cell % 8) * 8.f, y = (cell / 8) * 8.f;
+      const ArRenderColorF ambient = {.125f, .125f, .125f, 1};
+      const ArRenderVertex2D vertices[4] = {
+        {{x,y},ambient,{0,0}}, {{x+8,y},ambient,{1,0}},
+        {{x+8,y+8},ambient,{1,1}}, {{x,y+8},ambient,{0,1}},
+      };
+      const int32_t indices[6] = {0,1,2,0,2,3};
+      const DioramaSceneryLightEffectParams params = {
+        .illumination = maps[index], .shade = {shade,shade,shade,1},
+      };
+      CHECK(DioramaEffectBackend_BindSceneryLight(device, &params));
+      CHECK(ArRenderDevice_DrawGeometry(device, art, vertices, 4, indices, 6));
+      CHECK(DioramaEffectBackend_Unbind(device));
+    }
+    SDL_Surface *pixels = SDL_RenderReadPixels(renderer, NULL);
+    SDL_Surface *rgba = pixels ? SDL_ConvertSurface(pixels, SDL_PIXELFORMAT_RGBA32) : NULL;
+    CHECK(rgba != NULL);
+    if (rgba) for (unsigned cell = 0; cell < 64; ++cell) {
+      const unsigned index = cell < 12 ? cell : cell % 3 ? cell % 4 : (cell * 7) % 12;
+      const float shade = cell % 2 ? .5f : 1.f;
+      const uint8_t *pixel = (const uint8_t *)rgba->pixels +
+          (cell / 8 * 8 + 4) * rgba->pitch + (cell % 8 * 8 + 4) * 4;
+      for (unsigned channel = 0; channel < 3; ++channel) {
+        const unsigned light = (colors[index] >> (16 - channel * 8)) & 255;
+        CHECK(fabsf(pixel[channel] - (255.f * .125f + light * 4 * shade)) <= 2);
+      }
+      CHECK(pixel[3] == 255);
+    }
+    SDL_DestroySurface(rgba);
+    SDL_DestroySurface(pixels);
+  }
+  DioramaEffectBackend_Reset(device);
+  for (unsigned i = 0; i < 12; ++i) ArRenderDevice_DestroyTexture(device, maps[i]);
+  ArRenderDevice_DestroyTexture(device, art);
+  CHECK(SDL_SetRenderTarget(renderer, previous_target));
+  SDL_DestroyTexture(target);
+}
+
 static void TestPreparedLightBindings(ArRenderDevice *device) {
   CHECK(DioramaEffectBackend_PrepareSceneryLight(device));
   const ArRenderTextureDesc desc={1,1,kArRenderPixelFormat_Argb8888,
@@ -980,6 +1051,7 @@ int main(void) {
   TestActorIllumination(&device,renderer);
   TestActorBlurExposure(&device,renderer);
   TestPreparedLightBindings(&device);
+    TestSceneryLightBindings(&device, renderer);
   TestSceneryIllumination(&device, renderer);
   TestCloudLighting(&device,renderer);
     TestSceneryHeat(&device, renderer);
@@ -1007,6 +1079,7 @@ int main(void) {
     TestActorIllumination(&device,renderer);
     TestActorBlurExposure(&device,renderer);
     TestPreparedLightBindings(&device);
+    TestSceneryLightBindings(&device, renderer);
     TestSceneryIllumination(&device, renderer);
   TestCloudLighting(&device,renderer);
     TestSceneryHeat(&device, renderer);

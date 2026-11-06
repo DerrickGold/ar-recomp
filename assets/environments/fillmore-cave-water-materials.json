@@ -1,0 +1,366 @@
+{
+  "profile": "fillmore-cave-water",
+  "description": "Reviewed native pool surfaces and falling-water curtains across every animation phase. Semantic kinds distinguish surfaces (1) and falls (2); source IDs are provenance only.",
+  "materials": [
+    {
+      "key": "14d0a01372cd697a",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "animation_phases": [
+        0
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "35923a7a25244d03",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "animation_phases": [
+        3
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "4dbe1f92d1173632",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "animation_phases": [
+        2
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "90520bb9f074f472",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "animation_phases": [
+        1
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "1e566a7e30cc44ee",
+      "kinds": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "flags": 0,
+      "animation_phases": [
+        0
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          2
+        ],
+        [
+          2,
+          1,
+          2
+        ],
+        [
+          2,
+          2,
+          2
+        ]
+      ]
+    },
+    {
+      "key": "2a1a50970b1bb2b6",
+      "kinds": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "flags": 0,
+      "animation_phases": [
+        0
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          6
+        ],
+        [
+          2,
+          1,
+          6
+        ],
+        [
+          2,
+          2,
+          6
+        ]
+      ]
+    },
+    {
+      "key": "ba7b27183a7221fa",
+      "kinds": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "flags": 0,
+      "animation_phases": [
+        1
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          2
+        ],
+        [
+          2,
+          1,
+          2
+        ],
+        [
+          2,
+          2,
+          2
+        ]
+      ]
+    },
+    {
+      "key": "dd86bed797b9cb96",
+      "kinds": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "flags": 0,
+      "animation_phases": [
+        1
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          6
+        ],
+        [
+          2,
+          1,
+          6
+        ],
+        [
+          2,
+          2,
+          6
+        ]
+      ]
+    },
+    {
+      "key": "7b5aa50cc1a0fb1f",
+      "kinds": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "flags": 0,
+      "animation_phases": [
+        2
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          2
+        ],
+        [
+          2,
+          1,
+          2
+        ],
+        [
+          2,
+          2,
+          2
+        ]
+      ]
+    },
+    {
+      "key": "5206e6f1b8d734ef",
+      "kinds": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "flags": 0,
+      "animation_phases": [
+        2
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          6
+        ],
+        [
+          2,
+          1,
+          6
+        ],
+        [
+          2,
+          2,
+          6
+        ]
+      ]
+    },
+    {
+      "key": "3a27a44ef06f8387",
+      "kinds": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "flags": 0,
+      "animation_phases": [
+        3
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          2
+        ],
+        [
+          2,
+          1,
+          2
+        ],
+        [
+          2,
+          2,
+          2
+        ]
+      ]
+    },
+    {
+      "key": "7fe8c0026ace8e3b",
+      "kinds": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "flags": 0,
+      "animation_phases": [
+        3
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          6
+        ],
+        [
+          2,
+          1,
+          6
+        ],
+        [
+          2,
+          2,
+          6
+        ]
+      ]
+    }
+  ]
+}

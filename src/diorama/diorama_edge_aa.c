@@ -82,12 +82,12 @@ static ArRenderPointF FringeOffset(
   return (ArRenderPointF){mx * distance, my * distance};
 }
 
-bool DioramaEdgeAa_BuildFringe(
-    const ArRenderVertex2D *grid, int subdiv_x, int subdiv_y,
+bool DioramaEdgeAa_BuildFringeDepth(
+    const ArRenderVertex2D *grid, const float *depths, int subdiv_x, int subdiv_y,
     float width_pixels, DioramaEdgeAaMask edge_mask,
     float u_min, float u_max, float v_min, float v_max,
     float texel_width, float texel_height,
-    ArRenderVertex2D *out_vertices, int vertex_capacity,
+    ArRenderVertex2D *out_vertices, float *out_depths, int vertex_capacity,
     int32_t *out_indices, int index_capacity,
     int *out_vertex_count, int *out_index_count) {
   if (out_vertex_count) *out_vertex_count = 0;
@@ -100,7 +100,7 @@ bool DioramaEdgeAa_BuildFringe(
       enabled_segments++;
   }
   const int needed_indices = 6 * enabled_segments;
-  if (!grid || !out_vertices || !out_indices || !out_vertex_count ||
+  if ((depths!=NULL)!=(out_depths!=NULL) || !grid || !out_vertices || !out_indices || !out_vertex_count ||
       !out_index_count || boundary_count <= 0 || width_pixels <= 0.0f ||
       texel_width <= 0.0f || texel_height <= 0.0f ||
       u_max - u_min <= texel_width || v_max - v_min <= texel_height ||
@@ -143,6 +143,8 @@ bool DioramaEdgeAa_BuildFringe(
     outer.color.a = 0.0f;
     out_vertices[2 * point] = inner;
     out_vertices[2 * point + 1] = outer;
+    if(out_depths)out_depths[2*point]=out_depths[2*point+1]=
+        depths[BoundaryGridIndex(point,subdiv_x,subdiv_y)];
   }
 
   int index_count = 0;
@@ -165,4 +167,15 @@ bool DioramaEdgeAa_BuildFringe(
   *out_vertex_count = needed_vertices;
   *out_index_count = index_count;
   return true;
+}
+
+bool DioramaEdgeAa_BuildFringe(
+    const ArRenderVertex2D *grid,int subdiv_x,int subdiv_y,
+    float width_pixels,DioramaEdgeAaMask edge_mask,
+    float u_min,float u_max,float v_min,float v_max,float texel_width,float texel_height,
+    ArRenderVertex2D *out_vertices,int vertex_capacity,int32_t *out_indices,int index_capacity,
+    int *out_vertex_count,int *out_index_count) {
+  return DioramaEdgeAa_BuildFringeDepth(grid,NULL,subdiv_x,subdiv_y,width_pixels,edge_mask,
+      u_min,u_max,v_min,v_max,texel_width,texel_height,out_vertices,NULL,vertex_capacity,
+      out_indices,index_capacity,out_vertex_count,out_index_count);
 }

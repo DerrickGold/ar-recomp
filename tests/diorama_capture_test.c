@@ -12,8 +12,9 @@ bool g_diorama_frame_active;
 static FrameSlot slot;
 static SrPpuFrameSnapshot ppu;
 uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
-static bool receiver_attributes;
+static bool receiver_attributes,prop_attributes;
 bool ActRaiser_DioramaReceiverAttributes(void) {return receiver_attributes;}
+bool ActRaiser_DioramaPropAttributes(void) {return prop_attributes;}
 static bool faces_promoted;
 static int promotion_queries;
 bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void) {
@@ -116,6 +117,12 @@ int main(void) {
   assert(slot.diorama_plane_request_mask & Bit(kDioramaPlane_ObjAttributes2));
   assert(slot.diorama_obj_attributes[2].data==&attribute);
   assert(slot.diorama_obj_attributes[2].pitch_bytes==2560);
+  assert(!slot.diorama_obj_owner_tags);
+  prop_attributes=true;Capture(&ppu);
+  assert(slot.diorama_obj_owner_tags);
+  Capture(NULL);assert(!slot.diorama_obj_owner_tags);
+  Capture(&ppu);assert(slot.diorama_obj_owner_tags);
+  prop_attributes=false;Capture(&ppu);assert(!slot.diorama_obj_owner_tags);
   g_settings.diorama_layer_obj=false;Capture(&ppu);
   assert(!slot.diorama_obj_attributes[2].data);
   puts("Diorama capture: shared band mapping, source masks and missing-view gates passed");

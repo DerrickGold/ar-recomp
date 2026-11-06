@@ -43,6 +43,13 @@ static atomic_int s_enabled_state;
 static atomic_int s_viewport_width;
 static atomic_int s_viewport_height;
 static atomic_int s_current_plane;
+/* A deferred backend drain can run inside an already measured submission.
+ * Count the inclusive outer scope once, independently on each host thread. */
+#if defined(_MSC_VER)
+static __declspec(thread) unsigned s_stage_depth[kDioramaPerformanceStage_Count];
+#else
+static _Thread_local unsigned s_stage_depth[kDioramaPerformanceStage_Count];
+#endif
 
 static void LockPerformanceData(void) {
   while (atomic_flag_test_and_set_explicit(
@@ -93,11 +100,13 @@ DioramaPerformanceScope DioramaPerformance_Begin(
     return scope;
   scope.started_ns = DioramaPerformanceNow();
   scope.active = true;
+  ++s_stage_depth[stage];
   return scope;
 }
 
 void DioramaPerformance_End(DioramaPerformanceScope scope) {
   if (!scope.active) return;
+  if (--s_stage_depth[scope.stage]) return;
   const uint64_t elapsed_ns =
       HostClock_Nanoseconds() - scope.started_ns;
   PerformanceMetrics_Record(PerformanceMetrics_Epoch(),

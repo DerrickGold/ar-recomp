@@ -24,13 +24,44 @@ typedef enum ActRaiserSpriteRole {
 } ActRaiserSpriteRole;
 
 enum { kActRaiserSpriteSlots = 128, kActRaiserSpriteShadowBytes = 544 };
+enum { kActRaiserWallTorchPartLimit = 16 };
+typedef struct ActRaiserWallTorchPart {
+  uint16_t owner, tile_attr;
+  int16_t x, y, origin_x, origin_y, world_x, world_y;
+  uint8_t size, owner_tag;
+} ActRaiserWallTorchPart;
 typedef struct ActRaiserSpriteOwnership {
   bool valid, unowned_emitted;
   uint8_t group, map;
   uint16_t location;
   uint8_t slots[kActRaiserSpriteSlots];
   int16_t world_x[kActRaiserSpriteSlots], world_y[kActRaiserSpriteSlots];
+  /* Verified visual props, paired with the exact completed OAM build. */
+  uint16_t prop_owner[kActRaiserSpriteSlots];
+  uint8_t prop_shape[kActRaiserSpriteSlots];
+  /* Native composition origin before viewport clipping, from the same OAM
+   * emission. Large props keep stable sections as their visible parts change. */
+  int16_t prop_origin_x[kActRaiserSpriteSlots], prop_origin_y[kActRaiserSpriteSlots];
+  /* Exact native apron parts from the same completed build. These can exist
+   * without an OAM slot; recording them must never widen native OAM. */
+  uint8_t wall_torch_part_count;
+  ActRaiserWallTorchPart wall_torch_parts[kActRaiserWallTorchPartLimit];
 } ActRaiserSpriteOwnership;
+
+/* A transient capture tag, independent of color, tile identity and object
+ * address layout. All parts of one verified prop share its first OAM slot.
+ * Zero means no verified owner; 255 remains ordinary receiver coverage. */
+static inline unsigned ActRaiserSpriteOwnership_PropTag(
+    const ActRaiserSpriteOwnership *ownership, uint16_t owner) {
+  if (ownership && ownership->valid && owner) {
+    for (unsigned i=0;i<kActRaiserSpriteSlots;++i)
+      if (ownership->prop_owner[i]==owner) return i+1;
+    for (unsigned i=0;i<ownership->wall_torch_part_count;++i)
+      if (ownership->wall_torch_parts[i].owner==owner)
+        return ownership->wall_torch_parts[i].owner_tag;
+  }
+  return 0;
+}
 
 /* Emission describes identity; the completed native OAM DMA makes it visible.
  * These facts are independent of regional art selection and donor residency. */
@@ -44,6 +75,21 @@ void ActRaiserSpriteOwnership_RecordAction(uint16_t source,
 ActRaiserSpriteRole ActRaiserSpriteOwnership_ActionRole(uint16_t record);
 void ActRaiserSpriteOwnership_RecordActionObject(uint16_t source,uint16_t record,
     int16_t world_x,int16_t world_y,unsigned first_byte,unsigned end_byte);
+enum {
+  kActRaiserSpriteProp_None, kActRaiserSpriteProp_Log, kActRaiserSpriteProp_RockPlatform,
+  kActRaiserSpriteProp_TempleBridge, kActRaiserSpriteProp_TemplePlatform,
+  kActRaiserSpriteProp_TempleCrusher, kActRaiserSpriteProp_TempleSpikes,
+  kActRaiserSpriteProp_TempleSpikeRail,
+  /* Native animated flame attached to the room's rear wall, never extruded. */
+  kActRaiserSpriteProp_WallTorch,
+};
+void ActRaiserSpriteOwnership_RecordActionVisual(uint16_t source,uint16_t record,
+    uint16_t animation,uint8_t bank,uint16_t composition,
+    int16_t origin_x,int16_t origin_y,
+    unsigned first_byte,unsigned end_byte);
+void ActRaiserSpriteOwnership_RecordWallTorchPart(uint16_t source,uint16_t record,
+    uint16_t animation,uint8_t bank,int16_t origin_x,int16_t origin_y,
+    int16_t world_x,int16_t world_y,int16_t x,int16_t y,uint16_t tile_attr,uint8_t size);
 void ActRaiserSpriteOwnership_RecordSim(uint16_t record, uint16_t family,
     unsigned first_byte, unsigned end_byte);
 void ActRaiserSpriteOwnership_Complete(const uint8_t *shadow);

@@ -210,7 +210,163 @@ static void TestActionReceivers(void) {
   ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(1,2,shadow);
   CHECK(!ActRaiserSpriteOwnership_Presented(1,2).valid);
 }
+static void TestVoxelProps(void) {
+  uint8_t shadow[544]={0};
+  ActRaiserSpriteOwnership_Reset();
+  ActRaiserSpriteOwnership_Begin(4,5,0);
+  ActRaiserSpriteOwnership_RecordActionObject(0xd601,0xee0,192,212,40,52);
+  ActRaiserSpriteOwnership_RecordActionVisual(0xd601,0xee0,0x4000,0x7e,0x4750,20,80,40,52);
+  CHECK(!ActRaiserSpriteOwnership_Presented(4,5).valid);
+  ActRaiserSpriteOwnership_Complete(shadow);
+  CHECK(!ActRaiserSpriteOwnership_Presented(4,5).valid);
+  ActRaiserSpriteOwnership_Upload(4,5,shadow);
+  ActRaiserSpriteOwnership o=ActRaiserSpriteOwnership_Presented(4,5);
+  CHECK(o.valid && o.prop_shape[10]==kActRaiserSpriteProp_RockPlatform && o.prop_owner[12]==0xee0);
+  CHECK(!o.prop_owner[9] && !o.prop_owner[13]);
+  CHECK(ActRaiserSpriteOwnership_PropTag(&o,0xee0)==11);
+  CHECK(!ActRaiserSpriteOwnership_PropTag(&o,0));
+  CHECK(!ActRaiserSpriteOwnership_PropTag(&o,0xe80));
+  const ActRaiserSpriteOwnership invalid={.prop_owner={[127]=0xee0}};
+  CHECK(!ActRaiserSpriteOwnership_PropTag(&invalid,0xee0));
+  const ActRaiserSpriteOwnership last={.valid=true,.prop_owner={[127]=0xee0}};
+  CHECK(ActRaiserSpriteOwnership_PropTag(&last,0xee0)==128);
+  CHECK(!ActRaiserSpriteOwnership_Presented(4,4).valid);
+  shadow[0]=1;ActRaiserSpriteOwnership_Upload(4,5,shadow);
+  CHECK(!ActRaiserSpriteOwnership_Presented(4,5).valid);
+  /* Both native log compositions stay flat at the waterline and on upper
+   * platforms, including unchanged artwork after they begin falling. Actor
+   * ownership and world coordinates still feed priority and lighting. */
+  const unsigned log_heights[]={232,488,512};
+  for(unsigned short_log=0;short_log<2;++short_log)
+  for(unsigned height=0;height<sizeof(log_heights)/sizeof(*log_heights);++height) {
+    const unsigned y=log_heights[height];
+    const unsigned source=short_log?0xb4c0:0xb499;
+    ActRaiserSpriteOwnership_Begin(2,1,0);
+    ActRaiserSpriteOwnership_RecordActionObject(source,0xee0,1040,y,40,52);
+    ActRaiserSpriteOwnership_RecordActionVisual(source,0xee0,0x4000,0x7e,
+        short_log?0x45bc:0x45a2,20,80,40,52);
+    ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(2,1,shadow);
+    o=ActRaiserSpriteOwnership_Presented(2,1);
+    CHECK(o.valid && !ActRaiserSpriteOwnership_PropTag(&o,0xee0));
+    for(unsigned slot=10;slot<13;++slot) {
+      CHECK(o.slots[slot]==kActRaiserSprite_Enemy && !o.prop_owner[slot] && !o.prop_shape[slot]);
+      CHECK(o.world_x[slot]==1040 && o.world_y[slot]==(int)y);
+    }
+  }
+  /* Companions, changed art/animation, different rooms, players and a reused
+   * OAM range must never inherit a previous log's geometry. */
+  for (unsigned scenario=0;scenario<7;++scenario) {
+    const uint16_t record=scenario==4?0x8a0:0xf60;
+    ActRaiserSpriteOwnership_Begin(2,scenario==3?2:1,0);
+    ActRaiserSpriteOwnership_RecordActionObject(0xb4c0,record,1768,232,12,20);
+    ActRaiserSpriteOwnership_RecordActionVisual(scenario==0?0xb499:0xb4c0,record,
+        scenario==1?0x4002:0x4000,scenario==2?0:0x7e,0x45bc,20,80,12,20);
+    if(scenario==5)ActRaiserSpriteOwnership_Record(kActRaiserSprite_Enemy,12,20);
+    ActRaiserSpriteOwnership_Complete(shadow);
+    ActRaiserSpriteOwnership_Upload(2,scenario==3?2:1,shadow);
+    o=ActRaiserSpriteOwnership_Presented(2,scenario==3?2:1);
+    CHECK(o.valid && !o.prop_shape[3] && !o.prop_owner[3]);
+  }
+  for(unsigned scenario=0;scenario<7;++scenario) {
+    const unsigned room=scenario==1?4:5;
+    const uint16_t record=scenario==5?0x8a0:0xba0;
+    ActRaiserSpriteOwnership_Begin(4,room,0);
+    ActRaiserSpriteOwnership_RecordActionObject(0xd601,record,192,212,20,28);
+    ActRaiserSpriteOwnership_RecordActionVisual(scenario==2?0xd602:0xd601,record,
+        scenario==3?0x4002:0x4000,scenario==4?0:0x7e,0x4750,20,80,20,28);
+    if(scenario==6)ActRaiserSpriteOwnership_RecordActionVisual(0xd601,record,0x4000,0x7e,0x4763,20,80,20,28);
+    ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(4,room,shadow);
+    o=ActRaiserSpriteOwnership_Presented(4,room);
+    CHECK(o.valid && o.prop_shape[5]==(scenario==0?kActRaiserSpriteProp_RockPlatform:0));
+    CHECK(o.prop_owner[6]==(scenario==0?record:0));
+  }
+  const struct { unsigned room,source,animation,composition,shape; } temple[]={
+    {4,0xe42a,0x4000,0x49f4,kActRaiserSpriteProp_TempleBridge},
+    {5,0xe2d1,0x4000,0x48be,kActRaiserSpriteProp_TemplePlatform},
+    {7,0xe292,0x4000,0x488f,kActRaiserSpriteProp_TempleCrusher},
+    {7,0xe2a6,0x4000,0x48be,kActRaiserSpriteProp_TemplePlatform},
+    {7,0xe2bd,0x4000,0x48d1,kActRaiserSpriteProp_TempleSpikes},
+    {8,0xe5cf,0x5000,0x5ccd,kActRaiserSpriteProp_TemplePlatform},
+    {8,0xe606,0x5000,0x6022,kActRaiserSpriteProp_TempleSpikeRail},
+  };
+  for(unsigned i=0;i<sizeof(temple)/sizeof(*temple);++i)
+  for(unsigned scenario=0;scenario<8;++scenario) {
+    const unsigned group=scenario==1?4:5,room=scenario==2?6:temple[i].room;
+    ActRaiserSpriteOwnership_Begin(group,room,0);
+    ActRaiserSpriteOwnership_RecordActionObject(temple[i].source,0xba0,400,200,16,40);
+    ActRaiserSpriteOwnership_RecordActionVisual(scenario==3?0xa686:temple[i].source,0xba0,
+        temple[i].animation+(scenario==4?2:0),scenario==5?0:0x7e,
+        temple[i].composition+(scenario==6?2:0),-32,80,16,40);
+    if(scenario==7)ActRaiserSpriteOwnership_Record(kActRaiserSprite_Enemy,16,40);
+    ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(group,room,shadow);
+    o=ActRaiserSpriteOwnership_Presented(group,room);
+    CHECK(o.valid && o.prop_shape[4]==(scenario==0?temple[i].shape:0));
+    CHECK(o.prop_owner[9]==(scenario==0?0xba0:0));
+    if(!scenario)CHECK(o.prop_origin_x[9]==-32 && o.prop_origin_y[9]==80);
+  }
+  ActRaiserSpriteOwnership_Begin(5,6,0);
+  ActRaiserSpriteOwnership_RecordActionObject(0xe3a1,0xba0,400,200,16,32);
+  ActRaiserSpriteOwnership_RecordActionVisual(0xe3a1,0xba0,0x4000,0x7e,0x48e4,0,0,16,32);
+  ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(5,6,shadow);
+  CHECK(!ActRaiserSpriteOwnership_Presented(5,6).prop_owner[4]);
+  /* Wall flames attach by their native source family, independently of the
+   * animation picture/composition and regional art selection. Nearby static
+   * scenery, fire enemies and reused/player slots remain normal native OBJ. */
+  for(unsigned room=3;room<=5;room+=2)
+  for(unsigned scenario=0;scenario<8;++scenario) {
+    const unsigned group=scenario==1?5:2,map=scenario==2?7:room;
+    const uint16_t record=scenario==6?0x8a0:0xfa0;
+    const uint16_t source=scenario==3?0xba12:0xba01;
+    ActRaiserSpriteOwnership_Begin(group,map,0);
+    ActRaiserSpriteOwnership_RecordActionObject(source,record,224,528,20,28);
+    ActRaiserSpriteOwnership_RecordActionVisual(source,record,
+        scenario==4?0x5000:0x4000,scenario==5?6:0x7e,0x49ff,-4,80,20,28);
+    if(scenario==7)ActRaiserSpriteOwnership_Record(kActRaiserSprite_Enemy,20,28);
+    ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(group,map,shadow);
+    o=ActRaiserSpriteOwnership_Presented(group,map);
+    CHECK(o.valid && o.prop_shape[5]==(scenario==0?kActRaiserSpriteProp_WallTorch:0));
+    CHECK(o.prop_owner[6]==(scenario==0?record:0));
+    if(!scenario)CHECK(o.world_x[5]==224 && o.world_y[5]==528 && o.prop_origin_x[5]==-4);
+  }
+}
+static void TestApronWallTorches(void) {
+  uint8_t shadow[544]={0};
+  ActRaiserSpriteOwnership_Begin(2,3,0);
+  ActRaiserSpriteOwnership_RecordActionObject(0xba01,0xfa0,80,464,508,512);
+  ActRaiserSpriteOwnership_RecordActionVisual(0xba01,0xfa0,0x4000,0x7e,0, -130,80,508,512);
+  ActRaiserSpriteOwnership_RecordWallTorchPart(0xba01,0xfa0,0x4000,0x7e,-130,80,
+      80,464,-130,80,0x2000,16);
+  ActRaiserSpriteOwnership_RecordWallTorchPart(0xba01,0xfe0,0x4000,0x7e,-160,80,
+      48,464,-160,80,0x2000,16);
+  /* No neighbouring scenery, unsupported part size, or player may be moved. */
+  ActRaiserSpriteOwnership_RecordWallTorchPart(0xba12,0x1020,0x4000,0x7e,-160,80,
+      48,464,-160,80,0x2000,16);
+  ActRaiserSpriteOwnership_RecordWallTorchPart(0xba01,0x1020,0x4000,0x7e,-160,80,
+      48,464,-160,80,0x2000,32);
+  ActRaiserSpriteOwnership_RecordWallTorchPart(0xba01,0x8a0,0x4000,0x7e,-160,80,
+      48,464,-160,80,0x2000,16);
+  CHECK(!ActRaiserSpriteOwnership_Presented(2,3).wall_torch_part_count);
+  ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(2,3,shadow);
+  ActRaiserSpriteOwnership o=ActRaiserSpriteOwnership_Presented(2,3);
+  CHECK(o.valid && o.wall_torch_part_count==2);
+  CHECK(ActRaiserSpriteOwnership_PropTag(&o,0xfa0)==128);
+  CHECK(ActRaiserSpriteOwnership_PropTag(&o,0xfe0)==127);
+  CHECK(o.wall_torch_parts[0].owner_tag==128 && o.wall_torch_parts[1].owner_tag==127);
+  CHECK(o.wall_torch_parts[1].x==-160 && o.wall_torch_parts[1].world_x==48);
+  shadow[20]=1;ActRaiserSpriteOwnership_Upload(2,3,shadow);
+  CHECK(!ActRaiserSpriteOwnership_Presented(2,3).valid);
+  ActRaiserSpriteOwnership_Begin(2,3,0);
+  for(unsigned i=0;i<kActRaiserWallTorchPartLimit+1;++i)
+    ActRaiserSpriteOwnership_RecordWallTorchPart(0xba01,0x8e0+i*64,0x4000,0x7e,
+        -160,80,48,464,-160,80,0x2000,16);
+  ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(2,3,shadow);
+  o=ActRaiserSpriteOwnership_Presented(2,3);
+  CHECK(o.wall_torch_part_count==kActRaiserWallTorchPartLimit);
+  CHECK(!ActRaiserSpriteOwnership_PropTag(&o,0x8e0+kActRaiserWallTorchPartLimit*64));
+}
 int main(void) {
+  TestApronWallTorches();
+  TestVoxelProps();
   TestActionReceivers();
   TestNativeWrappers();
   TestPublication();

@@ -42,6 +42,7 @@ static uint32_t RequestedPlanes(void) {
 }
 
 void DioramaCapture_CaptureFrame(FrameSlot *frame, const SrPpuFrameSnapshot *ppu) {
+  frame->diorama_obj_owner_tags = false;
   for(unsigned p=0;p<4;++p)frame->diorama_obj_attributes[p]=(SrPpuSurfaceView){0};
   frame->diorama_active = g_diorama_frame_active;
   frame->diorama_plane_request_mask = 0;
@@ -49,7 +50,7 @@ void DioramaCapture_CaptureFrame(FrameSlot *frame, const SrPpuFrameSnapshot *ppu
   frame->diorama_plane_additive_mask = 0;
   if (!frame->diorama_active) return;
   frame->diorama_plane_request_mask = RequestedPlanes();
-  if(frame->diorama_trunk && frame->diorama_trunk_settings.enabled) {
+  if(frame->diorama_voxel || (frame->diorama_trunk && frame->diorama_trunk_settings.enabled)) {
     frame->diorama_plane_request_mask|=SourcePlanes(SR_PPU_OVERLAY_BG1)|SourcePlanes(SR_PPU_OVERLAY_BG2);
   }
   if (!ppu) return;
@@ -75,7 +76,8 @@ void DioramaCapture_CaptureFrame(FrameSlot *frame, const SrPpuFrameSnapshot *ppu
    * result supplements the PPU's own content bits. */
   if (ActRaiser_DioramaDeathHeimHubFacesPromoted())
     content |= PlaneBit(kDioramaPlane_Bg2Far);
-  if (ActRaiser_DioramaReceiverAttributes())
+  if (ActRaiser_DioramaReceiverAttributes()) {
+    frame->diorama_obj_owner_tags = ActRaiser_DioramaPropAttributes();
     for(unsigned p=0;p<4;++p) {
       const unsigned parent=DioramaPlaneForObjectPriority(p),plane=kDioramaPlane_ObjAttributes0+p;
       if (!(content & frame->diorama_plane_request_mask & PlaneBit(parent))) continue;
@@ -84,7 +86,9 @@ void DioramaCapture_CaptureFrame(FrameSlot *frame, const SrPpuFrameSnapshot *ppu
       content|=PlaneBit(plane);
       frame->diorama_plane_request_mask|=PlaneBit(plane);
     }
+  }
   if(frame->diorama_trunk)content|=SourcePlanes(SR_PPU_OVERLAY_BG1);
+  if(frame->diorama_voxel)content|=PlaneBit(SR_PPU_OVERLAY_BG1)|PlaneBit(kDioramaPlane_Bg1Far);
   frame->diorama_plane_content_mask = content;
   frame->diorama_plane_additive_mask = additive;
 }

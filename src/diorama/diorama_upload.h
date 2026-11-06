@@ -31,13 +31,23 @@ DioramaUploadResult Diorama_Upload(
     uint32_t plane_mask);
 
 /* The GPU has already synchronized these planes. Keep CPU coverage/mirror
- * fallback bookkeeping without uploading their expanded pixels a second time. */
+ * fallback bookkeeping without uploading their expanded pixels a second time.
+ * Coverage may be omitted when the consumer does not use it. Omission always
+ * invalidates retained masks so an unchanged upload cannot revive stale
+ * coverage when the consumer starts using it again. */
 DioramaUploadResult Diorama_UploadResolved(
     ArRenderDevice *device, ArRenderTexture textures[kDioramaPlane_Count],
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
     int width, int height, int apron, unsigned bg_apron_mask,
-    uint32_t plane_mask, uint32_t gpu_mask, uint32_t gpu_changed);
+    uint32_t plane_mask, uint32_t gpu_mask, uint32_t gpu_changed,
+    bool collect_coverage);
+
+/* Generated planes can move beyond either endpoint's alpha footprint. Their
+ * compositor already uses the complete mesh; do not scan unused footprints. */
+static inline bool DioramaUpload_UsesCoverage(bool interpolation_enabled) {
+  return !interpolation_enabled;
+}
 
 /* Forget retained upload hashes after a render-device reset or shutdown. */
 void DioramaUpload_Reset(void);

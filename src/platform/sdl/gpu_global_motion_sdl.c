@@ -141,7 +141,10 @@ bool ArGpuGlobalMotion_Analyze(ArGpuGlobalMotion *p, SDL_GPUCommandBuffer *cmd, 
 bool ArGpuGlobalMotion_Warp(ArGpuGlobalMotion *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *previous, SDL_GPUTexture *current, float phase) {
   if (!(phase >= 0.0f && phase <= 1.0f) || !ArGpuGlobalMotion_EnsureOutput(p)) return false;
   const SDL_GPUStorageTextureReadWriteBinding output = {.texture = p->output, .cycle = true};
-  struct { float phase[4], extents[8][4]; } uniform = {.phase = {phase, (float)(p->input_plane_count ? p->input_plane_count : p->plane_count), 0, 0}};
+  struct { float phase[4], extents[8][4], map_delta[4]; } uniform = {.phase = {phase,
+      (float)(p->input_plane_count ? p->input_plane_count : p->plane_count),
+      p->alpha_correct ? 1.0f : 0.0f, (float)p->exact_map_mask},
+      .map_delta = {(float)p->map_camera_dx, (float)p->map_camera_dy}};
   SDL_memcpy(uniform.extents, p->extents, sizeof(p->extents));
   SDL_PushGPUComputeUniformData(cmd, 0, &uniform, sizeof(uniform));
   SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(cmd, &output, 1, NULL, 0);
@@ -158,8 +161,10 @@ bool ArGpuGlobalMotion_WarpLayers(ArGpuGlobalMotion *p, SDL_GPUCommandBuffer *cm
   if (!p->warp_layers || !targets || p->plane_count != 8 || mask > 255 ||
       !(phase >= 0.0f && phase <= 1.0f)) return false;
   SDL_GPUStorageTextureReadWriteBinding outputs[8] = {0};
-  struct { float phase[4], extents[8][4]; } uniform = {
-      .phase = {phase, (float)(p->input_plane_count ? p->input_plane_count : p->plane_count)}};
+  struct { float phase[4], extents[8][4], map_delta[4]; } uniform = {
+      .phase = {phase, (float)(p->input_plane_count ? p->input_plane_count : p->plane_count),
+          p->alpha_correct ? 1.0f : 0.0f, (float)p->exact_map_mask},
+      .map_delta = {(float)p->map_camera_dx, (float)p->map_camera_dy}};
   SDL_memcpy(uniform.extents, p->extents, sizeof(p->extents));
   /* Validate the complete set before recording anything. */
   for (unsigned i = 0; i < 8; ++i) {

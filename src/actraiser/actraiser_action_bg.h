@@ -29,6 +29,11 @@ bool ActRaiserActionBg_LiveRasterCameraSensitivity(
 struct DioramaRoomOverride;
 struct ActionTrunkAssets;
 /* Immutable assets retained until the producer/presenter session is stopped. */
+/* Producer-owned immutable publication; retained frames take a reference.
+ * Prepare runs before capture policy, after the native gameplay pass. */
+struct ActionVoxelGeometry;
+void ActRaiserActionBg_PrepareVoxel(bool enabled, const struct DioramaRoomOverride *terrain);
+const struct ActionVoxelGeometry *ActRaiserActionBg_VoxelGeometry(unsigned group, unsigned room);
 const struct ActionTrunkAssets *ActRaiserActionBg_TrunkAssets(unsigned group,unsigned room,
     const struct DioramaRoomOverride *edits);
 struct ActionEnvironmentScene;

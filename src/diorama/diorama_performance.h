@@ -38,6 +38,8 @@ typedef struct DioramaPerformanceScope {
  * The interactive pipeline collector also uses lightweight stage/work hooks,
  * but never enables the legacy CPU triangle-coverage estimator. */
 bool DioramaPerformance_Enabled(void);
+/* Pair scopes on the same thread in nesting order. Re-entering the same stage
+ * records only its outer inclusive duration; distinct stages may overlap. */
 DioramaPerformanceScope DioramaPerformance_Begin(
     DioramaPerformanceStage stage);
 void DioramaPerformance_End(DioramaPerformanceScope scope);

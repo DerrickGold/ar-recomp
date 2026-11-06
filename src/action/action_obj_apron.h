@@ -109,7 +109,7 @@ int ActionApron_Count(void);
 int ActionApron_Overflow(void);
 int ActionApron_PeakCount(void);
 const SrPpuObjPart *ActionApron_Parts(void);
-typedef struct ActionApronReceiver { int16_t x,y; uint8_t role; } ActionApronReceiver;
+typedef struct ActionApronReceiver { int16_t x,y; uint8_t role; uint16_t owner; } ActionApronReceiver;
 bool ActionApron_AddOwnedPart(const ActionApronGeometry *,int,int,uint16_t,uint8_t,ActionApronReceiver);
 const ActionApronReceiver *ActionApron_Receivers(void);
 

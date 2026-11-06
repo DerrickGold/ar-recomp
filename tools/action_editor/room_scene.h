@@ -24,6 +24,9 @@ bool EditorRoomScene_DefaultGuide(EditorRoomScene *room, unsigned index, unsigne
                                   ArRenderRectF *bounds);
 EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets);
 void EditorRoomScene_SetEvent(EditorRoomScene *room,const ActionEffectPreviewEvent *event);
+/* Offline tools start in Voxel 3D; flat scanout remains a separate path. */
+void EditorRoomScene_Set3DMode(EditorRoomScene *room, Action3DMode mode);
+Action3DMode EditorRoomScene_3DMode(const EditorRoomScene *room);
 void EditorRoomScene_Destroy(EditorRoomScene *room);
 /* Complete selected-room INI text; parser/terrain resolution are production C.
  * Bad edits leave the previous configuration intact. */
@@ -67,6 +70,13 @@ const char *EditorRoomScene_RecipeError(const EditorRoomScene *room);
 const ActionSceneEffectFrame *EditorRoomScene_Effects(const EditorRoomScene *room);
 void EditorRoomScene_EnableEffects(EditorRoomScene *room,bool enabled);
 const ActionEnvironmentScene *EditorRoomScene_Environment(const EditorRoomScene *room);
+unsigned EditorRoomScene_TerrainProfile(const EditorRoomScene *room);
+/* Native scenery identity at a packet's own camera/clock, without changing
+ * the current editor render or retained actor frame. */
+bool EditorRoomScene_NativeSection(const EditorRoomScene *,int x,int y,uint32_t frame,unsigned *section);
+/* A native packet replaces synthetic receiver/binding facts, including an
+ * intentionally empty native actor frame. Facts retain their world space. */
+bool EditorRoomScene_SetNativeActors(EditorRoomScene *,const ActionEffectActor *,unsigned count,bool enabled);
 const ActionAtmosphereField *EditorRoomScene_AtmosphereField(const EditorRoomScene *room);
 bool EditorRoomScene_PreviewBinding(EditorRoomScene *,bool enabled,uint32_t source,int x,int y,unsigned start);
 void EditorRoomScene_AdvanceReceivers(EditorRoomScene *,unsigned mask,const int x[2],const int feet_y[2],uint32_t frame);

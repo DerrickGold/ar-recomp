@@ -5,6 +5,10 @@ These enhancements use AR1 rooms and regional terrain. The shared
 provides the authoring controls; [diorama depth shapes](../diorama-depth-shapes.md)
 describes room geometry.
 
+For the available rendering modes, see [Action 3D modes](../manual.md#action-3d-modes).
+Diorama is the default 3D mode; **Voxel 3D (WIP)** adds modeled environments in
+supported rooms.
+
 ## Aitos Act 1
 
 Rooms `04:01–03` use the **Environmental effects** setting. Their definitions
@@ -138,11 +142,13 @@ and follow **Environmental effects**.
 | 06:07 | Darker upper branches, a restrained green aurora glimpsed through the native openings and a faint green cast on the climb. |
 | 06:08 | Three broader, brighter green/cyan and rose/red aurora curtains above the snowy canopy, matching reflected color and light windblown snow. |
 
-In Diorama, the two interiors form a connected tree hollow: a smoothly curved
+With **Action 3D** set to **Voxel 3D**, the two interiors form a connected tree hollow: a smoothly curved
 rear wall, recessed platforms and actors, and solid native bark edges. The
 **Tree enclosure** controls in the action editor set curvature and recess.
 The enclosure owns its background layout, so ordinary BG layer and skybox policies
-cannot change it. Choosing **Original layers** restores the saved BG settings.
+cannot change it. Switching the game to **Diorama**, or choosing **Original layers**
+in the editor, restores the saved BG settings. Unsupported rooms use ordinary
+Diorama rendering in either 3D mode.
 
 Twelve short, widening beams shine through selected openings. They softly light
 the curved wall and branch undersides, with restrained shadows beneath branches.
@@ -241,7 +247,7 @@ run from an icicle tip to the water, with **Water landing** enabled and a low
 
 ## Death Heim final battle
 
-For room `07:08`, enable **Action 3D → Scene → Diorama 3D** and **Environmental
+For room `07:08`, select **Diorama** or **Voxel 3D** under **Action 3D → Scene → Action 3D** and enable **Environmental
 effects**, the same master used by other action rooms. The completion-scene
 setting is independent.
 The enhancement adds glow, colour grading, fighter illumination, and sparse
@@ -266,3 +272,74 @@ drift, and the blue/rose colours are independently editable. Pausing freezes
 their gameplay clock, and editor seeking reproduces the same time. Save,
 reset, undo, and INI reload preserve these controls; older material entries
 inherit the default dust values.
+
+## Bloodpool Act 2
+
+### Castle geometry in Voxel 3D
+
+Bloodpool rooms `02:02–08` now use the shared castle renderer in the main game
+and room editor. Select **Action 3D → Scene → Action 3D → Voxel 3D (WIP)** to enable
+recessed halls and actors, connected floor tops, shallow foreground
+crenellations with matching rear trim, and gates extending back to the wall.
+Native high-priority artwork still covers actors; the generated walking
+surface behind an actor is drawn before that actor. Open or transparent gate
+art does not become a solid block.
+
+The castle owns its BG order, depth, fill and stacking while active, including
+the moat water. Saved policies return in ordinary Diorama mode. Terrain stamps
+and pixel edits remain supported; their displayed native priority determines
+castle occlusion. Environmental lighting and particles keep their own controls.
+
+Geometry uses collision, native priority and reviewed artwork signatures from
+`assets/environments/castle-materials.json`, independent of metatile and
+character numbering. Native map/definition/character/palette changes, observed
+VRAM gate patches and terrain edits invalidate the producer's cache. Published
+geometry is immutable and reference-counted through the frame queue and display
+history. Geometry revisions reset frame-generation history when gates change
+or Voxel mode is toggled. Unknown backing artwork falls back to ordinary Diorama.
+
+## Voxel 3D (WIP)
+
+Choose **Action 3D → Scene → Action 3D → Voxel 3D (WIP)** to enable modeled
+terrain in supported rooms. The mode adds connected walking surfaces, recessed
+scenery and depth for selected native objects while retaining the original
+artwork, collision, movement and sprite priority. It is a work in progress.
+
+Each modeled room controls the background layout needed for its geometry,
+including depth, fill, stacking and camera framing. Ordinary **Diorama** restores
+the room's saved layer policies. **Off** retains the flat view. Environmental
+effects, lighting and particles keep their separate controls. Northwall's tree
+interiors use the enclosure controls described above; the completion scene
+retains its independent presentation setting.
+
+### Terrain and material authoring
+
+Terrain stamps and pixel edits remain available in modeled rooms. Material
+recipes in `assets/environments/*-materials.json` distinguish walkable solids,
+rear scenery, trim and open structures using displayed artwork, palette slots,
+collision and native priority. Recorded tile and character IDs are review
+provenance, not runtime material selectors. Keep collision and priority separate
+from visual depth when editing a surface. Freestanding platforms and islands
+keep open space behind them; they do not imply a distant backing wall.
+
+Voxel-only matte cutouts are defined in
+`assets/environments/voxel-transparency.json`. Only listed palette indices
+connected to the metatile border become transparent; enclosed shadows and
+coloured outlines remain intact. Authored black paint overrides automatic
+cutouts, and explicit transparency keeps its existing precedence. These rules
+do not change collision or ordinary Off/Diorama artwork.
+
+After changing the material recipes, regenerate their tables with:
+
+```sh
+python3 tools/generate_voxel_materials.py
+```
+
+Add `--check` to validate the generated tables without writing them. Review
+edited surfaces head-on and from both yaw directions, including their joins,
+openings and relationship to actors.
+
+Map scenery alone cannot show moving native objects. The action editor can
+[load captured native sprites and moving objects](https://github.com/DerrickGold/ar-recomp/blob/main/tools/action_editor/README.md#native-sprites-and-moving-objects)
+for a matching room and regional layout. Captures have finite camera coverage;
+use live gameplay to check movement, spawning and actor contacts.

@@ -980,6 +980,9 @@ static void ChangeSelectedValue(int direction) {
       long next;
       if (desc->type == kSettingType_Bool) {
         next = !value;
+      } else if (desc->field == &g_settings.diorama_mode && value == kAction3D_Off) {
+        /* Either enable direction starts with the shipped 3D mode. */
+        next = kAction3D_Diorama;
       } else {
         long step = desc->step > 0 ? desc->step : 1;
         /* Step over values this platform cannot select, for at most one

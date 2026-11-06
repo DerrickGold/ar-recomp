@@ -1,4 +1,5 @@
 #include "host/frame_queue.h"
+#include "action/action_voxel.h"
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -37,6 +38,7 @@ HostFrameQueue *HostFrameQueue_Create(void) {
 void HostFrameQueue_Destroy(HostFrameQueue *q) {
   if (!q) return;
   for (int i = 0; i < kQueueCapacity; ++i) {
+    ActionVoxel_Release(q->packets[i].voxel_storage);
     free(q->packets[i].pixels);
     free(q->packets[i].background_storage);
     free(q->packets[i].sim_storage);
@@ -71,6 +73,10 @@ unsigned HostFrameQueue_ReadyCount(const HostFrameQueue *q) {
 }
 
 void HostFrameQueue_Release(HostFrameQueue *q) {
+  const uint64_t r = atomic_load_explicit(&q->consumed, memory_order_relaxed);
+  HostFramePacket *packet = &q->packets[r % kQueueCapacity];
+  ActionVoxel_Release(packet->voxel_storage);
+  packet->voxel_storage = NULL;
   atomic_fetch_add_explicit(&q->consumed, 1, memory_order_release);
 }
 
@@ -155,6 +161,9 @@ static bool OwnSimPixels(HostFramePacket *p) {
 
 bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   FrameSlot *f = &p->frame;
+  const ActionVoxelGeometry *castle = ActionVoxel_Retain(f->diorama_voxel);
+  ActionVoxel_Release(p->voxel_storage);
+  p->voxel_storage = castle;
   if (!HostFramePacket_Supports(f)) return false;
   if (f->sim.view == kSimView_Enhanced) return OwnSimPixels(p);
   const uint32_t mask = f->diorama_plane_request_mask & f->diorama_plane_content_mask &
@@ -192,6 +201,7 @@ bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   for(unsigned band=0;band<4;++band)
     if(!CopyView(p,&f->diorama_obj_attributes[band],
         (mask & (1u<<(kDioramaPlane_ObjAttributes0+band)))!=0))return false;
+  if (!CopyView(p, &f->voxel_sprite_atlas, f->voxel_sprites.count != 0)) return false;
   f->ppu_surfaces.authentic = (SrPpuSurfaceView){0};
   f->ppu_surfaces.mode7 = (SrPpuSurfaceView){0};
   f->authentic_frame_serial = 0;

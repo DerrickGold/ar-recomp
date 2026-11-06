@@ -7,7 +7,12 @@
 #include "sim/sim3d/sim3d_performance.h"
 #include "diorama/diorama_performance.h"
 
-uint64_t HostClock_Nanoseconds(void) { return 1; }
+#if defined(_MSC_VER)
+static __declspec(thread) uint64_t test_now = 1;
+#else
+static _Thread_local uint64_t test_now = 1;
+#endif
+uint64_t HostClock_Nanoseconds(void) { return test_now; }
 uint64_t HostClock_Milliseconds(void) { return 0; }
 
 static void BeginMeasurement(void) {
@@ -26,7 +31,52 @@ static void CheckMeasurement(unsigned calls, unsigned bytes, unsigned skipped) {
   assert(snapshot.counts[kPerformanceCount_UploadSkipped] * 2 == skipped);
 }
 
+static int MeasureWorker(void *unused) {
+  (void)unused;
+  test_now = 1000000;
+  const DioramaPerformanceScope work = DioramaPerformance_Begin(kDioramaPerformance_Submit);
+  test_now = 8000000;
+  DioramaPerformance_End(work);
+  return 0;
+}
+
+static void CheckNestedSubmission(void) {
+  BeginMeasurement();
+  test_now = 1000000;
+  const DioramaPerformanceScope outer = DioramaPerformance_Begin(kDioramaPerformance_Submit);
+  test_now = 2000000;
+  const DioramaPerformanceScope nested = DioramaPerformance_Begin(kDioramaPerformance_Submit);
+  const DioramaPerformanceScope mesh = DioramaPerformance_Begin(kDioramaPerformance_Mesh);
+  test_now = 4000000;
+  DioramaPerformance_End(mesh);
+  test_now = 5000000;
+  DioramaPerformance_End(nested);
+  /* Another thread's submission must not be hidden by this thread's scope. */
+  SDL_Thread *worker = SDL_CreateThread(MeasureWorker,"nested action timing",NULL);
+  assert(worker);
+  int status = -1; SDL_WaitThread(worker,&status); assert(status == 0);
+  test_now = 10000000;
+  DioramaPerformance_End(outer);
+  /* A deferred drain outside the outer submission is an additional 4 ms. */
+  test_now = 11000000;
+  const DioramaPerformanceScope deferred = DioramaPerformance_Begin(kDioramaPerformance_Submit);
+  test_now = 15000000;
+  DioramaPerformance_End(deferred);
+  DioramaPerformance_End(DioramaPerformance_Begin((DioramaPerformanceStage)-1));
+  DioramaPerformance_End(DioramaPerformance_Begin(kDioramaPerformanceStage_Count));
+  PerformanceMetrics_PresentCompleted(1000000000);
+  PerformanceSnapshot snapshot; PerformanceMetrics_Snapshot(&snapshot);
+  const PerformanceValue submit = snapshot.stages[kPerformance_ActionFirst+kDioramaPerformance_Submit];
+  const PerformanceValue meshes = snapshot.stages[kPerformance_ActionFirst+kDioramaPerformance_Mesh];
+  assert(snapshot.ready && snapshot.presents == 2);
+  assert(submit.calls == 3 && submit.mean_ms == 10 && submit.maximum_ms == 9);
+  assert(meshes.calls == 1 && meshes.mean_ms == 1 && meshes.maximum_ms == 2);
+  PerformanceMetrics_Configure(false,false);
+  DioramaPerformance_End(DioramaPerformance_Begin(kDioramaPerformance_Submit));
+}
+
 int main(void) {
+  CheckNestedSubmission();
   SDL_Surface *surface = SDL_CreateSurface(4, 4, SDL_PIXELFORMAT_ARGB8888);
   assert(surface);
   SDL_Renderer *renderer = SDL_CreateSoftwareRenderer(surface);

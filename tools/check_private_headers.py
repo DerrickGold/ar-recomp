@@ -23,6 +23,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RULES = {
+    'action/action_voxel_internal.h': [
+        'src/action/action_voxel.c', 'src/action/action_voxel_build.c',
+        # Focused compositor oracles construct minimal immutable geometry;
+        # neither exposes internal helpers to production callers.
+        'tests/diorama_compositor_test.c', 'tests/diorama_voxel_subscreen_gpu_test.c'],
     'actraiser/actraiser_ar2_master_internal.h': [
         'src/actraiser/actraiser_ar2_master.c',
         'src/actraiser/actraiser_ar2_master_presentation.c'],
@@ -65,7 +70,7 @@ RULES = {
         'src/action/action_scene_lightning_render.c',
         # Direct geometry-writer regression coverage, like the focused
         # renderer/camera tests allowed for the other private families.
-        'tests/action_authored_fields_test.c'],
+        'tests/action_authored_fields_test.c', 'tests/action_surface_recipe_test.c'],
     'platform/sdl/sim3d_depth_pass_sdl_internal.h': [
         'src/platform/sdl/sim3d_depth_pass*_sdl.c'],
     'actraiser/actraiser_action_room_hle_internal.h': [
@@ -121,6 +126,7 @@ def unregistered_headers(files, rules=RULES):
 
 def self_test():
     cases = [
+        ('action/action_voxel_internal.h', 'src/action/action_voxel_build.c'),
         ('actraiser/enhancements/actraiser_enhancements_internal.h',
          'src/actraiser/enhancements/actraiser_frame_draw.c'),
         ('present/present_internal.h', 'src/present/present_frame.c'),

@@ -91,6 +91,7 @@ HudIconFrame ActRaiser_HudIconFrame(void);
 bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void);
 uint8_t ActRaiser_DioramaBgApronMask(void);
 bool ActRaiser_DioramaReceiverAttributes(void);
+bool ActRaiser_DioramaPropAttributes(void);
 void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);
 void ActRaiser_OnInidispWrite(uint8 value);

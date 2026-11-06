@@ -16,8 +16,13 @@ DioramaUploadResult Diorama_UploadResolved(
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
     int snes_width, int snes_height, int obj_apron, unsigned bg_apron_mask,
-    uint32_t plane_mask, uint32_t gpu_mask, uint32_t gpu_changed) {
+    uint32_t plane_mask, uint32_t gpu_mask, uint32_t gpu_changed,
+    bool collect_coverage) {
   DioramaUploadResult upload = {0};
+  /* Do this before device/source validation too. A disabled-coverage capture
+   * may fail to upload; its next unchanged successful capture must still
+   * recompute coverage if the consumer has since enabled it. */
+  if (!collect_coverage) s_coverage_valid_mask = 0;
   DioramaPerformanceScope performance =
       DioramaPerformance_Begin(kDioramaPerformance_Upload);
   /* `snes_width` is the full surface width (display + both aprons); the pitch
@@ -61,7 +66,7 @@ DioramaUploadResult Diorama_UploadResolved(
     upload.synchronized_plane_mask |= 1u << plane;
     if (plane_upload.changed) upload.changed_plane_mask |= 1u << plane;
     upload.coverage_masks[plane] = DioramaCoverage_FullMask();
-    if (!on_gpu && DioramaPlaneUsesSparseCoverage(plane)) {
+    if (collect_coverage && !on_gpu && DioramaPlaneUsesSparseCoverage(plane)) {
       const bool object = DioramaPlaneIsObjectPriority(plane);
       const int coverage_width = object ? region.width : snes_width - obj_apron * 2;
       const uint8_t *covered_pixels = object ? source : pixels[plane] +
@@ -91,7 +96,7 @@ DioramaUploadResult Diorama_Upload(ArRenderDevice *device,
     const size_t pitches[kDioramaPlane_Count], int width, int height,
     int apron, unsigned bg_apron, uint32_t mask) {
   return Diorama_UploadResolved(device, textures, pixels, pitches,
-      width, height, apron, bg_apron, mask, 0, 0);
+      width, height, apron, bg_apron, mask, 0, 0, true);
 }
 
 void DioramaUpload_Reset(void) {

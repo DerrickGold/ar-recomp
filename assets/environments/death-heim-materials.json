@@ -1,0 +1,9348 @@
+{
+  "description": "Reviewed Death Heim boss arenas and floating skull island. Native artwork, collision, palette slots and priority select semantic material roles. Reused boss architecture inherits reviewed stage contracts; the final dual-wave nebula and stars remain celestial rear art despite invisible collision. Completion scenery is a separate scene and is excluded by callers. No freestanding room receives a fabricated back wall.",
+  "materials": [
+    {
+      "key": "01a681a3002c2ada",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          84
+        ],
+        [
+          6,
+          1,
+          84
+        ],
+        [
+          6,
+          2,
+          84
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "035ddc663855f039",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          170
+        ],
+        [
+          1,
+          1,
+          170
+        ],
+        [
+          1,
+          2,
+          170
+        ]
+      ]
+    },
+    {
+      "key": "04626923db6d82a6",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          84
+        ],
+        [
+          4,
+          1,
+          84
+        ],
+        [
+          4,
+          2,
+          84
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "04e2286ccaa6a2fe",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          65
+        ],
+        [
+          8,
+          1,
+          65
+        ],
+        [
+          8,
+          2,
+          65
+        ]
+      ]
+    },
+    {
+      "key": "057acfc5b2366704",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          49
+        ],
+        [
+          8,
+          1,
+          49
+        ],
+        [
+          8,
+          2,
+          49
+        ]
+      ]
+    },
+    {
+      "key": "091d25976b910c7b",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          34
+        ],
+        [
+          3,
+          1,
+          34
+        ],
+        [
+          3,
+          2,
+          34
+        ]
+      ]
+    },
+    {
+      "key": "096537792b91795a",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 6,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          98
+        ],
+        [
+          1,
+          1,
+          98
+        ],
+        [
+          1,
+          2,
+          98
+        ]
+      ]
+    },
+    {
+      "key": "0a74a7cbabf94c5e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          94
+        ],
+        [
+          6,
+          1,
+          94
+        ],
+        [
+          6,
+          2,
+          94
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "0aa86bab44137285",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          69
+        ],
+        [
+          6,
+          1,
+          69
+        ],
+        [
+          6,
+          2,
+          69
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "0d6b0bf191b8b32e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          214
+        ],
+        [
+          6,
+          1,
+          214
+        ],
+        [
+          6,
+          2,
+          214
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "0e511b6ed6f6cbc4",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 2,
+      "role": "native_stone_backing",
+      "origins": [
+        [
+          6,
+          0,
+          13
+        ],
+        [
+          6,
+          1,
+          13
+        ],
+        [
+          6,
+          2,
+          13
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "0e6fa96d901f1f99",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          57
+        ],
+        [
+          2,
+          1,
+          57
+        ],
+        [
+          2,
+          2,
+          57
+        ]
+      ]
+    },
+    {
+      "key": "0eee020e92f4bdb7",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          88
+        ],
+        [
+          4,
+          1,
+          88
+        ],
+        [
+          4,
+          2,
+          88
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "0f1ec62f384e1185",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          95
+        ],
+        [
+          3,
+          1,
+          95
+        ],
+        [
+          3,
+          2,
+          95
+        ]
+      ]
+    },
+    {
+      "key": "112d589cd4ef9711",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          60
+        ],
+        [
+          8,
+          1,
+          60
+        ],
+        [
+          8,
+          2,
+          60
+        ]
+      ]
+    },
+    {
+      "key": "12b14188d736c141",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          80
+        ],
+        [
+          6,
+          1,
+          80
+        ],
+        [
+          6,
+          2,
+          80
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "12bb4b3913dc646b",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          87
+        ],
+        [
+          4,
+          1,
+          87
+        ],
+        [
+          4,
+          2,
+          87
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "1313bc1cfc095731",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_invisible_collision",
+      "origins": [
+        [
+          1,
+          0,
+          24
+        ],
+        [
+          1,
+          1,
+          24
+        ],
+        [
+          1,
+          2,
+          24
+        ]
+      ]
+    },
+    {
+      "key": "1313bc1cfc095731",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_invisible_collision",
+      "origins": [
+        [
+          8,
+          0,
+          24
+        ],
+        [
+          8,
+          1,
+          24
+        ],
+        [
+          8,
+          2,
+          24
+        ]
+      ]
+    },
+    {
+      "key": "147372c30c24f732",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          85
+        ],
+        [
+          4,
+          1,
+          85
+        ],
+        [
+          4,
+          2,
+          85
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "14867122f2fffd7d",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          194
+        ],
+        [
+          1,
+          1,
+          194
+        ],
+        [
+          1,
+          2,
+          194
+        ]
+      ]
+    },
+    {
+      "key": "16a6e1fb037ef100",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "solid_snow_canopy",
+      "origins": [
+        [
+          7,
+          0,
+          230
+        ],
+        [
+          7,
+          1,
+          230
+        ],
+        [
+          7,
+          2,
+          230
+        ]
+      ]
+    },
+    {
+      "key": "16ce1c2b5e98dd1f",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          72
+        ],
+        [
+          6,
+          1,
+          72
+        ],
+        [
+          6,
+          2,
+          72
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "16eb4a73a6a264ee",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          4,
+          0,
+          56
+        ],
+        [
+          4,
+          1,
+          56
+        ],
+        [
+          4,
+          2,
+          56
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "194a840d452cb06e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          157
+        ],
+        [
+          6,
+          1,
+          157
+        ],
+        [
+          6,
+          2,
+          157
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "197fb07830f8e2e7",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          83
+        ],
+        [
+          6,
+          1,
+          83
+        ],
+        [
+          6,
+          2,
+          83
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "1a99b94b4b4a192d",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          4,
+          0,
+          62
+        ],
+        [
+          4,
+          1,
+          62
+        ],
+        [
+          4,
+          2,
+          62
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "1cd34f4fad0b96f1",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          80
+        ],
+        [
+          8,
+          1,
+          80
+        ],
+        [
+          8,
+          2,
+          80
+        ]
+      ]
+    },
+    {
+      "key": "1ddffad0449f71db",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          211
+        ],
+        [
+          3,
+          1,
+          211
+        ],
+        [
+          3,
+          2,
+          211
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "1de4a147b01d1cc0",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "solid_cavern",
+      "origins": [
+        [
+          5,
+          0,
+          19
+        ],
+        [
+          5,
+          1,
+          19
+        ],
+        [
+          5,
+          2,
+          19
+        ]
+      ]
+    },
+    {
+      "key": "1dfca2cdbf743810",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "rock_ledge",
+      "origins": [
+        [
+          5,
+          0,
+          84
+        ],
+        [
+          5,
+          1,
+          84
+        ],
+        [
+          5,
+          2,
+          84
+        ]
+      ]
+    },
+    {
+      "key": "1e948ad369473120",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          51
+        ],
+        [
+          3,
+          1,
+          51
+        ],
+        [
+          3,
+          2,
+          51
+        ]
+      ]
+    },
+    {
+      "key": "20279e7346ecfbbd",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          38
+        ],
+        [
+          2,
+          1,
+          38
+        ],
+        [
+          2,
+          2,
+          38
+        ]
+      ]
+    },
+    {
+      "key": "20917e128810c057",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          74
+        ],
+        [
+          6,
+          1,
+          74
+        ],
+        [
+          6,
+          2,
+          74
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "213bccd4c5fbfe28",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          82
+        ],
+        [
+          6,
+          1,
+          82
+        ],
+        [
+          6,
+          2,
+          82
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "21b643d7d448d145",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          186
+        ],
+        [
+          1,
+          1,
+          186
+        ],
+        [
+          1,
+          2,
+          186
+        ]
+      ]
+    },
+    {
+      "key": "244d3042d023e7f5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_stalagmite_or_stalactite",
+      "origins": [
+        [
+          5,
+          0,
+          41
+        ],
+        [
+          5,
+          1,
+          41
+        ],
+        [
+          5,
+          2,
+          41
+        ]
+      ]
+    },
+    {
+      "key": "248dce8e7fd4640c",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          60
+        ],
+        [
+          3,
+          1,
+          60
+        ],
+        [
+          3,
+          2,
+          60
+        ]
+      ]
+    },
+    {
+      "key": "25d7f55990f792ac",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          106
+        ],
+        [
+          1,
+          0,
+          107
+        ],
+        [
+          1,
+          1,
+          106
+        ],
+        [
+          1,
+          1,
+          107
+        ],
+        [
+          1,
+          2,
+          106
+        ],
+        [
+          1,
+          2,
+          107
+        ]
+      ]
+    },
+    {
+      "key": "267787efb42cc690",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          59
+        ],
+        [
+          3,
+          1,
+          59
+        ],
+        [
+          3,
+          2,
+          59
+        ]
+      ]
+    },
+    {
+      "key": "2731aac12534a0f3",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          183
+        ],
+        [
+          6,
+          1,
+          183
+        ],
+        [
+          6,
+          2,
+          183
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "2732ca4823ae56a3",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          74
+        ],
+        [
+          4,
+          1,
+          74
+        ],
+        [
+          4,
+          2,
+          74
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "2b3cd0439aab97d2",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_stalagmite_or_stalactite",
+      "origins": [
+        [
+          5,
+          0,
+          16
+        ],
+        [
+          5,
+          1,
+          16
+        ],
+        [
+          5,
+          2,
+          16
+        ]
+      ]
+    },
+    {
+      "key": "2b9585b6483447e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_empty",
+      "origins": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          160
+        ],
+        [
+          1,
+          0,
+          164
+        ],
+        [
+          1,
+          0,
+          167
+        ],
+        [
+          1,
+          0,
+          172
+        ],
+        [
+          1,
+          0,
+          191
+        ],
+        [
+          1,
+          0,
+          193
+        ],
+        [
+          1,
+          0,
+          198
+        ],
+        [
+          1,
+          0,
+          199
+        ],
+        [
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          1,
+          160
+        ],
+        [
+          1,
+          1,
+          164
+        ],
+        [
+          1,
+          1,
+          167
+        ],
+        [
+          1,
+          1,
+          172
+        ],
+        [
+          1,
+          1,
+          191
+        ],
+        [
+          1,
+          1,
+          193
+        ],
+        [
+          1,
+          1,
+          198
+        ],
+        [
+          1,
+          1,
+          199
+        ],
+        [
+          1,
+          2,
+          0
+        ],
+        [
+          1,
+          2,
+          160
+        ],
+        [
+          1,
+          2,
+          164
+        ],
+        [
+          1,
+          2,
+          167
+        ],
+        [
+          1,
+          2,
+          172
+        ],
+        [
+          1,
+          2,
+          191
+        ],
+        [
+          1,
+          2,
+          193
+        ],
+        [
+          1,
+          2,
+          198
+        ],
+        [
+          1,
+          2,
+          199
+        ]
+      ]
+    },
+    {
+      "key": "2b9585b6483447e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          0
+        ],
+        [
+          2,
+          1,
+          0
+        ],
+        [
+          2,
+          2,
+          0
+        ]
+      ]
+    },
+    {
+      "key": "2b9585b6483447e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_empty",
+      "origins": [
+        [
+          3,
+          0,
+          97
+        ],
+        [
+          3,
+          0,
+          98
+        ],
+        [
+          3,
+          1,
+          97
+        ],
+        [
+          3,
+          1,
+          98
+        ],
+        [
+          3,
+          2,
+          97
+        ],
+        [
+          3,
+          2,
+          98
+        ]
+      ]
+    },
+    {
+      "key": "2b9585b6483447e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_empty",
+      "origins": [
+        [
+          4,
+          0,
+          0
+        ],
+        [
+          4,
+          1,
+          0
+        ],
+        [
+          4,
+          2,
+          0
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "2b9585b6483447e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_empty",
+      "origins": [
+        [
+          5,
+          0,
+          0
+        ],
+        [
+          5,
+          0,
+          9
+        ],
+        [
+          5,
+          0,
+          10
+        ],
+        [
+          5,
+          0,
+          92
+        ],
+        [
+          5,
+          0,
+          94
+        ],
+        [
+          5,
+          1,
+          0
+        ],
+        [
+          5,
+          1,
+          9
+        ],
+        [
+          5,
+          1,
+          10
+        ],
+        [
+          5,
+          1,
+          92
+        ],
+        [
+          5,
+          1,
+          94
+        ],
+        [
+          5,
+          2,
+          0
+        ],
+        [
+          5,
+          2,
+          9
+        ],
+        [
+          5,
+          2,
+          10
+        ],
+        [
+          5,
+          2,
+          92
+        ],
+        [
+          5,
+          2,
+          94
+        ]
+      ]
+    },
+    {
+      "key": "2b9585b6483447e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_empty",
+      "origins": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          6,
+          1,
+          0
+        ],
+        [
+          6,
+          2,
+          0
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "2b9585b6483447e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_empty",
+      "origins": [
+        [
+          7,
+          0,
+          0
+        ],
+        [
+          7,
+          1,
+          0
+        ],
+        [
+          7,
+          2,
+          0
+        ]
+      ]
+    },
+    {
+      "key": "2b9585b6483447e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 2,
+      "role": "native_invisible_collision",
+      "origins": [
+        [
+          8,
+          0,
+          0
+        ],
+        [
+          8,
+          1,
+          0
+        ],
+        [
+          8,
+          2,
+          0
+        ]
+      ]
+    },
+    {
+      "key": "2bcf071a3ad68361",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          68
+        ],
+        [
+          6,
+          1,
+          68
+        ],
+        [
+          6,
+          2,
+          68
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "2c0b049a18c120d3",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "solid_snow_canopy",
+      "origins": [
+        [
+          7,
+          0,
+          236
+        ],
+        [
+          7,
+          1,
+          236
+        ],
+        [
+          7,
+          2,
+          236
+        ]
+      ]
+    },
+    {
+      "key": "2c5a2df2e6cda57a",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          56
+        ],
+        [
+          3,
+          1,
+          56
+        ],
+        [
+          3,
+          2,
+          56
+        ]
+      ]
+    },
+    {
+      "key": "2f61085e9a568aa0",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          115
+        ],
+        [
+          1,
+          1,
+          115
+        ],
+        [
+          1,
+          2,
+          115
+        ]
+      ]
+    },
+    {
+      "key": "2fdb380c2b4b3cd3",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          91
+        ],
+        [
+          1,
+          1,
+          91
+        ],
+        [
+          1,
+          2,
+          91
+        ]
+      ]
+    },
+    {
+      "key": "3054e07c6b843f2e",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          61
+        ],
+        [
+          3,
+          1,
+          61
+        ],
+        [
+          3,
+          2,
+          61
+        ]
+      ]
+    },
+    {
+      "key": "31d978b3d0bbc117",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          40
+        ],
+        [
+          8,
+          1,
+          40
+        ],
+        [
+          8,
+          2,
+          40
+        ]
+      ]
+    },
+    {
+      "key": "31fe19527e0fc160",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          91
+        ],
+        [
+          3,
+          1,
+          91
+        ],
+        [
+          3,
+          2,
+          91
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "3290af72d95e8be8",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          53
+        ],
+        [
+          8,
+          1,
+          53
+        ],
+        [
+          8,
+          2,
+          53
+        ]
+      ]
+    },
+    {
+      "key": "34523e6f1e67503f",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          116
+        ],
+        [
+          1,
+          1,
+          116
+        ],
+        [
+          1,
+          2,
+          116
+        ]
+      ]
+    },
+    {
+      "key": "34ccdc0e2972a623",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          42
+        ],
+        [
+          3,
+          1,
+          42
+        ],
+        [
+          3,
+          2,
+          42
+        ]
+      ]
+    },
+    {
+      "key": "352541e4325b6ca3",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          165
+        ],
+        [
+          6,
+          1,
+          165
+        ],
+        [
+          6,
+          2,
+          165
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "3557dd12726933fb",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_formation",
+      "origins": [
+        [
+          5,
+          0,
+          91
+        ],
+        [
+          5,
+          1,
+          91
+        ],
+        [
+          5,
+          2,
+          91
+        ]
+      ]
+    },
+    {
+      "key": "35b3d8a7cfbd6f0d",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          214
+        ],
+        [
+          3,
+          1,
+          214
+        ],
+        [
+          3,
+          2,
+          214
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "365c9c719308edb6",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          114
+        ],
+        [
+          1,
+          1,
+          114
+        ],
+        [
+          1,
+          2,
+          114
+        ]
+      ]
+    },
+    {
+      "key": "374d59124a5624d0",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          91
+        ],
+        [
+          4,
+          1,
+          91
+        ],
+        [
+          4,
+          2,
+          91
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "37d3d9f4794d3a69",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          62
+        ],
+        [
+          8,
+          1,
+          62
+        ],
+        [
+          8,
+          2,
+          62
+        ]
+      ]
+    },
+    {
+      "key": "3840e04272e5ebf5",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          11
+        ],
+        [
+          2,
+          1,
+          11
+        ],
+        [
+          2,
+          2,
+          11
+        ]
+      ]
+    },
+    {
+      "key": "39bc26a5bd4f47c2",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          87
+        ],
+        [
+          8,
+          1,
+          87
+        ],
+        [
+          8,
+          2,
+          87
+        ]
+      ]
+    },
+    {
+      "key": "3cfbc6c6171bbaab",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          185
+        ],
+        [
+          1,
+          1,
+          185
+        ],
+        [
+          1,
+          2,
+          185
+        ]
+      ]
+    },
+    {
+      "key": "3ed7d342fa261673",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          37
+        ],
+        [
+          3,
+          1,
+          37
+        ],
+        [
+          3,
+          2,
+          37
+        ]
+      ]
+    },
+    {
+      "key": "3f1e6b08b11ae4bf",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          195
+        ],
+        [
+          1,
+          1,
+          195
+        ],
+        [
+          1,
+          2,
+          195
+        ]
+      ]
+    },
+    {
+      "key": "3f27b883ccbf111b",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "rear_column",
+      "origins": [
+        [
+          4,
+          0,
+          54
+        ],
+        [
+          4,
+          1,
+          54
+        ],
+        [
+          4,
+          2,
+          54
+        ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "3fcd5106664ff507",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "solid_snow_canopy",
+      "origins": [
+        [
+          7,
+          0,
+          235
+        ],
+        [
+          7,
+          1,
+          235
+        ],
+        [
+          7,
+          2,
+          235
+        ]
+      ]
+    },
+    {
+      "key": "43ad167f6a0d70bc",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          180
+        ],
+        [
+          1,
+          1,
+          180
+        ],
+        [
+          1,
+          2,
+          180
+        ]
+      ]
+    },
+    {
+      "key": "443bd3947f34ff43",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          6,
+          0,
+          17
+        ],
+        [
+          6,
+          1,
+          17
+        ],
+        [
+          6,
+          2,
+          17
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "44ecbc32216c41b8",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          103
+        ],
+        [
+          6,
+          1,
+          103
+        ],
+        [
+          6,
+          2,
+          103
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "451d43fb038b2cbf",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          176
+        ],
+        [
+          1,
+          1,
+          176
+        ],
+        [
+          1,
+          2,
+          176
+        ]
+      ]
+    },
+    {
+      "key": "45b636fb1ff5452c",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_torch",
+      "origins": [
+        [
+          6,
+          0,
+          66
+        ],
+        [
+          6,
+          1,
+          66
+        ],
+        [
+          6,
+          2,
+          66
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "47cf40c658ff354a",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          61
+        ],
+        [
+          8,
+          1,
+          61
+        ],
+        [
+          8,
+          2,
+          61
+        ]
+      ]
+    },
+    {
+      "key": "47ebf96924eab217",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "solid_snow_canopy",
+      "origins": [
+        [
+          7,
+          0,
+          237
+        ],
+        [
+          7,
+          1,
+          237
+        ],
+        [
+          7,
+          2,
+          237
+        ]
+      ]
+    },
+    {
+      "key": "47ef530b937d4ae7",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "solid_cavern",
+      "origins": [
+        [
+          5,
+          0,
+          77
+        ],
+        [
+          5,
+          1,
+          77
+        ],
+        [
+          5,
+          2,
+          77
+        ]
+      ]
+    },
+    {
+      "key": "4af62d752813bf86",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          70
+        ],
+        [
+          4,
+          1,
+          70
+        ],
+        [
+          4,
+          2,
+          70
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "4afa919f5ebdf0c1",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "rear_column",
+      "origins": [
+        [
+          4,
+          0,
+          46
+        ],
+        [
+          4,
+          1,
+          46
+        ],
+        [
+          4,
+          2,
+          46
+        ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "4ba21e516cffbe9b",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          117
+        ],
+        [
+          2,
+          1,
+          117
+        ],
+        [
+          2,
+          2,
+          117
+        ]
+      ]
+    },
+    {
+      "key": "4c7fc75f685114e3",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "rock_ledge",
+      "origins": [
+        [
+          5,
+          0,
+          86
+        ],
+        [
+          5,
+          1,
+          86
+        ],
+        [
+          5,
+          2,
+          86
+        ]
+      ]
+    },
+    {
+      "key": "4d6357b5b2b0daf5",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          54
+        ],
+        [
+          6,
+          1,
+          54
+        ],
+        [
+          6,
+          2,
+          54
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "4dc5601f2db0f782",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "snow_lip",
+      "origins": [
+        [
+          7,
+          0,
+          240
+        ],
+        [
+          7,
+          1,
+          240
+        ],
+        [
+          7,
+          2,
+          240
+        ]
+      ]
+    },
+    {
+      "key": "4dce889b782c6d44",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          64
+        ],
+        [
+          8,
+          1,
+          64
+        ],
+        [
+          8,
+          2,
+          64
+        ]
+      ]
+    },
+    {
+      "key": "4e4ae74bc24990a4",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "solid_cavern",
+      "origins": [
+        [
+          5,
+          0,
+          62
+        ],
+        [
+          5,
+          1,
+          62
+        ],
+        [
+          5,
+          2,
+          62
+        ]
+      ]
+    },
+    {
+      "key": "4e4ff827adb6b75b",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          6,
+          0,
+          46
+        ],
+        [
+          6,
+          1,
+          46
+        ],
+        [
+          6,
+          2,
+          46
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "50add8813c4bc5e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          47
+        ],
+        [
+          2,
+          1,
+          47
+        ],
+        [
+          2,
+          2,
+          47
+        ]
+      ]
+    },
+    {
+      "key": "5265bc7377859bb9",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_torch",
+      "origins": [
+        [
+          6,
+          0,
+          67
+        ],
+        [
+          6,
+          1,
+          67
+        ],
+        [
+          6,
+          2,
+          67
+        ]
+      ]
+    },
+    {
+      "key": "532e29928e1a95a5",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20486,
+      "role": "solid_snow_canopy",
+      "origins": [
+        [
+          7,
+          0,
+          243
+        ],
+        [
+          7,
+          1,
+          243
+        ],
+        [
+          7,
+          2,
+          243
+        ]
+      ]
+    },
+    {
+      "key": "53d230a09e11937b",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          6,
+          0,
+          45
+        ],
+        [
+          6,
+          1,
+          45
+        ],
+        [
+          6,
+          2,
+          45
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "548c4f3c099db033",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          89
+        ],
+        [
+          4,
+          1,
+          89
+        ],
+        [
+          4,
+          2,
+          89
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "56162ffd3236e944",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "solid_snow_canopy",
+      "origins": [
+        [
+          7,
+          0,
+          231
+        ],
+        [
+          7,
+          1,
+          231
+        ],
+        [
+          7,
+          2,
+          231
+        ]
+      ]
+    },
+    {
+      "key": "56dae7bc2aa7526f",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          41
+        ],
+        [
+          8,
+          1,
+          41
+        ],
+        [
+          8,
+          2,
+          41
+        ]
+      ]
+    },
+    {
+      "key": "58dc15d0b8a80bb5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_stalagmite_or_stalactite",
+      "origins": [
+        [
+          5,
+          0,
+          32
+        ],
+        [
+          5,
+          1,
+          32
+        ],
+        [
+          5,
+          2,
+          32
+        ]
+      ]
+    },
+    {
+      "key": "599d61d31f4c00b4",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          163
+        ],
+        [
+          6,
+          1,
+          163
+        ],
+        [
+          6,
+          2,
+          163
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "5b04a776b8fa2f18",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          73
+        ],
+        [
+          4,
+          1,
+          73
+        ],
+        [
+          4,
+          2,
+          73
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "5b6b87193db3f535",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          71
+        ],
+        [
+          6,
+          1,
+          71
+        ],
+        [
+          6,
+          2,
+          71
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "5c87258714410a46",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          215
+        ],
+        [
+          3,
+          1,
+          215
+        ],
+        [
+          3,
+          2,
+          215
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "5d717f944333c447",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "solid_cavern",
+      "origins": [
+        [
+          5,
+          0,
+          24
+        ],
+        [
+          5,
+          1,
+          24
+        ],
+        [
+          5,
+          2,
+          24
+        ]
+      ]
+    },
+    {
+      "key": "5d742130e1c4e9a3",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          175
+        ],
+        [
+          1,
+          1,
+          175
+        ],
+        [
+          1,
+          2,
+          175
+        ]
+      ]
+    },
+    {
+      "key": "5eff1a806f63bc55",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          217
+        ],
+        [
+          3,
+          1,
+          217
+        ],
+        [
+          3,
+          2,
+          217
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "5f76186e1ba1aff5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          10
+        ],
+        [
+          3,
+          1,
+          10
+        ],
+        [
+          3,
+          2,
+          10
+        ]
+      ]
+    },
+    {
+      "key": "619e72c7ce86fceb",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          88
+        ],
+        [
+          6,
+          1,
+          88
+        ],
+        [
+          6,
+          2,
+          88
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "62da862ec4c15518",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          86
+        ],
+        [
+          8,
+          1,
+          86
+        ],
+        [
+          8,
+          2,
+          86
+        ]
+      ]
+    },
+    {
+      "key": "63961125d6c1e304",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          9
+        ],
+        [
+          3,
+          1,
+          9
+        ],
+        [
+          3,
+          2,
+          9
+        ]
+      ]
+    },
+    {
+      "key": "63e1e4a2a299f0d2",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          174
+        ],
+        [
+          1,
+          1,
+          174
+        ],
+        [
+          1,
+          2,
+          174
+        ]
+      ]
+    },
+    {
+      "key": "63eed4eaa6e5b27e",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          71
+        ],
+        [
+          4,
+          1,
+          71
+        ],
+        [
+          4,
+          2,
+          71
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "63f904868040b80f",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          6,
+          0,
+          16
+        ],
+        [
+          6,
+          1,
+          16
+        ],
+        [
+          6,
+          2,
+          16
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "64d967b8452bf308",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          113
+        ],
+        [
+          1,
+          1,
+          113
+        ],
+        [
+          1,
+          2,
+          113
+        ]
+      ]
+    },
+    {
+      "key": "65288c19e65ff146",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          115
+        ],
+        [
+          2,
+          1,
+          115
+        ],
+        [
+          2,
+          2,
+          115
+        ]
+      ]
+    },
+    {
+      "key": "664d35727d2cf390",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          218
+        ],
+        [
+          3,
+          1,
+          218
+        ],
+        [
+          3,
+          2,
+          218
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "6656fdd9550c2bc2",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          224
+        ],
+        [
+          3,
+          1,
+          224
+        ],
+        [
+          3,
+          2,
+          224
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "66702b1966dfc53e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          90
+        ],
+        [
+          3,
+          1,
+          90
+        ],
+        [
+          3,
+          2,
+          90
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "66e991a081daebc7",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          177
+        ],
+        [
+          1,
+          1,
+          177
+        ],
+        [
+          1,
+          2,
+          177
+        ]
+      ]
+    },
+    {
+      "key": "67e99a59aa8e2522",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          110
+        ],
+        [
+          6,
+          1,
+          110
+        ],
+        [
+          6,
+          2,
+          110
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "68cf36897ec32341",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          8
+        ],
+        [
+          2,
+          1,
+          8
+        ],
+        [
+          2,
+          2,
+          8
+        ]
+      ]
+    },
+    {
+      "key": "692a8a17be8d2e00",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          52
+        ],
+        [
+          8,
+          1,
+          52
+        ],
+        [
+          8,
+          2,
+          52
+        ]
+      ]
+    },
+    {
+      "key": "6954cbafef3b724e",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          43
+        ],
+        [
+          8,
+          1,
+          43
+        ],
+        [
+          8,
+          2,
+          43
+        ]
+      ]
+    },
+    {
+      "key": "6abd05a8df7a78fa",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          16
+        ],
+        [
+          2,
+          1,
+          16
+        ],
+        [
+          2,
+          2,
+          16
+        ]
+      ]
+    },
+    {
+      "key": "6af561356d073f97",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          48
+        ],
+        [
+          8,
+          1,
+          48
+        ],
+        [
+          8,
+          2,
+          48
+        ]
+      ]
+    },
+    {
+      "key": "6b0fa1e710ba1441",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "snow_lip",
+      "origins": [
+        [
+          7,
+          0,
+          242
+        ],
+        [
+          7,
+          1,
+          242
+        ],
+        [
+          7,
+          2,
+          242
+        ]
+      ]
+    },
+    {
+      "key": "6b2934b7c55a65a5",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16390,
+      "role": "solid_interior",
+      "origins": [
+        [
+          5,
+          0,
+          6
+        ],
+        [
+          5,
+          1,
+          6
+        ],
+        [
+          5,
+          2,
+          6
+        ]
+      ]
+    },
+    {
+      "key": "6bc7d6cbf15dabe3",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "canopy_leaf_edge",
+      "origins": [
+        [
+          7,
+          0,
+          239
+        ],
+        [
+          7,
+          1,
+          239
+        ],
+        [
+          7,
+          2,
+          239
+        ]
+      ]
+    },
+    {
+      "key": "6c5c8365bdf60189",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          85
+        ],
+        [
+          8,
+          1,
+          85
+        ],
+        [
+          8,
+          2,
+          85
+        ]
+      ]
+    },
+    {
+      "key": "6c73e356e71b13c1",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          34
+        ],
+        [
+          8,
+          1,
+          34
+        ],
+        [
+          8,
+          2,
+          34
+        ]
+      ]
+    },
+    {
+      "key": "6d49f50308a3b5dc",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          63
+        ],
+        [
+          8,
+          1,
+          63
+        ],
+        [
+          8,
+          2,
+          63
+        ]
+      ]
+    },
+    {
+      "key": "6ea8d755f76aa715",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "canopy_leaf_edge",
+      "origins": [
+        [
+          7,
+          0,
+          238
+        ],
+        [
+          7,
+          1,
+          238
+        ],
+        [
+          7,
+          2,
+          238
+        ]
+      ]
+    },
+    {
+      "key": "732abfe0f4e0192b",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          90
+        ],
+        [
+          1,
+          1,
+          90
+        ],
+        [
+          1,
+          2,
+          90
+        ]
+      ]
+    },
+    {
+      "key": "7377af6a6c2457e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_formation",
+      "origins": [
+        [
+          5,
+          0,
+          93
+        ],
+        [
+          5,
+          1,
+          93
+        ],
+        [
+          5,
+          2,
+          93
+        ]
+      ]
+    },
+    {
+      "key": "752d4b42099a31f9",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          82
+        ],
+        [
+          4,
+          1,
+          82
+        ],
+        [
+          4,
+          2,
+          82
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "75337a5b1c0a8572",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          19
+        ],
+        [
+          2,
+          1,
+          19
+        ],
+        [
+          2,
+          2,
+          19
+        ]
+      ]
+    },
+    {
+      "key": "75708f4a3300374f",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          190
+        ],
+        [
+          1,
+          1,
+          190
+        ],
+        [
+          1,
+          2,
+          190
+        ]
+      ]
+    },
+    {
+      "key": "75a221075a78aca9",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          6,
+          0,
+          8
+        ],
+        [
+          6,
+          1,
+          8
+        ],
+        [
+          6,
+          2,
+          8
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "768e76b67f7ce2f9",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          32
+        ],
+        [
+          8,
+          1,
+          32
+        ],
+        [
+          8,
+          2,
+          32
+        ]
+      ]
+    },
+    {
+      "key": "76f719ec1ebe966f",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          24
+        ],
+        [
+          3,
+          1,
+          24
+        ],
+        [
+          3,
+          2,
+          24
+        ]
+      ]
+    },
+    {
+      "key": "771b974a513ca12e",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          8
+        ],
+        [
+          3,
+          1,
+          8
+        ],
+        [
+          3,
+          2,
+          8
+        ]
+      ]
+    },
+    {
+      "key": "77d356e08281b07e",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          75
+        ],
+        [
+          6,
+          1,
+          75
+        ],
+        [
+          6,
+          2,
+          75
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "78131f463dabc0e6",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          57
+        ],
+        [
+          3,
+          1,
+          57
+        ],
+        [
+          3,
+          2,
+          57
+        ]
+      ]
+    },
+    {
+      "key": "785c53e6d53f62ca",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          10
+        ],
+        [
+          2,
+          1,
+          10
+        ],
+        [
+          2,
+          2,
+          10
+        ]
+      ]
+    },
+    {
+      "key": "7a39d3d8612976ea",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          169
+        ],
+        [
+          1,
+          1,
+          169
+        ],
+        [
+          1,
+          2,
+          169
+        ]
+      ]
+    },
+    {
+      "key": "7a7f0b3677412f97",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          76
+        ],
+        [
+          6,
+          1,
+          76
+        ],
+        [
+          6,
+          2,
+          76
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "7b3160f50f913745",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          67
+        ],
+        [
+          2,
+          1,
+          67
+        ],
+        [
+          2,
+          2,
+          67
+        ]
+      ]
+    },
+    {
+      "key": "7bd5df80e44ff2c1",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          99
+        ],
+        [
+          4,
+          1,
+          99
+        ],
+        [
+          4,
+          2,
+          99
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "7be62fbeacf599d7",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_torch",
+      "origins": [
+        [
+          6,
+          0,
+          67
+        ],
+        [
+          6,
+          1,
+          67
+        ],
+        [
+          6,
+          2,
+          67
+        ]
+      ],
+      "animation_phases": [
+        0,
+        3
+      ]
+    },
+    {
+      "key": "7c51b1a7556ed458",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          11
+        ],
+        [
+          3,
+          1,
+          11
+        ],
+        [
+          3,
+          2,
+          11
+        ]
+      ]
+    },
+    {
+      "key": "7d85ce3ba6e1d166",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          158
+        ],
+        [
+          6,
+          1,
+          158
+        ],
+        [
+          6,
+          2,
+          158
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "7e7d00748675330d",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          69
+        ],
+        [
+          8,
+          1,
+          69
+        ],
+        [
+          8,
+          2,
+          69
+        ]
+      ]
+    },
+    {
+      "key": "7ee9c5b40d0ecf85",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          98
+        ],
+        [
+          4,
+          1,
+          98
+        ],
+        [
+          4,
+          2,
+          98
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "7f0e7cf19eeb5f52",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          66
+        ],
+        [
+          4,
+          1,
+          66
+        ],
+        [
+          4,
+          2,
+          66
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "812b2717bca9a4be",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 6,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          4,
+          0,
+          10
+        ],
+        [
+          4,
+          1,
+          10
+        ],
+        [
+          4,
+          2,
+          10
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "81a1d356656d0103",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          155
+        ],
+        [
+          6,
+          1,
+          155
+        ],
+        [
+          6,
+          2,
+          155
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "82fc5fbbbd869ee7",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          6,
+          0,
+          9
+        ],
+        [
+          6,
+          1,
+          9
+        ],
+        [
+          6,
+          2,
+          9
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "8503c0e950809230",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "canopy_leaf_edge",
+      "origins": [
+        [
+          7,
+          0,
+          246
+        ],
+        [
+          7,
+          1,
+          246
+        ],
+        [
+          7,
+          2,
+          246
+        ]
+      ]
+    },
+    {
+      "key": "8524fb67cef563b9",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 6,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          37
+        ],
+        [
+          2,
+          1,
+          37
+        ],
+        [
+          2,
+          2,
+          37
+        ]
+      ]
+    },
+    {
+      "key": "85e8f2f40b268fdf",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          33
+        ],
+        [
+          8,
+          1,
+          33
+        ],
+        [
+          8,
+          2,
+          33
+        ]
+      ]
+    },
+    {
+      "key": "892a8c7c971509be",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          196
+        ],
+        [
+          1,
+          1,
+          196
+        ],
+        [
+          1,
+          2,
+          196
+        ]
+      ]
+    },
+    {
+      "key": "8a148618a62edb3a",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          78
+        ],
+        [
+          4,
+          1,
+          78
+        ],
+        [
+          4,
+          2,
+          78
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "8aedb7100ab8674e",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "solid_cavern",
+      "origins": [
+        [
+          5,
+          0,
+          55
+        ],
+        [
+          5,
+          1,
+          55
+        ],
+        [
+          5,
+          2,
+          55
+        ]
+      ]
+    },
+    {
+      "key": "8aede3f251bdda4c",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          35
+        ],
+        [
+          8,
+          1,
+          35
+        ],
+        [
+          8,
+          2,
+          35
+        ]
+      ]
+    },
+    {
+      "key": "8b09796ffb5361f1",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "snow_lip",
+      "origins": [
+        [
+          7,
+          0,
+          241
+        ],
+        [
+          7,
+          1,
+          241
+        ],
+        [
+          7,
+          2,
+          241
+        ]
+      ]
+    },
+    {
+      "key": "8b0a48fda6513649",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          168
+        ],
+        [
+          1,
+          1,
+          168
+        ],
+        [
+          1,
+          2,
+          168
+        ]
+      ]
+    },
+    {
+      "key": "8b7bb75ff6a84ec2",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          206
+        ],
+        [
+          3,
+          1,
+          206
+        ],
+        [
+          3,
+          2,
+          206
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "8b7c89f79de2be0f",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "solid_snow_canopy",
+      "origins": [
+        [
+          7,
+          0,
+          245
+        ],
+        [
+          7,
+          1,
+          245
+        ],
+        [
+          7,
+          2,
+          245
+        ]
+      ]
+    },
+    {
+      "key": "8cd2d2e6161380b0",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          99
+        ],
+        [
+          1,
+          1,
+          99
+        ],
+        [
+          1,
+          2,
+          99
+        ]
+      ]
+    },
+    {
+      "key": "8d78207110a0310d",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          56
+        ],
+        [
+          2,
+          1,
+          56
+        ],
+        [
+          2,
+          2,
+          56
+        ]
+      ]
+    },
+    {
+      "key": "8f134be1674185f9",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "solid_cavern",
+      "origins": [
+        [
+          5,
+          0,
+          63
+        ],
+        [
+          5,
+          1,
+          63
+        ],
+        [
+          5,
+          2,
+          63
+        ]
+      ]
+    },
+    {
+      "key": "8f45b7c28905bc2f",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          57
+        ],
+        [
+          8,
+          1,
+          57
+        ],
+        [
+          8,
+          2,
+          57
+        ]
+      ]
+    },
+    {
+      "key": "9224890ba211a004",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          90
+        ],
+        [
+          4,
+          1,
+          90
+        ],
+        [
+          4,
+          2,
+          90
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "941a96d7eb2f5363",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          153
+        ],
+        [
+          6,
+          1,
+          153
+        ],
+        [
+          6,
+          2,
+          153
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "94bd12feb29ff09e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          227
+        ],
+        [
+          3,
+          1,
+          227
+        ],
+        [
+          3,
+          2,
+          227
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "957191c38ca75232",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          89
+        ],
+        [
+          3,
+          1,
+          89
+        ],
+        [
+          3,
+          2,
+          89
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "96948fa80c5cb429",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          53
+        ],
+        [
+          3,
+          1,
+          53
+        ],
+        [
+          3,
+          2,
+          53
+        ]
+      ]
+    },
+    {
+      "key": "96a2df4db54818f8",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          88
+        ],
+        [
+          3,
+          1,
+          88
+        ],
+        [
+          3,
+          2,
+          88
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "978242dd19dbf31e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          95
+        ],
+        [
+          6,
+          1,
+          95
+        ],
+        [
+          6,
+          2,
+          95
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "9885170ad29d5990",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          221
+        ],
+        [
+          3,
+          1,
+          221
+        ],
+        [
+          3,
+          2,
+          221
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "98c8e4e21147cf65",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          96
+        ],
+        [
+          3,
+          1,
+          96
+        ],
+        [
+          3,
+          2,
+          96
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "994d58da96c5cd3a",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          223
+        ],
+        [
+          3,
+          1,
+          223
+        ],
+        [
+          3,
+          2,
+          223
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "9a171ba19f41d437",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          45
+        ],
+        [
+          8,
+          1,
+          45
+        ],
+        [
+          8,
+          2,
+          45
+        ]
+      ]
+    },
+    {
+      "key": "9b02cee65ecf4ac1",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          17
+        ],
+        [
+          2,
+          1,
+          17
+        ],
+        [
+          2,
+          2,
+          17
+        ]
+      ]
+    },
+    {
+      "key": "9e79c344f0cc344d",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          99
+        ],
+        [
+          3,
+          1,
+          99
+        ],
+        [
+          3,
+          2,
+          99
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "9f079cd56fa27071",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "solid_cavern",
+      "origins": [
+        [
+          5,
+          0,
+          20
+        ],
+        [
+          5,
+          1,
+          20
+        ],
+        [
+          5,
+          2,
+          20
+        ]
+      ]
+    },
+    {
+      "key": "9f2d32d7f9055ff6",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          210
+        ],
+        [
+          3,
+          1,
+          210
+        ],
+        [
+          3,
+          2,
+          210
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "9f31533e1f53105d",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          154
+        ],
+        [
+          6,
+          1,
+          154
+        ],
+        [
+          6,
+          2,
+          154
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "9f8e4ff6d16c1c17",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          81
+        ],
+        [
+          4,
+          1,
+          81
+        ],
+        [
+          4,
+          2,
+          81
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "a48063baebf369ee",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          111
+        ],
+        [
+          6,
+          1,
+          111
+        ],
+        [
+          6,
+          2,
+          111
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "a5719aee923e83e9",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          50
+        ],
+        [
+          8,
+          1,
+          50
+        ],
+        [
+          8,
+          2,
+          50
+        ]
+      ]
+    },
+    {
+      "key": "a6d974431e737c18",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          190
+        ],
+        [
+          6,
+          1,
+          190
+        ],
+        [
+          6,
+          2,
+          190
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "a7bd0348505fe1f1",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          81
+        ],
+        [
+          3,
+          1,
+          81
+        ],
+        [
+          3,
+          2,
+          81
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "aae6afa2d00c21ce",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          165
+        ],
+        [
+          1,
+          1,
+          165
+        ],
+        [
+          1,
+          2,
+          165
+        ]
+      ]
+    },
+    {
+      "key": "abde6e24e3e445e5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          23
+        ],
+        [
+          3,
+          0,
+          80
+        ],
+        [
+          3,
+          0,
+          83
+        ],
+        [
+          3,
+          0,
+          219
+        ],
+        [
+          3,
+          1,
+          23
+        ],
+        [
+          3,
+          1,
+          80
+        ],
+        [
+          3,
+          1,
+          83
+        ],
+        [
+          3,
+          1,
+          219
+        ],
+        [
+          3,
+          2,
+          23
+        ],
+        [
+          3,
+          2,
+          80
+        ],
+        [
+          3,
+          2,
+          83
+        ],
+        [
+          3,
+          2,
+          219
+        ]
+      ]
+    },
+    {
+      "key": "acaec37103d2ef4b",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          222
+        ],
+        [
+          3,
+          1,
+          222
+        ],
+        [
+          3,
+          2,
+          222
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "ad3e241d2d498981",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          4,
+          0,
+          11
+        ],
+        [
+          4,
+          1,
+          11
+        ],
+        [
+          4,
+          2,
+          11
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "adc67310bf3422e6",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          149
+        ],
+        [
+          6,
+          1,
+          149
+        ],
+        [
+          6,
+          2,
+          149
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "ae25ae14c916edb3",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 512,
+      "role": "spike_row",
+      "origins": [
+        [
+          6,
+          0,
+          212
+        ],
+        [
+          6,
+          1,
+          212
+        ],
+        [
+          6,
+          2,
+          212
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "aec479471ce34127",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          78
+        ],
+        [
+          8,
+          1,
+          78
+        ],
+        [
+          8,
+          2,
+          78
+        ]
+      ]
+    },
+    {
+      "key": "b1b866a83bb73d8b",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          90
+        ],
+        [
+          6,
+          1,
+          90
+        ],
+        [
+          6,
+          2,
+          90
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "b782e29fdc3e7abf",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "solid_snow_canopy",
+      "origins": [
+        [
+          7,
+          0,
+          244
+        ],
+        [
+          7,
+          1,
+          244
+        ],
+        [
+          7,
+          2,
+          244
+        ]
+      ]
+    },
+    {
+      "key": "b7b5cca9b70e86ba",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          77
+        ],
+        [
+          8,
+          1,
+          77
+        ],
+        [
+          8,
+          2,
+          77
+        ]
+      ]
+    },
+    {
+      "key": "b89d8de77679f90d",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          189
+        ],
+        [
+          1,
+          1,
+          189
+        ],
+        [
+          1,
+          2,
+          189
+        ]
+      ]
+    },
+    {
+      "key": "b8e3dbc48560eba4",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          102
+        ],
+        [
+          6,
+          1,
+          102
+        ],
+        [
+          6,
+          2,
+          102
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "b91f9c7532ca9741",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          70
+        ],
+        [
+          6,
+          1,
+          70
+        ],
+        [
+          6,
+          2,
+          70
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "b98fae5d9a3dad89",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_torch",
+      "origins": [
+        [
+          6,
+          0,
+          67
+        ],
+        [
+          6,
+          1,
+          67
+        ],
+        [
+          6,
+          2,
+          67
+        ]
+      ],
+      "animation_phases": [
+        0,
+        2
+      ]
+    },
+    {
+      "key": "ba65b3dd8c36f421",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_stalagmite_or_stalactite",
+      "origins": [
+        [
+          5,
+          0,
+          18
+        ],
+        [
+          5,
+          1,
+          18
+        ],
+        [
+          5,
+          2,
+          18
+        ]
+      ]
+    },
+    {
+      "key": "bd38b4b4734a1af8",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          182
+        ],
+        [
+          6,
+          1,
+          182
+        ],
+        [
+          6,
+          2,
+          182
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "bec9d415249e7a09",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          56
+        ],
+        [
+          8,
+          1,
+          56
+        ],
+        [
+          8,
+          2,
+          56
+        ]
+      ]
+    },
+    {
+      "key": "c017d5a128602784",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          52
+        ],
+        [
+          3,
+          1,
+          52
+        ],
+        [
+          3,
+          2,
+          52
+        ]
+      ]
+    },
+    {
+      "key": "c0ffd798c5552d8d",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_formation",
+      "origins": [
+        [
+          5,
+          0,
+          101
+        ],
+        [
+          5,
+          1,
+          101
+        ],
+        [
+          5,
+          2,
+          101
+        ]
+      ]
+    },
+    {
+      "key": "c12333187eea0417",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          178
+        ],
+        [
+          1,
+          1,
+          178
+        ],
+        [
+          1,
+          2,
+          178
+        ]
+      ]
+    },
+    {
+      "key": "c1386d819482bd57",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 20484,
+      "role": "solid_snow_canopy",
+      "origins": [
+        [
+          7,
+          0,
+          234
+        ],
+        [
+          7,
+          1,
+          234
+        ],
+        [
+          7,
+          2,
+          234
+        ]
+      ]
+    },
+    {
+      "key": "c13e9f05c5493553",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          161
+        ],
+        [
+          1,
+          1,
+          161
+        ],
+        [
+          1,
+          2,
+          161
+        ]
+      ]
+    },
+    {
+      "key": "c1cae02c857922d6",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          156
+        ],
+        [
+          6,
+          1,
+          156
+        ],
+        [
+          6,
+          2,
+          156
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "c32a50c1ee249e1f",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          152
+        ],
+        [
+          6,
+          1,
+          152
+        ],
+        [
+          6,
+          2,
+          152
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "c4a3bc70741186ee",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          9
+        ],
+        [
+          2,
+          1,
+          9
+        ],
+        [
+          2,
+          2,
+          9
+        ]
+      ]
+    },
+    {
+      "key": "c520cc13261806d1",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_formation",
+      "origins": [
+        [
+          5,
+          0,
+          102
+        ],
+        [
+          5,
+          1,
+          102
+        ],
+        [
+          5,
+          2,
+          102
+        ]
+      ]
+    },
+    {
+      "key": "c590843ad2b5827a",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          66
+        ],
+        [
+          8,
+          1,
+          66
+        ],
+        [
+          8,
+          2,
+          66
+        ]
+      ]
+    },
+    {
+      "key": "c5eef8d5204601fd",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          53
+        ],
+        [
+          6,
+          1,
+          53
+        ],
+        [
+          6,
+          2,
+          53
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "c60170bc6cd95d23",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          82
+        ],
+        [
+          3,
+          1,
+          82
+        ],
+        [
+          3,
+          2,
+          82
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "c7c437842af075f9",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          44
+        ],
+        [
+          8,
+          1,
+          44
+        ],
+        [
+          8,
+          2,
+          44
+        ]
+      ]
+    },
+    {
+      "key": "c7dfcdcf5fd939f9",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          46
+        ],
+        [
+          3,
+          1,
+          46
+        ],
+        [
+          3,
+          2,
+          46
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "c806844e4136eb6d",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          207
+        ],
+        [
+          3,
+          1,
+          207
+        ],
+        [
+          3,
+          2,
+          207
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "c84ecf6e0998fd71",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          219
+        ],
+        [
+          6,
+          1,
+          219
+        ],
+        [
+          6,
+          2,
+          219
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "c907acb1775b3ee9",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          208
+        ],
+        [
+          3,
+          1,
+          208
+        ],
+        [
+          3,
+          2,
+          208
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "cac169d72e31dabb",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          166
+        ],
+        [
+          1,
+          1,
+          166
+        ],
+        [
+          1,
+          2,
+          166
+        ]
+      ]
+    },
+    {
+      "key": "cb152415010bdfa7",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          164
+        ],
+        [
+          6,
+          1,
+          164
+        ],
+        [
+          6,
+          2,
+          164
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "cdd956b571ed110a",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          79
+        ],
+        [
+          4,
+          1,
+          79
+        ],
+        [
+          4,
+          2,
+          79
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "ce408201d1a1bb87",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          182
+        ],
+        [
+          1,
+          1,
+          182
+        ],
+        [
+          1,
+          2,
+          182
+        ]
+      ]
+    },
+    {
+      "key": "ce486a030eb3c363",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_stalagmite_or_stalactite",
+      "origins": [
+        [
+          5,
+          0,
+          33
+        ],
+        [
+          5,
+          1,
+          33
+        ],
+        [
+          5,
+          2,
+          33
+        ]
+      ]
+    },
+    {
+      "key": "ce5e7585b79ec06c",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_stalagmite_or_stalactite",
+      "origins": [
+        [
+          5,
+          0,
+          8
+        ],
+        [
+          5,
+          1,
+          8
+        ],
+        [
+          5,
+          2,
+          8
+        ]
+      ]
+    },
+    {
+      "key": "d0c5e5b7000891d4",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_formation",
+      "origins": [
+        [
+          5,
+          0,
+          100
+        ],
+        [
+          5,
+          1,
+          100
+        ],
+        [
+          5,
+          2,
+          100
+        ]
+      ]
+    },
+    {
+      "key": "d27723c1908e8f88",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          179
+        ],
+        [
+          1,
+          1,
+          179
+        ],
+        [
+          1,
+          2,
+          179
+        ]
+      ]
+    },
+    {
+      "key": "d397a98411236205",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          66
+        ],
+        [
+          2,
+          1,
+          66
+        ],
+        [
+          2,
+          2,
+          66
+        ]
+      ]
+    },
+    {
+      "key": "d3a08159a9294e32",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          187
+        ],
+        [
+          1,
+          1,
+          187
+        ],
+        [
+          1,
+          2,
+          187
+        ]
+      ]
+    },
+    {
+      "key": "d409bc1f3a896873",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          45
+        ],
+        [
+          3,
+          1,
+          45
+        ],
+        [
+          3,
+          2,
+          45
+        ]
+      ]
+    },
+    {
+      "key": "d54c19354150f729",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          47
+        ],
+        [
+          3,
+          1,
+          47
+        ],
+        [
+          3,
+          2,
+          47
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "d61e5a4f578301d4",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          42
+        ],
+        [
+          8,
+          1,
+          42
+        ],
+        [
+          8,
+          2,
+          42
+        ]
+      ]
+    },
+    {
+      "key": "d69d93c4d810eb36",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "solid_cavern",
+      "origins": [
+        [
+          5,
+          0,
+          54
+        ],
+        [
+          5,
+          1,
+          54
+        ],
+        [
+          5,
+          2,
+          54
+        ]
+      ]
+    },
+    {
+      "key": "d7474770092964b8",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          166
+        ],
+        [
+          6,
+          1,
+          166
+        ],
+        [
+          6,
+          2,
+          166
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "d75cdab13cc352f4",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          83
+        ],
+        [
+          8,
+          1,
+          83
+        ],
+        [
+          8,
+          2,
+          83
+        ]
+      ]
+    },
+    {
+      "key": "d8f69c23c705e9f9",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          6,
+          0,
+          99
+        ],
+        [
+          6,
+          1,
+          99
+        ],
+        [
+          6,
+          2,
+          99
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "d94c9e9c9799cd7a",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          116
+        ],
+        [
+          2,
+          1,
+          116
+        ],
+        [
+          2,
+          2,
+          116
+        ]
+      ]
+    },
+    {
+      "key": "da28fe376d834929",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          229
+        ],
+        [
+          6,
+          1,
+          229
+        ],
+        [
+          6,
+          2,
+          229
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "da47ad7ff1a37f87",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          160
+        ],
+        [
+          6,
+          1,
+          160
+        ],
+        [
+          6,
+          2,
+          160
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "da6fd7926e039bfd",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          50
+        ],
+        [
+          3,
+          1,
+          50
+        ],
+        [
+          3,
+          2,
+          50
+        ]
+      ]
+    },
+    {
+      "key": "db0c220a5d9df4bd",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          83
+        ],
+        [
+          4,
+          1,
+          83
+        ],
+        [
+          4,
+          2,
+          83
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "dccfbdebad5d8747",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          81
+        ],
+        [
+          8,
+          1,
+          81
+        ],
+        [
+          8,
+          2,
+          81
+        ]
+      ]
+    },
+    {
+      "key": "dd7dbc01647ece69",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          27
+        ],
+        [
+          6,
+          1,
+          27
+        ],
+        [
+          6,
+          2,
+          27
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "de8c7543b911c492",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          55
+        ],
+        [
+          3,
+          1,
+          55
+        ],
+        [
+          3,
+          2,
+          55
+        ]
+      ]
+    },
+    {
+      "key": "e0d5aada0fd7164b",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          183
+        ],
+        [
+          1,
+          1,
+          183
+        ],
+        [
+          1,
+          2,
+          183
+        ]
+      ]
+    },
+    {
+      "key": "e11ea8559af52092",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          51
+        ],
+        [
+          8,
+          1,
+          51
+        ],
+        [
+          8,
+          2,
+          51
+        ]
+      ]
+    },
+    {
+      "key": "e20b0a1df2518d8e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          226
+        ],
+        [
+          3,
+          1,
+          226
+        ],
+        [
+          3,
+          2,
+          226
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "e265744eb4c9f25d",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          191
+        ],
+        [
+          6,
+          1,
+          191
+        ],
+        [
+          6,
+          2,
+          191
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "e453e5e9d7faba05",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          173
+        ],
+        [
+          1,
+          1,
+          173
+        ],
+        [
+          1,
+          2,
+          173
+        ]
+      ]
+    },
+    {
+      "key": "e48e2c52452fd091",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          65
+        ],
+        [
+          3,
+          1,
+          65
+        ],
+        [
+          3,
+          2,
+          65
+        ]
+      ]
+    },
+    {
+      "key": "e48e6d0092290c54",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 8,
+      "role": "osseous_rib_and_skull_trim",
+      "origins": [
+        [
+          1,
+          0,
+          162
+        ],
+        [
+          1,
+          1,
+          162
+        ],
+        [
+          1,
+          2,
+          162
+        ]
+      ]
+    },
+    {
+      "key": "e51818b794dcc8d6",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          58
+        ],
+        [
+          3,
+          1,
+          58
+        ],
+        [
+          3,
+          2,
+          58
+        ]
+      ]
+    },
+    {
+      "key": "e6b5faf69b93f2ce",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          216
+        ],
+        [
+          3,
+          1,
+          216
+        ],
+        [
+          3,
+          2,
+          216
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "e6dccaadddcb4d43",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          14
+        ],
+        [
+          6,
+          1,
+          14
+        ],
+        [
+          6,
+          2,
+          14
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "e71a677b231ff73e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          189
+        ],
+        [
+          6,
+          1,
+          189
+        ],
+        [
+          6,
+          2,
+          189
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "e967ab6d797c481d",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          197
+        ],
+        [
+          1,
+          1,
+          197
+        ],
+        [
+          1,
+          2,
+          197
+        ]
+      ]
+    },
+    {
+      "key": "eb43237bc476b95e",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          188
+        ],
+        [
+          1,
+          1,
+          188
+        ],
+        [
+          1,
+          2,
+          188
+        ]
+      ]
+    },
+    {
+      "key": "eccd71ad2fb27e8e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          213
+        ],
+        [
+          6,
+          1,
+          213
+        ],
+        [
+          6,
+          2,
+          213
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "eccdedb3f5be8e91",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          74
+        ],
+        [
+          8,
+          1,
+          74
+        ],
+        [
+          8,
+          2,
+          74
+        ]
+      ]
+    },
+    {
+      "key": "ed1d7577891aa578",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          73
+        ],
+        [
+          3,
+          1,
+          73
+        ],
+        [
+          3,
+          2,
+          73
+        ]
+      ]
+    },
+    {
+      "key": "edd5fdd68866c5ae",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          54
+        ],
+        [
+          3,
+          1,
+          54
+        ],
+        [
+          3,
+          2,
+          54
+        ]
+      ]
+    },
+    {
+      "key": "ede31899e7c448b5",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_torch",
+      "origins": [
+        [
+          6,
+          0,
+          67
+        ],
+        [
+          6,
+          1,
+          67
+        ],
+        [
+          6,
+          2,
+          67
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1
+      ]
+    },
+    {
+      "key": "edf72042b6596e37",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          80
+        ],
+        [
+          4,
+          1,
+          80
+        ],
+        [
+          4,
+          2,
+          80
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "f0c039e0334f7623",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 6,
+      "role": "wolf_arena_masonry",
+      "origins": [
+        [
+          3,
+          0,
+          119
+        ],
+        [
+          3,
+          1,
+          119
+        ],
+        [
+          3,
+          2,
+          119
+        ]
+      ]
+    },
+    {
+      "key": "f0ed4aa0906b6d23",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          86
+        ],
+        [
+          4,
+          1,
+          86
+        ],
+        [
+          4,
+          2,
+          86
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "f1d137b816f38621",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_mural_or_brazier",
+      "origins": [
+        [
+          4,
+          0,
+          65
+        ],
+        [
+          4,
+          1,
+          65
+        ],
+        [
+          4,
+          2,
+          65
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "f21c5a06977dd46f",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_stalagmite_or_stalactite",
+      "origins": [
+        [
+          5,
+          0,
+          40
+        ],
+        [
+          5,
+          1,
+          40
+        ],
+        [
+          5,
+          2,
+          40
+        ]
+      ]
+    },
+    {
+      "key": "f34d6f7d6555f07a",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          220
+        ],
+        [
+          3,
+          1,
+          220
+        ],
+        [
+          3,
+          2,
+          220
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "f3ab2908c324901d",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          148
+        ],
+        [
+          6,
+          1,
+          148
+        ],
+        [
+          6,
+          2,
+          148
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "f4f8c243eee85625",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "osseous_island_body",
+      "origins": [
+        [
+          1,
+          0,
+          181
+        ],
+        [
+          1,
+          1,
+          181
+        ],
+        [
+          1,
+          2,
+          181
+        ]
+      ]
+    },
+    {
+      "key": "f6da7d6ff5f93bc9",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          36
+        ],
+        [
+          2,
+          1,
+          36
+        ],
+        [
+          2,
+          2,
+          36
+        ]
+      ]
+    },
+    {
+      "key": "f81dc70626fdd4df",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_wall",
+      "origins": [
+        [
+          6,
+          0,
+          161
+        ],
+        [
+          6,
+          1,
+          161
+        ],
+        [
+          6,
+          2,
+          161
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "f82f56c29dda4771",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32768,
+      "role": "reviewed_boss_arena_material",
+      "origins": [
+        [
+          2,
+          0,
+          18
+        ],
+        [
+          2,
+          1,
+          18
+        ],
+        [
+          2,
+          2,
+          18
+        ]
+      ]
+    },
+    {
+      "key": "f916b8e105b54d42",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_statue_or_arch_trim",
+      "origins": [
+        [
+          3,
+          0,
+          209
+        ],
+        [
+          3,
+          1,
+          209
+        ],
+        [
+          3,
+          2,
+          209
+        ]
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "key": "f96e8065dd7d129a",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4,
+      "role": "solid_masonry",
+      "origins": [
+        [
+          4,
+          0,
+          57
+        ],
+        [
+          4,
+          1,
+          57
+        ],
+        [
+          4,
+          2,
+          57
+        ]
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "fb602813bb744b95",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_stalagmite_or_stalactite",
+      "origins": [
+        [
+          5,
+          0,
+          17
+        ],
+        [
+          5,
+          1,
+          17
+        ],
+        [
+          5,
+          2,
+          17
+        ]
+      ]
+    },
+    {
+      "key": "fc5d128b2e7d79fb",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          70
+        ],
+        [
+          8,
+          1,
+          70
+        ],
+        [
+          8,
+          2,
+          70
+        ]
+      ]
+    },
+    {
+      "key": "fcd63670ed8a0a20",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 16388,
+      "role": "rock_ledge",
+      "origins": [
+        [
+          5,
+          0,
+          85
+        ],
+        [
+          5,
+          1,
+          85
+        ],
+        [
+          5,
+          2,
+          85
+        ]
+      ]
+    },
+    {
+      "key": "fd13e79f5418861b",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          82
+        ],
+        [
+          8,
+          1,
+          82
+        ],
+        [
+          8,
+          2,
+          82
+        ]
+      ]
+    },
+    {
+      "key": "fe1ec7eeee135d6d",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 32776,
+      "role": "rear_carving",
+      "origins": [
+        [
+          6,
+          0,
+          188
+        ],
+        [
+          6,
+          1,
+          188
+        ],
+        [
+          6,
+          2,
+          188
+        ]
+      ],
+      "rear_colors": [
+        8192,
+        8192,
+        8192,
+        8192
+      ],
+      "animation_phases": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "fe41a3b30d8a684a",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          73
+        ],
+        [
+          8,
+          1,
+          73
+        ],
+        [
+          8,
+          2,
+          73
+        ]
+      ]
+    },
+    {
+      "key": "ff1831509b80f38d",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "opaque_rear_arch_or_shadow",
+      "origins": [
+        [
+          3,
+          0,
+          64
+        ],
+        [
+          3,
+          1,
+          64
+        ],
+        [
+          3,
+          2,
+          64
+        ]
+      ]
+    },
+    {
+      "key": "ff7879f2585967dc",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "native_celestial_art",
+      "origins": [
+        [
+          8,
+          0,
+          67
+        ],
+        [
+          8,
+          1,
+          67
+        ],
+        [
+          8,
+          2,
+          67
+        ]
+      ]
+    }
+  ]
+}

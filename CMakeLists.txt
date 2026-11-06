@@ -1041,6 +1041,13 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_sprite_ownership COMMAND actraiser_sprite_ownership_test)
 
+    add_executable(actraiser_voxel_sprite_capture_test
+        tests/voxel_sprite_capture_test.c src/actraiser/actraiser_sprite_ownership.c)
+    target_include_directories(actraiser_voxel_sprite_capture_test PRIVATE
+        src tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_voxel_sprite_capture_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_voxel_sprite_capture COMMAND actraiser_voxel_sprite_capture_test)
+
     add_executable(actraiser_hud_test
         tests/actraiser_hud_test.c
         src/actraiser/actraiser_hud.c
@@ -1253,6 +1260,15 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_presentation_upload_mirror
         COMMAND actraiser_presentation_upload_mirror_test)
+    add_executable(actraiser_diorama_upload_test
+        tests/diorama_upload_test.c
+        src/diorama/diorama_upload.c
+        src/present/presentation_upload_mirror.c)
+    target_link_libraries(actraiser_diorama_upload_test PRIVATE
+        actraiser_performance_test_support actraiser_render_test_support)
+    target_include_directories(actraiser_diorama_upload_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_diorama_upload COMMAND actraiser_diorama_upload_test)
 
     add_executable(actraiser_upload_rect_run_test
         tests/upload_rect_run_test.c
@@ -1522,7 +1538,8 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_gamepad_poll COMMAND actraiser_gamepad_poll_test)
 
     add_executable(actraiser_frame_queue_test tests/frame_queue_test.c
-        src/host/frame_queue.c src/platform/sdl/frame_producer_sdl.c)
+        src/host/frame_queue.c src/platform/sdl/frame_producer_sdl.c
+        src/action/action_voxel.c src/diorama/diorama_capture_blend.c)
     target_include_directories(actraiser_frame_queue_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_frame_queue_test PRIVATE snesrecomp::sdk SDL3::SDL3)
     add_test(NAME actraiser_frame_queue COMMAND actraiser_frame_queue_test)
@@ -1533,7 +1550,8 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_frame_playout COMMAND actraiser_frame_playout_test)
 
     add_executable(actraiser_frame_pipeline_test tests/frame_pipeline_test.c
-        src/host/frame_queue.c src/platform/sdl/frame_producer_sdl.c)
+        src/host/frame_queue.c src/platform/sdl/frame_producer_sdl.c
+        src/action/action_voxel.c src/diorama/diorama_capture_blend.c)
     target_include_directories(actraiser_frame_pipeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_frame_pipeline_test PRIVATE snesrecomp::sdk SDL3::SDL3)
     add_test(NAME actraiser_frame_pipeline COMMAND actraiser_frame_pipeline_test)
@@ -2253,14 +2271,50 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_bg_tuner
         COMMAND actraiser_action_bg_tuner_test)
 
+    add_executable(actraiser_action_voxel_test tests/action_voxel_test.c
+        src/action/action_voxel.c src/action/action_voxel_build.c
+        src/action/action_scene_snapshot.c src/action/action_room_scene.c
+        src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c)
+    target_include_directories(actraiser_action_voxel_test PRIVATE src tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_action_voxel_test PRIVATE actraiser_rom_decode_test_support)
+    add_test(NAME actraiser_action_voxel COMMAND actraiser_action_voxel_test)
+
+    add_executable(actraiser_action_voxel_split_test tests/action_voxel_split_test.c
+        src/action/action_voxel.c src/action/action_voxel_build.c
+        src/action/action_scene_snapshot.c src/action/action_room_scene.c
+        src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c)
+    target_include_directories(actraiser_action_voxel_split_test PRIVATE src tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_action_voxel_split_test PRIVATE actraiser_rom_decode_test_support)
+    add_test(NAME actraiser_action_voxel_split COMMAND actraiser_action_voxel_split_test)
+
+    add_executable(actraiser_action_voxel_mountain_cloud_test tests/action_voxel_mountain_cloud_test.c
+        src/action/action_voxel.c src/action/action_voxel_build.c
+        src/action/action_scene_snapshot.c src/action/action_room_scene.c
+        src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c)
+    target_include_directories(actraiser_action_voxel_mountain_cloud_test PRIVATE src tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_action_voxel_mountain_cloud_test PRIVATE actraiser_rom_decode_test_support)
+    add_test(NAME actraiser_action_voxel_mountain_cloud COMMAND actraiser_action_voxel_mountain_cloud_test)
+
+    add_executable(actraiser_diorama_voxel_source_cache_test
+        tests/diorama_voxel_source_cache_test.c
+        src/action/action_voxel.c src/action/action_voxel_build.c
+        src/action/action_room_scene.c
+        src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c)
+    target_include_directories(actraiser_diorama_voxel_source_cache_test PRIVATE
+        src tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diorama_voxel_source_cache_test PRIVATE
+        actraiser_rom_decode_test_support)
+    add_test(NAME actraiser_diorama_voxel_source_cache
+        COMMAND actraiser_diorama_voxel_source_cache_test)
+
     add_executable(actraiser_action_bg_test
         tests/actraiser_action_bg_test.c
         src/action/action_bg_plan.c
         src/action/action_bg_world.c
         src/action/action_room_scene.c src/action/action_room_terrain.c src/action/action_room_mosaic.c
         src/actraiser/actraiser_action_bg.c
-        src/action/action_trunk.c
-        src/diorama/diorama_layer_order.c)
+        src/action/action_trunk.c src/action/action_voxel.c src/action/action_voxel_build.c
+        src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c)
     target_link_libraries(actraiser_action_bg_test PRIVATE
         actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_action_bg_test PRIVATE actraiser_regional_rules)
@@ -2407,15 +2461,15 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_glow_recipe COMMAND actraiser_action_glow_recipe_test)
     set_tests_properties(actraiser_action_glow_recipe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-    add_executable(actraiser_action_castle_recipe_test
+    add_executable(actraiser_action_voxel_recipe_test
         tests/action_castle_recipe_test.c ${AR_ACTION_EFFECT_TEST_SOURCES}
         src/action/action_effect_recipes.c src/action/action_floor_support.c src/action/action_scenery_occlusion.c
         src/action/action_bg_world.c)
-    target_include_directories(actraiser_action_castle_recipe_test PRIVATE
+    target_include_directories(actraiser_action_voxel_recipe_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
-    target_link_libraries(actraiser_action_castle_recipe_test PRIVATE actraiser_math)
-    add_test(NAME actraiser_action_castle_recipe COMMAND actraiser_action_castle_recipe_test)
-    set_tests_properties(actraiser_action_castle_recipe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    target_link_libraries(actraiser_action_voxel_recipe_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_action_voxel_recipe COMMAND actraiser_action_voxel_recipe_test)
+    set_tests_properties(actraiser_action_voxel_recipe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
   add_executable(actraiser_action_marsh_recipe_test
         tests/action_marsh_recipe_test.c ${AR_ACTION_EFFECT_TEST_SOURCES}
@@ -2533,6 +2587,9 @@ if(BUILD_TESTING)
 
     file(STRINGS "${CMAKE_SOURCE_DIR}/tools/action_editor/compositor_sources.txt"
         _diorama_compositor_sources)
+    set(AR_DIORAMA_DEPTH_GPU_SOURCES
+        src/platform/sdl/diorama_depth_pass_sdl.c
+        src/platform/sdl/diorama_depth_alpha_sdl.c)
     add_executable(actraiser_diorama_compositor_test
         tests/diorama_compositor_test.c src/render/cloud_material.c ${_diorama_compositor_sources})
     target_include_directories(actraiser_diorama_compositor_test PRIVATE
@@ -2557,6 +2614,26 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_diorama_snapshot_test PRIVATE actraiser_render_test_support)
     add_test(NAME actraiser_diorama_snapshot COMMAND actraiser_diorama_snapshot_test)
 
+    add_executable(actraiser_diorama_object_snapshot_test
+        tests/diorama_object_snapshot_test.c src/diorama/diorama_object_snapshot.c)
+    target_include_directories(actraiser_diorama_object_snapshot_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diorama_object_snapshot_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_diorama_object_snapshot COMMAND actraiser_diorama_object_snapshot_test)
+
+    add_executable(actraiser_action_editor_objects_test
+        tests/action_editor_objects_test.c tools/action_editor/object_preview.c
+        src/diorama/diorama_object_snapshot.c src/diorama/diorama.c
+        src/diorama/diorama_layer_order.c src/diorama/diorama_projection.c
+        src/diorama/diorama_depth_shapes.c src/diorama/diorama_skybox_uv.c
+        src/action/action_voxel.c src/render/render_device.c
+        src/render/scene3d_math.c src/render/presentation_layout.c)
+    target_include_directories(actraiser_action_editor_objects_test PRIVATE src tests tools/action_editor
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS} snesrecomp-go/runtime/src
+        snesrecomp-go/runtime/src/runner snesrecomp-go/runtime/src/core)
+    target_link_libraries(actraiser_action_editor_objects_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_action_editor_objects COMMAND actraiser_action_editor_objects_test)
+
     add_executable(actraiser_diorama_replay
         tools/action_editor/replay_compositor.c tools/action_editor/compositor_profile_stub.c
         src/diorama/diorama_snapshot.c src/render/cloud_material.c ${_diorama_compositor_sources}
@@ -2565,6 +2642,18 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_diorama_replay PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_diorama_replay PRIVATE actraiser_render_sdl_test_support)
+
+    add_executable(actraiser_diorama_voxel_subscreen_gpu_test
+        tests/diorama_voxel_subscreen_gpu_test.c tools/action_editor/compositor_profile_stub.c
+        src/render/cloud_material.c ${_diorama_compositor_sources}
+        ${AR_DIORAMA_DEPTH_GPU_SOURCES} src/platform/sdl/diorama_depth_sink_sdl.c
+        src/platform/sdl/diorama_effect_backend_sdl.c
+        src/render/gpu_compile_log.c src/app/session_fatal.c)
+    target_include_directories(actraiser_diorama_voxel_subscreen_gpu_test PRIVATE
+        src tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diorama_voxel_subscreen_gpu_test PRIVATE actraiser_render_sdl_test_support)
+    add_test(NAME actraiser_diorama_voxel_subscreen_gpu COMMAND actraiser_diorama_voxel_subscreen_gpu_test)
+    set_tests_properties(actraiser_diorama_voxel_subscreen_gpu PROPERTIES SKIP_RETURN_CODE 77)
 
 
     # Complete room assets exercise every environmental family without relying
@@ -2583,7 +2672,7 @@ if(BUILD_TESTING)
         ${_room_environment_sources}
         src/action/action_scene_snapshot.c src/action/action_room_scene.c
         src/action/action_bg_world.c src/action/action_bg_plan.c src/action/action_camera_bounds.c
-        src/diorama/diorama.c src/diorama/diorama_astral_rift.c src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c
+        src/action/action_voxel.c src/diorama/diorama.c src/diorama/diorama_astral_rift.c src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c
         src/diorama/diorama_projection.c src/diorama/diorama_skybox_uv.c src/diorama/diorama_depth_shapes.c
         src/render/scene3d_math.c src/render/presentation_layout.c
         snesrecomp-go/runtime/src/scene_renderer.c snesrecomp-go/runtime/src/snes/ppu.c)
@@ -2594,7 +2683,9 @@ if(BUILD_TESTING)
     add_executable(actraiser_action_room_gpu_compare
         tools/ppu_gpu/runner_events_stub.c
         tools/action_editor/check_native_projection.c tools/action_editor/room_preview.c
+        ${AR_DIORAMA_DEPTH_GPU_SOURCES} src/platform/sdl/diorama_depth_sink_sdl.c
         tools/action_editor/receiver_preview.c
+        tools/action_editor/object_preview.c src/diorama/diorama_object_snapshot.c
         tools/action_editor/room_scene.c tools/action_editor/compositor_profile_stub.c
         ${_room_environment_sources} ${_diorama_compositor_sources}
         src/action/action_scene_snapshot.c src/action/action_room_scene.c
@@ -2630,7 +2721,7 @@ if(BUILD_TESTING)
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
     endif()
 
-    foreach(_room_oracle IN ITEMS actraiser_action_room_gpu_compare actraiser_action_room_benchmark actraiser_action_room_capture_test)
+    foreach(_room_oracle IN ITEMS actraiser_action_room_gpu_compare actraiser_action_room_benchmark actraiser_action_room_capture_test actraiser_action_editor_objects_test)
         if(MSVC)
             target_compile_options(${_room_oracle} PRIVATE /Gy)
             target_link_options(${_room_oracle} PRIVATE /OPT:REF)
@@ -4155,8 +4246,15 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_diorama_gpu_policy COMMAND actraiser_diorama_gpu_policy_test)
 
+    add_executable(actraiser_diorama_bg_decode_test tests/diorama_bg_decode_test.c)
+    target_include_directories(actraiser_diorama_bg_decode_test PRIVATE src tests
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_diorama_bg_decode COMMAND actraiser_diorama_bg_decode_test)
+
     add_executable(actraiser_diorama_frame_generation_test
         tests/diorama_frame_generation_test.c
+        src/action/action_voxel.c
+        src/diorama/diorama_capture_blend.c
         src/action/action_effect_masks.c
         src/render/cloud_material.c
         src/diorama/diorama_projection.c
@@ -4199,6 +4297,64 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_action_scene_pass_gpu_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_action_scene_pass_gpu COMMAND actraiser_action_scene_pass_gpu_test)
     set_tests_properties(actraiser_action_scene_pass_gpu PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(actraiser_diorama_depth_pass_gpu_test
+        tests/diorama_depth_pass_gpu_test.c
+        ${AR_DIORAMA_DEPTH_GPU_SOURCES}
+        src/render/gpu_compile_log.c)
+    target_include_directories(actraiser_diorama_depth_pass_gpu_test PRIVATE src tests)
+    target_link_libraries(actraiser_diorama_depth_pass_gpu_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_diorama_depth_pass_gpu COMMAND actraiser_diorama_depth_pass_gpu_test)
+    set_tests_properties(actraiser_diorama_depth_pass_gpu PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(actraiser_diorama_depth_alpha_gpu_test
+        tests/diorama_depth_alpha_gpu_test.c ${AR_DIORAMA_DEPTH_GPU_SOURCES}
+        src/render/gpu_compile_log.c)
+    target_include_directories(actraiser_diorama_depth_alpha_gpu_test PRIVATE src tests)
+    target_link_libraries(actraiser_diorama_depth_alpha_gpu_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_diorama_depth_alpha_gpu COMMAND actraiser_diorama_depth_alpha_gpu_test)
+    set_tests_properties(actraiser_diorama_depth_alpha_gpu PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(actraiser_diorama_depth_alpha_util_test
+        tests/diorama_depth_alpha_util_test.c)
+    target_include_directories(actraiser_diorama_depth_alpha_util_test PRIVATE src tests)
+    target_link_libraries(actraiser_diorama_depth_alpha_util_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_diorama_depth_alpha_util COMMAND actraiser_diorama_depth_alpha_util_test)
+    add_executable(actraiser_diorama_depth_alpha_targets_gpu_test
+        tests/diorama_depth_alpha_targets_gpu_test.c
+        tests/diorama_depth_alpha_legacy_fixture.c
+        ${AR_DIORAMA_DEPTH_GPU_SOURCES} src/render/gpu_compile_log.c)
+    target_include_directories(actraiser_diorama_depth_alpha_targets_gpu_test PRIVATE src tests)
+    target_link_libraries(actraiser_diorama_depth_alpha_targets_gpu_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_diorama_depth_alpha_targets_gpu COMMAND actraiser_diorama_depth_alpha_targets_gpu_test)
+    set_tests_properties(actraiser_diorama_depth_alpha_targets_gpu PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(actraiser_diorama_depth_material_gpu_test
+        tests/diorama_depth_material_gpu_test.c
+        ${AR_DIORAMA_DEPTH_GPU_SOURCES}
+        src/platform/sdl/diorama_effect_backend_sdl.c
+        src/render/gpu_compile_log.c src/app/session_fatal.c)
+    target_include_directories(actraiser_diorama_depth_material_gpu_test PRIVATE src tests)
+    target_link_libraries(actraiser_diorama_depth_material_gpu_test PRIVATE
+        actraiser_render_sdl_test_support SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_diorama_depth_material_gpu COMMAND actraiser_diorama_depth_material_gpu_test)
+    add_test(NAME actraiser_diorama_depth_material_hybrid_gpu
+        COMMAND actraiser_diorama_depth_material_gpu_test --hybrid)
+    set_tests_properties(actraiser_diorama_depth_material_gpu actraiser_diorama_depth_material_hybrid_gpu
+        PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(actraiser_diorama_depth_sink_gpu_test
+        tests/diorama_depth_sink_gpu_test.c
+        ${AR_DIORAMA_DEPTH_GPU_SOURCES}
+        src/platform/sdl/diorama_depth_sink_sdl.c src/render/gpu_compile_log.c)
+    target_include_directories(actraiser_diorama_depth_sink_gpu_test PRIVATE src tests)
+    target_link_libraries(actraiser_diorama_depth_sink_gpu_test PRIVATE
+        actraiser_render_sdl_test_support SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_diorama_depth_sink_gpu COMMAND actraiser_diorama_depth_sink_gpu_test)
+    add_test(NAME actraiser_diorama_depth_sink_hybrid_gpu
+        COMMAND actraiser_diorama_depth_sink_gpu_test --hybrid)
+    set_tests_properties(actraiser_diorama_depth_sink_gpu actraiser_diorama_depth_sink_hybrid_gpu
+        PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(actraiser_scenery_depth_test
+        tests/scenery_depth_test.c src/diorama/diorama_edge_aa.c)
+    target_include_directories(actraiser_scenery_depth_test PRIVATE src tests)
+    target_link_libraries(actraiser_scenery_depth_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_scenery_depth COMMAND actraiser_scenery_depth_test)
     add_executable(actraiser_diorama_bg_gpu_test
         tests/diorama_bg_gpu_test.c src/platform/sdl/diorama_bg_gpu_sdl.c
         src/app/session_fatal.c

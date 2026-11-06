@@ -16,6 +16,7 @@
  * motion that actually fit. */
 
 #include "action/action_camera_bounds.h"
+#include "action/action_voxel.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser/enhancements/actraiser_camera_internal.h"
 #include "actraiser_game.h"
@@ -85,7 +86,10 @@ static bool ActionCamera_ResolvePlayfield(ActionBgPlan *plan) {
   const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
   /* Atomic rejection leaves the canonical plan intact, matching frame-plan
    * rendering when an edited policy is invalid for the current topology. */
-  if(Diorama_ModeIsOn())DioramaTrunk_ApplyBgPolicy(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],room,plan);
+  const bool castle = Diorama_ModeIsOn() && g_settings.diorama_mode == kAction3D_Voxel &&
+      ActRaiserActionBg_VoxelGeometry(g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap]);
+  if (castle) return true;
+  if(Diorama_ModeIsOn())DioramaTrunk_ApplyBgPolicyForMode(g_settings.diorama_mode,g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],room,plan);
   else if(room)DioramaBgPolicy_Apply(room->bg_policy,plan);
   return true;
 }
@@ -169,8 +173,15 @@ static bool ActionCamera_DioramaMargins(const ActionBgPlan *plan,
   const bool edits = DioramaCameraPolicy_HasEdits(room, 0);
   const bool bg_apron = ActRaiser_DioramaNeedsBgApron(room, 0, edits,
       DioramaCameraPolicy_WorldApron(playfield));
-  const DioramaCapture capture = DioramaCameraPolicy_Capture(plan, room, x, y,
+  DioramaCapture capture = DioramaCameraPolicy_Capture(plan, room, x, y,
       g_ws_extra, g_settings.diorama_vertical_extend, bg_apron ? 1 : 0);
+  /* The first native camera tick precedes compiled geometry publication. Use
+   * the room's Voxel framing policy now too, so that publication cannot move
+   * the horizontal stop by a pixel and feed that delta into the player tail. */
+  const ActionVoxelProfile framing_profile = g_settings.diorama_mode == kAction3D_Voxel
+      ? ActionVoxel_ProfileForRoom(g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap])
+      : kActionVoxelProfile_None;
+  capture.framing_y = ActionVoxel_VerticalFraming(framing_profile, capture.framing_y);
   const bool crt = g_settings.pixel_aspect == kPixelAspect_Crt43;
   const int visible_width = Settings_VisibleWidth();
   const int visible_height = 224 + (g_settings.extended_aspect == kScreenAspect_Auto
@@ -190,12 +201,14 @@ static bool ActionCamera_DioramaMargins(const ActionBgPlan *plan,
     .ignore_aspect_ratio = stretch, .visible_width = visible_width, .visible_height = visible_height,
     .viewport = ArPresentationLayout_ResolveViewport(output_width, output_height,
         stretch, crt, visible_width, visible_height)};
-  const DioramaTrunkSettings trunk=DioramaTrunk_Resolve(
+  const DioramaTrunkSettings trunk=DioramaTrunk_ResolveForMode(g_settings.diorama_mode,
       g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],room);
+  const struct ActionVoxelGeometry *castle = g_settings.diorama_mode == kAction3D_Voxel
+      ? ActRaiserActionBg_VoxelGeometry(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]) : NULL;
   const DioramaRenderOptions options = {.layers = DioramaLayerManifest_Table(),
-    .visible_planes = (trunk.enabled||g_settings.diorama_layer_bg1) ? (1u << SR_PPU_OVERLAY_BG1) | (1u << kDioramaPlane_Bg1Hi) : 0,
+    .visible_planes = (trunk.enabled||castle||g_settings.diorama_layer_bg1) ? (1u << SR_PPU_OVERLAY_BG1) | (1u << kDioramaPlane_Bg1Hi) : 0,
     .skybox = trunk.enabled ? kDioramaSky_Only : g_settings.diorama_skybox};
-  const DioramaScene scene = {.render = &options,
+  const DioramaScene scene = {.render = &options, .voxel_geometry = castle,
     .map_group = g_ram[kActRaiserWram_MapGroup], .map_number = g_ram[kActRaiserWram_CurrentMap],
     .layer_section = room ? room->section : kDioramaLayerSection_Room,
     .trunk_settings=trunk,.trunk=trunk.enabled?ActRaiserActionBg_TrunkAssets(

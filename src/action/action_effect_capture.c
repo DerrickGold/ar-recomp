@@ -215,7 +215,7 @@ static void PreparePendingFrame(void) {
       ActRaiserActionBg_TerrainProfile(),s_pending.observer.scene_clock,
       g_settings.action_environmental_effects&&g_settings.action_effect_particles);
   const DioramaRoomOverride *trunk_room=CurrentTrunkRoom();
-  DioramaTrunkSettings trunk=DioramaTrunk_Resolve(group,room,trunk_room);
+  DioramaTrunkSettings trunk=DioramaTrunk_ResolveForMode(g_settings.diorama_mode,group,room,trunk_room);
   trunk.enabled &= g_diorama_frame_active&&g_settings.action_environmental_effects;
   ActionTrunk_Capture(&s_pending.observer.trunk,&s_pending.scene,
       trunk.enabled?ActRaiserActionBg_TrunkAssets(group,room,trunk_room):NULL,
@@ -234,8 +234,10 @@ void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
   s_pending.valid = false;
   dst->diorama_map_group = g_ram[kActRaiserWram_MapGroup];
   dst->diorama_map_number = g_ram[kActRaiserWram_CurrentMap];
+  dst->diorama_voxel = g_diorama_frame_active && g_settings.diorama_mode == kAction3D_Voxel
+      ? ActRaiserActionBg_VoxelGeometry(dst->diorama_map_group, dst->diorama_map_number) : NULL;
   const DioramaRoomOverride *trunk_room=CurrentTrunkRoom();
-  dst->diorama_trunk_settings=DioramaTrunk_Resolve(dst->diorama_map_group,dst->diorama_map_number,trunk_room);
+  dst->diorama_trunk_settings=DioramaTrunk_ResolveForMode(g_settings.diorama_mode,dst->diorama_map_group,dst->diorama_map_number,trunk_room);
   dst->diorama_trunk=g_diorama_frame_active&&dst->diorama_trunk_settings.enabled?
       ActRaiserActionBg_TrunkAssets(dst->diorama_map_group,dst->diorama_map_number,trunk_room):NULL;
   Diorama_PublishLiveLayerSection(

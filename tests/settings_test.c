@@ -2048,6 +2048,33 @@ static void TestEffectAvailabilityFollowsRendererSupport(void) {
   g_settings.sim3d_ground_projection = restore_ground;
 }
 
+static void TestAction3DMode(void) {
+  const char *path="actraiser-action-3d-mode-test.ini";
+  ClearSettingsEnv();Settings_Init();
+  const SettingDesc *mode=Settings_Find("diorama_mode");
+  CHECK(mode&&mode->type==kSettingType_Enum&&mode->enum_count==3&&mode->apply==kApply_Callback);
+  if(!mode)return;
+  const char *names[]={"Off","Diorama","Voxel 3D"};
+  for(int i=0;i<kAction3D_Count;++i){
+    CHECK(Settings_SetText(mode,names[i])!=kSettingChange_Rejected);
+    CHECK(g_settings.diorama_mode==i&&Diorama_ModeIsOn()==(i!=0));
+    CHECK(Settings_Save(path));Settings_InitWithFile(path);
+    CHECK(g_settings.diorama_mode==i);
+    char value[32];Settings_FormatValue(mode,value,sizeof(value));CHECK(!strcmp(value,names[i]));
+  }
+  CHECK(WriteTextFile(path,"diorama_mode = On\n"));Settings_InitWithFile(path);
+  CHECK(g_settings.diorama_mode==kAction3D_Diorama);
+  CHECK(Settings_SetText(mode,"false")==kSettingChange_Applied);
+  CHECK(g_settings.diorama_mode==kAction3D_Off);
+  CHECK(Settings_SetText(mode,"2")==kSettingChange_Applied);
+  CHECK(g_settings.diorama_mode==kAction3D_Voxel);
+  CHECK(Settings_SetText(mode,"invalid")==kSettingChange_Rejected);
+  CHECK(g_settings.diorama_mode==kAction3D_Voxel);
+  CHECK(Settings_Reset(mode)==kSettingChange_Applied);
+  CHECK(g_settings.diorama_mode==kAction3D_Off);
+  remove(path);
+}
+
 static void TestEnvironmentalEffectsSetting(void) {
   const char *path = "actraiser-environmental-effects-test.ini";
   ClearSettingsEnv();
@@ -2777,6 +2804,7 @@ int main(int argc, char **argv) {
   TestRimLightAvailabilityFollowsBlendSupport();
   TestEffectAvailabilityFollowsRendererSupport();
   TestEnvironmentalEffectsSetting();
+  TestAction3DMode();
   TestScalePercentToOutput();
   TestDefaultsAndMetadata();
   TestRememberTownPreference();

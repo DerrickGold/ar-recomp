@@ -370,8 +370,13 @@ static bool ReplayLevel(void) {
     }
     const char *command = s_visit.replay_command;
     if (!strcmp(command, "input")) s_visit.replay_input = s_visit.replay_value;
-    else if (!strcmp(command, "view"))
-      Settings_SetLong(Settings_Find("diorama_mode"), s_visit.replay_value != 0);
+    else if (!strcmp(command, "view")) {
+      if (s_visit.replay_value >= kAction3D_Count) {
+        ShowError("Invalid Action 3D replay mode");
+        return false;
+      }
+      Settings_SetLong(Settings_Find("diorama_mode"), s_visit.replay_value);
+    }
     else if (!strcmp(command, "menu")) {
       if (s_visit.replay_value) SettingsOverlay_Open();
       else SettingsOverlay_Close();

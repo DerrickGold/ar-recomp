@@ -10,6 +10,7 @@
 #include "actraiser_game.h"
 #include "action/action_room_scene.h"
 #include "action/action_trunk.h"
+#include "action/action_voxel.h"
 #include "action/action_environment_scene.h"
 #include "action/action_room_terrain.h"
 #include "action/action_room_mosaic.h"
@@ -82,6 +83,7 @@ typedef struct ActRaiserActionBgObserver {
 typedef struct ActRaiserActionBgProvider {
   const ActionBgWorld *world;
   const DioramaRoomOverride *virtual_room;
+  ActionBgLayerPlan capture_plan;
   uint8_t *tile_band_cache;
   size_t tile_band_capacity;
   size_t tile_band_count;
@@ -692,6 +694,35 @@ const ActionTrunkAssets *ActRaiserActionBg_TrunkAssets(unsigned group,unsigned r
   *cache=assets;return assets;
 }
 
+/* The producer mutates only these source snapshots. Published geometry never
+ * borrows them, and queued/displayed frames keep their own counted reference. */
+static struct {
+  ActionRoomScene *source;
+  uint16_t *tiles;
+  const ActionVoxelGeometry *geometry;
+  /* Castle chains change their exact native opacity every two game frames.
+   * Keep each finite phase, rather than rebuilding its entire room or using
+   * another phase's front/matte mask. Each entry owns a separate reference. */
+  const ActionVoxelGeometry *castle_phases[4];
+  uint64_t terrain_key;
+  bool source_valid, terrain_valid, animation_safe;
+} s_voxel;
+static void ResetVoxelCastlePhases(void) {
+  for(unsigned i=0;i<4;++i) {
+    ActionVoxel_Release(s_voxel.castle_phases[i]);
+    s_voxel.castle_phases[i]=NULL;
+  }
+}
+static void ResetVoxel(void) {
+  ActionVoxel_Release(s_voxel.geometry);
+  s_voxel.geometry = NULL;
+  ResetVoxelCastlePhases();
+  s_voxel.source_valid = s_voxel.terrain_valid = s_voxel.animation_safe = false;
+}
+const ActionVoxelGeometry *ActRaiserActionBg_VoxelGeometry(unsigned group, unsigned room) {
+  return ActionVoxel_Active(s_voxel.geometry, group, room) ? s_voxel.geometry : NULL;
+}
+
 bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
   s_observer.rom = rom;
   s_observer.rom_size = rom_size;
@@ -721,6 +752,7 @@ bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
 }
 
 static void ResetWorlds(void) {
+  ResetVoxel();
   s_capture_edit_mask = 0;
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
     ActionBgWorld_Reset(s_observer.provider_world[layer]);
@@ -1218,6 +1250,254 @@ static bool SyncFrameIdentity(const uint8_t *wram, size_t wram_size) {
   return true;
 }
 
+static uint64_t VoxelHash(uint64_t key, const void *data, size_t bytes) {
+  const uint8_t *p = data;
+  for (size_t i = 0; i < bytes; ++i) key = (key ^ p[i]) * UINT64_C(1099511628211);
+  return key;
+}
+static bool VoxelCopy(void *dst, const void *src, size_t size) {
+  if (!memcmp(dst, src, size)) return false;
+  memcpy(dst, src, size);
+  return true;
+}
+static bool CaptureMasksSupported(void) {
+  return s_runner_api && s_runner_api->struct_size >= SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE &&
+      (s_runner_api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILES) &&
+      (s_runner_api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY) &&
+      s_runner_api->replace_ppu_capture_tiles;
+}
+
+static bool VoxelSourceLayout(ActRaiserActionBgLayerSnapshot *live,
+                              unsigned group, unsigned room, size_t vram_words) {
+  if (ActRaiserActionBg_WorldRingEligible(live,vram_words)) return true;
+  /* Resident pages have fixed local coordinates; their raster scroll is
+   * presentation, not a rolling world-map publication. Death Heim's hub
+   * stores its separate completion page immediately after the faces page. */
+  const unsigned layout=live->bgsc & 3u;
+  const bool repeated_celestial=layout==2 && s_observer.room_scene &&
+      s_observer.room_scene->raster_effect==kActionRoomRaster_DualBgOpposedWaves;
+  if ((layout && !repeated_celestial) || live->decode.world_height != 256) return false;
+  const size_t base=(size_t)(live->bgsc & 0xfcu)<<8;
+  if (base>vram_words || 1024>vram_words-base) return false;
+  if (group==kActRaiserMapGroup_DeathHeim && room==kActRaiserDeathHeimMap_Hub) {
+    if (live->decode.world_width!=512 || (live->bgsc & 0xfcu)!=0x60) return false;
+    live->decode.world_width=256;
+  } else if (live->decode.world_width!=256) return false;
+  return true;
+}
+
+void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *terrain) {
+  const unsigned group = g_ram[kActRaiserWram_MapGroup], room = g_ram[kActRaiserWram_CurrentMap];
+  SrPpuStateSnapshot ppu;
+  SrBorrowedU16Span vram, palette = {.struct_size = sizeof(palette)};
+  ActRaiserActionBgLayerSnapshot live;
+  ActionBgMapView map;
+  if (!enabled || !ActionVoxel_Room(group, room) ||
+      !SyncFrameIdentity(g_ram, kActRaiserWramSize) || !EnsureRoomScene(group, room) ||
+      !QueryPpuState(&ppu) || ppu.bg_mode != 1 || (ppu.flags & SR_PPU_STATE_FORCED_BLANK) ||
+      ActRaiser_IsDeathHeimCompletionScene(group, room,
+          g_ram[kActRaiserWram_DeathHeimProgress],
+          ppu.background_tilemap_control[0], ppu.background_tilemap_control[1]) ||
+      !BorrowVram(ppu.lifetime_generation, &vram) ||
+      s_runner_api->borrow_u16_memory(s_runner, SR_MEMORY_CGRAM, &palette) != SR_RESULT_OK ||
+      !palette.data || palette.element_count < 128 || palette.lifetime_generation != ppu.lifetime_generation ||
+      !ActRaiserActionBg_CaptureLayer(g_ram, kActRaiserWramSize, 0, ppu.background_tilemap_control[0], &live) ||
+      !VoxelSourceLayout(&live, group, room, vram.element_count) ||
+      !ActionBgMapView_Init(&map, g_ram, kActRaiserWramSize, live.decode.world_width,
+                            live.decode.world_height, live.decode.map_page) ||
+      map.map_size > kActionRoomSceneMaxMapBytes ||
+      !ActionVoxel_ValidBounds(0, 0, live.decode.world_width, live.decode.world_height) ||
+      live.decode.word_mask != kActionRoomSceneTileWordMask ||
+      (live.decode.attributes & ~0x20u) != kActionRoomSceneBg1AttributeByte) {
+    ResetVoxel();
+    return;
+  }
+  if (!s_voxel.source) s_voxel.source = calloc(1, sizeof(*s_voxel.source));
+  if (!s_voxel.tiles) s_voxel.tiles = calloc(kActionRoomSceneMaxMapBytes * 4, sizeof(*s_voxel.tiles));
+  if (!s_voxel.source || !s_voxel.tiles) { ResetVoxel(); return; }
+  ActionRoomScene *source = s_voxel.source;
+  const bool new_room = !s_voxel.source_valid || source->group != group || source->map != room;
+  if(new_room)ResetVoxelCastlePhases();
+  if (new_room) *source = *s_observer.room_scene;
+  ActionRoomSceneBg *bg = &source->bg[0];
+  bool layout_changed = new_room || bg->map_size != map.map_size ||
+      bg->pages_wide != map.pages_wide || bg->pages_high != live.decode.world_height / 256;
+  bg->map_size = map.map_size; bg->pages_wide = map.pages_wide;
+  bg->pages_high = live.decode.world_height / 256;
+  bg->have_map = bg->have_metatiles = true;
+  layout_changed |= VoxelCopy(bg->map, map.map, map.map_size);
+  for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; ++i) {
+    const uint8_t byte = g_ram[live.decode.metatile_table + (i ^ 1u)];
+    layout_changed |= bg->metatiles[i] != byte;
+    bg->metatiles[i] = byte;
+  }
+  const uint8_t priority = (live.decode.attributes & 0x20u) ? 1 : 0;
+  layout_changed |= (source->video_profile[4] & 1u) != priority;
+  source->video_profile[4] = (source->video_profile[4] & ~1u) | priority;
+  source->have_video_profile = true;
+  bool changed = layout_changed;
+  if (ActionVoxel_BackgroundWater(ActionVoxel_ProfileForRoom(group,room))) {
+    /* Pool topology follows the live BG2 map, but its animation stays in the
+     * captured texture. An ordinary animation tick must not rebuild geometry. */
+    ActRaiserActionBgLayerSnapshot water_live;
+    ActionBgMapView water_map;
+    if (!ActRaiserActionBg_CaptureLayer(g_ram,kActRaiserWramSize,1,ppu.background_tilemap_control[1],&water_live) ||
+        !ActionBgMapView_Init(&water_map,g_ram,kActRaiserWramSize,water_live.decode.world_width,
+                              water_live.decode.world_height,water_live.decode.map_page) ||
+        water_map.map_size > kActionRoomSceneMaxMapBytes ||
+        !ActionVoxel_ValidBounds(0,0,water_live.decode.world_width,water_live.decode.world_height) ||
+        water_live.decode.word_mask != kActionRoomSceneTileWordMask ||
+        (water_live.decode.attributes & ~0x20u) != kActionRoomSceneBg2AttributeByte) {
+      ResetVoxel(); return;
+    }
+    ActionRoomSceneBg *water = &source->bg[1];
+    changed |= water->map_size != water_map.map_size || water->pages_wide != water_map.pages_wide ||
+        water->pages_high != water_live.decode.world_height/256;
+    water->map_size = water_map.map_size; water->pages_wide = water_map.pages_wide;
+    water->pages_high = water_live.decode.world_height/256;
+    water->have_map = water->have_metatiles = true;
+    changed |= VoxelCopy(water->map,water_map.map,water_map.map_size);
+    for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; ++i) {
+      const uint8_t byte = g_ram[water_live.decode.metatile_table+(i^1u)];
+      changed |= water->metatiles[i] != byte; water->metatiles[i] = byte;
+    }
+    const uint8_t high = (water_live.decode.attributes & 0x20u) ? 2 : 0;
+    changed |= (source->video_profile[4]&2u) != high;
+    source->video_profile[4] = (source->video_profile[4]&~2u)|high;
+  }
+  /* BG2 animation must not rebuild the castle. Capture only character slots
+   * referenced by BG1 definitions or authored terrain, with bounds checks. */
+  bool used[kActionRoomSceneCharacterBytes / 32] = {false};
+  size_t animation_offset = 0, animation_bytes = 0;
+  const ActionRoomScene *reference = s_observer.room_scene;
+  const unsigned phase_count=ActionRoomScene_CharacterAnimationPhaseCount(reference);
+  const bool castle_animation=ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_Castle &&
+      phase_count>0 && phase_count<=4;
+  const bool have_animation = (castle_animation ||
+      ActionVoxel_AnimationCacheCandidate(ActionVoxel_ProfileForRoom(group,room))) &&
+      ActionVoxel_AnimationMatches(reference,reference->characters,&animation_offset,&animation_bytes);
+  /* Read the complete window so a partially published or edited phase cannot
+   * masquerade as a known native frame. Unrelated BG2 characters stay out. */
+  if (have_animation) for (size_t at = animation_offset; at < animation_offset+animation_bytes; at += 32)
+    used[at/32] = true;
+  for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; i += 2)
+    used[bg->metatiles[i + 1]] = true;
+  if (terrain) for (size_t i = 0; i < terrain->stamp_layers[0].count; ++i)
+    for (unsigned q = 0; q < 4; ++q) {
+      const unsigned character = terrain->stamp_layers[0].cells[i].words[q] & 1023;
+      if (character < sizeof(used) / sizeof(*used)) used[character] = true;
+    }
+  bool animation_changed = false;
+  for (unsigned ch = 0; ch < sizeof(used) / sizeof(*used); ++ch) if (used[ch]) {
+    for (unsigned byte = 0; byte < 32; ++byte) {
+      const size_t word = ppu.backgrounds[0].tile_base_word + ch * 16 + byte / 2;
+      if (word >= vram.element_count) { ResetVoxel(); return; }
+      const uint8_t value = vram.data[word] >> ((byte & 1) * 8);
+      const bool different = source->characters[ch * 32 + byte] != value;
+      if (have_animation && ch*32 >= animation_offset && ch*32 < animation_offset+animation_bytes)
+        animation_changed |= different;
+      else changed |= different;
+      source->characters[ch * 32 + byte] = value;
+    }
+  }
+  for (unsigned i = 0; i < 256; ++i) {
+    const uint8_t value = palette.data[i / 2] >> ((i & 1) * 8);
+    changed |= source->palette[i] != value;
+    source->palette[i] = value;
+  }
+  source->have_palette = source->have_character_bank[0] = true;
+  const unsigned width = bg->pages_wide * 32, height = bg->pages_high * 32;
+  if (layout_changed) for (unsigned y = 0; y < height; ++y)
+    for (unsigned x = 0; x < width; ++x)
+      ActionRoomScene_LookupTile(source, 1, x, y, &s_voxel.tiles[y * width + x], NULL);
+  /* Keep observed native door patches outside the viewport until their next
+   * publication. Camera motion alone does not invalidate geometry. */
+  if ((live.bgsc & 3u)!=3) {
+    const size_t base=(size_t)(live.bgsc & 0xfcu)<<8;
+    for (unsigned y=0;y<height;++y) for (unsigned x=0;x<width;++x) {
+      const uint16_t word=vram.data[base+(size_t)y*32+x];
+      changed |= s_voxel.tiles[y*width+x]!=word;
+      s_voxel.tiles[y*width+x]=word;
+    }
+  } else if ((live.camera_x & 1023) == (ppu.backgrounds[0].h_scroll & 1023) &&
+      (live.camera_y & 1023) == (ppu.backgrounds[0].v_scroll & 1023)) {
+    const unsigned last_x = (live.camera_x + 255u) / 8, last_y = (live.camera_y + 224u) / 8;
+    for (unsigned y = (live.camera_y + 1u) / 8; y <= last_y && y < height; ++y)
+      for (unsigned x = live.camera_x / 8; x <= last_x && x < width; ++x) {
+        size_t address;
+        if (!ActRaiserActionBg_RingAddress(live.tilemap_base, x, y, vram.element_count, &address)) continue;
+        changed |= s_voxel.tiles[y * width + x] != vram.data[address];
+        s_voxel.tiles[y * width + x] = vram.data[address];
+      }
+  }
+  uint64_t key = UINT64_C(14695981039346656037);
+  const unsigned terrain_layers = ActionVoxel_BackgroundWater(ActionVoxel_ProfileForRoom(group,room)) ? 2 : 1;
+  if (terrain) for (unsigned layer = 0; layer < terrain_layers; ++layer) {
+    const DioramaStampLayerOverride *stamps = &terrain->stamp_layers[layer];
+    key = VoxelHash(key, &stamps->set_bounds, sizeof(stamps->set_bounds));
+    if (stamps->set_bounds) {
+      const int16_t bounds[] = {stamps->x0, stamps->y0, stamps->x1, stamps->y1};
+      key = VoxelHash(key, bounds, sizeof(bounds));
+    }
+    key = VoxelHash(key, stamps->cells, stamps->count * sizeof(*stamps->cells));
+    key = VoxelHash(key, terrain->pixel_layers[layer].edits,
+                     terrain->pixel_layers[layer].count * sizeof(DioramaPixelEdit));
+  }
+  changed |= !s_voxel.terrain_valid || key != s_voxel.terrain_key;
+  s_voxel.source_valid = s_voxel.terrain_valid = true;
+  s_voxel.terrain_key = key;
+  const bool known_animation = have_animation && ActionVoxel_AnimationMatches(reference,source->characters,
+                                                                              &animation_offset,&animation_bytes);
+  int castle_phase=-1;
+  if(castle_animation) {
+    if(known_animation)for(unsigned phase=0;phase<phase_count;++phase)
+      if(!memcmp(source->characters+animation_offset,
+          reference->characters+animation_offset+phase*animation_bytes,animation_bytes)) {
+        castle_phase=(int)phase;break;
+      }
+    /* Every input outside the exact native animation window invalidates all
+     * phases, including live door words, palette, bounds and authored edits.
+     * Unknown/partial DMA frames never borrow a known phase's geometry. */
+    if(changed || castle_phase<0)ResetVoxelCastlePhases();
+    s_voxel.animation_safe=false;
+    if(castle_phase>=0 && s_voxel.castle_phases[castle_phase]) {
+      const ActionVoxelGeometry *cached=s_voxel.castle_phases[castle_phase];
+      if(ActionVoxel_HasCutouts(cached) && !CaptureMasksSupported()) {
+        ResetVoxel();return;
+      }
+      ActionVoxel_Retain(cached);
+      ActionVoxel_Release(s_voxel.geometry);
+      s_voxel.geometry=cached;
+      return;
+    }
+    changed |= animation_changed || castle_phase>=0;
+  } else if (changed || !known_animation) s_voxel.animation_safe = false;
+  if (!castle_animation && known_animation && !s_voxel.animation_safe && (changed || animation_changed)) {
+    s_voxel.animation_safe = ActionVoxel_AnimationIsPresentationOnly(source,reference,terrain,s_voxel.tiles,width);
+    changed |= s_voxel.animation_safe; /* Replace geometry compiled from an unknown frame. */
+  }
+  if (s_voxel.animation_safe) {
+    /* Only the geometry compiler sees canonical art. Native texture capture
+     * and emulation retain the current texture pixels and cadence. */
+    memcpy(source->characters+animation_offset,reference->characters+animation_offset,animation_bytes);
+  } else changed |= animation_changed;
+  if (!changed) return;
+  ActionVoxelGeometry *next = ActionVoxel_Create();
+  if (!next || !ActionVoxel_BuildWithTiles(next, source, terrain, ActionVoxel_SettingsForRoom(group, room),
+                                            s_voxel.tiles, width) ||
+      (ActionVoxel_HasCutouts(next) && !CaptureMasksSupported())) {
+    ActionVoxel_Release(next);
+    next = NULL;
+  }
+  if(castle_phase>=0 && ActionVoxel_Active(next,group,room))
+    s_voxel.castle_phases[castle_phase]=ActionVoxel_Retain(next);
+  else if(castle_animation)ResetVoxelCastlePhases();
+  /* Failure/unknown art falls back to ordinary Diorama for this frame; never
+   * pair an earlier door's geometry with newly captured native pixels. */
+  ActionVoxel_Release(s_voxel.geometry);
+  s_voxel.geometry = next;
+}
+
 static uint16_t ResolveAuthenticActionCameraX(
     const uint8_t *wram, size_t wram_size, uint16_t live_camera_x) {
   if (!wram || wram_size < kActRaiserWramSize)
@@ -1485,13 +1765,23 @@ bool ActRaiserActionBg_RoomSceneFrameObserverActive(void) {
   return s_observer.room_frame_valid;
 }
 
+/* Native gate patches must follow the capture into its synthetic margins,
+ * too. Otherwise the geometry could describe an open gate over closed art. */
+static const uint16_t *VoxelLiveTile(const ActRaiserActionBgProvider *provider, int x, int y) {
+  if (!provider || provider->layer || !s_voxel.source_valid ||
+      !ActRaiserActionBg_VoxelGeometry(s_observer.map_group,s_observer.map_number)) return NULL;
+  const unsigned width=s_voxel.source->bg[0].pages_wide*32, height=s_voxel.source->bg[0].pages_high*32;
+  return x>=0 && y>=0 && (unsigned)x<width && (unsigned)y<height ? s_voxel.tiles+(size_t)y*width+x : NULL;
+}
+
 static uint32_t ProviderLookup(void *context, int32_t tile_x,
                                int32_t tile_y, uint16_t *entry) {
   const ActRaiserActionBgProvider *provider = context;
   if (provider && provider->capture_native_tiles)
     tile_y = WrapWorldTile(tile_y, ActionBgWorld_TileHeight(provider->world));
   s_observer.diagnostics.provider_lookups++;
-  const ActionBgLookupResult result = LookupWorldTile(
+  const uint16_t *castle = VoxelLiveTile(provider,tile_x,tile_y);
+  const ActionBgLookupResult result = castle ? (*entry=*castle,kActionBgLookup_Tile) : LookupWorldTile(
       provider ? provider->world : NULL,
       provider && provider->wrap_world_x, tile_x, tile_y, entry);
   if (result == kActionBgLookup_Tile) {
@@ -1513,7 +1803,13 @@ static uint32_t ProviderLookupSpan(
 
   size_t filled = 0;
   ptrdiff_t native_step = 0;
-  if (!provider->wrap_world_x) {
+  const uint16_t *castle = VoxelLiveTile(provider,tile_x,tile_y);
+  if (castle) {
+    const unsigned width = s_voxel.source->bg[0].pages_wide*32;
+    filled = tile_step > 0 ? width-(unsigned)tile_x : (unsigned)tile_x+1;
+    if (filled>capacity) filled=capacity;
+    *entries=castle; native_step=tile_step;
+  } else if (!provider->wrap_world_x) {
     filled = ActionBgWorld_LookupSpan(
         provider->world, tile_x, tile_y, tile_step,
         capacity, entries, &native_step);
@@ -1710,19 +2006,40 @@ bool ActRaiserActionBg_CaptureTilesBound(unsigned bg) {
   return bg < kActionBgLayerCount && (s_capture_edit_mask & (1u << bg));
 }
 
+static const ActionVoxelGeometry *ProviderCutouts(const ActRaiserActionBgProvider *provider) {
+  const ActionVoxelGeometry *voxel = provider->layer == 0 && provider->world
+      ? ActRaiserActionBg_VoxelGeometry(s_observer.map_group, s_observer.map_number) : NULL;
+  return ActionVoxel_HasCutouts(voxel) ? voxel : NULL;
+}
+static const DioramaTileStamp *ProviderStampAt(const ActRaiserActionBgProvider *provider,
+    int cx, int cy, int source_y) {
+  if (!provider->virtual_room ||
+      !provider->virtual_room->stamp_layers[provider->layer].count) return NULL;
+  ActionBgRowPolicy row = {.edge = kActionBgEdge_Clamp};
+  /* Tile callbacks address canonical source rows, including authored rows
+   * outside a resident page. Their horizontal continuation follows the same
+   * content-family policy as the ordinary capture, never native page wrap
+   * alone. Exact authored cells remain authoritative under every policy. */
+  if (provider->capture_native_tiles)
+    (void)ActionBgLayerPlan_ResolveRow(&provider->capture_plan,
+        source_y - (int)provider->capture_plan.camera_y - 1, &row);
+  return DioramaLayerOrder_ExtendedRowStampAt(
+      &provider->virtual_room->stamp_layers[provider->layer], cx, cy,
+      provider->capture_native_tiles ? (int)ActionBgWorld_TileWidth(provider->world) / 2 : 0,
+      provider->capture_native_tiles ? (int)ActionBgWorld_TileHeight(provider->world) / 2 : 0,
+      row.edge);
+}
 static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
                                     int32_t tile_y, SrPpuCaptureTile *tile) {
   const ActRaiserActionBgProvider *provider = context;
   const DioramaRoomOverride *room = provider->virtual_room;
   const bool bubbles=provider->bubbles.characters!=NULL;
-  if ((!room || !provider->pixel_edits_active) && !bubbles) return 0;
+  const ActionVoxelGeometry *cutouts = ProviderCutouts(provider);
+  if ((!room || !provider->pixel_edits_active) && !bubbles && !cutouts) return 0;
   const unsigned bg = provider->layer;
   int cx = tile_x >= 0 ? tile_x / 2 : (tile_x - 1) / 2;
   int cy = tile_y >= 0 ? tile_y / 2 : (tile_y - 1) / 2;
-  const DioramaTileStamp *stamp = room ? DioramaLayerOrder_ExtendedRowStampAt(
-      &room->stamp_layers[bg], cx, cy,
-      provider->capture_native_tiles ? (int)ActionBgWorld_TileWidth(provider->world) / 2 : 0,
-      provider->capture_native_tiles ? (int)ActionBgWorld_TileHeight(provider->world) / 2 : 0) : NULL;
+  const DioramaTileStamp *stamp = ProviderStampAt(provider, cx, cy, tile_y * 8);
   int metatile = -1;
   /* Keep the legacy callback prefix safe on an older runner. Character bytes
    * are written only when ConfigureLavaBubbles verified the new capability. */
@@ -1731,12 +2048,15 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
     cx = stamp->x; cy = stamp->y;
     unsigned quadrant = ((tile_y & 1) * 2) + (tile_x & 1);
     tile->entry = stamp->words[quadrant];
-    tile->band = (stamp->bands >> (quadrant * 2)) & 3u;
+    tile->band = ActionVoxel_OwnsBackgroundBands(ActionVoxel_Profile(
+        ActRaiserActionBg_VoxelGeometry(s_observer.map_group,s_observer.map_number)),
+        s_observer.map_number,bg)
+        ? (tile->entry & 0x2000u ? 2u : 1u) : (stamp->bands >> (quadrant * 2)) & 3u;
     tile->flags = SR_PPU_CAPTURE_TILE_REPLACE |
         (stamp->blank ? SR_PPU_CAPTURE_TILE_BLANK : 0u);
     if (!stamp->blank) metatile = stamp->metatile;
   } else {
-    if ((!room || !room->pixel_layers[bg].count) && !provider->pixel_band_cache_active && !bubbles) return 0;
+    if ((!room || !room->pixel_layers[bg].count) && !provider->pixel_band_cache_active && !bubbles && !cutouts) return 0;
     if (provider->wrap_world_x)
       tile_x = WrapWorldTile(tile_x, ActionBgWorld_TileWidth(provider->world));
     if (provider->capture_native_tiles)
@@ -1745,6 +2065,8 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
     if (ActionBgWorld_Lookup(provider->world, tile_x, tile_y, &tile->entry) !=
             kActionBgLookup_Tile ||
         !ActionBgWorld_LookupMetatile(provider->world, tile_x, tile_y, &id)) return 0;
+    const uint16_t *castle = VoxelLiveTile(provider,tile_x,tile_y);
+    if (castle) tile->entry = *castle;
     cx = tile_x / 2;
     cy = tile_y / 2;
     metatile = id;
@@ -1772,8 +2094,9 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
       tile->black_rows[row] = (uint8_t)(edit->black[mask_row] >> shift);
       tile->transparent_rows[row] = (uint8_t)(edit->transparent[mask_row] >> shift);
     }
+  const bool cutout = ActionVoxel_CutoutRows(cutouts, tile_x, tile_y, tile->transparent_rows);
   return tile->band < kDioramaVirtualBandCount &&
-      (stamp || edit || provider->pixel_band_cache_active || bubble);
+      (stamp || edit || provider->pixel_band_cache_active || bubble || cutout);
 }
 
 static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
@@ -1790,7 +2113,9 @@ static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
   const bool edited = ProviderCaptureTile((void *)p, x, y, &tile) != 0;
   if (!edited) {
     uint16_t word;
-    if (!p->world || ActionBgWorld_Lookup(p->world, x, y, &word) != kActionBgLookup_Tile)
+    const uint16_t *castle = VoxelLiveTile(p, x, y);
+    if (castle) word = *castle;
+    else if (ActionBgWorld_Lookup(p->world, x, y, &word) != kActionBgLookup_Tile)
       return false;
     tile = (SrPpuCaptureTile){.entry = word, .band = (word & 0x2000) ? 2 : 1};
     if (p->pixel_band_cache_active) (void)ProviderBandLookup((void *)p, x, y, word, &tile.band);
@@ -1850,11 +2175,7 @@ void ActRaiserActionBg_ConfigureLavaBubbles(const ActionSurfaceField *field, uin
 bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask) {
   s_capture_edit_mask = 0;
   SrPpuStateSnapshot state;
-  if (!s_runner_api ||
-      s_runner_api->struct_size < SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE ||
-      !(s_runner_api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILES) ||
-      !(s_runner_api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY) ||
-      !s_runner_api->replace_ppu_capture_tiles || !QueryPpuState(&state)) return false;
+  if (!CaptureMasksSupported() || !QueryPpuState(&state)) return false;
   SrPpuCaptureTileRequest request = {
     .struct_size = sizeof(request), .lifetime_generation = state.lifetime_generation,
   };
@@ -1862,7 +2183,7 @@ bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask
     if (!(capture_mask & (1u << bg))) continue;
     ActRaiserActionBgProvider *provider = &s_provider[bg];
     const DioramaRoomOverride *room = provider->virtual_room;
-    bool edits = provider->bubbles.characters || (provider->pixel_edits_active && room &&
+    bool edits = ProviderCutouts(provider) || provider->bubbles.characters || (provider->pixel_edits_active && room &&
         (room->stamp_layers[bg].count || room->pixel_layers[bg].count ||
          provider->pixel_band_cache_active));
     if (!edits && !(apron_mask & (1u << bg))) continue;
@@ -1923,10 +2244,7 @@ bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
   /* Floor division is required for scenery extending left or above zero. */
   const int cx = x >= 0 ? x / 16 : (x - 15) / 16;
   const int cy = y >= 0 ? y / 16 : (y - 15) / 16;
-  const DioramaTileStamp *cell = DioramaLayerOrder_ExtendedRowStampAt(
-      &provider->virtual_room->stamp_layers[bg], cx, cy,
-      provider->capture_native_tiles ? (int)ActionBgWorld_TileWidth(provider->world) / 2 : 0,
-      provider->capture_native_tiles ? (int)ActionBgWorld_TileHeight(provider->world) / 2 : 0);
+  const DioramaTileStamp *cell = ProviderStampAt(provider, cx, cy, y);
   if (!cell) return false;
   *local_x = (uint8_t)(x & 15);
   *local_y = (uint8_t)(y & 15);
@@ -2082,8 +2400,9 @@ static void PrepareNativeCaptureEdits(const uint8_t *wram, size_t wram_size,
       room->map_number == kActRaiserDeathHeimMap_Hub;
   for (unsigned bg = 0; bg < kActionBgLayerCount; bg++) {
     if (!plan->layer[bg].valid || plan->layer[bg].source == kActionBgSource_WorldMap) continue;
-    const bool classified = DioramaLayerOrder_VirtualLayerHasClassification(
-        &room->virtual_layers[bg]);
+    const bool classified = !ActionVoxel_OwnsBackgroundBands(ActionVoxel_Profile(
+        ActRaiserActionBg_VoxelGeometry(room->map_group,room->map_number)),room->map_number,bg) &&
+        DioramaLayerOrder_VirtualLayerHasClassification(&room->virtual_layers[bg]);
     if (!classified && !room->stamp_layers[bg].count && !room->pixel_layers[bg].count) continue;
     ActRaiserActionBgLayerSnapshot snapshot;
     if (!ActRaiserActionBg_CaptureLayer(wram, wram_size, bg,
@@ -2104,6 +2423,7 @@ static void PrepareNativeCaptureEdits(const uint8_t *wram, size_t wram_size,
     ActRaiserActionBgProvider *provider = &s_provider[bg];
     provider->world = world;
     provider->virtual_room = room;
+    provider->capture_plan = plan->layer[bg];
     provider->layer = (uint8_t)bg;
     provider->wrap_world_x = true;
     provider->camera_x = snapshot.camera_x;
@@ -2295,7 +2615,8 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     s_provider[layer].virtual_room = virtual_room;
     s_provider[layer].wrap_world_x = layer_plan->wrap_world_x;
     s_provider[layer].layer = (uint8_t)layer;
-    const bool virtual_layer_classified = virtual_room &&
+    const bool virtual_layer_classified = !ActionVoxel_OwnsBackgroundBands(ActionVoxel_Profile(
+        ActRaiserActionBg_VoxelGeometry(map_group,map_number)),map_number,layer) && virtual_room &&
         DioramaLayerOrder_VirtualLayerHasClassification(
             &virtual_room->virtual_layers[layer]);
     const bool tile_band_cache_ready =
@@ -2613,6 +2934,9 @@ void ActRaiserActionBg_Shutdown(void) {
   for(unsigned terrain=0;terrain<kDioramaTerrainProfileCount;++terrain)for(unsigned room=0;room<2;++room) {
     free(s_trunk_rooms[terrain][room]);s_trunk_rooms[terrain][room]=NULL;
   }
+  ResetVoxel();
+  free(s_voxel.source); free(s_voxel.tiles);
+  memset(&s_voxel, 0, sizeof(s_voxel));
   free(s_observer.room_scene);
   memset(&s_observer, 0, sizeof(s_observer));
   s_observer.enabled = -1;

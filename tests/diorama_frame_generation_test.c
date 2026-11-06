@@ -6,6 +6,8 @@
 
 #include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_gpu_policy.h"
+#include "action/action_voxel.h"
+#include "action/action_voxel_internal.h"
 #include "platform/sdl/action_effect_source_sdl.h"
 #include "platform/sdl/render_sdl_internal.h"
 #include "present/present.h"
@@ -475,6 +477,68 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     }
     SDL_UnmapGPUTransferBuffer(gpu,download);
   }
+  /* Empty capture bands need no triangle/light dispatch. Resident motion may
+   * reveal a band whose CPU row interval is empty, so only raw empty spans
+   * qualify. Weather still draws the union when the first band is empty. */
+  for (unsigned scenario=0;scenario<10;++scenario) {
+    DioramaProjection v={.valid=true,.texture_width=32,.texture_height=16,
+        .output_width=64,.output_height=64,.aspect_x=2,.height_scale=2,
+        .matrix={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1},
+        .bg1_plane={.valid=true,.u1=1,.v1=1},
+        .bg2_skybox={.count=2,.active_band=0,
+            .bands={{0},{0,8,32,16,.5f,1}},
+            .resident={.meta={2,32,16,1},.output={64,64},.vertical={0,16,0,1},
+                .bands={{0,0,0,8},{0,1,8,16}}}}};
+    ActionEffectSourcePrimitive triangles[2]={
+      {.meta={kActionSourceTriangle,2},.origin={8,12,6},.clip={-100,-100,100,100},
+       .points={{0,0},{4,0},{0,3}},.colors={{1,1,1,1},{1,1,1,1},{1,1,1,1}}},
+      {.meta={kActionSourceTriangle,1},.origin={8,12},.clip={-100,-100,100,100},
+       .points={{0,0},{4,0},{0,3}},.colors={{1,1,1,1},{1,1,1,1},{1,1,1,1}}}};
+    ActionEffectSourceBatch b={.primitives=triangles,.count=1,.capacity=2};
+    static ActionEffectSourceLightJob light;
+    light=(ActionEffectSourceLightJob){.data={.meta={1,0},.light={8,12,2,6},
+        .receiver={8,12,2,6},.clip={-100,-100,100,100}}};
+    if (scenario==1) v.bg2_skybox.resident.meta[0]=0;
+    if (scenario==2) {
+      v.bg2_skybox.resident.bands[0][1]=1;
+      triangles[0].origin[1]=2;
+    }
+    if (scenario==3) v.bg2_plane=v.bg1_plane;
+    if (scenario==4) v.bg2_skybox.world_plane=v.bg1_plane;
+    if (scenario==5) v.bg2_skybox.to_texture=true;
+    if (scenario==6) b.count=2;
+    if (scenario==7) {
+      triangles[0].meta[0]=kActionSourceParticle;
+      triangles[0].origin[2]=7;
+      triangles[0].points[1][0]=triangles[0].points[1][1]=1;
+      triangles[0].extra[0]=triangles[0].extra[1]=1;
+    }
+    if (scenario==8) b.weather_only=true;
+    if (scenario==9) {
+      triangles[0].meta[0]=kActionSourceLitTriangle;
+      b.lights=&light;b.light_count=b.light_capacity=1;
+    }
+    CHECK(SDL_SetRenderDrawColor(renderer,0,0,0,255) && SDL_RenderClear(renderer));
+    const uint64_t draws=effect.draws, submissions=effect.submissions;
+    CHECK(ArGpuEffectSource_Draw(&effect,device,motion,0,.5f,&b,&v,NULL,kArRenderBlendMode_Add,1));
+    const bool empty=scenario==0||scenario==1||scenario==9;
+    CHECK(effect.draws==draws+!empty && effect.submissions==submissions+!empty);
+    if (scenario==8) {
+      v.bg2_skybox.active_band=1;
+      CHECK(ArGpuEffectSource_Draw(&effect,device,motion,0,.5f,&b,&v,NULL,kArRenderBlendMode_Add,1));
+      CHECK(effect.draws==draws+1 && effect.submissions==submissions+1);
+    }
+    if (empty || scenario==2 || scenario==8) {
+      SDL_Surface *pixels=SDL_RenderReadPixels(renderer,NULL);
+      SDL_Surface *rgba=pixels?SDL_ConvertSurface(pixels,SDL_PIXELFORMAT_RGBA32):NULL;
+      CHECK(rgba!=NULL);
+      unsigned lit=0;
+      if (rgba) for (int y=0;y<rgba->h;++y) for (int x=0;x<rgba->w;++x)
+        lit+=((const uint8_t*)rgba->pixels)[y*rgba->pitch+x*4]>0;
+      CHECK(empty ? lit==0 : lit>0);
+      SDL_DestroySurface(rgba);SDL_DestroySurface(pixels);
+    }
+  }
   CHECK(SDL_SetRenderTarget(renderer,previous_target));
   SDL_DestroyTexture(target); ArGpuEffectSource_Destroy(&effect);
   SDL_ReleaseGPUBuffer(gpu,motion); SDL_ReleaseGPUTransferBuffer(gpu,upload);
@@ -500,6 +564,97 @@ static void TestProductionPolicy(void) {
   CHECK(!explicit_reference.capture&&!explicit_reference.motion&&!explicit_reference.pack&&!explicit_reference.resident);
   const DioramaGpuPolicy incomplete=DioramaGpuPolicy_Resolve(1,1,NULL,NULL,"compute","all","resident");
   CHECK(!incomplete.resident);
+}
+
+static uint32_t MapPixel(int x,int y,unsigned endpoint,bool periodic) {
+  if(periodic)return (x+y)&1?0xff287810u:0xff020804u;
+  if(x==12 && y==8)return endpoint?0xff2040f0u:0xfff04020u;
+  return PatternPixel(x,y);
+}
+
+static void TestExactMapPlacement(ArRenderDevice *device,SDL_Renderer *renderer,
+    SDL_Texture *current,bool resident) {
+  const int bands[]={SR_PPU_OVERLAY_BG1,kDioramaPlane_Bg1Hi,kDioramaPlane_Bg1Far};
+  const uint32_t mask=(1u<<bands[0])|(1u<<bands[1])|(1u<<bands[2]);
+  const float phases[]={0,.49f,.5f,.75f,1};
+  const int deltas[][2]={{2,-1},{-2,1},{0,2},{0,0},{2,0},{2,0},{2,0},{8,0},{2,0},{2,0}};
+  ActionVoxelGeometry *voxel=ActionVoxel_Create();CHECK(voxel!=NULL);if(!voxel)return;
+  voxel->ready=true;voxel->active_group=voxel->active_room=1;
+  voxel->profile=kActionVoxelProfile_FillmoreForest;
+  voxel->settings=ActionVoxel_SettingsForRoom(1,1);
+  static FrameSlot slot;
+  static SrPpuBgPacket packet;
+  const SDL_Rect region={kApron,0,kDisplayWidth,kHeight};
+  SDL_Texture *saved=SDL_GetRenderTarget(renderer);
+  for(unsigned test=0;test<SDL_arraysize(deltas);++test) {
+    DioramaFrameGeneration_InvalidateHistory();
+    memset(&slot,0,sizeof(slot));memset(&packet,0,sizeof(packet));
+    packet.owned_sources=packet.words[2]=1;
+    slot=(FrameSlot){.diorama_active=true,.interp_setting_enabled=true,
+        .snes_width=kDisplayWidth,.snes_height=kHeight,.obj_apron=kApron,
+        .capture_ticks=1,.bg_mode=1,.diorama_map_group=1,.diorama_map_number=1,
+        .diorama_plane_request_mask=mask,.diorama_plane_content_mask=mask,
+        .diorama_voxel=voxel,.background_packet=&packet};
+    slot.action_bg_plan.valid=true;
+    slot.action_bg_plan.layer[0]=(ActionBgLayerPlan){.valid=true,.role=kActionBgLayerRole_Playfield,
+        .source=kActionBgSource_WorldMap,.default_edge=kActionBgEdge_LiveWorld,
+        .world_width=1024,.world_height=768};
+    if(test==4)slot.diorama_voxel=NULL;
+    if(test==5)slot.action_bg_plan.layer[0].band_count=1;
+    if(test==6)slot.diorama_plane_additive_mask=mask;
+    if(test==8)slot.action_bg_plan.layer[0].role=kActionBgLayerRole_Backdrop;
+    const bool expected=test<4 || test==9,periodic=test==9;
+    ArRenderTexture raw[kDioramaPlane_Count]={0},resolved[kDioramaPlane_Count]={0};
+    const uint8_t *pixels[kDioramaPlane_Count]={0};size_t pitches[kDioramaPlane_Count]={0};
+    for(unsigned i=0;i<3;++i)raw[bands[i]]=ArSdlRenderBackend_BorrowTexture(current);
+    uint32_t native[kDisplayWidth*kHeight];
+    /* A third identical periodic capture exercises atlas swapping after the
+     * first no-change pair, not merely initial endpoint seeding. */
+    for(unsigned endpoint=0;endpoint<(periodic?3u:2u);++endpoint) {
+      const int dx=endpoint*deltas[test][0],dy=endpoint*deltas[test][1];
+      for(int y=0;y<kHeight;++y)for(int x=0;x<kDisplayWidth;++x)
+        native[y*kDisplayWidth+x]=MapPixel(x+dx,y+dy,endpoint,periodic);
+      DioramaFrameGeneration_FinishCapture();
+      CHECK(SDL_UpdateTexture(current,&region,native,kDisplayWidth*sizeof(uint32_t)));
+      slot.timestamp_ns=UINT64_C(1000000000)+test*UINT64_C(100000000)+endpoint*UINT64_C(16666667);
+      slot.bg1_camera_x=dx;slot.bg1_camera_y=dy;
+      DioramaFrameGeneration_Capture(device,&slot,raw,pixels,pitches,periodic&&endpoint?0:mask);
+      if(!endpoint)continue;
+      for(unsigned step=0;step<SDL_arraysize(phases);++step) {
+        const float phase=phases[step];
+        const uint32_t generated=DioramaFrameGeneration_Prepare(device,&slot,phase,raw,mask,resolved);
+        CHECK(DioramaFrameGeneration_VoxelMapPlaneMask()==(expected?mask:0));
+        if(!expected)continue;
+        CHECK(generated==mask && DioramaFrameGeneration_GeneratedPlaneMask()==mask);
+        CHECK(DioramaFrameGeneration_GpuPlaneMask()==0); /* Do not move effects twice. */
+        CHECK(!resident || DioramaFrameGeneration_MetadataReadbackCount()==0);
+        for(unsigned i=0;i<3;++i) {
+          const ArRenderPointF offset=DioramaFrameGeneration_PlaneOffset(bands[i]);
+          CHECK(fabsf(offset.x-deltas[test][0]*(1-phase))<.00001f);
+          CHECK(fabsf(offset.y-deltas[test][1]*(1-phase))<.00001f);
+          CHECK(SDL_SetRenderTarget(renderer,ArSdlRenderBackend_UnwrapTexture(resolved[bands[i]])));
+          SDL_Surface *image=SDL_RenderReadPixels(renderer,&region);
+          SDL_Surface *argb=image?SDL_ConvertSurface(image,SDL_PIXELFORMAT_ARGB8888):NULL;
+          CHECK(argb!=NULL);
+          if(argb)for(int y=0;y<kHeight;++y)for(int x=0;x<kDisplayWidth;++x) {
+            const int px=x+deltas[test][0],py=y+deltas[test][1];
+            const bool previous=phase<.5f && px>=0 && px<kDisplayWidth && py>=0 && py<kHeight;
+            const uint32_t want=MapPixel(x+dx,y+dy,previous?0:1,periodic);
+            const uint32_t *row=(const uint32_t *)((const uint8_t *)argb->pixels+y*argb->pitch);
+            CHECK(row[x]==want);
+          }
+          SDL_DestroySurface(argb);SDL_DestroySurface(image);
+          CHECK(SDL_SetRenderTarget(renderer,saved));
+        }
+      }
+    }
+  }
+  DioramaFrameGeneration_InvalidateHistory();
+  CHECK(DioramaFrameGeneration_VoxelMapPlaneMask()==0);
+  for(unsigned i=0;i<3;++i)CHECK(DioramaFrameGeneration_PlaneOffset(bands[i]).x==0 &&
+      DioramaFrameGeneration_PlaneOffset(bands[i]).y==0);
+  ActionVoxel_Release(voxel);
+  printf("exact Voxel map: signed/vertical continuous placement, all3 bands, endpoint bytes, border fallback, unchanged pixels and unsupported-source guards\n");
 }
 
 int main(void) {
@@ -778,6 +933,28 @@ int main(void) {
   CHECK(ArRenderTexture_Equals(
       resolved[test_plane], raw[test_plane]));
 
+  /* Opening a gate and leaving Voxel mode replace the source geometry even
+   * inside the same room. Never blend across those topology changes. */
+  ActionVoxelGeometry *castle_a=ActionVoxel_Create(), *castle_b=ActionVoxel_Create();
+  CHECK(castle_a && castle_b);
+  const ActionVoxelGeometry *castle_frames[]={castle_a,castle_a,castle_b,NULL,NULL};
+  for (unsigned pass=0;pass<sizeof(castle_frames)/sizeof(*castle_frames);++pass) {
+    const uint8_t *endpoint=(const uint8_t *)(pass&1 ? current_pixels : previous_pixels);
+    planes[test_plane]=gpu_owned ? NULL : endpoint;
+    DioramaFrameGeneration_FinishCapture();
+    CHECK(SDL_UpdateTexture(current,&source_rect,endpoint+kApron*sizeof(uint32_t),
+        kSurfaceWidth*sizeof(uint32_t)));
+    slot.timestamp_ns+=16666667;
+    slot.diorama_voxel=castle_frames[pass];
+    DioramaFrameGeneration_Capture(&render_device,&slot,sources,planes,
+        plane_pitches,1u<<test_plane);
+    const uint32_t expected=(pass==1 || pass==4) ? 1u<<test_plane : 0;
+    CHECK(DioramaFrameGeneration_Prepare(&render_device,&slot,.5f,raw,
+        1u<<test_plane,resolved)==expected);
+  }
+  ActionVoxel_Release(castle_a);
+  ActionVoxel_Release(castle_b);
+
   /* Shrinking and restoring the capture reallocates the compute atlas. Neither
    * its old field nor its old endpoint can survive the geometry change. */
   for (int pass = 0; pass < 3; ++pass) {
@@ -965,6 +1142,8 @@ int main(void) {
     }
     slot.interp_setting_enabled=true;
   }
+
+  if(gpu_motion && gpu_owned)TestExactMapPlacement(&render_device,renderer,current,resident);
 
   /* Teardown may happen immediately after dispatch, without Prepare ever
    * joining it. Repeated lifetimes must retire the borrow before destruction. */

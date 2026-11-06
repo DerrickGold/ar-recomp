@@ -82,6 +82,10 @@ void DioramaFrameGeneration_EnableWaitTrace(bool enabled);
 uint64_t DioramaFrameGeneration_LastWaitNs(void);
 
 ArRenderPointF DioramaFrameGeneration_PlaneOffset(int plane);
+/* Certified Voxel map textures are exact endpoint pixels, rebased to current
+ * capture coordinates. These planes must apply PlaneOffset to geometry; their
+ * effects already use that same offset instead of GPU-inferred source motion. */
+uint32_t DioramaFrameGeneration_VoxelMapPlaneMask(void);
 
 /* Resident source-projection path. The presenter selects the shared action
  * policy before Capture; unavailable backends keep the reference path.

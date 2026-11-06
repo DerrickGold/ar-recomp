@@ -509,6 +509,7 @@ typedef struct ActionSourcePacketCache {
   unsigned count, capacity, light_count, light_capacity;
   uint64_t revision;
   bool valid, failed, requested, lighting, particles, scenery_exposure_in_mesh, scenery_lighting_in_material, atmosphere_unlit, weather_only;
+  bool voxel_scenery;
   unsigned particle_count;
   uint8_t particle_indices[kActionAuthoredMaxInstances];
   ActionEffectLocalRect particle_bounds[kActionAuthoredMaxInstances];
@@ -588,6 +589,7 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
       projection->light_receiver == kActionReceiver_Enemies ? 3 : projection->scenery_lighting_only ? 1 : 0;
   const unsigned packet_slot = pass + category * kActionSourceCompositePacketSlots;
   ActionSourcePacketCache *cache = &s_source_packets[packet_slot];
+  const bool voxel_scenery=projection->diorama_projection && projection->diorama_projection->voxel_scenery;
   if (!cache->valid) {
     cache->particle_count = 0;
     if (pass < kActionEffectRenderLayer_Count)
@@ -603,6 +605,7 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
       UpdateSourceParticleBounds(cache, &slot->action_scene_effects, projection))
     cache->valid = false;
   if (!cache->valid || cache->lighting != lighting || cache->particles != particles ||
+      cache->voxel_scenery != voxel_scenery ||
       cache->atmosphere_unlit != projection->atmosphere_unlit ||
       cache->scenery_exposure_in_mesh != projection->scenery_exposure_in_mesh ||
       cache->scenery_lighting_in_material != projection->scenery_lighting_in_material) {
@@ -624,6 +627,7 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
     cache->scenery_exposure_in_mesh=projection->scenery_exposure_in_mesh;
     cache->scenery_lighting_in_material=projection->scenery_lighting_in_material;
     cache->atmosphere_unlit=projection->atmosphere_unlit;
+    cache->voxel_scenery=voxel_scenery;
     cache->lighting = lighting;
     cache->particles = particles;
     cache->valid = true;

@@ -644,6 +644,37 @@ failed:
   return false;
 }
 
+static bool EmptySkyTriangles(const ActionEffectSourceBatch *batch, const DioramaProjection *view) {
+  if (!batch || batch->failed || !batch->count || batch->count > kActionSourceMaximumPrimitives ||
+      !batch->primitives || batch->light_count > kActionSourceMaxLightJobs ||
+      (batch->light_count && !batch->lights) || !view || !view->valid || view->bg2_plane.valid)
+    return false;
+  const DioramaSkyboxProjection *sky = &view->bg2_skybox;
+  if (sky->world_plane.valid || sky->to_texture || !sky->count ||
+      sky->count > kDioramaBgMaxValidSpans || sky->active_band < 0 ||
+      sky->active_band >= (int)sky->count) return false;
+  if (sky->resident.meta[0] > 0) {
+    if (sky->resident.meta[0] != sky->count) return false;
+    const float *band = sky->resident.bands[sky->active_band];
+    /* GPU motion can reveal a row outside the captured window. Only an empty
+     * raw source span stays empty at every interpolation phase. */
+    if (!(band[1] <= band[0] || band[3] <= band[2])) return false;
+  } else {
+    const DioramaSkyboxBandProjection *band = &sky->bands[sky->active_band];
+    if (!(band->output_y1 <= band->output_y0)) return false;
+  }
+  for (unsigned i = 0; i < batch->count; ++i) {
+    const ActionEffectSourcePrimitive *s = &batch->primitives[i];
+    /* These triangles always clip to sky_bounds before projection, including
+     * anchored moonlight. Atmospheric billboards can extend beyond the band;
+     * mixed packets and other planes must keep their normal dispatch. */
+    if (s->meta[1] != kActionEffectProjectionPlane_Bg2 ||
+        (s->meta[0] != kActionSourceTriangle && s->meta[0] != kActionSourceLitTriangle &&
+         s->meta[0] != kActionSourceRainbowTriangle)) return false;
+  }
+  return true;
+}
+
 static bool StaticSkyPacket(const ActionEffectSourceBatch *batch) {
   if(!batch||!batch->weather_only||batch->failed||!batch->count||batch->count>kActionSourceMaximumPrimitives||
       !batch->primitives||batch->light_count)return false;
@@ -674,6 +705,7 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
     if(view->bg2_skybox.active_band>0)return true;
     single_sky=*view;single_sky.bg2_skybox.active_band=-1;view=&single_sky;
   }
+  if (EmptySkyTriangles(batch, view)) return true;
   const bool ok = Draw(p, device, motion, mask, phase, batch, view, scenery, blend, brightness);
   if (ok && !batch->count) return true;
   return FinishDraw(p, ok);

@@ -10,6 +10,7 @@
 #include "sim/sim3d/sim3d.h"
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
+#include "action/action_voxel_sprites.h"
 #include "present/presentation_frame_generation.h"
 #include "render/hud_layout.h"
 #include "render/hud_icon_frame.h"
@@ -178,12 +179,18 @@ typedef struct FrameSlot {
 
   /* Diorama gate (D14 — Diorama_IsActiveThisFrame() result for this frame). */
   bool diorama_active;
+  /* Captured mode gate for Voxel-only renderer policy; ordinary Diorama may
+   * still use authored enclosures without opting into shared world depth. */
+  bool diorama_voxel_mode;
   /* Upload policy and exact producer metadata for this captured frame. The
    * request mask snapshots presentation settings; the content mask comes from
    * PPU scanout and marks destinations that received a nontransparent pixel.
    * PresentUpload intersects them without reading live settings or rescanning
    * the CPU surfaces. */
   SrPpuSurfaceView diorama_obj_attributes[4];
+  /* Attribute alpha carries an exact prop-owner tag until present upload
+   * restores ordinary receiver coverage. Native OBJ pixels remain intact. */
+  bool diorama_obj_owner_tags;
   uint32_t diorama_plane_request_mask;
   uint32_t diorama_plane_content_mask;
   /* Planes containing the resolved TS input to a full SNES colour add. The
@@ -193,6 +200,11 @@ typedef struct FrameSlot {
   /* Immutable key for scoped diorama layer overrides. The section is derived
    * from positively identified captured scene art, never from present-time
    * live WRAM. */
+  const struct ActionVoxelGeometry *diorama_voxel;
+  ActionVoxelSpriteFrame voxel_sprites;
+  SrPpuSurfaceView voxel_sprite_atlas;
+  uint16_t diorama_voxel_fixed_color;
+  uint8_t diorama_voxel_cgwsel, diorama_voxel_cgadsub;
   const struct ActionTrunkAssets *diorama_trunk;
   DioramaTrunkSettings diorama_trunk_settings;
   uint8_t diorama_map_group;

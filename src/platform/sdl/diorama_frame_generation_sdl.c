@@ -1,6 +1,7 @@
 #include "diorama/diorama_gpu_policy.h"
 #include "diorama/diorama_frame_generation.h"
 #include "app/performance_metrics.h"
+#include "action/action_voxel.h"
 
 #include <SDL3/SDL.h>
 #include <stddef.h>
@@ -49,6 +50,7 @@ typedef struct DioramaFrameGenerationPlane {
 
 typedef struct DioramaFrameGenerationKey {
   uint64_t timestamp_ns;
+  uint64_t voxel_revision;
   uint32_t plane_mask;
   uint32_t additive_plane_mask;
   int width;
@@ -58,16 +60,20 @@ typedef struct DioramaFrameGenerationKey {
   uint8_t map_group;
   uint8_t map_number;
   uint8_t layer_section;
-  bool valid;
+  bool valid, voxel_map;
 } DioramaFrameGenerationKey;
 
 enum { kFrameGenerationPlaneCount = kDioramaPlane_Count + 1 };
+enum { kVoxelMapPlanes = (1u << SR_PPU_OVERLAY_BG1) | (1u << kDioramaPlane_Bg1Hi) |
+    (1u << kDioramaPlane_Bg1Far) };
 static DioramaFrameGenerationPlane s_planes[kFrameGenerationPlaneCount];
 static DioramaFrameGenerationKey s_last_key;
 static ArRenderPointF s_present_offsets[kFrameGenerationPlaneCount];
 static uint64_t s_pair_timestamp_ns;
 static uint32_t s_pair_mask;
 static uint32_t s_generated_mask;
+static uint32_t s_voxel_map_pair_mask, s_voxel_map_present_mask;
+static int s_voxel_map_dx, s_voxel_map_dy;
 static bool s_wait_trace;
 static uint64_t s_last_wait_ns;
 static SDL_Vertex s_vertices[kFrameGenerationMaximumVertices];
@@ -436,7 +442,8 @@ static bool ApplyGpuResults(uint32_t analyzed_mask) {
       field->backward_dy[0] = (int8_t)results[i].backward_y;
       plane->pair_valid = field->valid;
       s_pair_mask &= ~(1u << kGpuPlanes[i]);
-      if (field->valid) s_pair_mask |= 1u << kGpuPlanes[i];
+      if (field->valid || (s_voxel_map_pair_mask & (1u << kGpuPlanes[i])))
+        s_pair_mask |= 1u << kGpuPlanes[i];
       continue;
     }
     const ArGpuGlobalMotionResult expected = {field->forward_dx[0], field->forward_dy[0],
@@ -476,6 +483,7 @@ static bool ApplyGpuResults(uint32_t analyzed_mask) {
 
 uint32_t DioramaFrameGeneration_GpuPlaneMask(void) { return s_gpu.presented_mask; }
 uint32_t DioramaFrameGeneration_GeneratedPlaneMask(void) { return s_generated_mask; }
+uint32_t DioramaFrameGeneration_VoxelMapPlaneMask(void) { return s_voxel_map_present_mask; }
 void DioramaFrameGeneration_EnableWaitTrace(bool enabled) {
   s_wait_trace = enabled;
   s_last_wait_ns = 0;
@@ -899,6 +907,8 @@ void DioramaFrameGeneration_InvalidateHistory(void) {
   s_pair_timestamp_ns = 0;
   s_pair_mask = 0;
   s_generated_mask = 0;
+  s_voxel_map_pair_mask = s_voxel_map_present_mask = 0;
+  s_voxel_map_dx = s_voxel_map_dy = 0;
   s_last_wait_ns = 0;
   s_index_blocks_x = -1;
   s_index_blocks_y = -1;
@@ -1080,7 +1090,22 @@ static bool KeysAreContinuous(const DioramaFrameGenerationKey *previous,
       previous->map_group == current->map_group &&
       previous->map_number == current->map_number &&
       previous->layer_section == current->layer_section &&
+      previous->voxel_revision == current->voxel_revision &&
       previous->additive_plane_mask == current->additive_plane_mask;
+}
+
+/* Fillmore's BG1 is a finite, uniform native map. Its immutable camera is the
+ * translation authority; pixel-derived flow need not rediscover it. Do not
+ * extend this to raster-warped, mirrored, additive or unclassified sources. */
+static bool ExactVoxelMap(const FrameSlot *slot) {
+  const ActionBgLayerPlan *map = &slot->action_bg_plan.layer[0];
+  return ActionVoxel_Active(slot->diorama_voxel,slot->diorama_map_group,slot->diorama_map_number) &&
+      ActionVoxel_Profile(slot->diorama_voxel) == kActionVoxelProfile_FillmoreForest &&
+      slot->action_bg_plan.valid && map->valid && map->role == kActionBgLayerRole_Playfield &&
+      map->source == kActionBgSource_WorldMap && map->default_edge == kActionBgEdge_LiveWorld &&
+      !map->wrap_world_x && !map->band_count && map->world_width && map->world_height &&
+      !(slot->diorama_plane_additive_mask & kVoxelMapPlanes) && slot->background_packet &&
+      (slot->background_packet->owned_sources & 1u) && !slot->background_packet->words[7];
 }
 
 static void CopySurfaceRegion(
@@ -1106,6 +1131,8 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   s_pair_timestamp_ns = 0;
   s_pair_mask = 0;
+  s_voxel_map_pair_mask = s_voxel_map_present_mask = 0;
+  s_voxel_map_dx = s_voxel_map_dy = 0;
   s_gpu.mask = 0;
   s_gpu.resident = false;
   s_policy = slot ? DioramaGpuPolicy_ForRoom(slot->diorama_map_group, slot->diorama_map_number)
@@ -1148,6 +1175,7 @@ void DioramaFrameGeneration_CaptureWithSkybox(
       (have_skybox ? 1u << kDioramaFrameGenerationSkybox : 0u);
   DioramaFrameGenerationKey current = {
     .timestamp_ns = slot->timestamp_ns,
+    .voxel_revision = ActionVoxel_Revision(slot->diorama_voxel),
     .plane_mask = plane_mask,
     .additive_plane_mask = slot->diorama_plane_additive_mask,
     .width = width,
@@ -1158,6 +1186,7 @@ void DioramaFrameGeneration_CaptureWithSkybox(
     .map_group = slot->diorama_map_group,
     .map_number = slot->diorama_map_number,
     .layer_section = slot->diorama_layer_section,
+    .voxel_map = ExactVoxelMap(slot),
     .valid = width > 0 &&
         width <= kFrameSlotLayerTextureWidth &&
         width <= kPresentationFrameGenerationMaximumWidth &&
@@ -1174,6 +1203,12 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   const bool own_gpu_analysis = GpuOwnsAnalysis() && EnsureGpu(device, width, height);
   const bool continuous =
       KeysAreContinuous(&s_last_key, &current, slot->capture_ticks);
+  const int map_dx = current.camera_x[0] - s_last_key.camera_x[0];
+  const int map_dy = current.camera_y[0] - s_last_key.camera_y[0];
+  const bool exact_map_pair = own_gpu_analysis && NativeHandoff(false) && continuous && current.voxel_map &&
+      s_last_key.voxel_map && abs(map_dx) <= kPresentationFrameGenerationSearchRadius &&
+      abs(map_dy) <= kPresentationFrameGenerationSearchRadius;
+  uint32_t exact_map_mask = 0;
   /* Endpoint copies bind their own render target. Capture the caller's once
    * and restore it after the loop so no plane's early exit can leave the
    * renderer pointing at a private texture. */
@@ -1220,6 +1255,11 @@ void DioramaFrameGeneration_CaptureWithSkybox(
         plane->output_x == region.x &&
         plane->texture_width == region.width &&
         plane->texture_height == region.height;
+    if (exact_map_pair && plane->current_valid && region_matches &&
+        (s_last_key.plane_mask & (1u << plane_index)) &&
+        (plane_index == SR_PPU_OVERLAY_BG1 || plane_index == kDioramaPlane_Bg1Hi ||
+         plane_index == kDioramaPlane_Bg1Far))
+      exact_map_mask |= 1u << plane_index;
     /* The synchronized raw texture is already the exact current endpoint.
      * A byte-identical private pair cannot add an intermediate image, so keep
      * the retained endpoint in place and do no CPU copy, private upload, motion
@@ -1334,6 +1374,16 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   }
   if (SDL_GetRenderTarget(renderer) != entry_target)
     (void)SDL_SetRenderTarget(renderer, entry_target);
+  /* Include unchanged periodic pixels: identical endpoint bytes do not imply
+   * a stationary world camera. This pair still needs continuous placement. */
+  for (int plane = 0; plane < kDioramaPlane_Count; ++plane)
+    if (!s_planes[plane].current_valid) exact_map_mask &= ~(1u << plane);
+  /* Low, high and rear artwork must share one temporal world. A newly added
+   * or unavailable member seeds the whole map group before opting back in. */
+  if ((exact_map_mask & plane_mask) != (plane_mask & kVoxelMapPlanes)) exact_map_mask = 0;
+  analyzed_bg_mask |= exact_map_mask;
+  s_voxel_map_pair_mask = exact_map_mask;
+  s_voxel_map_dx = map_dx; s_voxel_map_dy = map_dy;
   /* The immutable pair already carries both camera positions. These hints
    * only tighten pixel-derived search bounds; raster effects, animation and
    * differing skybox policies still choose their own motion from the pixels.
@@ -1514,6 +1564,8 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
   s_gpu.presented_mask = 0;
   s_gpu.phase = 1;
   s_generated_mask = 0;
+  s_voxel_map_present_mask = 0;
+  s_gpu.motion.exact_map_mask = 0;
   s_last_wait_ns = 0;
   if (resolved_skybox) *resolved_skybox = skybox_texture;
   if (!resolved_textures || !current_textures) return 0;
@@ -1546,9 +1598,24 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
     ArSdlPresentation_PopFullOutput(renderer, &output_state);
     return 0;
   }
+  /* Slot ownership is NULL outside Voxel 3D; do not change ordinary Diorama's
+   * established interpolation. Re-evaluate per presentation across mode swaps. */
+  s_gpu.motion.alpha_correct = ActionVoxel_Active(slot->diorama_voxel,
+      slot->diorama_map_group, slot->diorama_map_number);
+  uint32_t map_mask = s_voxel_map_pair_mask & current_plane_mask & s_pair_mask;
+  for (unsigned i = 0; i < 3; ++i)
+    if ((map_mask & (1u << kGpuPlanes[i])) && !native_current_textures[kGpuPlanes[i]])
+      map_mask = 0;
+  for (unsigned i = 0; i < 3; ++i)
+    if (map_mask & (1u << kGpuPlanes[i])) s_gpu.motion.exact_map_mask |= 1u << i;
+  s_gpu.motion.map_camera_dx = s_voxel_map_dx;
+  s_gpu.motion.map_camera_dy = s_voxel_map_dy;
   const uint32_t gpu_mask = PrepareGpu(device, phase);
   s_gpu.phase = phase;
-  s_gpu.presented_mask = gpu_mask;
+  s_voxel_map_present_mask = map_mask & gpu_mask;
+  /* CPU-known placement is already in the plane projection. Never add the
+   * GPU vector again in effects, illumination, shadows or sky attachments. */
+  s_gpu.presented_mask = gpu_mask & ~(s_voxel_map_present_mask ? kVoxelMapPlanes : 0u);
   uint32_t generated_mask = 0;
   for (int plane = 0; plane < kFrameGenerationPlaneCount; plane++) {
     if (!((s_pair_mask & current_plane_mask) & (1u << plane)) ||
@@ -1568,7 +1635,9 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
       else
         resolved_textures[plane] = generated_texture;
       generated_mask |= 1u << plane;
-      if (!s_gpu.resident && !DioramaPlaneIsObjectPriority(plane) && !DioramaPlaneIsObjectAttributes(plane) &&
+      if (s_voxel_map_present_mask & (1u << plane)) {
+        s_present_offsets[plane] = (ArRenderPointF){s_voxel_map_dx * (1-phase), s_voxel_map_dy * (1-phase)};
+      } else if (!s_gpu.resident && !DioramaPlaneIsObjectPriority(plane) && !DioramaPlaneIsObjectAttributes(plane) &&
           s_planes[plane].motion.uniform) {
         float dx, dy;
         PresentationFrameGeneration_MotionAt(&s_planes[plane].motion,false,0,0,&dx,&dy);
@@ -1584,6 +1653,9 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
     }
   }
   SDL_SetRenderDrawColor(renderer, old_r, old_g, old_b, old_a);
+  if (s_voxel_map_present_mask) for (unsigned i = 0; i < 3; ++i)
+    /* Even an empty/projectable map band anchors effects in this same world. */
+    s_present_offsets[kGpuPlanes[i]] = (ArRenderPointF){s_voxel_map_dx*(1-phase),s_voxel_map_dy*(1-phase)};
   ArSdlPresentation_PopFullOutput(renderer, &output_state);
   s_generated_mask = generated_mask;
   return generated_mask;

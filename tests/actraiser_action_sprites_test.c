@@ -354,7 +354,59 @@ static void TestReceiverOwnership(void) {
     assert(ActionApron_Count() == 2);
     const ActionApronReceiver *apron = ActionApron_Receivers();
     for (int part = 0; part < ActionApron_Count(); ++part)
-      assert(apron[part].role == kActRaiserSprite_Enemy && apron[part].x == 370 && apron[part].y == 168);
+      assert(apron[part].role == kActRaiserSprite_Enemy && apron[part].owner == obj &&
+          apron[part].x == 370 && apron[part].y == 168);
+  }
+}
+static void TestVoxelCompositionOrigin(void) {
+  Reset(64);
+  g_ram[kActRaiserWram_MapGroup]=5;g_ram[kActRaiserWram_CurrentMap]=4;
+  Write(kActRaiserWram_Bg1CameraX,256);
+  const unsigned obj=Object(9,40,2,0x230c);
+  memcpy(g_ram+0x49f4,g_ram+0x8800,19);
+  Write(obj+kActRaiserActionObject_Composition,0x49f4);
+  Write(obj+kActRaiserActionObject_AnimationAddress,0x4000);
+  Write(obj+kActRaiserActionObject_SourceDescriptor,0xe42a);
+  Write(obj+kActRaiserActionObject_WorldX,400);
+  Write(obj+kActRaiserActionObject_LeftExtent,96);
+  Write(obj+kActRaiserActionObject_TopExtent,16);
+  g_ram[0x49f4+5+7+1]=16; /* Second component, no horizontal flip. */
+  Scan();
+  ActRaiserSpriteOwnership_Upload(5,4,g_ram+kActRaiserOamShadow);
+  const ActRaiserSpriteOwnership o=ActRaiserSpriteOwnership_Presented(5,4);
+  assert(o.valid && s_position_count==2);
+  for(unsigned i=0;i<2;++i) {
+    assert(o.prop_owner[i]==obj && o.prop_shape[i]==kActRaiserSpriteProp_TempleBridge);
+    /* Compare with actual native emission, including its draw bias and Y
+     * subtraction carry. A synthetic ownership-only test cannot prove this. */
+    assert(o.prop_origin_x[i]==48 && o.prop_origin_y[i]==23);
+    assert(s_positions[i].x==o.prop_origin_x[i]+(int)i*16);
+    assert(g_ram[kActRaiserOamShadow+i*4+1]==o.prop_origin_y[i]);
+  }
+}
+static void TestWallTorchGuardOwnership(void) {
+  const int positions[]={-160,-124,100};
+  for(unsigned scene=0;scene<2;++scene)for(unsigned i=0;i<3;++i) {
+    Reset(64);
+    g_ram[kActRaiserWram_MapGroup]=2;g_ram[kActRaiserWram_CurrentMap]=3;
+    s_ppu.margin_left=s_ppu.margin_right=120;s_apron=(ActionApronGeometry){120,64};
+    const unsigned obj=Object(9,40,1,0x230c);
+    Write(obj+kActRaiserActionObject_WorldX,(uint16_t)positions[i]);
+    Write(obj+kActRaiserActionObject_AnimationAddress,0x4000);
+    Write(obj+kActRaiserActionObject_SourceDescriptor,scene?0xba12:0xba01);
+    g_ram[0x8805]=1; /* Native16x16 flame picture. */
+    Scan();ActRaiserSpriteOwnership_Upload(2,3,g_ram+kActRaiserOamShadow);
+    const ActRaiserSpriteOwnership o=ActRaiserSpriteOwnership_Presented(2,3);
+    assert(o.valid && s_position_count==(i?1u:0u));
+    assert(ActionApron_Count()==(i<2?1:0));
+    assert(o.wall_torch_part_count==(!scene && i<2?1:0));
+    if(!scene && i<2) {
+      const ActRaiserWallTorchPart *p=&o.wall_torch_parts[0];
+      assert(p->owner==obj && p->x==positions[i] && p->y==39 && p->size==16);
+      assert(p->world_x==positions[i] && p->world_y==168 && p->tile_attr==0x230c);
+      assert(p->owner_tag==(i?1:128));
+    }
+    if(!i)assert(Read(kActRaiserOamShadow)==0xe080); /* Guard never allocates OAM. */
   }
 }
 static void TestCaptureGuardParts(void) {
@@ -400,7 +452,8 @@ static void TestCaptureGuardParts(void) {
   assert(owner.valid && owner.slots[126] == kActRaiserSprite_Player);
   assert(owner.slots[127] == kActRaiserSprite_Enemy);
   const ActionApronReceiver receiver = ActionApron_Receivers()[0];
-  assert(receiver.role == kActRaiserSprite_Enemy && receiver.x == 370 && receiver.y == 168);
+  assert(receiver.role == kActRaiserSprite_Enemy && receiver.owner == last &&
+      receiver.x == 370 && receiver.y == 168);
 }
 static void TestGuardReceiverOverflow(void) {
   /* Guard-only parts have their own finite ownership channel. Overflow must
@@ -634,6 +687,8 @@ int main(int argc, char **argv) {
   TestPharaohPlaceholder();
   TestFittedCameraPreservesAuthenticActivation();
   TestReceiverOwnership();
+  TestVoxelCompositionOrigin();
+  TestWallTorchGuardOwnership();
   TestAutoDrawIgnoresManualProfile();
   TestCaptureGuardParts();
   TestGuardReceiverOverflow();

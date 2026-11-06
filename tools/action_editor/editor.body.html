@@ -470,6 +470,11 @@
     </div>
     <button id="sharedPlacePlayer" type="button" aria-pressed="false">Place player</button>
     <button id="sharedPlayerSettings" type="button">Player settings…</button>
+    <button id="sharedLoadObjects" type="button">Load native objects…</button>
+    <input id="sharedObjectFile" type="file" accept=".arobj" hidden>
+    <button id="sharedResetObjects" type="button" disabled>Captured camera</button>
+    <button id="sharedClearObjects" type="button" disabled>Clear native objects</button>
+    <span id="sharedObjectStatus" role="status"></span>
     <label>Pixels <select id="sharedPixels"><option value="0">Square</option><option value="1">CRT 4:3</option></select></label>
     <label title="Captured pixels per side, independent of the display crop. Game default: 120.">Capture width margin <input id="sharedExtra" type="number" min="0" max="128" step="8" value="120" style="width:55px"></label>
     <label>Capture row budget <select id="sharedVertical"><option value="0">0</option><option value="32">32</option><option value="64" selected>64</option></select></label>

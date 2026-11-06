@@ -1,0 +1,3408 @@
+{
+  "description": "Reviewed native Bloodpool marsh artwork. Source IDs are provenance only; runtime uses pixels, palette slots, collision and priority. Decks span the path, timber supports and shoreline rocks retain native water contact with shallow depth, and native water gains a continuous surface. Opaque infill follows supporting earth or shallow shoreline rock. NativePriorityScenery (1048576) keeps high-priority timber at the front while low-priority noncolliding timber stands behind the walking plane; colliding beam tops retain their deck geometry. PixelRecess (4194304) gives face_colors a distinct reviewed rear-mounted-ink meaning: only selected low-priority wood pixels in mixed water/post characters move to the post plane. Water ink and all high-priority artwork retain native placement; this is not a global palette-color rule.",
+  "materials": [
+    {
+      "key": "031740aeed28b2c3",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          163
+        ],
+        [
+          1,
+          1,
+          163
+        ],
+        [
+          1,
+          2,
+          163
+        ]
+      ]
+    },
+    {
+      "key": "03f34722c0ad863d",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          26
+        ],
+        [
+          1,
+          1,
+          26
+        ],
+        [
+          1,
+          2,
+          26
+        ]
+      ]
+    },
+    {
+      "key": "07273cefa6849614",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          103
+        ],
+        [
+          1,
+          1,
+          103
+        ],
+        [
+          1,
+          2,
+          103
+        ]
+      ]
+    },
+    {
+      "key": "074239e87afb123b",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_vegetation_join",
+      "origins": [
+        [
+          1,
+          0,
+          138
+        ],
+        [
+          1,
+          1,
+          138
+        ],
+        [
+          1,
+          2,
+          138
+        ]
+      ],
+      "rear_colors": [
+        0,
+        0,
+        58,
+        58
+      ],
+      "review": "Opaque shadow continues the shallow rock body above the colliding island. Only the native grass/ground colours recede; black is neither erased nor sent to the rear plane."
+    },
+    {
+      "key": "093d2e096ae8f6d9",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          153
+        ],
+        [
+          1,
+          1,
+          153
+        ],
+        [
+          1,
+          2,
+          153
+        ]
+      ]
+    },
+    {
+      "key": "09f1e64bf64bfb36",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          65
+        ],
+        [
+          1,
+          1,
+          65
+        ],
+        [
+          1,
+          2,
+          65
+        ]
+      ]
+    },
+    {
+      "key": "0aa43dfb7f633b6b",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_vegetation",
+      "origins": [
+        [
+          1,
+          0,
+          13
+        ],
+        [
+          1,
+          1,
+          13
+        ],
+        [
+          1,
+          2,
+          13
+        ]
+      ],
+      "rear_fold_pixels": 8
+    },
+    {
+      "key": "0ddbd36df5201cb4",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          69
+        ],
+        [
+          1,
+          1,
+          69
+        ],
+        [
+          1,
+          2,
+          69
+        ]
+      ]
+    },
+    {
+      "key": "10d30bd1fa328164",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4096,
+      "role": "earth",
+      "origins": [
+        [
+          1,
+          0,
+          17
+        ],
+        [
+          1,
+          1,
+          17
+        ],
+        [
+          1,
+          2,
+          17
+        ]
+      ]
+    },
+    {
+      "key": "1464277439d2b751",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4096,
+      "role": "earth",
+      "origins": [
+        [
+          1,
+          0,
+          21
+        ],
+        [
+          1,
+          1,
+          21
+        ],
+        [
+          1,
+          2,
+          21
+        ]
+      ]
+    },
+    {
+      "key": "1e31c7e32723ac11",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4096,
+      "role": "earth",
+      "origins": [
+        [
+          1,
+          0,
+          16
+        ],
+        [
+          1,
+          1,
+          16
+        ],
+        [
+          1,
+          2,
+          16
+        ]
+      ]
+    },
+    {
+      "key": "1f26bed12bbc4f7d",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4096,
+      "role": "earth",
+      "origins": [
+        [
+          1,
+          0,
+          165
+        ],
+        [
+          1,
+          1,
+          165
+        ],
+        [
+          1,
+          2,
+          165
+        ]
+      ]
+    },
+    {
+      "key": "21b99250dc48d857",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_vegetation",
+      "origins": [
+        [
+          1,
+          0,
+          14
+        ],
+        [
+          1,
+          1,
+          14
+        ],
+        [
+          1,
+          2,
+          14
+        ]
+      ],
+      "rear_fold_pixels": 8
+    },
+    {
+      "key": "22b1daa751a226e2",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          168
+        ],
+        [
+          1,
+          1,
+          168
+        ],
+        [
+          1,
+          2,
+          168
+        ]
+      ]
+    },
+    {
+      "key": "23a006e0cffa7518",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          111
+        ],
+        [
+          1,
+          1,
+          111
+        ],
+        [
+          1,
+          2,
+          111
+        ]
+      ]
+    },
+    {
+      "key": "297c279c049c128c",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_vegetation",
+      "origins": [
+        [
+          1,
+          0,
+          12
+        ],
+        [
+          1,
+          1,
+          12
+        ],
+        [
+          1,
+          2,
+          12
+        ]
+      ],
+      "rear_fold_pixels": 8
+    },
+    {
+      "key": "2b9585b6483447e5",
+      "kinds": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "flags": 0,
+      "role": "empty",
+      "origins": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          176
+        ],
+        [
+          1,
+          0,
+          178
+        ],
+        [
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          1,
+          176
+        ],
+        [
+          1,
+          1,
+          178
+        ],
+        [
+          1,
+          2,
+          0
+        ],
+        [
+          1,
+          2,
+          176
+        ],
+        [
+          1,
+          2,
+          178
+        ]
+      ]
+    },
+    {
+      "key": "2cf8633032d1b636",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          177
+        ],
+        [
+          1,
+          1,
+          177
+        ],
+        [
+          1,
+          2,
+          177
+        ]
+      ]
+    },
+    {
+      "key": "2eef9cc68f084421",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 0,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          149
+        ],
+        [
+          1,
+          1,
+          149
+        ],
+        [
+          1,
+          2,
+          149
+        ]
+      ]
+    },
+    {
+      "key": "308dec00d8192197",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "log_deck",
+      "origins": [
+        [
+          1,
+          0,
+          80
+        ],
+        [
+          1,
+          1,
+          80
+        ],
+        [
+          1,
+          2,
+          80
+        ]
+      ]
+    },
+    {
+      "key": "3127be32f736fd8e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          112
+        ],
+        [
+          1,
+          1,
+          112
+        ],
+        [
+          1,
+          2,
+          112
+        ]
+      ]
+    },
+    {
+      "key": "33347c373a655763",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "log_deck",
+      "origins": [
+        [
+          1,
+          0,
+          23
+        ],
+        [
+          1,
+          1,
+          23
+        ],
+        [
+          1,
+          2,
+          23
+        ]
+      ]
+    },
+    {
+      "key": "334f5826de82aabc",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          30
+        ],
+        [
+          1,
+          1,
+          30
+        ],
+        [
+          1,
+          2,
+          30
+        ]
+      ]
+    },
+    {
+      "key": "352dd7dac9070cc9",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_vegetation",
+      "origins": [
+        [
+          1,
+          0,
+          110
+        ],
+        [
+          1,
+          1,
+          110
+        ],
+        [
+          1,
+          2,
+          110
+        ]
+      ]
+    },
+    {
+      "key": "36fb56732495fbfd",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4096,
+      "role": "earth",
+      "origins": [
+        [
+          1,
+          0,
+          22
+        ],
+        [
+          1,
+          1,
+          22
+        ],
+        [
+          1,
+          2,
+          22
+        ]
+      ]
+    },
+    {
+      "key": "3af0a0552ba2cea9",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          155
+        ],
+        [
+          1,
+          1,
+          155
+        ],
+        [
+          1,
+          2,
+          155
+        ]
+      ]
+    },
+    {
+      "key": "3af1c562c99e148e",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 4202496,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          158
+        ],
+        [
+          1,
+          1,
+          158
+        ],
+        [
+          1,
+          2,
+          158
+        ]
+      ],
+      "face_colors": [
+        14,
+        0,
+        0,
+        0
+      ],
+      "review": "Mixed water/post art: face_colors selects only the authored low-priority wood ink. Water and high-priority wood stay on their original plane."
+    },
+    {
+      "key": "3ea0302fa5ca26d0",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          47
+        ],
+        [
+          1,
+          1,
+          47
+        ],
+        [
+          1,
+          2,
+          47
+        ]
+      ]
+    },
+    {
+      "key": "3f6cf81ada214bf9",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_vegetation_join",
+      "origins": [
+        [
+          1,
+          0,
+          148
+        ],
+        [
+          1,
+          1,
+          148
+        ],
+        [
+          1,
+          2,
+          148
+        ]
+      ],
+      "rear_colors": [
+        0,
+        0,
+        8130,
+        8130
+      ],
+      "rear_fold_pixels": 8,
+      "review": "Mixed rock/painted earth at the island top. Lower-character authored ground ink1 and6..12 belongs on the rear earth band; opaque black14 remains the shallow rock shadow. Fold the supporting earth deck through this8px band, preserving native collision and the rock contour. The supporting earth supplies only missing earth behind the lower rock-shadow pixels from an adjacent compatible ground band; original rear ink stays intact."
+    },
+    {
+      "key": "4642c7f3ac7e1143",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          92
+        ],
+        [
+          1,
+          1,
+          92
+        ],
+        [
+          1,
+          2,
+          92
+        ]
+      ]
+    },
+    {
+      "key": "4787a040be3e73cb",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "log_deck",
+      "origins": [
+        [
+          1,
+          0,
+          76
+        ],
+        [
+          1,
+          1,
+          76
+        ],
+        [
+          1,
+          2,
+          76
+        ]
+      ]
+    },
+    {
+      "key": "47cc014f3c234ac0",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 0,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          99
+        ],
+        [
+          1,
+          1,
+          99
+        ],
+        [
+          1,
+          2,
+          99
+        ]
+      ]
+    },
+    {
+      "key": "481ebefeec07702e",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          133
+        ],
+        [
+          1,
+          1,
+          133
+        ],
+        [
+          1,
+          2,
+          133
+        ]
+      ]
+    },
+    {
+      "key": "4882e4e0bc7c55d9",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "log_deck",
+      "origins": [
+        [
+          1,
+          0,
+          116
+        ],
+        [
+          1,
+          1,
+          116
+        ],
+        [
+          1,
+          2,
+          116
+        ]
+      ]
+    },
+    {
+      "key": "491f4bc107f73b29",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 0,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          25
+        ],
+        [
+          1,
+          1,
+          25
+        ],
+        [
+          1,
+          2,
+          25
+        ]
+      ]
+    },
+    {
+      "key": "4ab74649ce9b3b95",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          154
+        ],
+        [
+          1,
+          1,
+          154
+        ],
+        [
+          1,
+          2,
+          154
+        ]
+      ]
+    },
+    {
+      "key": "4c4883c02f892355",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          66
+        ],
+        [
+          1,
+          1,
+          66
+        ],
+        [
+          1,
+          2,
+          66
+        ]
+      ]
+    },
+    {
+      "key": "4d466ca32f8f0953",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 8192,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          32
+        ],
+        [
+          1,
+          1,
+          32
+        ],
+        [
+          1,
+          2,
+          32
+        ]
+      ]
+    },
+    {
+      "key": "4f35688f22288cee",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          82
+        ],
+        [
+          1,
+          1,
+          82
+        ],
+        [
+          1,
+          2,
+          82
+        ]
+      ]
+    },
+    {
+      "key": "51ac0a04bc2b03d7",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          156
+        ],
+        [
+          1,
+          1,
+          156
+        ],
+        [
+          1,
+          2,
+          156
+        ]
+      ]
+    },
+    {
+      "key": "57a1d6ca4574eb01",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 8192,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          159
+        ],
+        [
+          1,
+          1,
+          159
+        ],
+        [
+          1,
+          2,
+          159
+        ]
+      ]
+    },
+    {
+      "key": "5b67dd7774b1a2d4",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          90
+        ],
+        [
+          1,
+          1,
+          90
+        ],
+        [
+          1,
+          2,
+          90
+        ]
+      ]
+    },
+    {
+      "key": "5bb97ac99da65765",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          77
+        ],
+        [
+          1,
+          1,
+          77
+        ],
+        [
+          1,
+          2,
+          77
+        ]
+      ]
+    },
+    {
+      "key": "5c62c7a25d254868",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 0,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          100
+        ],
+        [
+          1,
+          1,
+          100
+        ],
+        [
+          1,
+          2,
+          100
+        ]
+      ]
+    },
+    {
+      "key": "617981fdd81b770b",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          130
+        ],
+        [
+          1,
+          1,
+          130
+        ],
+        [
+          1,
+          2,
+          130
+        ]
+      ]
+    },
+    {
+      "key": "6200f0a84e055e29",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          132
+        ],
+        [
+          1,
+          1,
+          132
+        ],
+        [
+          1,
+          2,
+          132
+        ]
+      ]
+    },
+    {
+      "key": "62d15c99e219a6f6",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          83
+        ],
+        [
+          1,
+          1,
+          83
+        ],
+        [
+          1,
+          2,
+          83
+        ]
+      ]
+    },
+    {
+      "key": "6319a9823e302016",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 0,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          40
+        ],
+        [
+          1,
+          0,
+          41
+        ],
+        [
+          1,
+          0,
+          42
+        ],
+        [
+          1,
+          1,
+          40
+        ],
+        [
+          1,
+          1,
+          41
+        ],
+        [
+          1,
+          1,
+          42
+        ],
+        [
+          1,
+          2,
+          40
+        ],
+        [
+          1,
+          2,
+          41
+        ],
+        [
+          1,
+          2,
+          42
+        ]
+      ]
+    },
+    {
+      "key": "634be0915ae90b99",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          89
+        ],
+        [
+          1,
+          1,
+          89
+        ],
+        [
+          1,
+          2,
+          89
+        ]
+      ]
+    },
+    {
+      "key": "65d5088e150cc12b",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          119
+        ],
+        [
+          1,
+          1,
+          119
+        ],
+        [
+          1,
+          2,
+          119
+        ]
+      ]
+    },
+    {
+      "key": "6f2690f1b8170ef3",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          152
+        ],
+        [
+          1,
+          1,
+          152
+        ],
+        [
+          1,
+          2,
+          152
+        ]
+      ]
+    },
+    {
+      "key": "737793a5743b30fa",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_vegetation_join",
+      "origins": [
+        [
+          1,
+          0,
+          139
+        ],
+        [
+          1,
+          1,
+          139
+        ],
+        [
+          1,
+          2,
+          139
+        ]
+      ],
+      "rear_colors": [
+        0,
+        0,
+        314,
+        1976
+      ],
+      "review": "Opaque shadow continues the shallow rock body above the colliding island. Only the native grass/ground colours recede; black is neither erased nor sent to the rear plane."
+    },
+    {
+      "key": "799f202b35bdadb1",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          96
+        ],
+        [
+          1,
+          1,
+          96
+        ],
+        [
+          1,
+          2,
+          96
+        ]
+      ]
+    },
+    {
+      "key": "7e4b1c4aa3606b0d",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4096,
+      "role": "earth",
+      "origins": [
+        [
+          1,
+          0,
+          63
+        ],
+        [
+          1,
+          1,
+          63
+        ],
+        [
+          1,
+          2,
+          63
+        ]
+      ]
+    },
+    {
+      "key": "7e701bce30f2efe0",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "log_deck",
+      "origins": [
+        [
+          1,
+          0,
+          73
+        ],
+        [
+          1,
+          1,
+          73
+        ],
+        [
+          1,
+          2,
+          73
+        ]
+      ]
+    },
+    {
+      "key": "7fc3caa22eb2e0e3",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          44
+        ],
+        [
+          1,
+          1,
+          44
+        ],
+        [
+          1,
+          2,
+          44
+        ]
+      ]
+    },
+    {
+      "key": "7fed344de24edffa",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          134
+        ],
+        [
+          1,
+          1,
+          134
+        ],
+        [
+          1,
+          2,
+          134
+        ]
+      ]
+    },
+    {
+      "key": "80095ef868d387b6",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          78
+        ],
+        [
+          1,
+          1,
+          78
+        ],
+        [
+          1,
+          2,
+          78
+        ]
+      ]
+    },
+    {
+      "key": "80887612c6bcd001",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          121
+        ],
+        [
+          1,
+          1,
+          121
+        ],
+        [
+          1,
+          2,
+          121
+        ]
+      ]
+    },
+    {
+      "key": "82b18a1b52907c2d",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          97
+        ],
+        [
+          1,
+          1,
+          97
+        ],
+        [
+          1,
+          2,
+          97
+        ]
+      ]
+    },
+    {
+      "key": "84cb69b2fefc8a06",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          105
+        ],
+        [
+          1,
+          1,
+          105
+        ],
+        [
+          1,
+          2,
+          105
+        ]
+      ]
+    },
+    {
+      "key": "88288e9d285dff97",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "log_deck",
+      "origins": [
+        [
+          1,
+          0,
+          64
+        ],
+        [
+          1,
+          1,
+          64
+        ],
+        [
+          1,
+          2,
+          64
+        ]
+      ]
+    },
+    {
+      "key": "88ee1088f0d1712b",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "log_deck",
+      "origins": [
+        [
+          1,
+          0,
+          72
+        ],
+        [
+          1,
+          1,
+          72
+        ],
+        [
+          1,
+          2,
+          72
+        ]
+      ]
+    },
+    {
+      "key": "89d6ae522047dcc4",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          137
+        ],
+        [
+          1,
+          1,
+          137
+        ],
+        [
+          1,
+          2,
+          137
+        ]
+      ]
+    },
+    {
+      "key": "8b08d857aef57eb5",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          170
+        ],
+        [
+          1,
+          1,
+          170
+        ],
+        [
+          1,
+          2,
+          170
+        ]
+      ]
+    },
+    {
+      "key": "8db45f961ef568b6",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 4202496,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          94
+        ],
+        [
+          1,
+          1,
+          94
+        ],
+        [
+          1,
+          2,
+          94
+        ]
+      ],
+      "face_colors": [
+        0,
+        62,
+        0,
+        0
+      ],
+      "review": "Mixed water/post art: face_colors selects only the authored low-priority wood ink. Water and high-priority wood stay on their original plane."
+    },
+    {
+      "key": "971982e705b4f424",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          186
+        ],
+        [
+          1,
+          1,
+          186
+        ],
+        [
+          1,
+          2,
+          186
+        ]
+      ]
+    },
+    {
+      "key": "9758ad935cc25a5c",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          93
+        ],
+        [
+          1,
+          1,
+          93
+        ],
+        [
+          1,
+          2,
+          93
+        ]
+      ]
+    },
+    {
+      "key": "983f98a2d594a332",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          136
+        ],
+        [
+          1,
+          1,
+          136
+        ],
+        [
+          1,
+          2,
+          136
+        ]
+      ]
+    },
+    {
+      "key": "985b3487344c9d40",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          68
+        ],
+        [
+          1,
+          1,
+          68
+        ],
+        [
+          1,
+          2,
+          68
+        ]
+      ]
+    },
+    {
+      "key": "9cfe976308dda140",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          127
+        ],
+        [
+          1,
+          1,
+          127
+        ],
+        [
+          1,
+          2,
+          127
+        ]
+      ]
+    },
+    {
+      "key": "9eb0d60c978b3205",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          184
+        ],
+        [
+          1,
+          1,
+          184
+        ],
+        [
+          1,
+          2,
+          184
+        ]
+      ]
+    },
+    {
+      "key": "a16d2225fe0de616",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 0,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          150
+        ],
+        [
+          1,
+          1,
+          150
+        ],
+        [
+          1,
+          2,
+          150
+        ]
+      ]
+    },
+    {
+      "key": "a5b9df3e03d1883b",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          70
+        ],
+        [
+          1,
+          1,
+          70
+        ],
+        [
+          1,
+          2,
+          70
+        ]
+      ]
+    },
+    {
+      "key": "ab460f7af143ba5e",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          120
+        ],
+        [
+          1,
+          1,
+          120
+        ],
+        [
+          1,
+          2,
+          120
+        ]
+      ]
+    },
+    {
+      "key": "ac1cd325d5d9fda6",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          167
+        ],
+        [
+          1,
+          1,
+          167
+        ],
+        [
+          1,
+          2,
+          167
+        ]
+      ]
+    },
+    {
+      "key": "ad748e689890eed1",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "log_deck",
+      "origins": [
+        [
+          1,
+          0,
+          74
+        ],
+        [
+          1,
+          1,
+          74
+        ],
+        [
+          1,
+          2,
+          74
+        ]
+      ]
+    },
+    {
+      "key": "ad989ab17e7b836a",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "log_deck",
+      "origins": [
+        [
+          1,
+          0,
+          75
+        ],
+        [
+          1,
+          1,
+          75
+        ],
+        [
+          1,
+          2,
+          75
+        ]
+      ]
+    },
+    {
+      "key": "adcae44694b9e28b",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          45
+        ],
+        [
+          1,
+          1,
+          45
+        ],
+        [
+          1,
+          2,
+          45
+        ]
+      ]
+    },
+    {
+      "key": "aff69a8940a6172e",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4096,
+      "role": "earth",
+      "origins": [
+        [
+          1,
+          0,
+          20
+        ],
+        [
+          1,
+          0,
+          62
+        ],
+        [
+          1,
+          1,
+          20
+        ],
+        [
+          1,
+          1,
+          62
+        ],
+        [
+          1,
+          2,
+          20
+        ],
+        [
+          1,
+          2,
+          62
+        ]
+      ]
+    },
+    {
+      "key": "b17fb81c144c963a",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          60
+        ],
+        [
+          1,
+          1,
+          60
+        ],
+        [
+          1,
+          2,
+          60
+        ]
+      ]
+    },
+    {
+      "key": "b287bf822703a8b7",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          58
+        ],
+        [
+          1,
+          1,
+          58
+        ],
+        [
+          1,
+          2,
+          58
+        ]
+      ]
+    },
+    {
+      "key": "b500143440f97099",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4098,
+      "role": "earth",
+      "origins": [
+        [
+          1,
+          0,
+          19
+        ],
+        [
+          1,
+          0,
+          61
+        ],
+        [
+          1,
+          1,
+          19
+        ],
+        [
+          1,
+          1,
+          61
+        ],
+        [
+          1,
+          2,
+          19
+        ],
+        [
+          1,
+          2,
+          61
+        ]
+      ]
+    },
+    {
+      "key": "b6fd2375a9580d18",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4096,
+      "role": "earth",
+      "origins": [
+        [
+          1,
+          0,
+          175
+        ],
+        [
+          1,
+          1,
+          175
+        ],
+        [
+          1,
+          2,
+          175
+        ]
+      ]
+    },
+    {
+      "key": "b8e27da4fc59b969",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          162
+        ],
+        [
+          1,
+          1,
+          162
+        ],
+        [
+          1,
+          2,
+          162
+        ]
+      ]
+    },
+    {
+      "key": "bc103ddbeb55ad8c",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          142
+        ],
+        [
+          1,
+          1,
+          142
+        ],
+        [
+          1,
+          2,
+          142
+        ]
+      ],
+      "review": "Skull-pole collar between the native skull crown and timber shaft. Its low-priority artwork belongs to the same rear timber depth; this is not shoreline rock."
+    },
+    {
+      "key": "bcdcf9b674e47a8c",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_vegetation_join",
+      "origins": [
+        [
+          1,
+          0,
+          54
+        ],
+        [
+          1,
+          1,
+          54
+        ],
+        [
+          1,
+          2,
+          54
+        ]
+      ],
+      "rear_colors": [
+        0,
+        0,
+        15296,
+        15296
+      ],
+      "review": "Opaque shadow continues the shallow rock body above the colliding island. Only the native grass/ground colours recede; black is neither erased nor sent to the rear plane.",
+      "rear_fold_pixels": 8
+    },
+    {
+      "key": "c0075984cb18d2c9",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          118
+        ],
+        [
+          1,
+          1,
+          118
+        ],
+        [
+          1,
+          2,
+          118
+        ]
+      ]
+    },
+    {
+      "key": "c0298f463f947ada",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 4202496,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          34
+        ],
+        [
+          1,
+          1,
+          34
+        ],
+        [
+          1,
+          2,
+          34
+        ]
+      ],
+      "face_colors": [
+        102,
+        108,
+        0,
+        0
+      ],
+      "review": "Mixed water/post art: face_colors selects only the authored low-priority wood ink. Water and high-priority wood stay on their original plane."
+    },
+    {
+      "key": "c565c121b9e9b727",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          161
+        ],
+        [
+          1,
+          1,
+          161
+        ],
+        [
+          1,
+          2,
+          161
+        ]
+      ]
+    },
+    {
+      "key": "cca6ea2dc6c54e5b",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          57
+        ],
+        [
+          1,
+          1,
+          57
+        ],
+        [
+          1,
+          2,
+          57
+        ]
+      ]
+    },
+    {
+      "key": "cd048ba16c924301",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 0,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          24
+        ],
+        [
+          1,
+          1,
+          24
+        ],
+        [
+          1,
+          2,
+          24
+        ]
+      ]
+    },
+    {
+      "key": "ceb43a9d49249bbf",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          43
+        ],
+        [
+          1,
+          1,
+          43
+        ],
+        [
+          1,
+          2,
+          43
+        ]
+      ]
+    },
+    {
+      "key": "d21551e58e414480",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_vegetation_join",
+      "origins": [
+        [
+          1,
+          0,
+          85
+        ],
+        [
+          1,
+          1,
+          85
+        ],
+        [
+          1,
+          2,
+          85
+        ]
+      ],
+      "rear_colors": [
+        0,
+        0,
+        8130,
+        8130
+      ],
+      "rear_fold_pixels": 8,
+      "review": "Mixed rock/painted earth at the island top. Lower-character authored ground ink1 and6..12 belongs on the rear earth band; opaque black14 remains the shallow rock shadow. Fold the supporting earth deck through this8px band, preserving native collision and the rock contour. The supporting earth supplies only missing earth behind the lower rock-shadow pixels from an adjacent compatible ground band; original rear ink stays intact."
+    },
+    {
+      "key": "d272a1e8dbe1c67a",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          39
+        ],
+        [
+          1,
+          1,
+          39
+        ],
+        [
+          1,
+          2,
+          39
+        ]
+      ]
+    },
+    {
+      "key": "d4aaf721a87e7989",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          56
+        ],
+        [
+          1,
+          0,
+          81
+        ],
+        [
+          1,
+          1,
+          56
+        ],
+        [
+          1,
+          1,
+          81
+        ],
+        [
+          1,
+          2,
+          56
+        ],
+        [
+          1,
+          2,
+          81
+        ]
+      ]
+    },
+    {
+      "key": "d6a9b6de62c63d56",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          185
+        ],
+        [
+          1,
+          1,
+          185
+        ],
+        [
+          1,
+          2,
+          185
+        ]
+      ]
+    },
+    {
+      "key": "d728c74aa7fb8429",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          113
+        ],
+        [
+          1,
+          1,
+          113
+        ],
+        [
+          1,
+          2,
+          113
+        ]
+      ]
+    },
+    {
+      "key": "d7ce6e88fa09caed",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 4096,
+      "role": "earth",
+      "origins": [
+        [
+          1,
+          0,
+          164
+        ],
+        [
+          1,
+          1,
+          164
+        ],
+        [
+          1,
+          2,
+          164
+        ]
+      ]
+    },
+    {
+      "key": "d89decd9e66c4a74",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_vegetation",
+      "origins": [
+        [
+          1,
+          0,
+          11
+        ],
+        [
+          1,
+          1,
+          11
+        ],
+        [
+          1,
+          2,
+          11
+        ]
+      ],
+      "rear_fold_pixels": 8
+    },
+    {
+      "key": "dad59374b27997ab",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          84
+        ],
+        [
+          1,
+          1,
+          84
+        ],
+        [
+          1,
+          2,
+          84
+        ]
+      ]
+    },
+    {
+      "key": "dbbf6a86a3af2403",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 4202496,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          33
+        ],
+        [
+          1,
+          1,
+          33
+        ],
+        [
+          1,
+          2,
+          33
+        ]
+      ],
+      "face_colors": [
+        0,
+        62,
+        0,
+        0
+      ],
+      "review": "Mixed water/post art: face_colors selects only the authored low-priority wood ink. Water and high-priority wood stay on their original plane."
+    },
+    {
+      "key": "df4a331da4df5ca9",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          135
+        ],
+        [
+          1,
+          1,
+          135
+        ],
+        [
+          1,
+          2,
+          135
+        ]
+      ]
+    },
+    {
+      "key": "e9d78a392064d831",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          129
+        ],
+        [
+          1,
+          1,
+          129
+        ],
+        [
+          1,
+          2,
+          129
+        ]
+      ]
+    },
+    {
+      "key": "ea51e7ff9c6606b1",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 0,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          98
+        ],
+        [
+          1,
+          1,
+          98
+        ],
+        [
+          1,
+          2,
+          98
+        ]
+      ]
+    },
+    {
+      "key": "f27589e66f844fde",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          15
+        ],
+        [
+          1,
+          1,
+          15
+        ],
+        [
+          1,
+          2,
+          15
+        ]
+      ]
+    },
+    {
+      "key": "f516074fcc2aa4e9",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          91
+        ],
+        [
+          1,
+          1,
+          91
+        ],
+        [
+          1,
+          2,
+          91
+        ]
+      ]
+    },
+    {
+      "key": "f75c7c84925d1080",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          171
+        ],
+        [
+          1,
+          1,
+          171
+        ],
+        [
+          1,
+          2,
+          171
+        ]
+      ]
+    },
+    {
+      "key": "f8133f452cf857e5",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 2048,
+      "role": "infill",
+      "origins": [
+        [
+          1,
+          0,
+          27
+        ],
+        [
+          1,
+          1,
+          27
+        ],
+        [
+          1,
+          2,
+          27
+        ]
+      ]
+    },
+    {
+      "key": "f85dd4430f011fe6",
+      "kinds": [
+        1,
+        1,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "beam_deck",
+      "origins": [
+        [
+          1,
+          0,
+          172
+        ],
+        [
+          1,
+          1,
+          172
+        ],
+        [
+          1,
+          2,
+          172
+        ]
+      ]
+    },
+    {
+      "key": "f924424285283219",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 0,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          101
+        ],
+        [
+          1,
+          1,
+          101
+        ],
+        [
+          1,
+          2,
+          101
+        ]
+      ]
+    },
+    {
+      "key": "fa776c2e40862dd9",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 0,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          151
+        ],
+        [
+          1,
+          1,
+          151
+        ],
+        [
+          1,
+          2,
+          151
+        ]
+      ]
+    },
+    {
+      "key": "fda1d55b4131e545",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 1048576,
+      "role": "timber_support",
+      "origins": [
+        [
+          1,
+          0,
+          126
+        ],
+        [
+          1,
+          1,
+          126
+        ],
+        [
+          1,
+          2,
+          126
+        ]
+      ]
+    },
+    {
+      "key": "fe741c80cdf402ab",
+      "kinds": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "flags": 4202496,
+      "role": "water",
+      "origins": [
+        [
+          1,
+          0,
+          160
+        ],
+        [
+          1,
+          1,
+          160
+        ],
+        [
+          1,
+          2,
+          160
+        ]
+      ],
+      "face_colors": [
+        62,
+        14,
+        0,
+        0
+      ],
+      "review": "Mixed water/post art: face_colors selects only the authored low-priority wood ink. Water and high-priority wood stay on their original plane."
+    },
+    {
+      "key": "fff6fe6c7e296585",
+      "kinds": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "flags": 0,
+      "role": "rock_relief",
+      "origins": [
+        [
+          1,
+          0,
+          104
+        ],
+        [
+          1,
+          1,
+          104
+        ],
+        [
+          1,
+          2,
+          104
+        ]
+      ]
+    }
+  ]
+}

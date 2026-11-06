@@ -359,9 +359,26 @@ F2 remains available for a full snapshot while the overlay is open. The game and
 SNES input stay frozen until the overlay closes. Accepted setting changes are
 written atomically to `settings.ini`; action rows are not persisted.
 
+### Action 3D modes
+
+Under **Action 3D → Scene → Action 3D**, choose:
+
+- **Off** — flat action-stage rendering.
+- **Diorama** — the default when enabling Action 3D, with separated layers using
+  the saved BG depth and layout policies.
+- **Voxel 3D (WIP)** — work-in-progress modeled environments in supported
+  rooms, adding connected walking surfaces, recessed scenery and depth for
+  selected native objects while retaining the original artwork and gameplay.
+
+Switching to Diorama restores the modeled rooms' saved BG policies. Room
+authoring settings are preserved for Voxel 3D. Lighting and particles retain their
+separate controls. Existing `diorama_mode = On` or `1` settings select Diorama;
+choose Voxel 3D (WIP) explicitly to enable the modeled environments. The developer `D` shortcut cycles
+all three modes.
+
 ### Death Heim final battle
 
-With **Action 3D → Scene → Diorama 3D** and **Environmental effects** enabled,
+With **Action 3D → Scene → Action 3D** set to **Diorama** or **Voxel 3D**, and **Environmental effects** enabled,
 room `07:08` enhances its original nebula artwork. The native blue and
 magenta ribbons, stars, black space, wave animation and layer geometry remain.
 Bright filaments receive a soft coloured glow and a modest colour/contrast
@@ -386,7 +403,7 @@ ratios and camera orbit use the same renderer as the game.
 
 ### Death Heim completion scene
 
-Enable **Action 3D → Scene → Diorama 3D**. The **Death Heim completion scene**
+Set **Action 3D → Scene → Action 3D** to **Diorama** or **Voxel 3D**. The **Death Heim completion scene**
 switch in the same tab replaces room 1 B's native background with a bright
 ocean and opening in the clouds. It applies its own backdrop and enclosure
 while active, with any **Skybox** setting. Your saved skybox and shoebox

@@ -7,6 +7,7 @@
 
 #include "diorama_planes.h"
 #include "diorama_bg_policy.h"
+#include "render/presentation_options.h"
 
 /* Pure per-room diorama authoring keyed by the game's (map group, map) pair.
  * Paint order is independent of geometric z because SDL does not depth-sort
@@ -306,6 +307,15 @@ static inline DioramaTrunkSettings DioramaTrunk_Resolve(unsigned group,
   return result;
 }
 
+/* Resolve the live presentation without changing saved room authoring.
+ * Offline tools may still inspect/preview the authored enclosure directly. */
+static inline DioramaTrunkSettings DioramaTrunk_ResolveForMode(Action3DMode mode,
+    unsigned group,unsigned number,const DioramaRoomOverride *room) {
+  DioramaTrunkSettings result=DioramaTrunk_Resolve(group,number,room);
+  result.enabled=result.enabled&&mode==kAction3D_Voxel;
+  return result;
+}
+
 /* Resolve capture and camera policy together. Authored BG policies remain in
  * the document and become effective again when this enclosure is disabled. */
 static inline bool DioramaTrunk_ApplyBgPolicy(unsigned group,unsigned number,
@@ -326,6 +336,13 @@ static inline bool DioramaTrunk_ApplyBgPolicy(unsigned group,unsigned number,
   *plan=next;return true;
 }
 
+static inline bool DioramaTrunk_ApplyBgPolicyForMode(Action3DMode mode,
+    unsigned group,unsigned number,const DioramaRoomOverride *room,ActionBgPlan *plan) {
+  if(!plan)return false;
+  if(mode!=kAction3D_Voxel)return !room||DioramaBgPolicy_Apply(room->bg_policy,plan);
+  return DioramaTrunk_ApplyBgPolicy(group,number,room,plan);
+}
+
 /* Rooms/tables must start zero-initialized. Stamp buffers are owned: plain
  * struct assignment borrows/transfers them rather than making a deep copy.
  * Release owned rooms/tables before discarding or reinitializing them. */
@@ -342,11 +359,13 @@ const DioramaTileStamp *DioramaLayerOrder_StampAt(
     const DioramaStampLayerOverride *layer, int x, int y);
 /* Extra rows of a horizontally cycling native page retain its X period.
  * Exact authored cells (including blanks) win; only missing cells above/below
- * the page may repeat. Zero dimensions disable this fallback. All units are
+ * the page may repeat, and only under a Repeat or RawWrap row policy. A finite
+ * or mirrored row must not acquire periodic copies of authored extensions.
+ * Zero dimensions disable this fallback. All units are
  * 16px metatiles; use the returned stamp's coordinates for pixel-mask lookup. */
 const DioramaTileStamp *DioramaLayerOrder_ExtendedRowStampAt(
     const DioramaStampLayerOverride *layer, int x, int y,
-    int native_width, int native_height);
+    int native_width, int native_height, ActionBgEdgeMode row_edge);
 
 const uint16_t *DioramaLayerOrder_PixelMask(
     const DioramaRoomOverride *room, unsigned bg, int cell_x,

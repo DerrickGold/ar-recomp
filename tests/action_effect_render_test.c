@@ -1,6 +1,7 @@
 #include "action/action_effect_receivers.h"
 #include "action/action_soft_light.h"
 #include "action/action_effect_source.h"
+#include "action/action_effect_masks.h"
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -2819,6 +2820,63 @@ static void TestTempleGroundMist(void) {
   CHECK(!first.vertex_count && !first.index_count); /* Unproved spans are omitted. */
 }
 
+static void TestVoxelContactPlanes(void) {
+  DioramaProjection projection=RakedApronProjection();
+  projection.texture_x_origin=0;projection.texture_width=4096;projection.texture_height=2048;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1,.z_world=-.22f};
+  projection.bg1_high_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1};
+  projection.bg2_high_plane=projection.bg1_high_plane;
+  projection.object_planes[2]=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1,.z_world=-.075f};
+  static ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+  static ActionSceneEffectRenderBatch actual,expected,scratch;
+  ActionSceneEffectFrame frame={.decoration_count=1,.decoration_visible_count=1};
+  const unsigned kinds[]={kActionEffect_CaveDrips,kActionEffect_LandingDust,kActionEffect_CaveWater,kActionEffect_CaveMist,kActionEffect_TempleGroundMist};
+  for(unsigned family=0;family<sizeof(kinds)/sizeof(*kinds);++family) {
+    const bool dust=family==1,water=family==2 || family==3,ground=family==4;
+    const unsigned original=water?kActionEffectProjectionPlane_Bg2High:kActionEffectProjectionPlane_Bg1;
+    frame.decorations[0]=(ActionEffectInstance){
+      .kind=kinds[family],
+      .phase=kActionEffectPhase_CaveEnvironment,.source_mask=0xff,
+      .flags=kActionEffectFlag_Visible,.generation=1,.phase_ticks=dust?12:0,
+      .visual=dust?3:2,.world_x=dust?128:1024,.world_y=dust?192:0,
+      .render_layer=ground?kActionEffectRenderLayer_Bg1Mist:family==2?kActionEffectRenderLayer_Bg2HighPlane:
+          dust || family==3?kActionEffectRenderLayer_WorldDust:kActionEffectRenderLayer_WorldOverlay,
+      .projection_plane=original,
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-1024,0,1024,1280}}};
+    if(dust)frame.decorations[0].geometry.data.rect=(ActionEffectLocalRect){-104,-72,104,2};
+    if(ground) {
+      frame.decorations[0].world_x=128;frame.decorations[0].world_y=192;
+      frame.decorations[0].geometry.data.rect=(ActionEffectLocalRect){0,-26,64,0};
+    }
+    for(unsigned voxel=0;voxel<2;++voxel) {
+      projection.voxel_scenery=voxel;
+      ActionEffectProjectionContext context={.diorama_projection=&projection};
+      ActionEffectSourceBatch source={.context=context,.primitives=primitives,.capacity=kActionSourceMaximumPrimitives};
+      const unsigned layer=frame.decorations[0].render_layer;
+      CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,ActionEffectSource_ProjectPoint,
+          ActionEffectSource_ClipBounds,&source,&scratch));
+      CHECK(source.count>0 && !source.failed);
+      /* Deferred plane slots 5+priority encode nonzero OBJ priorities. */
+      const unsigned plane=!voxel?original:family?7u:kActionEffectProjectionPlane_Bg1High;
+      for(unsigned i=0;i<source.count;++i) {
+        CHECK(primitives[i].meta[1]==plane);
+        if(voxel&&family)CHECK(primitives[i].meta[2]==2);
+      }
+      CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,ActionEffectProjection_ProjectPoint,
+          ActionEffectProjection_ClipBounds,&context,&actual));
+      DioramaProjection reference=projection;reference.voxel_scenery=false;
+      if(voxel) {
+        if(water)reference.bg2_high_plane=projection.object_planes[2];
+        else reference.bg1_plane=dust || ground?projection.object_planes[2]:projection.bg1_high_plane;
+      }
+      context.diorama_projection=&reference;
+      CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,ActionEffectProjection_ProjectPoint,
+          ActionEffectProjection_ClipBounds,&context,&expected));
+      CHECK(actual.vertex_count>0 && SceneBatchesEqual(&actual,&expected));
+      CHECK(frame.decorations[0].projection_plane==original);
+    }
+  }
+}
 static void TestLandingParticleGeometry(void) {
   ActionSceneEffectFrame frame = {.decoration_count = kActionLandingDustMaxPuffs};
   static ActionSceneEffectRenderBatch batch, paused;
@@ -4676,6 +4734,12 @@ static void TestGroundSnowCover(void) {
 #undef BUILD_COVER
 #undef BUILD_TOP
 }
+static bool IsCloudBodyMask(ArRenderPointF uv) {
+  const unsigned column=(unsigned)(uv.x*kActionMaskAtlasWidth/kActionMaskCellSize);
+  const unsigned row=(unsigned)(uv.y*kActionMaskAtlasHeight/kActionMaskCellSize);
+  const unsigned cell=row*kActionMaskAtlasColumns+column;
+  return cell>=kActionMaskCloudBodyFirst && cell<kActionMaskCloudBodyFirst+kActionMaskCloudCount;
+}
 static void TestSlopePowder(void) {
   static ActionSceneEffectFrame frame;
   static ActionSceneEffectRenderBatch first,next;
@@ -4697,7 +4761,7 @@ static void TestSlopePowder(void) {
     ArRenderPointF corners[4];unsigned corner=0,puffs=0;
     for(int i=0;i<first.vertex_count;++i) {
       const ArRenderVertex2D *v=&first.vertices[i];
-      if(v->tex_coord.y<=2.f/3||v->tex_coord.y>=5.f/6)continue;
+      if(!IsCloudBodyMask(v->tex_coord))continue;
       corners[corner++]=v->position;
       if(corner<4)continue;
       corner=0;++puffs;
@@ -4767,11 +4831,11 @@ static void TestReactiveSnow(void) {
   frame.actors[0].wake.strength=frame.actors[1].wake.strength=.3f;
   BUILD_SNOW(changed,true);
   /* Ordinary walking must retain dense powder cores, not just enlarge faint
-   * diamonds. Cloud-body UVs occupy the second-last row of the shared atlas. */
+   * diamonds. Identify the body masks through the current atlas layout. */
   unsigned opaque_powder=0;
   for(int i=0;i<changed.vertex_count;++i) {
     const ArRenderVertex2D *v=&changed.vertices[i];
-    if(v->tex_coord.y>2.f/3&&v->tex_coord.y<5.f/6&&v->color.a>.9f)++opaque_powder;
+    if(IsCloudBodyMask(v->tex_coord)&&v->color.a>.9f)++opaque_powder;
   }
   CHECK(opaque_powder>=4);
   /* Staggered clumps must overlap throughout a complete cycle, with gradual
@@ -4783,7 +4847,7 @@ static void TestReactiveSnow(void) {
     float coverage=0;
     for(int j=0;j<changed.vertex_count;++j) {
       const ArRenderVertex2D *v=&changed.vertices[j];
-      if(v->tex_coord.y>2.f/3&&v->tex_coord.y<5.f/6)coverage+=v->color.a;
+      if(IsCloudBodyMask(v->tex_coord))coverage+=v->color.a;
     }
     CHECK(coverage>8);
     if(i)CHECK(fabsf(coverage-previous_coverage)<previous_coverage*.16f);
@@ -4995,6 +5059,7 @@ int main(void) {
   TestBloodpoolMoonlight();
   TestCavePolishGeometry();
   TestLandingParticleGeometry();
+  TestVoxelContactPlanes();
   TestCaveEnvironmentGeometry();
   TestCaveWaterUsesHighPlane();
   TestCaveAmbientScroll();

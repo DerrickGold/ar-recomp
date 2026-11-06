@@ -16,13 +16,22 @@
 Settings g_settings;
 bool g_diorama_frame_active;
 static DioramaLayerOrderTable layers;
+static ActionTrunkAssets trunk_assets;
+static unsigned trunk_asset_requests;
+static unsigned castle_asset_requests;
+static char castle_token;
 const DioramaLayerOrderTable *DioramaLayerManifest_Table(void) { return &layers; }
 const DioramaRoomOverride *DioramaLayerManifest_TerrainRoom(const DioramaRoomOverride *room,unsigned profile) {
   assert(profile==0);return room;
 }
 unsigned ActRaiserActionBg_TerrainProfile(void) { return 0; }
+const struct ActionVoxelGeometry *ActRaiserActionBg_VoxelGeometry(unsigned group,unsigned room) {
+  ++castle_asset_requests;
+  return group==2 && room>=2 && room<=8 ? (const struct ActionVoxelGeometry *)&castle_token : NULL;
+}
 const ActionTrunkAssets *ActRaiserActionBg_TrunkAssets(unsigned group,unsigned room,const DioramaRoomOverride *edits) {
-  (void)group;(void)room;(void)edits;return NULL;
+  assert(DioramaTrunk_ResolveForMode(g_settings.diorama_mode,group,room,edits).enabled);
+  ++trunk_asset_requests;return &trunk_assets;
 }
 uint8 g_ram[kActRaiserWramSize];
 static FrameSlot frame;
@@ -227,6 +236,28 @@ int main(void) {
   scene.decoration_count = 0;
   scenery_section = kDioramaLayerSection_Room;
   Capture(0, kDioramaLayerSection_Room);
-  puts("Action capture: shared gameplay clock, pause, settings and section publication passed");
+  /* Mode changes publish immutable enclosure ownership even with ambience
+   * disabled. Ordinary Diorama must not request assets or retain a trunk. */
+  g_ram[kActRaiserWram_MapGroup]=6;g_ram[kActRaiserWram_CurrentMap]=6;
+  g_diorama_frame_active=true;g_settings.action_environmental_effects=false;
+  const int modes[]={kAction3D_Voxel,kAction3D_Diorama,kAction3D_Off,kAction3D_Voxel};
+  for(unsigned i=0;i<sizeof(modes)/sizeof(*modes);++i){
+    const unsigned before=trunk_asset_requests;
+    g_settings.diorama_mode=modes[i];Capture(0,kDioramaLayerSection_Room);
+    const bool voxel=modes[i]==kAction3D_Voxel;
+    assert(frame.diorama_trunk_settings.enabled==voxel);
+    assert(frame.diorama_trunk==(voxel?&trunk_assets:NULL));
+    assert(trunk_asset_requests==before+(unsigned)voxel);
+  }
+  g_ram[kActRaiserWram_MapGroup]=2;g_ram[kActRaiserWram_CurrentMap]=8;
+  for(unsigned i=0;i<sizeof(modes)/sizeof(*modes);++i) {
+    const unsigned before=castle_asset_requests;
+    g_settings.diorama_mode=modes[i];Capture(0,kDioramaLayerSection_Room);
+    const bool voxel=modes[i]==kAction3D_Voxel;
+    assert(frame.diorama_voxel==(voxel ? (const struct ActionVoxelGeometry *)&castle_token : NULL));
+    assert(castle_asset_requests==before+(unsigned)voxel);
+    assert(!frame.diorama_trunk);
+  }
+  puts("Action capture: shared gameplay clock, pause, settings, 3D mode ownership and section publication passed");
   return 0;
 }

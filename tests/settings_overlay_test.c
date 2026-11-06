@@ -1034,7 +1034,10 @@ static void CheckCompleteDescriptorCatalog(void) {
     }
     for (int v = 0; desc->enum_labels && v < desc->enum_count; ++v) {
       snprintf(key, sizeof(key), "setting.%s.value.%d", desc->key, v);
-      CheckCatalogEntry(key, desc->enum_labels[v]);
+      /* The WIP notice is display text, not a new persisted mode name. */
+      const char *caption = desc->field == &g_settings.diorama_mode && v == kAction3D_Voxel
+          ? "Voxel 3D (WIP)" : desc->enum_labels[v];
+      CheckCatalogEntry(key, caption);
     }
   }
   /* Controller names come from the input owner; adding a named button/axis
@@ -3924,9 +3927,30 @@ int main(int argc, char **argv) {
   NavToSection(1); /* Action settings in the reduced navigation. */
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   RowToKey("diorama_mode");
-  const bool previous_diorama = g_settings.diorama_mode;
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
-  CHECK(g_settings.diorama_mode != previous_diorama);
+  const int previous_diorama = g_settings.diorama_mode;
+  for(int step=1;step<=kAction3D_Count;++step){
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    CHECK(g_settings.diorama_mode==(previous_diorama+step)%kAction3D_Count);
+  }
+  /* Enabling from either direction chooses Diorama. WIP geometry remains an
+   * explicit second choice, and its display notice is not serialized. */
+  const SettingDesc *action_3d = Settings_Find("diorama_mode");
+  const SDL_Keycode enable_keys[] = {SDLK_LEFT, SDLK_RIGHT};
+  for (unsigned i = 0; i < sizeof(enable_keys) / sizeof(enable_keys[0]); ++i) {
+    Settings_SetLong(action_3d, kAction3D_Off);
+    CHECK(SettingsOverlay_HandleKey(enable_keys[i], true, false));
+    CHECK(g_settings.diorama_mode == kAction3D_Diorama);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    CHECK(g_settings.diorama_mode == kAction3D_Voxel);
+    char caption[64];
+    for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+      SettingsOverlay_LocalizedValue((ArUiLocale)locale, action_3d, caption, sizeof(caption));
+      CHECK(strstr(caption, "WIP") != NULL);
+    }
+    Settings_FormatValue(action_3d, caption, sizeof(caption));
+    CHECK(!strcmp(caption, "Voxel 3D"));
+  }
+  Settings_SetLong(action_3d, previous_diorama);
   Settings_SetImportedLevelActive(true);
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false)); /* Back to section navigation. */
   NavToSection(host_sections - 1); /* System, in the reduced navigation. */

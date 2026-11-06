@@ -9,6 +9,7 @@
  * deadline; capturing again would refresh its timestamp and break pair
  * continuity. */
 #include "host_display.h"
+#include "action/action_voxel.h"
 #include "action/present_action_effects.h"
 #include "dev/dev_automation.h"
 
@@ -156,6 +157,8 @@ bool HostDisplay_CanPresentDuringProduction(void) {
 }
 
 static void RetainFrame(const FrameSlot *slot) {
+  ActionVoxel_Retain(slot->diorama_voxel);
+  ActionVoxel_Release(s_retained_frame.slot.diorama_voxel);
   s_retained_frame.slot = *slot;
   s_retained_frame.valid = true;
   s_retained_upload_complete = false;
@@ -171,6 +174,7 @@ static void RetainFrame(const FrameSlot *slot) {
     retained->sim_inputs = NULL;
     retained->hud_icon.surface = (SrPpuSurfaceView){0};
     retained->diorama_skybox_surface = (SrPpuSurfaceView){0};
+    retained->voxel_sprite_atlas = (SrPpuSurfaceView){0};
     s_retained_upload_complete = true;
   }
 }
@@ -722,6 +726,8 @@ uint64_t HostDisplay_CatchupCapNs(uint64_t emulation_frame_interval_ns,
 }
 
 void HostDisplay_InvalidatePresentHistory(void) {
+  ActionVoxel_Release(s_retained_frame.slot.diorama_voxel);
+  s_retained_frame.slot.diorama_voxel = NULL;
   s_retained_frame.valid = false;
   DioramaFrameGeneration_InvalidateHistory();
 }

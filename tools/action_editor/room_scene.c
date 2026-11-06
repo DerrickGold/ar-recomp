@@ -1,3 +1,4 @@
+#include "action/action_voxel.h"
 #include "action/action_trunk_life.h"
 #include "action/action_woodland.h"
 /* Whole-room adapter. Pixel sampling, priority splitting, edit application and
@@ -20,9 +21,10 @@ typedef struct RoomLayer {
   const DioramaRoomOverride *edits;
   ActionBgLayerPlan plan;
   unsigned bg, page;
-  bool page_cycle;
+  bool page_cycle, native_priority;
   uint8_t *bands;
   ActionLavaBubbles bubbles;
+  const ActionVoxelGeometry *cutouts;
 } RoomLayer;
 struct EditorRoomScene {
   ActionSceneSnapshot assets;
@@ -46,6 +48,9 @@ struct EditorRoomScene {
   uint16_t actor_preview_start;
   bool actor_preview_enabled;
   ActionEffectActor receiver_actors[2];
+  ActionEffectActor native_actors[kActionEffectActorMax];
+  unsigned native_actor_count;
+  bool native_actors_enabled;
   uint16_t receiver_clock;
   ActionEffectPreviewEvent event;
   SrSceneSurfaces surfaces;
@@ -73,7 +78,68 @@ struct EditorRoomScene {
   ActionTrunkObserver trunk_observer;
   ActionWoodlandObserver woodland_observer;
   uint32_t *trunk_pixels[3];
+  Action3DMode mode;
+  ActionVoxelGeometry *voxel_geometry;
+  const ActionVoxelGeometry *castle_phases[4];
+  size_t voxel_pixel_capacity;
 };
+/* The ending reuses $0701 after a native BG-page handoff. Its separate
+ * completion vista owns those pages; the boss-hub island must not claim it. */
+static bool RoomVoxelAllowed(const EditorRoomScene *r) {
+  return !ActRaiser_IsDeathHeimCompletionScene(r->assets.scene.group,
+      r->assets.scene.map, 7, r->frame.bgsc[0], r->frame.bgsc[1]);
+}
+static bool CastleAnimation(const EditorRoomScene *r) {
+  return ActionVoxel_ProfileForRoom(r->assets.scene.group,r->assets.scene.map)==kActionVoxelProfile_Castle &&
+      ActionRoomScene_HasCharacterAnimation(&r->assets.scene);
+}
+static void ClearCastlePhases(EditorRoomScene *r) {
+  for(unsigned i=0;i<4;++i) {
+    ActionVoxel_Release(r->castle_phases[i]);
+    r->castle_phases[i]=NULL;
+  }
+}
+/* The immutable snapshot is normally phase zero, but only share its geometry
+ * when the exact native characters prove that. Never infer opacity from the
+ * material family: moving chain links have a different mask in every phase. */
+static void SeedCastlePhase(EditorRoomScene *r) {
+  if(!CastleAnimation(r) || ActionRoomScene_CharacterAnimationPhaseCount(&r->assets.scene)>4 ||
+      !ActionVoxel_Active(r->voxel_geometry,r->assets.scene.group,r->assets.scene.map))return;
+  uint8_t characters[kActionRoomSceneCharacterBytes];
+  if(ActionRoomScene_BuildCharacters(&r->assets.scene,0,0,characters,sizeof(characters)) &&
+      !memcmp(characters,r->assets.scene.characters,sizeof(characters)))
+    r->castle_phases[0]=ActionVoxel_Retain(r->voxel_geometry);
+}
+static bool PrepareCastlePhase(EditorRoomScene *r) {
+  if(r->mode!=kAction3D_Voxel || !RoomVoxelAllowed(r) || !CastleAnimation(r))return true;
+  const unsigned phase=r->frame.animation_phase;
+  const unsigned count=ActionRoomScene_CharacterAnimationPhaseCount(&r->assets.scene);
+  const bool cacheable=count<=4 && phase<count;
+  const ActionVoxelGeometry *cached=cacheable?r->castle_phases[phase]:NULL;
+  if(cached==r->voxel_geometry)return true;
+  ActionVoxelGeometry *next=NULL;
+  if(cached)next=(ActionVoxelGeometry *)ActionVoxel_Retain(cached);
+  else {
+    ActionRoomScene *source=malloc(sizeof(*source));
+    next=ActionVoxel_Create();
+    bool ok=source && next;
+    if(ok) {
+      *source=r->assets.scene;
+      ok=ActionRoomScene_BuildCharacters(&r->assets.scene,r->frame.game_frame,phase,
+          source->characters,sizeof(source->characters)) &&
+          ActionVoxel_Build(next,source,&r->terrain,
+              ActionVoxel_SettingsForRoom(source->group,source->map));
+    }
+    free(source);
+    if(!ok) {ActionVoxel_Release(next);return false;}
+    if(cacheable)r->castle_phases[phase]=ActionVoxel_Retain(next);
+  }
+  ActionVoxel_Release(r->voxel_geometry);
+  r->voxel_geometry=next;
+  r->scene.voxel_geometry=ActionVoxel_Active(next,r->assets.scene.group,r->assets.scene.map)?next:NULL;
+  r->raster_valid=false;
+  return true;
+}
 const ActionSurfaceField *EditorRoomScene_SurfaceField(const EditorRoomScene *r,unsigned index){
   if(!r||index>=kActionSurfaceFieldKinds)return NULL;
   for(unsigned i=0;i<r->recipes.count;++i){const ActionEffectRecipe *e=&r->recipes.records[i];
@@ -478,21 +544,24 @@ static uint32_t Edit(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile
   int cx = x >= 0 ? x / 2 : (x - 1) / 2, cy = y >= 0 ? y / 2 : (y - 1) / 2;
   const bool native_page = l->plan.source != kActionBgSource_WorldMap && !l->page_cycle &&
       ActionBgWorld_TileWidth(l->world) == 32 && ActionBgWorld_TileHeight(l->world) == 32;
+  ActionBgRowPolicy row = {.edge = kActionBgEdge_Clamp};
+  if (native_page && r->stamp_layers[l->bg].count)
+    (void)ActionBgLayerPlan_ResolveRow(&l->plan, y * 8 - (int)l->plan.camera_y - 1, &row);
   const DioramaTileStamp *stamp = DioramaLayerOrder_ExtendedRowStampAt(
-      &r->stamp_layers[l->bg], cx, cy, native_page ? 16 : 0, native_page ? 16 : 0);
+      &r->stamp_layers[l->bg], cx, cy, native_page ? 16 : 0, native_page ? 16 : 0, row.edge);
   int metatile = -1;
   *tile = (SrPpuCaptureTile){0};
   if (stamp) {
     cx = stamp->x; cy = stamp->y;
     unsigned q = (y & 1) * 2 + (x & 1);
     tile->entry = stamp->words[q];
-    tile->band = (stamp->bands >> (q * 2)) & 3;
+    tile->band = l->native_priority ? ((tile->entry & 0x2000) ? 2 : 1) : (stamp->bands >> (q * 2)) & 3;
     tile->flags = SR_PPU_CAPTURE_TILE_REPLACE | (stamp->blank ? SR_PPU_CAPTURE_TILE_BLANK : 0);
     if (!stamp->blank) metatile = stamp->metatile;
   } else {
     uint8_t id;
     Coordinates(l, &x, &y);
-    if ((!r->pixel_layers[l->bg].count && !l->bubbles.characters) ||
+    if ((!r->pixel_layers[l->bg].count && !l->bubbles.characters && !l->cutouts) ||
         ActionBgWorld_Lookup(l->world, x, y, &tile->entry) != kActionBgLookup_Tile ||
         !ActionBgWorld_LookupMetatile(l->world, x, y, &id)) return 0;
     cx = x / 2; cy = y / 2; metatile = id;
@@ -507,7 +576,8 @@ static uint32_t Edit(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile
     tile->black_rows[row] = (uint8_t)(edit->black[at] >> shift);
     tile->transparent_rows[row] = (uint8_t)(edit->transparent[at] >> shift);
   }
-  return tile->band < 3 && (stamp || edit || bubble);
+  const bool cutout = ActionVoxel_CutoutRows(l->cutouts, x, y, tile->transparent_rows);
+  return tile->band < 3 && (stamp || edit || bubble || cutout);
 }
 static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
                                 ActionEnvironmentTileEdit *out) {
@@ -571,6 +641,15 @@ EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets) {
       !ActionEnvironmentScene_FromRoom(&r->environment,&r->assets.scene,&r->frame)) {
     EditorRoomScene_Destroy(r); return NULL;
   }
+  r->mode=kAction3D_Voxel;
+  r->voxel_geometry=ActionVoxel_Create();
+  if(!r->voxel_geometry || (RoomVoxelAllowed(r) &&
+      !ActionVoxel_Build(r->voxel_geometry,&assets->scene,NULL,ActionVoxel_SettingsForRoom(assets->scene.group,assets->scene.map)))){
+    EditorRoomScene_Destroy(r);return NULL;
+  }
+  r->scene.voxel_geometry=RoomVoxelAllowed(r) &&
+      ActionVoxel_Active(r->voxel_geometry,assets->scene.group,assets->scene.map)?r->voxel_geometry:NULL;
+  SeedCastlePhase(r);
   r->scene.trunk_settings=DioramaTrunk_Resolve(assets->scene.group,assets->scene.map,NULL);
   if(r->scene.trunk_settings.enabled) {
     r->trunk=malloc(sizeof(*r->trunk));
@@ -579,8 +658,21 @@ EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets) {
   }
   return r;
 }
+Action3DMode EditorRoomScene_3DMode(const EditorRoomScene *r) {
+  return r ? r->mode : kAction3D_Off;
+}
+void EditorRoomScene_Set3DMode(EditorRoomScene *r, Action3DMode mode) {
+  if (!r || mode < kAction3D_Off || mode > kAction3D_Voxel || r->mode == mode) return;
+  r->mode = mode;
+  r->scene.voxel_geometry = mode == kAction3D_Voxel && RoomVoxelAllowed(r) &&
+      ActionVoxel_Active(r->voxel_geometry,r->assets.scene.group,r->assets.scene.map) ? r->voxel_geometry : NULL;
+  r->scene.trunk_settings = DioramaTrunk_ResolveForMode(mode,r->assets.scene.group,r->assets.scene.map,&r->terrain);
+  r->raster_valid = false;
+}
 void EditorRoomScene_Destroy(EditorRoomScene *r) {
   if (!r) return;
+  ClearCastlePhases(r);
+  ActionVoxel_Release(r->voxel_geometry);
   for (unsigned bg = 0; bg < 2; ++bg) {
     ActionBgWorld_Destroy(r->layers[bg].world); free(r->layers[bg].bands);
   }
@@ -619,7 +711,7 @@ bool EditorRoomScene_BgPolicy(const EditorRoomScene *r, int x, int y,
       !BuildBgPlan(r, &frame, out)) return false;
   if (camera_x)
     for (unsigned bg = 0; bg < 2; bg++) camera_x[bg] = frame.layer_camera_x[bg];
-  return defaults || DioramaTrunk_ApplyBgPolicy(r->assets.scene.group,r->assets.scene.map,&r->terrain,out);
+  return defaults || r->scene.voxel_geometry || DioramaTrunk_ApplyBgPolicyForMode(r->mode,r->assets.scene.group,r->assets.scene.map,&r->terrain,out);
 }
 
 bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
@@ -660,7 +752,7 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
   if (ok && base) ok = DioramaLayerOrder_ForTerrain(base, r->assets.terrain_profile, terrain);
   ActionBgPlan policy;
   if (ok) ok = EditorRoomScene_BgPolicy(r, 0, 0, 0, true, &policy, NULL) &&
-      DioramaTrunk_ApplyBgPolicy(r->assets.scene.group,r->assets.scene.map,terrain,&policy);
+      (r->scene.voxel_geometry || DioramaTrunk_ApplyBgPolicyForMode(r->mode,r->assets.scene.group,r->assets.scene.map,terrain,&policy));
   uint8_t *bands[2] = {0};
   for (unsigned bg = 0; ok && bg < 2; ++bg) {
     if (!DioramaLayerOrder_VirtualLayerHasClassification(&terrain->virtual_layers[bg])) continue;
@@ -680,7 +772,22 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
   if(ok&&settings.enabled) {
     trunk=malloc(sizeof(*trunk));ok=trunk&&ActionTrunk_Build(trunk,&r->assets.scene,terrain);
   }
+  /* A cached phase may still be retained by a caller. Build edited castle
+   * geometry separately, then discard every old phase only on success. */
+  ActionVoxelGeometry *castle_base=NULL;
+  if(ok && RoomVoxelAllowed(r)) {
+    ActionVoxelGeometry *target=r->voxel_geometry;
+    if(CastleAnimation(r))target=castle_base=ActionVoxel_Create();
+    ok=target && ActionVoxel_Build(target,&r->assets.scene,terrain,
+        ActionVoxel_SettingsForRoom(r->assets.scene.group,r->assets.scene.map));
+  }
   if (ok) {
+    if(castle_base) {
+      ClearCastlePhases(r);
+      ActionVoxel_Release(r->voxel_geometry);
+      r->voxel_geometry=castle_base;
+      SeedCastlePhase(r);
+    }
     free(r->trunk);r->trunk=trunk;r->scene.trunk=trunk;r->scene.trunk_settings=settings;
     memset(&r->trunk_observer,0,sizeof(r->trunk_observer));
     memset(&r->woodland_observer,0,sizeof(r->woodland_observer));
@@ -688,8 +795,12 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
     if (r->table) { DioramaLayerOrder_ClearTable(r->table); free(r->table); }
     DioramaLayerOrder_ClearRoom(&r->terrain);
     r->table = table; r->terrain = *terrain; r->options.layers = table;
+    r->scene.voxel_geometry = r->mode == kAction3D_Voxel && RoomVoxelAllowed(r) &&
+        ActionVoxel_Active(r->voxel_geometry,r->assets.scene.group,r->assets.scene.map) ? r->voxel_geometry : NULL;
+    r->scene.trunk_settings.enabled &= r->mode == kAction3D_Voxel;
     r->raster_valid = false;
   } else {
+    ActionVoxel_Release(castle_base);
     free(trunk);free(bands[0]); free(bands[1]);
     DioramaLayerOrder_ClearTable(table); free(table);
     DioramaLayerOrder_ClearRoom(terrain);
@@ -701,6 +812,40 @@ bool EditorRoomScene_PreviewBinding(EditorRoomScene *r,bool enabled,uint32_t sou
   if(!r||x<-2048||x>16384||y<-2048||y>16384||start>65535)return false;
   r->actor_preview_enabled=enabled;r->actor_preview_source=source;
   r->actor_preview_x=x;r->actor_preview_y=y;r->actor_preview_start=start;return true;
+}
+unsigned EditorRoomScene_TerrainProfile(const EditorRoomScene *r) {
+  return r?r->assets.terrain_profile:0;
+}
+bool EditorRoomScene_NativeSection(const EditorRoomScene *r,int x,int y,uint32_t frame,unsigned *section) {
+  if(!r || !section || x<0 || y<0 || x>65535 || y>65535)return false;
+  ActionRoomSceneFrameRequest request=r->assets.frame;
+  request.camera_x=x;request.camera_y=y;request.game_frame=frame;
+  ActionRoomSceneFrameState state;
+  ActionEnvironmentScene environment;
+  if(!ActionRoomScene_BuildFrameState(&r->assets.scene,&request,&state) ||
+      !ActionEnvironmentScene_FromRoom(&environment,&r->assets.scene,&state))return false;
+  if(ActRaiser_IsDeathHeimCompletionScene(r->assets.scene.group,r->assets.scene.map,
+      7,state.bgsc[0],state.bgsc[1])) {
+    *section=kDioramaLayerSection_DeathHeimCompletion;return true;
+  }
+  ActionSceneEffectFrame *effects=calloc(1,sizeof(*effects));
+  if(!effects)return false;
+  environment.suppress_default_glow_field=ActionEffectRecipes_ReplacesGlowField(&r->recipes,
+      environment.group,environment.room,r->assets.terrain_profile);
+  ActionEffectRecipes_SurfaceFields(&r->recipes,environment.group,environment.room,
+      r->assets.terrain_profile,environment.surface_fields);
+  ActionMapEnvironmentScene_Capture(&environment,effects,NULL);
+  *section=kDioramaLayerSection_Room;
+  if(!effects->decoration_overflow)for(unsigned i=0;i<effects->decoration_count;++i)
+    if(effects->decorations[i].kind==kActionEffect_AitosWaterfall) {
+      *section=kDioramaLayerSection_AitosWaterfall;break;
+    }
+  free(effects);return true;
+}
+bool EditorRoomScene_SetNativeActors(EditorRoomScene *r,const ActionEffectActor *actors,unsigned count,bool enabled) {
+  if(!r || count>kActionEffectActorMax || (count&&!actors))return false;
+  if(count)memcpy(r->native_actors,actors,count*sizeof(*actors));
+  r->native_actor_count=count;r->native_actors_enabled=enabled;return true;
 }
 void EditorRoomScene_AdvanceReceivers(EditorRoomScene *r,unsigned mask,const int x[2],const int feet_y[2],uint32_t clock) {
   if(!r)return;
@@ -746,7 +891,10 @@ bool EditorRoomScene_ResolveCamera(const EditorRoomScene *r, int x, int y,
   *out = (EditorRoomCamera){.x = x, .y = y, .maximum_y = maximum_y};
   for (unsigned bg = 0; bg < 2; ++bg) {
     const bool edits = DioramaCameraPolicy_HasEdits(&r->terrain, bg);
-    if (DioramaCameraPolicy_NeedsBgApron(&r->terrain, bg, edits,
+    if ((r->mode==kAction3D_Voxel &&
+        ActionVoxel_BackgroundApron(ActionVoxel_ProfileForRoom(r->assets.scene.group,r->assets.scene.map),bg) &&
+        DioramaCameraPolicy_WorldApron(&plan.layer[bg])) ||
+        DioramaCameraPolicy_NeedsBgApron(&r->terrain, bg, edits,
         DioramaCameraPolicy_WorldApron(&plan.layer[bg]),
         view ? view->viewport.w : 16, view ? view->viewport.h : 10))
       out->bg_apron_mask |= 1u << bg;
@@ -898,6 +1046,24 @@ bool EditorRoomScene_RenderFlat(EditorRoomScene *r, int x, int y, uint32_t clock
 }
 
 static bool TrunkSplit(EditorRoomScene *r,int ox,int oy,bool fresh) {
+  if(r->scene.voxel_geometry){
+    const int pitch=r->surfaces.pitch_pixels,height=r->surfaces.height;
+    if(pitch<=0||height<=0||(size_t)pitch>SIZE_MAX/(size_t)height/sizeof(uint32_t))return false;
+    const size_t capacity=(size_t)pitch*height;
+    if(r->voxel_pixel_capacity<capacity){
+      uint32_t *rear=malloc(capacity*sizeof(*rear)),*front=malloc(capacity*sizeof(*front));
+      if(!rear||!front){free(rear);free(front);return false;}
+      free(r->trunk_pixels[0]);free(r->trunk_pixels[1]);
+      r->trunk_pixels[0]=rear;r->trunk_pixels[1]=front;
+      r->voxel_pixel_capacity=capacity;fresh=true;
+    }
+    if(fresh)ActionVoxel_Split(r->voxel_geometry,ox,oy,pitch,height,pitch,&r->frame,
+        r->surfaces.bands[0][0],pitch,r->trunk_pixels[0],r->trunk_pixels[1]);
+    r->pixels[SR_PPU_OVERLAY_BG1]=(const uint8_t *)r->trunk_pixels[0];
+    r->pixels[kDioramaPlane_Bg1Far]=(const uint8_t *)r->trunk_pixels[1];
+    r->pixels[kDioramaPlane_Bg1Hi]=(r->surfaces.content[0]&2)?(const uint8_t *)r->surfaces.bands[0][1]:NULL;
+    return true;
+  }
   if(!r->trunk||!r->scene.trunk_settings.enabled)return true;
   for(unsigned i=0;i<3;++i)if(!r->trunk_pixels[i]) {
     r->trunk_pixels[i]=calloc(640*352,sizeof(uint32_t));
@@ -937,13 +1103,19 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   if (!ActionRoomScene_BuildFrameState(s, &request, f)) return false;
   memset(&r->effects,0,sizeof(r->effects));
   if (!ActionEnvironmentScene_FromRoom(&r->environment,s,f)) return false;
-  if (!LoadFrameGraphics(r)) return false;
+  if (!LoadFrameGraphics(r) || !PrepareCastlePhase(r)) return false;
   ActionLavaBubbles_Prepare(&r->layers[0].bubbles,s,r->environmental_effects_enabled
       ? ActionEffectRecipes_NativeBubbleField(&r->recipes,s->group,s->map,r->assets.terrain_profile) : NULL,
       r->environment.clock);
   r->environment.vram = r->vram;
   r->environment.tile_base[0] = 0;
   r->environment.tile_base[1] = 0;
+  for (unsigned bg = 0; bg < 2; ++bg) {
+    r->layers[bg].native_priority = ActionVoxel_OwnsBackgroundBands(
+        ActionVoxel_Profile(r->scene.voxel_geometry),s->map,bg);
+    r->layers[bg].cutouts = bg == 0 && ActionVoxel_HasCutouts(r->scene.voxel_geometry)
+        ? r->scene.voxel_geometry : NULL;
+  }
   r->environment.tile_edit = EnvironmentTileEdit;
   r->environment.tile_edit_context = r;
   r->effects.game_frame = r->environment.clock;
@@ -978,7 +1150,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   }
   ActionBgPlan plan;
   if (!BuildBgPlan(r, f, &plan) ||
-      !DioramaTrunk_ApplyBgPolicy(s->group,s->map,&r->terrain,&plan)) return false;
+      (!r->scene.voxel_geometry && !DioramaTrunk_ApplyBgPolicyForMode(r->mode,s->group,s->map,&r->terrain,&plan))) return false;
   const DioramaCapture geometry = DioramaCameraPolicy_Capture(&plan, &r->terrain,
       x, y, extra_x, budget, camera->bg_apron_mask);
   const int top = geometry.authentic_y0, bottom = geometry.height - 224 - top;
@@ -992,13 +1164,13 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   for (unsigned bg = 0; bg < 2; ++bg) {
     SrSceneBackground *b = &input.backgrounds[bg];
     *b = RasterBackground(r, bg, &plan.layer[bg]);
-    b->tiles.band_lookup = !r->scene.trunk_settings.enabled && DioramaLayerOrder_VirtualLayerHasClassification(
+    b->tiles.band_lookup = !r->layers[bg].native_priority && !r->scene.trunk_settings.enabled && DioramaLayerOrder_VirtualLayerHasClassification(
         &r->terrain.virtual_layers[bg]) ? Band : NULL;
     b->edits = (SrPpuCaptureTileBinding){
       .lookup = r->terrain.stamp_layers[bg].count || r->terrain.pixel_layers[bg].count ||
-          r->layers[bg].bubbles.characters ? Edit : NULL,
+          r->layers[bg].bubbles.characters || r->layers[bg].cutouts ? Edit : NULL,
       .user_data = &r->layers[bg], .apron = (camera->bg_apron_mask & (1u << bg)) ? 64 : 0};
-    b->edits_stable = r->layers[bg].bubbles.characters != NULL;
+    b->edits_stable = r->layers[bg].bubbles.characters != NULL || r->layers[bg].cutouts != NULL;
     b->capture_flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME;
     b->clip_vertical = top || bottom;
     b->clip_top = Min(Max(0, f->layer_camera_y[bg] + 1), Max(top, bottom));
@@ -1014,13 +1186,18 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
           (1u << (bg ? kDioramaPlane_Bg2Far : kDioramaPlane_Bg1Far));
     }
     DioramaTransparentFill fill = kDioramaTransparentFill_None;
-    b->fill_configured = !r->scene.trunk_settings.enabled && DioramaLayerOrder_ResolveTransparentFill(r->table, s->group, s->map,
+    b->fill_configured = !r->scene.voxel_geometry && !r->scene.trunk_settings.enabled && DioramaLayerOrder_ResolveTransparentFill(r->table, s->group, s->map,
         r->scene.layer_section, bg, &fill, &b->fill_cgram);
     b->fill_mode = (uint8_t)fill; r->fill_configured[bg] = b->fill_configured;
   }
-  CaptureBindingPreview(r);
-  for(unsigned i=0;i<2;++i)if(r->receiver_actors[i].visible&&r->effects.actor_count<kActionEffectActorMax)
-    r->effects.actors[r->effects.actor_count++]=r->receiver_actors[i];
+  if(r->native_actors_enabled) {
+    r->effects.actor_count=r->native_actor_count;
+    memcpy(r->effects.actors,r->native_actors,r->native_actor_count*sizeof(*r->native_actors));
+  } else {
+    CaptureBindingPreview(r);
+    for(unsigned i=0;i<2;++i)if(r->receiver_actors[i].visible&&r->effects.actor_count<kActionEffectActorMax)
+      r->effects.actors[r->effects.actor_count++]=r->receiver_actors[i];
+  }
   r->environment.scenery_cache = &r->scenery_cache;
   ActionEffectRecipes_Apply(&r->recipes, s->group, s->map, r->assets.terrain_profile,
                             r->environment.clock, &r->environment, &r->effects);

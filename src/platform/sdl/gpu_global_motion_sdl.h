@@ -19,6 +19,13 @@ typedef struct ArGpuGlobalMotion {
    * Zero keeps the original nine bound candidates. Never forces motion. */
   unsigned bound_hint[8];
   bool camera_bound;
+  /* Voxel captures contain cutout scenery. Filter their straight-alpha art
+   * through premultiplied coverage; false retains ordinary Diorama sampling. */
+  bool alpha_correct;
+  /* Certified map bands retain exact nearest-endpoint texels, rebased to the
+   * current camera. The compositor applies the remaining fractional motion. */
+  unsigned exact_map_mask;
+  int map_camera_dx, map_camera_dy;
 } ArGpuGlobalMotion;
 typedef struct ArGpuGlobalMotionResult {
   int32_t forward_x, forward_y, backward_x, backward_y;

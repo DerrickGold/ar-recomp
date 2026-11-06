@@ -105,6 +105,16 @@ static SDL_TextureAddressMode ToSdlTextureAddressMode(
   return SDL_TEXTURE_ADDRESS_INVALID;
 }
 
+static bool FlushExternal(ArSdlRenderBackend *backend) {
+  if (!backend || !backend->external_flush) return true;
+  if (backend->external_flushing)
+    return SDL_SetError("recursive external GPU batch flush");
+  backend->external_flushing = true;
+  const bool ok = backend->external_flush(backend->external_userdata);
+  backend->external_flushing = false;
+  return ok;
+}
+
 static bool CreateTexture(void *context, const ArRenderTextureDesc *desc,
                           ArRenderTexture *out_texture) {
   ArSdlRenderBackend *backend = context;
@@ -129,7 +139,8 @@ static bool CreateTexture(void *context, const ArRenderTextureDesc *desc,
 }
 
 static void DestroyTexture(void *context, ArRenderTexture texture) {
-  (void)context;
+  /* A failed drain discards the batch; the texture can then be released. */
+  (void)FlushExternal(context);
   SDL_DestroyTexture(ArSdlRenderBackend_UnwrapTexture(texture));
 }
 
@@ -225,6 +236,7 @@ static bool UpdateGpuTexture(ArSdlRenderBackend *backend, SDL_Texture *texture,
 static bool UpdateTexture(void *context, ArRenderTexture texture,
                           const ArRenderRectI *destination,
                           const void *pixels, int pitch_bytes) {
+  if (!FlushExternal(context)) return false;
   SDL_Rect converted;
   const SDL_Rect *rect = NULL;
   if (destination) {
@@ -264,6 +276,7 @@ static bool EnsureOutputTarget(ArSdlRenderBackend *backend) {
   if (width <= 0 || height <= 0) return backend->output_target != NULL;
   if (backend->output_target && width == backend->output_width && height == backend->output_height)
     return true;
+  if (!FlushExternal(backend)) return false;
   const SDL_GPUTextureFormat format = SDL_GetGPUSwapchainTextureFormat(
       backend->gpu_device, backend->output_window);
   SDL_Texture *target = SDL_CreateTexture(backend->renderer,
@@ -291,6 +304,7 @@ static bool EnsureOutputTarget(ArSdlRenderBackend *backend) {
 
 static bool SetRenderTarget(void *context, ArRenderTexture target) {
   ArSdlRenderBackend *backend = context;
+  if (!FlushExternal(backend)) return false;
   if (!ArRenderTexture_IsValid(target) && backend->output_window) {
     if (!EnsureOutputTarget(backend)) return false;
     return SDL_SetRenderTarget(backend->renderer, backend->output_target);
@@ -397,6 +411,7 @@ static uint8_t ColorChannel(float value) {
 
 static bool Clear(void *context, ArRenderColorF color) {
   ArSdlRenderBackend *backend = context;
+  if (!FlushExternal(backend)) return false;
   Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
   if (!SDL_GetRenderDrawColor(
           backend->renderer, &old_r, &old_g, &old_b, &old_a))
@@ -511,6 +526,7 @@ static bool DrawTexture(void *context, ArRenderTexture texture,
                         const ArRenderRectF *destination,
                         const ArRenderDrawState *state) {
   ArSdlRenderBackend *backend = context;
+  if (!FlushExternal(backend)) return false;
   SDL_Texture *native_texture = ArSdlRenderBackend_UnwrapTexture(texture);
   SDL_FRect converted_source;
   SDL_FRect converted_destination;
@@ -547,6 +563,7 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
                          const int32_t *indices, int index_count,
                          const ArRenderDrawState *state) {
   ArSdlRenderBackend *backend = context;
+  if (!FlushExternal(backend)) return false;
   SDL_Texture *native_texture = ArSdlRenderBackend_UnwrapTexture(texture);
   if (!state || state->flags == 0)
     return SDL_RenderGeometry(
@@ -667,6 +684,7 @@ static bool PresentWindow(ArSdlRenderBackend *backend) {
 
 static bool Present(void *context) {
   ArSdlRenderBackend *backend = context;
+  if (!FlushExternal(backend)) return false;
   if (!backend->output_window) return SDL_RenderPresent(backend->renderer);
   return PresentWindow(backend);
 }
@@ -726,11 +744,27 @@ SDL_GPUDevice *ArSdlRenderBackend_GpuDevice(const ArRenderDevice *device) {
 bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device) {
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   if (!renderer) return false;
-  const ArSdlRenderBackend *backend = device->context;
+  ArSdlRenderBackend *backend = device->context;
+  if (!FlushExternal(backend)) return false;
   /* Preserve the explicit recording-failure check before submission: SDL's
    * RenderPresent does not propagate its internal command-flush result. */
   if (!SDL_FlushRenderer(renderer)) return false;
   return !backend->output_window || SDL_RenderPresent(renderer);
+}
+
+bool ArSdlRenderBackend_SetExternalFlush(ArRenderDevice *device,
+    bool (*flush)(void *), void *userdata) {
+  if (!ArSdlRenderBackend_Renderer(device)) return false;
+  ArSdlRenderBackend *backend = device->context;
+  if (backend->external_flushing ||
+      (backend->external_flush && backend->external_userdata != userdata))
+    return SDL_SetError("external GPU batch already owned");
+  const bool ok = FlushExternal(backend);
+  if (ok || !flush) {
+    backend->external_flush = flush;
+    backend->external_userdata = flush ? userdata : NULL;
+  }
+  return ok;
 }
 
 bool ArSdlRenderBackend_WindowOutputSize(const ArRenderDevice *device,
@@ -767,6 +801,7 @@ SDL_GPUShader *ArSdlRenderBackend_FragmentShader(ArRenderDevice *device,
 
 static bool FinishPreparation(void *context) {
   ArSdlRenderBackend *backend = context;
+  if (!FlushExternal(backend)) return false;
   SDL_Renderer *renderer = backend->renderer;
   if (!backend->gpu_device) return SDL_FlushRenderer(renderer);
   /* This adapter always provides scoped render targets (also advertised by
@@ -1066,6 +1101,9 @@ void ArSdlRenderBackend_Destroy(ArRenderDevice *device) {
     return;
   }
   ArSdlRenderBackend *backend = device->context;
+  (void)FlushExternal(backend);
+  backend->external_flush = NULL;
+  backend->external_userdata = NULL;
   SDL_Renderer *renderer = backend->renderer;
   const bool owns_renderer = backend->owns_renderer;
   const bool owns_context = backend->owns_context;

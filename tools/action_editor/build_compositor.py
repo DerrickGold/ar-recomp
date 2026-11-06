@@ -81,20 +81,23 @@ def build(output, compiler='emcc', scene=None):
                'tools/action_editor/compositor_preview.c',
                'tools/action_editor/room_preview.c', 'tools/action_editor/room_scene.c',
                'tools/action_editor/receiver_preview.c',
+               'tools/action_editor/object_preview.c', 'src/diorama/diorama_object_snapshot.c',
                    *(ROOT / 'tools/action_editor/environment_sources.txt').read_text().splitlines(),
                'src/action/action_scene_snapshot.c', 'src/action/action_room_scene.c',
-               'src/action/action_bg_world.c', 'src/diorama/diorama_capture_blend.c',
+               'src/action/action_bg_world.c',
                'src/diorama/diorama_rom_backdrop.c',
                'snesrecomp-go/runtime/src/scene_renderer.c',
                'snesrecomp-go/runtime/src/snes/ppu.c',
                'tools/action_editor/compositor_profile_stub.c', 'src/diorama/diorama_snapshot.c',
                *sources, '--no-entry', '-sSTANDALONE_WASM=1', '-sFILESYSTEM=0',
                # Fixed memory keeps JS views stable. Include the V2 snapshot
-               # companions and simultaneous old/new rooms during atomic load.
-               '-sSTACK_SIZE=1048576', '-sINITIAL_MEMORY=100663296', '-sALLOW_MEMORY_GROWTH=0',
+               # companions, native object pixels/ownership/atlas, and
+               # simultaneous old/new rooms during atomic load.
+               '-sSTACK_SIZE=1048576', '-sINITIAL_MEMORY=134217728', '-sALLOW_MEMORY_GROWTH=0',
                *['-Wl,--export=DioramaPreview_' + x for x in exports],
+               *['-Wl,--export=RoomPreview_' + x for x in ('LoadObjects', 'ClearObjects', 'ObjectInfo')],
                *['-Wl,--export=RoomPreview_' + x for x in
-                 ('Load', 'Configure', 'CloudOpenings', 'Policy', 'SetView', 'Measure', 'Render', 'Reset', 'Width', 'Height', 'CameraX', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'ShowBackdrop', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'RecipeError', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'LoadPlayer', 'ReceiverStyle', 'PickReceiver', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],
+                 ('Load', 'Configure', 'CloudOpenings', 'Policy', 'Set3DMode', 'SetView', 'Measure', 'Render', 'Reset', 'Width', 'Height', 'CameraX', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'ShowBackdrop', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'RecipeError', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'LoadPlayer', 'ReceiverStyle', 'PickReceiver', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],
                '-o', str(wasm)]
     subprocess.run(command, cwd=ROOT, env=compiler_environment(compiler), check=True)
     template = (ROOT / 'tools/action_editor/compositor_preview.html').read_text()

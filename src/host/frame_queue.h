@@ -16,6 +16,7 @@ typedef struct HostFramePacket {
   int tick;
   uint8_t *pixels;
   size_t capacity;
+  const struct ActionVoxelGeometry *voxel_storage;
   struct SimFrameInputs *sim_storage; /* Lazy town source snapshot. */
   SrPpuBgPacket *background_storage; /* Allocated only when the optional export is used. */
 } HostFramePacket;

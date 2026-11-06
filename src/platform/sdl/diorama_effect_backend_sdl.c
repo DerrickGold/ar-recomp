@@ -1,4 +1,5 @@
 #include "diorama/diorama_effect_backend.h"
+#include "diorama/diorama_scenery_uniforms.h"
 
 #include <SDL3/SDL.h>
 #include <stddef.h>
@@ -61,7 +62,15 @@ typedef struct DioramaEffectBackendState {
   SDL_GPURenderState *states[kDioramaEffect_Count];
   bool init_attempted[kDioramaEffect_Count];
   bool available[kDioramaEffect_Count];
-  SDL_GPURenderState *scenery;
+  /* Backgrounds and native prop faces can alternate between distinct light
+   * maps in one frame. Retain those bindings instead of rebuilding them at
+   * each switch. Include the host handle to guard native pointer reuse. */
+  struct {
+    SDL_GPURenderState *state;
+    SDL_GPUTexture *texture;
+    ArRenderTexture handle;
+  } scenery[8];
+  unsigned scenery_next;
   /* Four priority bands, each with a raw and an interpolated attribute map. */
   struct {
     SDL_GPURenderState *state;
@@ -69,7 +78,6 @@ typedef struct DioramaEffectBackendState {
   } actors[8];
   unsigned actor_next;
   bool scenery_warmed, actors_warmed;
-  SDL_GPUTexture *illumination;
   SDL_GPUSampler *light_sampler;
 } DioramaEffectBackendState;
 
@@ -321,15 +329,10 @@ static bool BindActorLight(ArRenderDevice *device, const DioramaSceneryLightEffe
     s_effects.actors[index].state = state;
     memcpy(s_effects.actors[index].textures, textures, sizeof(textures));
   }
-  const ArRenderRectF uv = params->light_uv.w > 0 ? params->light_uv : (ArRenderRectF){0,0,1,1};
-  const ArRenderRectF source = params->attributes_uv.w > 0 ? params->attributes_uv : (ArRenderRectF){0,0,1,1};
-  const float uniforms[16] = {
-    params->texel_width, params->texel_height, params->blur_radius, params->rim_strength,
-    uv.w/width, uv.h/height, uv.x, uv.y,
-    source.x, source.y, source.w, source.h, params->lower_content_v_max, 0, 0, 0,
-  };
+  DioramaActorUniforms uniforms;
+  DioramaActorUniforms_Init(&uniforms, params, width, height);
   SDL_GPURenderState *state = s_effects.actors[index].state;
-  return SDL_SetGPURenderStateFragmentUniforms(state, 0, uniforms, sizeof(uniforms)) &&
+  return SDL_SetGPURenderStateFragmentUniforms(state, 0, &uniforms, sizeof(uniforms)) &&
       SDL_SetGPURenderState(s_effects.renderer, state);
 }
 
@@ -341,7 +344,13 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *device,
   if (!PrepareLightBinding(device, &width, &height)) return false;
   SDL_GPUTexture *light = LightTexture(params->illumination);
   if (!light) return false;
-  if (!s_effects.scenery || s_effects.illumination != light) {
+  const unsigned capacity=sizeof(s_effects.scenery)/sizeof(s_effects.scenery[0]);
+  unsigned index=0;
+  while(index<capacity && (!s_effects.scenery[index].state ||
+      s_effects.scenery[index].texture!=light ||
+      s_effects.scenery[index].handle.value!=params->illumination.value)) ++index;
+  if (index==capacity) {
+    index=s_effects.scenery_next++%capacity;
     static const GpuShaderBlobs blobs = {
       kSceneryLightFragMSL, kSceneryLightFragMSLSize,
       kSceneryLightFragSPV, kSceneryLightFragSPVSize,
@@ -361,32 +370,25 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *device,
       SDL_DestroyGPURenderState(state);
       return false;
     }
-    SDL_DestroyGPURenderState(s_effects.scenery);
-    s_effects.scenery = state;
-    s_effects.illumination = light;
+    SDL_DestroyGPURenderState(s_effects.scenery[index].state);
+    s_effects.scenery[index].state = state;
+    s_effects.scenery[index].texture = light;
+    s_effects.scenery[index].handle = params->illumination;
   }
   /* RGBA8 stores quarter-strength incoming light (the receiver range is 0..4).
    * This texture stays resident; SDL binds it after the ordinary art sampler. */
-  const ArRenderRectF uv = params->light_uv.w > 0 ? params->light_uv : (ArRenderRectF){0,0,1,1};
-  const ArRenderRectF source = params->attributes_uv.w > 0 ? params->attributes_uv : (ArRenderRectF){0,0,1,1};
-  float uniforms[176] = {
-    params->texel_width, params->texel_height, params->blur_radius, params->lower_content_v_max,
-    params->priority.width, params->priority.height,
-    params->priority.high_band, params->priority.additive,
-    uv.w / width, uv.h / height, uv.x, uv.y,
-    params->shade.r, params->shade.g, params->shade.b, params->mode,
-    params->grade.strength, params->grade.saturation, 0, 0,
-    ((params->grade.shadows>>16)&255)/255.f, ((params->grade.shadows>>8)&255)/255.f,
-    (params->grade.shadows&255)/255.f, 0,
-    ((params->grade.highlights>>16)&255)/255.f, ((params->grade.highlights>>8)&255)/255.f,
-    (params->grade.highlights&255)/255.f, 0,
-    source.x, source.y, source.w, source.h,
-  };
-  _Static_assert(sizeof(DioramaHeat)==36*sizeof(float), "scenery heat std140 layout");
-  memcpy(uniforms+32, &params->heat, sizeof(params->heat));
-  memcpy(uniforms+68,&params->cloud_light,sizeof(params->cloud_light));
-  return SDL_SetGPURenderStateFragmentUniforms(s_effects.scenery, 0, uniforms, sizeof(uniforms)) &&
-      SDL_SetGPURenderState(s_effects.renderer, s_effects.scenery);
+  DioramaSceneryUniforms uniforms;
+  DioramaSceneryUniforms_Init(&uniforms, params, width, height);
+  SDL_GPURenderState *state=s_effects.scenery[index].state;
+  return SDL_SetGPURenderStateFragmentUniforms(state, 0, &uniforms, sizeof(uniforms)) &&
+      SDL_SetGPURenderState(s_effects.renderer, state);
+}
+
+static void ResetSceneryBindings(void) {
+  for(unsigned i=0;i<sizeof(s_effects.scenery)/sizeof(s_effects.scenery[0]);++i)
+    SDL_DestroyGPURenderState(s_effects.scenery[i].state);
+  memset(s_effects.scenery,0,sizeof(s_effects.scenery));
+  s_effects.scenery_next=0;
 }
 
 bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *device) {
@@ -405,9 +407,7 @@ bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *device) {
   const bool unbound = DioramaEffectBackend_Unbind(device);
   /* Pipeline compilation is cached by the device. The sample binding must
    * not outlive its texture or be mistaken for the first room's light map. */
-  SDL_DestroyGPURenderState(s_effects.scenery);
-  s_effects.scenery = NULL;
-  s_effects.illumination = NULL;
+  ResetSceneryBindings();
   for (unsigned i = 0; i < sizeof(s_effects.actors)/sizeof(s_effects.actors[0]); ++i)
     SDL_DestroyGPURenderState(s_effects.actors[i].state);
   memset(s_effects.actors,0,sizeof(s_effects.actors));
@@ -429,7 +429,7 @@ void DioramaEffectBackend_Reset(ArRenderDevice *device) {
   if (same_device) {
     for (unsigned i = 0; i < sizeof(s_effects.actors)/sizeof(s_effects.actors[0]); ++i)
       SDL_DestroyGPURenderState(s_effects.actors[i].state);
-    SDL_DestroyGPURenderState(s_effects.scenery);
+    ResetSceneryBindings();
     if (s_effects.light_sampler) SDL_ReleaseGPUSampler(s_effects.device,s_effects.light_sampler);
     for (int effect = 0; effect < kDioramaEffect_Count; effect++)
       SDL_DestroyGPURenderState(s_effects.states[effect]);

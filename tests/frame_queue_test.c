@@ -1,4 +1,5 @@
 #include "host/frame_queue.h"
+#include "action/action_voxel.h"
 #include "host/frame_producer.h"
 #include "sim/sim_frame_capture.h"
 #include "diorama/diorama_planes.h"
@@ -12,6 +13,20 @@ static SrPpuSurfaceView View(uint32_t *pixels) {
   return (SrPpuSurfaceView){.data = (const uint8_t *)pixels,
       .byte_size = 16, .pitch_bytes = 8, .width_pixels = 2, .height_pixels = 2,
       .flags = SR_PPU_SURFACE_BOUND, .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32};
+}
+
+static void TestCastleOwnership(void) {
+  HostFrameQueue *q=HostFrameQueue_Create(); assert(q);
+  ActionVoxelGeometry *geometry=ActionVoxel_Create(); assert(geometry);
+  HostFramePacket *p=HostFrameQueue_BeginWrite(q); assert(p);
+  p->frame=(FrameSlot){.diorama_active=true,.diorama_voxel=geometry};
+  assert(HostFramePacket_OwnPixels(p)); HostFrameQueue_Publish(q);
+  ActionVoxel_Release(geometry); /* producer can leave the room now */
+  const HostFramePacket *read=HostFrameQueue_Read(q);assert(read);
+  const ActionVoxelGeometry *display=ActionVoxel_Retain(read->frame.diorama_voxel);
+  HostFrameQueue_Release(q); HostFrameQueue_Destroy(q);
+  unsigned count;assert(ActionVoxel_Edges(display,&count) && count==0);
+  ActionVoxel_Release(display);
 }
 
 static void TestPixels(HostFramePacket *p) {
@@ -30,8 +45,11 @@ static void TestPixels(HostFramePacket *p) {
   f->m7_active = false; f->sim.view = kSimView_Enhanced;
   assert(!HostFramePacket_Supports(f));
   *f = (FrameSlot){.diorama_active = true,
-      .diorama_plane_request_mask = (1u << kDioramaPlane_Bg1Hi),
-      .diorama_plane_content_mask = (1u << kDioramaPlane_Bg1Hi)};
+      .diorama_obj_owner_tags=true,
+      .diorama_plane_request_mask = (1u << kDioramaPlane_Bg1Hi) | (1u << kDioramaPlane_ObjAttributes2),
+      .diorama_plane_content_mask = (1u << kDioramaPlane_Bg1Hi) | (1u << kDioramaPlane_ObjAttributes2)};
+  uint32_t attributes[]={0x074000ffu,0xff40ff00u,0,0x084000ffu};
+  f->diorama_obj_attributes[2]=View(attributes);
   f->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][1] = View(pixels);
   f->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0] = View(pixels);
   f->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0] = View(pixels);
@@ -44,12 +62,25 @@ static void TestPixels(HostFramePacket *p) {
                                .count = 4,
                                .scene_removed = true};
   f->hud_icon.surface = f->diorama_skybox_surface = View(pixels);
+  f->voxel_sprite_atlas=View(pixels);
+  f->voxel_sprites.count=1;
+  f->voxel_sprites.sprites[0]=(ActionVoxelSprite){.owner=0xee0,.owner_tag=7,.x=24,.y=180,
+      .component_x=64,.component_y=32,.solid_y=4,.solid_height=12,.join_left=0x1234};
   f->ppu_surfaces.main = f->ppu_surfaces.authentic = f->ppu_surfaces.mode7 = View(pixels);
   assert(HostFramePacket_OwnPixels(p));
-  assert(p->copied_bytes == 5 * sizeof(pixels));
+  assert(p->copied_bytes == 7 * sizeof(pixels));
   memset(pixels, 0, sizeof(pixels));
+  memset(attributes,0,sizeof(attributes));
+  const uint32_t *owned=(const uint32_t *)f->diorama_obj_attributes[2].data;
+  assert(f->diorama_obj_owner_tags && owned!=attributes && owned[0]==0x074000ffu &&
+      owned[1]==0xff40ff00u && owned[3]==0x084000ffu && f->voxel_sprites.sprites[0].owner_tag==7);
   const uint32_t *copy = (const uint32_t *)f->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][1].data;
   assert(copy != pixels && copy[0] == 1 && copy[3] == 4);
+  copy=(const uint32_t *)f->voxel_sprite_atlas.data;
+  assert(copy!=pixels && copy[0]==1 && copy[3]==4 && f->voxel_sprites.sprites[0].owner==0xee0);
+  assert(f->voxel_sprites.sprites[0].component_x==64 && f->voxel_sprites.sprites[0].component_y==32 &&
+      f->voxel_sprites.sprites[0].solid_y==4 && f->voxel_sprites.sprites[0].solid_height==12 &&
+      f->voxel_sprites.sprites[0].join_left==0x1234);
   assert(!f->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0].data);
   assert(!f->ppu_surfaces.main.data && !f->ppu_surfaces.authentic.data && !f->ppu_surfaces.mode7.data);
   assert(f->hud_icon.surface.data && f->diorama_skybox_surface.data);
@@ -290,6 +321,7 @@ static void TestMaintenanceWithFutureFrames(HostFrameQueue *queue) {
 }
 
 int main(void) {
+  TestCastleOwnership();
   HostFrameQueue *q = HostFrameQueue_Create();
   assert(q && !HostFrameQueue_Read(q));
   assert(HostFrameQueue_ReadyCount(q) == 0);

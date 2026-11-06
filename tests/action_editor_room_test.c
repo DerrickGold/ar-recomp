@@ -9,6 +9,7 @@
 #include <math.h>
 #include "action/action_effect_render.h"
 #include "action/action_lava_bubbles.h"
+#include "action/action_voxel_internal.h"
 #include "diorama/diorama_camera_policy.h"
 #include "render/presentation_layout.h"
 
@@ -119,7 +120,147 @@ static void Benchmark(EditorRoomScene *room, int x, int y, unsigned frame_clock,
          vertices, indices, frame->scenery.count, iterations);
 }
 
+static uint32_t FlatHash(const EditorRoomScene *room) {
+  const SrSceneSurfaces *surface=EditorRoomScene_Surfaces(room);
+  uint32_t hash=2166136261u;
+  for(int y=0;y<224;++y)for(int x=64;x<64+surface->width;++x)
+    hash=(hash^surface->backdrop[(size_t)y*surface->pitch_pixels+x])*16777619u;
+  return hash;
+}
+static void CastleAnimation(EditorRoomScene *room,const ActionSceneSnapshot *assets) {
+  assert(assets->scene.group==2 && (assets->scene.map==3 || assets->scene.map==5));
+  assert(ActionRoomScene_CharacterAnimationPhaseCount(&assets->scene)==4);
+  assert(assets->frame.animation_phase<0);
+  const unsigned cadence=ActionRoomScene_CharacterAnimationCadence(&assets->scene);
+  /* The first 0205 hanging-platform hall uses static chain art. Its animated
+   * chain family is in the later shaft at x=1600/1680. */
+  const int x=assets->scene.map==3?658:1408,y=assets->scene.map==3?253:128;
+  const ActionVoxelGeometry *saved[4]={0};uint64_t revisions[4]={0};
+  uint32_t ordinary[4],flat[4];
+  for(unsigned phase=0;phase<4;++phase) {
+    EditorRoomScene_Set3DMode(room,kAction3D_Diorama);
+    assert(EditorRoomScene_Render(room,x,y,phase*cadence,120,64,NULL));
+    ordinary[phase]=EditorRoomScene_Hash(room);
+    EditorRoomScene_Set3DMode(room,kAction3D_Off);
+    assert(EditorRoomScene_RenderFlat(room,x,y,phase*cadence,120,NULL));
+    flat[phase]=FlatHash(room);
+  }
+  EditorRoomScene_Set3DMode(room,kAction3D_Voxel);
+  DioramaRoomOverride terrain={0};
+  const DioramaRoomOverride *base=DioramaLayerOrder_Find(
+      EditorRoomScene_Scene(room)->render->layers,assets->scene.group,assets->scene.map);
+  if(base)assert(DioramaLayerOrder_ForTerrain(base,assets->terrain_profile,&terrain));
+  ActionRoomScene *source=malloc(sizeof(*source));assert(source);
+  unsigned total_old_misroutes=0;
+  for(unsigned iteration=0;iteration<8;++iteration) {
+    const unsigned phase=iteration%4,clock=iteration*cadence;
+    assert(EditorRoomScene_Render(room,x,y,clock,120,64,NULL));
+    const ActionVoxelGeometry *actual=EditorRoomScene_Scene(room)->voxel_geometry;
+    assert(actual);
+    if(iteration<4) {
+      for(unsigned prior=0;prior<phase;++prior)assert(actual!=saved[prior]);
+      saved[phase]=ActionVoxel_Retain(actual);revisions[phase]=ActionVoxel_Revision(actual);
+    } else assert(actual==saved[phase] && ActionVoxel_Revision(actual)==revisions[phase]);
+    *source=assets->scene;
+    assert(ActionRoomScene_BuildCharacters(&assets->scene,clock,-1,source->characters,sizeof(source->characters)));
+    ActionVoxelGeometry *fresh=ActionVoxel_Create();assert(fresh);
+    assert(ActionVoxel_Build(fresh,source,&terrain,ActionVoxel_SettingsForRoom(source->group,source->map)));
+    assert(actual->width==fresh->width && actual->height==fresh->height &&
+        actual->origin_x==fresh->origin_x && actual->origin_y==fresh->origin_y);
+    assert(!memcmp(actual->front,fresh->front,(size_t)fresh->width*fresh->height));
+    const DioramaCapture *capture=EditorRoomScene_Capture(room);
+    const SrSceneSurfaces *surface=EditorRoomScene_Surfaces(room);
+    const size_t pixels=(size_t)surface->pitch_pixels*surface->height,bytes=pixels*sizeof(uint32_t);
+    uint32_t *split=malloc(bytes*4);assert(split);
+    ActionRoomSceneFrameRequest request=assets->frame;
+    request.camera_x=x;request.camera_y=y;request.game_frame=clock;
+    ActionRoomSceneFrameState frame;
+    assert(ActionRoomScene_BuildFrameState(&assets->scene,&request,&frame));
+    const int ox=x-120-64,oy=y-capture->authentic_y0+1;
+    assert(ActionVoxel_Split(fresh,ox,oy,surface->pitch_pixels,surface->height,
+        surface->pitch_pixels,&frame,surface->bands[0][0],surface->pitch_pixels,split,split+pixels));
+    assert(ActionVoxel_Split(saved[0],ox,oy,surface->pitch_pixels,surface->height,
+        surface->pitch_pixels,&frame,surface->bands[0][0],surface->pitch_pixels,split+pixels*2,split+pixels*3));
+    const uint32_t *front=(const uint32_t *)capture->pixels[kDioramaPlane_Bg1Far];
+    unsigned old_misroutes=0,new_misroutes=0;
+    for(size_t i=0;i<pixels;++i)if((split[pixels+i]>>24) && (split[pixels+i]&0xffffff)) {
+      old_misroutes+=split[pixels*3+i]!=split[pixels+i];
+      new_misroutes+=front[i]!=split[pixels+i];
+    }
+    assert(!new_misroutes);
+    assert(!memcmp(front,split+pixels,bytes));
+    assert(!memcmp(capture->pixels[SR_PPU_OVERLAY_BG1],split,bytes));
+    if(iteration<4) {
+      printf("castle-phase room=%02x%02x terrain=%u phase=%u stale_mask_colored_misroutes=%u current_mask_colored_misroutes=%u capture_hash=%u\n",
+          source->group,source->map,assets->terrain_profile,phase,old_misroutes,new_misroutes,EditorRoomScene_Hash(room));
+      total_old_misroutes+=old_misroutes;
+    }
+    free(split);ActionVoxel_Release(fresh);
+    assert(EditorRoomScene_Render(room,x,y,clock+1,120,64,NULL));
+    assert(EditorRoomScene_Scene(room)->voxel_geometry==saved[phase]);
+  }
+  assert(total_old_misroutes>0);
+  for(unsigned phase=0;phase<4;++phase) {
+    EditorRoomScene_Set3DMode(room,kAction3D_Diorama);
+    assert(EditorRoomScene_Render(room,x,y,phase*cadence,120,64,NULL));
+    assert(!EditorRoomScene_Scene(room)->voxel_geometry && EditorRoomScene_Hash(room)==ordinary[phase]);
+    EditorRoomScene_Set3DMode(room,kAction3D_Off);
+    assert(EditorRoomScene_RenderFlat(room,x,y,phase*cadence,120,NULL));
+    assert(!EditorRoomScene_Scene(room)->voxel_geometry && FlatHash(room)==flat[phase]);
+  }
+  EditorRoomScene_Set3DMode(room,kAction3D_Voxel);
+  assert(!EditorRoomScene_Configure(room,"[layers:02:03]\nbg1-pixels = invalid\n"
+      "[layers:02:05]\nbg1-pixels = invalid\n"));
+  assert(EditorRoomScene_Render(room,x,y,2*cadence,120,64,NULL));
+  assert(EditorRoomScene_Scene(room)->voxel_geometry==saved[2]);
+  /* Applying an actual pixel edit invalidates all four retained variants.
+   * The saved old frames remain immutable and safe until their final release. */
+  char edit[512];
+  snprintf(edit,sizeof(edit),"[layers:%02x:%02x]\nbg1-pixels:us+jp+eu = cell:%d,%d transparent:"
+      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n",
+      assets->scene.group,assets->scene.map,x/16,y/16);
+  assert(EditorRoomScene_Configure(room,edit));
+  for(unsigned phase=0;phase<4;++phase) {
+    assert(EditorRoomScene_Render(room,x,y,phase*cadence,120,64,NULL));
+    const ActionVoxelGeometry *changed=EditorRoomScene_Scene(room)->voxel_geometry;
+    assert(changed && changed!=saved[phase] && ActionVoxel_Revision(changed)!=revisions[phase]);
+    assert(ActionVoxel_Revision(saved[phase])==revisions[phase]);
+    for(int py=y/16*16;py<y/16*16+16;++py)for(int px=x/16*16;px<x/16*16+16;++px)
+      assert(!changed->front[(size_t)(py-changed->origin_y)*changed->width+px-changed->origin_x]);
+  }
+  DioramaLayerOrder_ClearRoom(&terrain);free(source);
+  EditorRoomScene_Destroy(room);
+  for(unsigned phase=0;phase<4;++phase) {
+    assert(ActionVoxel_Revision(saved[phase])==revisions[phase]);
+    assert(atomic_load(&saved[phase]->references)==1);
+    ActionVoxel_Release(saved[phase]);
+  }
+  /* An unreviewed phase window must compile its actual pixels, never index
+   * past the bounded cache or reuse a previously known four-phase mask. */
+  ActionSceneSnapshot *extended=malloc(sizeof(*extended));assert(extended);
+  *extended=*assets;
+  extended->scene.video_profile[23]=(extended->scene.video_profile[23]&0xf0u)|8;
+  assert(ActionRoomScene_HasCharacterAnimation(&extended->scene));
+  room=EditorRoomScene_Create(extended);assert(room);
+  assert(EditorRoomScene_Render(room,x,y,7*cadence,120,64,NULL));
+  const ActionVoxelGeometry *unknown=ActionVoxel_Retain(EditorRoomScene_Scene(room)->voxel_geometry);
+  assert(unknown);
+  assert(EditorRoomScene_Render(room,x,y,7*cadence,120,64,NULL));
+  const ActionVoxelGeometry *again=EditorRoomScene_Scene(room)->voxel_geometry;
+  assert(again && again!=unknown && ActionVoxel_Revision(again)!=ActionVoxel_Revision(unknown));
+  source=malloc(sizeof(*source));assert(source);*source=extended->scene;
+  assert(ActionRoomScene_BuildCharacters(&extended->scene,7*cadence,-1,source->characters,sizeof(source->characters)));
+  ActionVoxelGeometry *fresh=ActionVoxel_Create();assert(fresh);
+  assert(ActionVoxel_Build(fresh,source,NULL,ActionVoxel_SettingsForRoom(source->group,source->map)));
+  assert(again->width==fresh->width && again->height==fresh->height);
+  assert(!memcmp(again->front,fresh->front,(size_t)fresh->width*fresh->height));
+  ActionVoxel_Release(fresh);free(source);free(extended);EditorRoomScene_Destroy(room);
+  assert(atomic_load(&unknown->references)==1);ActionVoxel_Release(unknown);
+}
+
 int main(int argc, char **argv) {
+  const bool castle_animation=argc>3 && !strcmp(argv[argc-1],"--castle-animation");
+  if(castle_animation)--argc;
   const bool benchmark = argc > 3 && !strcmp(argv[argc - 1], "--benchmark");
   if (benchmark) --argc;
   if (argc != 3 && argc != 4) return 2;
@@ -129,6 +270,7 @@ int main(int argc, char **argv) {
   assert(bytes && ActionSceneSnapshot_Decode((const uint8_t *)bytes, n, &assets)); free(bytes);
   EditorRoomScene *room = EditorRoomScene_Create(&assets); assert(room);
   char *ini = Read(argv[2], &n); assert(ini && EditorRoomScene_Configure(room, ini)); free(ini);
+  if(castle_animation) {CastleAnimation(room,&assets);return 0;}
   const uint32_t catalogue_before = EditorRoomScene_EffectHash(room);
   const clock_t catalogue_start = clock();
   const unsigned catalogue_count = EditorRoomScene_DefaultSourceCount(room);
@@ -324,6 +466,89 @@ int main(int argc, char **argv) {
         for (int col = 64; col < 80; ++col)
           assert(ceiling[row * surface->pitch_pixels + col] == solid);
     }
+  }
+  if (assets.scene.group == 7 && assets.scene.map == 1 &&
+      !(assets.frame.bgsc_override_mask == 3 &&
+        assets.frame.bgsc_override[0] == 0x64 && assets.frame.bgsc_override[1] == 0x74)) {
+    /* The hub's faces and source padding belong to its far skybox band;
+     * only BG1's skull island acquires hardware-priority Voxel geometry.
+     * Include a real source stamp so the edit path cannot silently retag it. */
+    unsigned metatile=assets.scene.bg[1].map[0];
+    const uint8_t *native=assets.scene.bg[1].metatiles+metatile*8;
+    char edits[512];
+    snprintf(edits,sizeof(edits),"[layers:07:01]\n"
+        "bg2-virtual:us+jp+eu = cells:0,0-15,15 band:0\n"
+        "bg2-stamp:us+jp+eu = cell:0,0 metatile:%02X words:%04X,%04X,%04X,%04X bands:0,0,0,0\n",
+        metatile,((((unsigned)native[0]<<8)|native[1])&0xecffu)|0x0100u,
+        ((((unsigned)native[2]<<8)|native[3])&0xecffu)|0x0100u,
+        ((((unsigned)native[4]<<8)|native[5])&0xecffu)|0x0100u,
+        ((((unsigned)native[6]<<8)|native[7])&0xecffu)|0x0100u);
+    assert(EditorRoomScene_Configure(room,edits));
+    EditorRoomScene_Set3DMode(room,kAction3D_Diorama);
+    assert(EditorRoomScene_Render(room,0,0,37,0,0,NULL));
+    const SrSceneSurfaces *surface=EditorRoomScene_Surfaces(room);
+    const size_t bytes=(size_t)surface->height*surface->pitch_pixels*sizeof(uint32_t);
+    uint32_t *saved[3];unsigned far_pixels=0;
+    for(unsigned band=0;band<3;++band) {
+      saved[band]=malloc(bytes);assert(saved[band]);
+      memcpy(saved[band],surface->bands[1][band],bytes);
+    }
+    /* Surface storage is low/high/far; authoring band zero routes to far. */
+    for(size_t i=0;i<bytes/sizeof(uint32_t);++i)far_pixels+=saved[2][i]>>24!=0;
+    assert(far_pixels);
+    EditorRoomScene_Set3DMode(room,kAction3D_Voxel);
+    assert(EditorRoomScene_Scene(room)->voxel_geometry);
+    assert(EditorRoomScene_Render(room,0,0,37,0,0,NULL));
+    for(unsigned band=0;band<3;++band) {
+      assert(!memcmp(saved[band],surface->bands[1][band],bytes));
+      free(saved[band]);
+    }
+    /* Authored rows beyond a resident page keep the row's edge semantics:
+     * a finite island extension is not another periodic island, while the
+     * hub's bottom water family still cycles. Exercise the editor's actual
+     * capture callback after rendering/reconfiguring the room. */
+    const char extension_edits[] = "[layers:07:01]\n"
+        "bg1-stamp:us+jp+eu = cell:6,16 metatile:00 words:0123,0123,0123,0123 bands:1,1,1,1\n"
+        "bg2-stamp:us+jp+eu = cell:6,16 metatile:00 words:0234,0234,0234,0234 bands:1,1,1,1\n"
+        "bg1-pixels:us+jp+eu = cell:6,16 black:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n"
+        "bg2-pixels:us+jp+eu = cell:6,16 black:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n";
+    for (unsigned changed_policy = 0; changed_policy < 2; ++changed_policy) {
+      char configured[2048];
+      snprintf(configured, sizeof(configured), "%s%s", extension_edits,
+          changed_policy ? "bg1-policy = edge:repeat\nbg2-policy = edge:clamp bands:0\n" : "");
+      assert(EditorRoomScene_Configure(room, configured));
+      EditorRoomScene_Set3DMode(room, kAction3D_Diorama);
+      assert(EditorRoomScene_Render(room, 0, 0, 37, 120, 64, NULL));
+      const ActionEnvironmentScene *environment = EditorRoomScene_Environment(room);
+      for (unsigned bg = 0; bg < 2; ++bg) {
+        ActionEnvironmentTileEdit edit;
+        assert(environment->tile_edit(environment->tile_edit_context, bg, 12, 32, &edit));
+        assert(edit.entry == (bg ? 0x234 : 0x123) && edit.black[0] == 255);
+        const bool cycles = bg ? !changed_policy : changed_policy;
+        for (int repeat = -1; repeat <= 1; repeat += 2) {
+          assert(environment->tile_edit(environment->tile_edit_context, bg,
+              12 + repeat * 32, 32, &edit));
+          assert((edit.black[0] == 255) == cycles);
+        }
+      }
+    }
+  }
+  if (assets.scene.group == 7 && assets.scene.map == 1 &&
+      assets.frame.bgsc_override_mask == 3 &&
+      assets.frame.bgsc_override[0] == 0x64 && assets.frame.bgsc_override[1] == 0x74) {
+    /* The completion page owns a separate presentation. A Voxel mode toggle
+     * or a scoped edit reload must not introduce the boss hub's skull deck. */
+    const char edits[]="[layers:07:01:completion]\nbg1-policy = edge:transparent\n";
+    assert(EditorRoomScene_Configure(room,edits));
+    EditorRoomScene_Set3DMode(room,kAction3D_Diorama);
+    assert(EditorRoomScene_Render(room,0,0,37,120,32,NULL));
+    const uint32_t original=EditorRoomScene_Hash(room);
+    EditorRoomScene_Set3DMode(room,kAction3D_Voxel);
+    assert(!EditorRoomScene_Scene(room)->voxel_geometry);
+    assert(EditorRoomScene_Configure(room,edits));
+    assert(!EditorRoomScene_Scene(room)->voxel_geometry);
+    assert(EditorRoomScene_Render(room,0,0,37,120,32,NULL));
+    assert(EditorRoomScene_Hash(room)==original);
   }
   if (getenv("AR_EDITOR_RASTER_STATS"))
     fprintf(stderr, "scanouts=%u\n", EditorRoomScene_RasterCount(room));

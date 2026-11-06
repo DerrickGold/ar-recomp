@@ -1,4 +1,7 @@
 [
+  {"key": "setting.diorama_mode.value.0", "text": ["Off", "Non", "Aus", "オフ"]},
+  {"key": "setting.diorama_mode.value.1", "text": ["Diorama", "Diorama", "Diorama", "ジオラマ"]},
+  {"key": "setting.diorama_mode.value.2", "text": ["Voxel 3D (WIP)", "Voxel 3D (WIP)", "Voxel 3D (WIP)", "ボクセル3D（WIP）"]},
   {"key":"setting.retry_imported_level.label","text":["Retry level","Recommencer le niveau","Level neu starten","ステージをやり直す"]},
   {"key":"setting.retry_imported_level.help","text":["Start this level again from its entrance.","Recommencer ce niveau depuis son entrée.","Dieses Level erneut am Eingang beginnen.","このステージの入口からやり直します。"]},
   {"key":"setting.return_imported_world.label","text":["Return to world","Revenir au monde","Zur Weltkarte zurück","ワールドに戻る"]},
@@ -2866,15 +2869,7 @@
       "現在のカメラモードのピッチ、ヨー、距離を初期値に戻します。"
     ]
   },
-  {
-    "key": "setting.diorama_mode.help",
-    "text": [
-      "Render action-stage layers as tilted 3D planes (action stages only; needs the new renderer).",
-      "Rend les couches des niveaux d’action comme des plans 3D inclinés. Réservé à l’action et nécessite le nouveau moteur de rendu.",
-      "Zeichnet Action-Ebenen als geneigte 3D-Flächen. Nur Action-Level, benötigt den neuen Renderer.",
-      "アクションステージのレイヤーを傾いた3D平面として描画します。アクション専用で、新しいレンダラーが必要です。"
-    ]
-  },
+  {"key": "setting.diorama_mode.help", "text": ["Off uses the flat view. Diorama is the default 3D mode and adds depth between layers. Voxel 3D is a work in progress, adding modeled environments in supported rooms.", "L’option Non affiche la vue plane. Diorama est le mode 3D par défaut et ajoute de la profondeur entre les couches. Voxel 3D est en cours de développement et ajoute des décors modélisés dans les salles compatibles.", "Aus verwendet die flache Ansicht. Diorama ist der standardmäßige 3D-Modus und erzeugt Tiefe zwischen den Ebenen. Voxel 3D befindet sich noch in Entwicklung und ergänzt modellierte Umgebungen in unterstützten Räumen.", "オフは平面表示です。ジオラマはデフォルトの3Dモードで、レイヤー間に奥行きを付けます。ボクセル3Dは開発中の機能で、対応する部屋に立体的な環境を追加します。"]},
   {
     "key": "setting.diorama_camera_mode.help",
     "text": [
@@ -4859,7 +4854,7 @@
   {"key":"setting.sim3d_reactive_strength.label","text":["Camera reactivity","Réactivité de la caméra","Kamerareaktion","カメラの反応"]},
   {"key":"setting.sim3d_height_pop_pct.label","text":["Flying sprite pop","Relief des sprites volants","Hervorhebung fliegender Sprites","飛行スプライトの浮き上がり"]},
   {"key":"setting.sim3d_reset_camera.label","text":["Reset camera","Réinitialiser la caméra","Kamera zurücksetzen","カメラを初期化"]},
-  {"key":"setting.diorama_mode.label","text":["Diorama 3D","Diorama 3D","3D-Diorama","3Dジオラマ"]},
+  {"key": "setting.diorama_mode.label", "text": ["Action 3D", "Action 3D", "Action 3D", "アクション3D"]},
   {"key":"setting.diorama_camera_mode.label","text":["Camera mode","Mode de caméra","Kameramodus","カメラモード"]},
   {"key":"setting.diorama_camera_mode.value.0","text":["Free Cam","Caméra libre","Freie Kamera","自由カメラ"]},
   {"key":"setting.diorama_camera_mode.value.1","text":["Dynamic Cam","Caméra dynamique","Dynamische Kamera","動的カメラ"]},

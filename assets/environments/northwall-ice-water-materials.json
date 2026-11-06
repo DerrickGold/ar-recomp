@@ -1,0 +1,810 @@
+{
+  "profile": "northwall-ice-water",
+  "description": "Reviewed Northwall native BG2 pool surfaces and shaped shoreline ends across four animation phases. Surface art matches the original cool lake and remains under its existing light/reflection effects. Interior water depth and opaque cave shadows are not surface geometry. Runtime selection uses displayed-art, palette and priority signatures; atlas IDs remain provenance only.",
+  "materials": [
+    {
+      "key": "065e761fc7d13b9a",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        0
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          1
+        ],
+        [
+          3,
+          1,
+          1
+        ],
+        [
+          3,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "0a26b8187d194b5b",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        3
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          177
+        ],
+        [
+          2,
+          1,
+          177
+        ],
+        [
+          2,
+          2,
+          177
+        ]
+      ]
+    },
+    {
+      "key": "0f6cab9063fd38d9",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        2
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          176
+        ],
+        [
+          2,
+          1,
+          176
+        ],
+        [
+          2,
+          2,
+          176
+        ]
+      ]
+    },
+    {
+      "key": "14d0a01372cd697a",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        0
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ],
+        [
+          4,
+          0,
+          1
+        ],
+        [
+          4,
+          1,
+          1
+        ],
+        [
+          4,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "182d53e18df188a5",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        2
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          176
+        ],
+        [
+          3,
+          1,
+          176
+        ],
+        [
+          3,
+          2,
+          176
+        ]
+      ]
+    },
+    {
+      "key": "31516e11ac7fa584",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        1
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          177
+        ],
+        [
+          2,
+          1,
+          177
+        ],
+        [
+          2,
+          2,
+          177
+        ]
+      ]
+    },
+    {
+      "key": "35923a7a25244d03",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        3
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ],
+        [
+          4,
+          0,
+          1
+        ],
+        [
+          4,
+          1,
+          1
+        ],
+        [
+          4,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "37999d174a65b553",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        1
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          176
+        ],
+        [
+          3,
+          1,
+          176
+        ],
+        [
+          3,
+          2,
+          176
+        ]
+      ]
+    },
+    {
+      "key": "479ee417901461fe",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        2
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          1
+        ],
+        [
+          3,
+          1,
+          1
+        ],
+        [
+          3,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "4d6f88ced95161b6",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        2
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          177
+        ],
+        [
+          2,
+          1,
+          177
+        ],
+        [
+          2,
+          2,
+          177
+        ]
+      ]
+    },
+    {
+      "key": "4dbe1f92d1173632",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        2
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ],
+        [
+          4,
+          0,
+          1
+        ],
+        [
+          4,
+          1,
+          1
+        ],
+        [
+          4,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "5f05f0c97acaa728",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        0
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          177
+        ],
+        [
+          2,
+          1,
+          177
+        ],
+        [
+          2,
+          2,
+          177
+        ]
+      ]
+    },
+    {
+      "key": "62d289982fbbad8a",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        2
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          177
+        ],
+        [
+          3,
+          1,
+          177
+        ],
+        [
+          3,
+          2,
+          177
+        ]
+      ]
+    },
+    {
+      "key": "8799f8f2451ec4a9",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        3
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          176
+        ],
+        [
+          2,
+          1,
+          176
+        ],
+        [
+          2,
+          2,
+          176
+        ]
+      ]
+    },
+    {
+      "key": "8c671a4232862fcf",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        1
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          176
+        ],
+        [
+          2,
+          1,
+          176
+        ],
+        [
+          2,
+          2,
+          176
+        ]
+      ]
+    },
+    {
+      "key": "8e11a541a22e0bf3",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        3
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          1
+        ],
+        [
+          3,
+          1,
+          1
+        ],
+        [
+          3,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "90520bb9f074f472",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        1
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ],
+        [
+          4,
+          0,
+          1
+        ],
+        [
+          4,
+          1,
+          1
+        ],
+        [
+          4,
+          2,
+          1
+        ]
+      ]
+    },
+    {
+      "key": "a9eb0d3b5c98c114",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        0
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          177
+        ],
+        [
+          3,
+          1,
+          177
+        ],
+        [
+          3,
+          2,
+          177
+        ]
+      ]
+    },
+    {
+      "key": "b16aaa70217b03c3",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        0
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          176
+        ],
+        [
+          2,
+          1,
+          176
+        ],
+        [
+          2,
+          2,
+          176
+        ]
+      ]
+    },
+    {
+      "key": "d9bd97e9ae7b147c",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        1
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          177
+        ],
+        [
+          3,
+          1,
+          177
+        ],
+        [
+          3,
+          2,
+          177
+        ]
+      ]
+    },
+    {
+      "key": "ddc4330b6d553d53",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        3
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          177
+        ],
+        [
+          3,
+          1,
+          177
+        ],
+        [
+          3,
+          2,
+          177
+        ]
+      ]
+    },
+    {
+      "key": "e0eb2fd0469a407d",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        3
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          176
+        ],
+        [
+          3,
+          1,
+          176
+        ],
+        [
+          3,
+          2,
+          176
+        ]
+      ]
+    },
+    {
+      "key": "fcb474e564b74ce3",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        0
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          176
+        ],
+        [
+          3,
+          1,
+          176
+        ],
+        [
+          3,
+          2,
+          176
+        ]
+      ]
+    },
+    {
+      "key": "fef56a24ed5aef92",
+      "kinds": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "flags": 0,
+      "role": "native_pool_surface",
+      "animation_phases": [
+        1
+      ],
+      "origins": [
+        [
+          3,
+          0,
+          1
+        ],
+        [
+          3,
+          1,
+          1
+        ],
+        [
+          3,
+          2,
+          1
+        ]
+      ]
+    }
+  ]
+}

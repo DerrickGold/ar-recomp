@@ -30,6 +30,12 @@ typedef struct ArSdlRenderBackend {
   bool present_trace_enabled;
   ArSdlPresentTrace present_trace;
   struct ArSdlFragmentShaderEntry *fragment_shaders;
+  /* One scoped external GPU batch. Its owner snapshots draw state and drains
+   * before ordinary draws, resource mutation, target changes or presentation.
+   * A failed drain must abandon its queued work so cleanup can still proceed. */
+  bool (*external_flush)(void *userdata);
+  void *external_userdata;
+  bool external_flushing;
 } ArSdlRenderBackend;
 
 /* Borrow a device/renderer-lifetime shader. SDL's pipeline cache keys custom
@@ -42,6 +48,10 @@ SDL_GPUShader *ArSdlRenderBackend_FragmentShader(ArRenderDevice *device,
 bool ArSdlRenderBackend_WindowOutputSize(const ArRenderDevice *device,
     int *width, int *height);
 ArRenderTexture ArSdlRenderBackend_BorrowTexture(SDL_Texture *texture);
+/* Register or remove an owned scope; NULL flush removes this userdata's scope.
+ * Removal drains first, and detaches even if that drain fails. The callback
+ * must not submit through the portable renderer or change the registration. */
+bool ArSdlRenderBackend_SetExternalFlush(ArRenderDevice *, bool (*flush)(void *), void *userdata);
 /* Focused SDL adapter tests may bind an externally owned renderer. Production
  * boot uses CreateForWindow so native lifetime remains backend-owned. */
 bool ArSdlRenderBackend_Bind(ArRenderDevice *device,

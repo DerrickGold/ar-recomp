@@ -1,5 +1,44 @@
 # Action-mode layer editor
 
+### Native sprites and moving objects
+
+In the shared renderer, **Load native objects…** imports an `.arobj` frame for
+the selected room and region. It adds the native sprite artwork and priority,
+modeled props, and actor lighting facts to the existing scenery compositor.
+Voxel mode replaces only the captured pixels owned by successfully modeled
+props; ordinary Diorama retains their native sprites. Comparison-player controls
+are disabled while a native capture is loaded. **Clear native objects** restores
+the usual scenery preview.
+
+Each file is a finite captured pose, not an actor simulation. Import restores
+its camera and native frame. **Captured camera** returns to that position.
+Orbit to inspect joins and priority; panning beyond
+the captured object coverage is rejected instead of silently dropping sprites.
+Changing rooms clears the capture. Captures are diagnostic inputs and are not
+included in a saved scenery/effects project.
+
+For acquisition, launch the game with `AR_EDITOR_OBJECT_CAPTURE_DIR` pointing
+to an existing fresh directory. Optional `AR_EDITOR_OBJECT_CAPTURE_FROM`,
+`AR_EDITOR_OBJECT_CAPTURE_TO`, and `AR_EDITOR_OBJECT_CAPTURE_EVERY` select
+native game frames. This opt-in export writes raw sprite winners and ownership,
+the matching prop atlas, actor facts and camera metadata before presentation
+hands modeled props to the Voxel renderer. Without the environment variable,
+the exporter is inactive.
+
+The native room benchmark accepts `AR_BENCH_OBJECT_FRAME=frame.arobj` for a
+frozen pose, or `AR_BENCH_OBJECT_SEQUENCE=paths.txt` for one packet per output
+frame. Sequence paths are resolved beside the manifest; the packet's native
+camera and clock drive each frame. Use `player-x=-1`; native captures and
+synthetic receiver routes are mutually exclusive. Recorded object sequences
+can show motion during editor sweeps, but diagnostic player/camera positioning
+does not establish gameplay completion or hardware performance acceptance.
+
+For video export, `AR_BENCH_CAPTURE_RAW=path` writes tightly packed RGBA8 frames
+without headers; a FIFO can feed an encoder directly. `-` selects stdout.
+Frame dimensions come from `AR_BENCH_WIDTH` and `AR_BENCH_HEIGHT`. Raw output
+and PNG capture/profiling are mutually exclusive. This uses the same renderer
+readback as PNG capture and avoids compressing a temporary image for every frame.
+
 ### Load and save a project
 
 Use **Save project** above the map (or Ctrl/Cmd-S) to download one `action-project.zip` containing

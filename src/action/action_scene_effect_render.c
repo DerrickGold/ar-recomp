@@ -2131,6 +2131,23 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
         (!lighting_enabled && !particles_enabled && !lake_detail) ||
         effect->projection_plane > kActionEffectProjectionPlane_BetweenBackgrounds)
       continue;
+    /* Generated terrain has distinct front and walking planes. Keep native
+     * source records unchanged; the same resolved copy feeds CPU and deferred
+     * GPU primitives, so ceiling drops and contact dust cannot lag behind on
+     * the recessed cave wall. Reflected wall illumination keeps its receiver. */
+    ActionEffectInstance contact;
+    if(projection && projection->diorama_projection && projection->diorama_projection->voxel_scenery &&
+        ((effect->projection_plane==kActionEffectProjectionPlane_Bg1 &&
+          (effect->kind==kActionEffect_CaveDrips || effect->kind==kActionEffect_LandingDust ||
+           effect->kind==kActionEffect_TempleGroundMist)) ||
+         (effect->projection_plane==kActionEffectProjectionPlane_Bg2High &&
+          (effect->kind==kActionEffect_CaveWater || effect->kind==kActionEffect_CaveMist)))) {
+      contact=*effect;
+      contact.projection_plane=effect->kind==kActionEffect_CaveDrips
+          ? kActionEffectProjectionPlane_Bg1High : kActionEffectProjectionPlane_Obj;
+      if(contact.projection_plane==kActionEffectProjectionPlane_Obj)contact.obj_priority=2;
+      effect=&contact;
+    }
     if ((effect->kind == kActionEffect_BloodpoolBossLightning ||
          effect->kind == kActionEffect_CentaurLightning) &&
         effect->phase == kActionEffectPhase_BossLightningStrike &&

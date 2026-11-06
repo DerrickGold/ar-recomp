@@ -194,6 +194,7 @@ typedef struct DioramaSkyboxProjection {
  * guess a parallel depth. */
 typedef struct DioramaProjection {
   bool valid;
+  bool voxel_scenery; /* Physical terrain/actor depths are published below. */
   float auto_distance; /* Resolved fit before manual zoom; controls may observe it. */
   float matrix[16];
   float aspect_x, height_scale;
@@ -356,6 +357,9 @@ typedef struct DioramaCapture {
   const ArRenderTexture *textures;
   const uint8_t *const *pixels;
   const ArRenderPointF *plane_capture_offsets;
+  /* Exact native map endpoints need continuous geometric placement. Only
+   * these planes consume plane_capture_offsets in their own mesh transform. */
+  uint32_t voxel_map_plane_mask;
   const bool *bg_transparent_fill_configured;
   const uint32_t *bg_transparent_fill_argb;
   const DioramaCoverageMask *coverage_masks;
@@ -393,6 +397,7 @@ struct SceneryShadingField;
 
 struct ActionTrunkAssets;
 struct ActionSceneEffectFrame;
+struct DioramaDepthSink;
 typedef struct DioramaScene {
   const DioramaRenderOptions *render; /* Required immutable policy for this draw. */
   uint8_t map_group, map_number, layer_section;
@@ -441,6 +446,16 @@ typedef struct DioramaScene {
    * compositor restores its viewport. The caller suppresses replaced planes. */
   PresentationOutcome (*backdrop)(void *userdata, ArRenderRectI viewport);
   void *backdrop_userdata;
+  /* Optional immutable castle geometry, owned by the room/capture producer.
+   * Borrowed for a synchronous draw; retained frame owners hold a reference.
+   * NULL uses ordinary layer policy. */
+  const struct ActionVoxelGeometry *voxel_geometry;
+  const struct ActionVoxelSpriteFrame *voxel_sprites;
+  ArRenderTexture voxel_sprite_atlas;
+  /* Optional shared world-depth backend, borrowed for Composite. NULL keeps
+   * the current renderer. Backends must retain all material/priority behavior
+   * before enabling this in the game; it is currently an integration seam. */
+  const struct DioramaDepthSink *depth_sink;
 } DioramaScene;
 
 /* Resolve the same painter order/shapes used by Composite. The output holds

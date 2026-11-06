@@ -5,6 +5,7 @@
 #include <stdlib.h>
 
 #include "dev/host_dev_tools.h"
+#include "dev/action_object_snapshot_capture.h"
 #include "host/host_ppu_output.h"
 #include "host/host_display.h"
 #include "host/host_input.h"
@@ -33,6 +34,8 @@
 #include "snesrecomp/game/runtime.h" /* g_ram */
 #include "present/frame_timing.h"
 #include "snesrecomp/runner.h"
+
+#include "frame_slot_voxel_sprites.inc"
 
 typedef struct FramePpuView {
   const SnesRunnerApi *api;
@@ -242,6 +245,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   dst->turbo_active = HostInput_IsTurbo();
   dst->interp_setting_enabled = g_settings.gpu_interp_enabled;
   dst->diorama_hud_flat = g_settings.diorama_hud_flat;
+  dst->diorama_voxel_mode = g_settings.diorama_mode == kAction3D_Voxel;
   /* Manual controls are main-thread owned and can change during production.
    * The host fills them before presentation; only game motion travels through
    * the queue. Never sample presentation state here. */
@@ -293,6 +297,9 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
       dst->action_bg_extent_guides = ActionBgTuner_GuidesEnabled();
     }
     dst->inidisp = ppu_frame->display_control;
+    dst->diorama_voxel_fixed_color = ppu_view.live_state.fixed_color;
+    dst->diorama_voxel_cgwsel = ppu_view.live_state.color_math_control;
+    dst->diorama_voxel_cgadsub = ppu_view.live_state.color_math_designation;
     dst->bg_mode = ppu_frame->bg_mode;
     const SrPpuBackgroundState *bg3 = &ppu_view.live_state.backgrounds[2];
     dst->bg3_state_valid = bg3->tilemap_width_tiles != 0u &&
@@ -440,6 +447,11 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
 
   HdReplacements_CaptureFrame(dst);
 
+  if (have_ppu_view)
+    CaptureVoxelSprites(dst, ppu_view.api, ppu_view.runner,
+                                     ppu_view.state.lifetime_generation);
+
   dst->scene_inspector_enabled = g_settings.scene_inspector;
   dst->inspector_selection = *HostDevTools_InspectorPresentation();
+  if (have_ppu_view) ActionObjectSnapshotCapture_Capture(dst);
 }

@@ -2,6 +2,15 @@
 #define AR_PRESENTATION_OPTIONS_H
 /* Stable presentation values shared by settings, captures and offline replay. */
 
+/* Keep the former action-3D boolean's 0/1 values: existing enabled settings
+ * select the original layered presentation. Mode 2 opts into modeled rooms. */
+typedef enum {
+  kAction3D_Off = 0,
+  kAction3D_Diorama,
+  kAction3D_Voxel,
+  kAction3D_Count,
+} Action3DMode;
+
 typedef enum {
   kPixelAspect_Square = 0,
   kPixelAspect_Crt43,

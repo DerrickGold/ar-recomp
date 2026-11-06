@@ -522,9 +522,10 @@ static void HandleKeyDown(const SDL_Event *event, bool imported) {
       if (mode && !Settings_IsAvailable(mode)) {
         fprintf(stderr, "[diorama] requires the new renderer\n");
       } else if (mode) {
-        Settings_SetLong(mode, !g_settings.diorama_mode);
-        fprintf(stderr, "[diorama] %s\n",
-                g_settings.diorama_mode ? "ON" : "OFF");
+        Settings_SetLong(mode, (g_settings.diorama_mode + 1) % kAction3D_Count);
+        char value[32];
+        Settings_FormatValue(mode, value, sizeof(value));
+        fprintf(stderr, "[action 3d] %s\n", value);
       }
     }
   } else {

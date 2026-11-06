@@ -386,10 +386,11 @@ const DioramaTileStamp *DioramaLayerOrder_StampAt(
 
 const DioramaTileStamp *DioramaLayerOrder_ExtendedRowStampAt(
     const DioramaStampLayerOverride *layer, int x, int y,
-    int native_width, int native_height) {
+    int native_width, int native_height, ActionBgEdgeMode row_edge) {
   const DioramaTileStamp *stamp = DioramaLayerOrder_StampAt(layer, x, y);
   if (stamp || !layer || !layer->count || native_width <= 0 || native_height <= 0 ||
-      (y >= 0 && y < native_height)) return stamp;
+      (y >= 0 && y < native_height) ||
+      (row_edge != kActionBgEdge_Repeat && row_edge != kActionBgEdge_RawWrap)) return stamp;
   int wrapped_x = x % native_width;
   if (wrapped_x < 0) wrapped_x += native_width;
   return wrapped_x == x ? NULL : DioramaLayerOrder_StampAt(layer, wrapped_x, y);

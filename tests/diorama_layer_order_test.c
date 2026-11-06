@@ -1946,16 +1946,25 @@ static void TestCyclicPageExtendedRows(void) {
     {.x = 19, .y = 16, .blank = true}, {.x = -1, .y = 16},
   };
   DioramaStampLayerOverride layer = {.cells = cells, .count = 5};
-  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 3, 0, 16, 16) == &cells[0]);
-  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 19, 0, 16, 16));
-  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, -1, 16, 16) == &cells[1]);
-  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, 16, 16, 16) == &cells[2]);
-  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, -13, 16, 16, 16) == &cells[2]);
-  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 19, 16, 16, 16) == &cells[3]);
-  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, -1, 16, 16, 16) == &cells[4]);
-  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, 16, 0, 0));
-  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, 32, 16, 16));
-  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 36, 16, 16, 16));
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 3, 0, 16, 16, kActionBgEdge_Repeat) == &cells[0]);
+  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 19, 0, 16, 16, kActionBgEdge_Repeat));
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, -1, 16, 16, kActionBgEdge_Repeat) == &cells[1]);
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, 16, 16, 16, kActionBgEdge_Repeat) == &cells[2]);
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, -13, 16, 16, 16, kActionBgEdge_Repeat) == &cells[2]);
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 19, 16, 16, 16, kActionBgEdge_Repeat) == &cells[3]);
+  CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, -1, 16, 16, 16, kActionBgEdge_Repeat) == &cells[4]);
+  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, 16, 0, 0, kActionBgEdge_Repeat));
+  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, 32, 16, 16, kActionBgEdge_Repeat));
+  CHECK(!DioramaLayerOrder_ExtendedRowStampAt(&layer, 36, 16, 16, 16, kActionBgEdge_Repeat));
+  for (ActionBgEdgeMode edge = kActionBgEdge_Transparent; edge <= kActionBgEdge_RawWrap; ++edge) {
+    const bool cycles = edge == kActionBgEdge_Repeat || edge == kActionBgEdge_RawWrap;
+    CHECK((DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, -1, 16, 16, edge) != NULL) == cycles);
+    CHECK((DioramaLayerOrder_ExtendedRowStampAt(&layer, -13, 16, 16, 16, edge) != NULL) == cycles);
+    CHECK((DioramaLayerOrder_ExtendedRowStampAt(&layer, 35, 16, 16, 16, edge) != NULL) == cycles);
+    /* An exact negative cell and a far authored blank are never suppressed. */
+    CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, -1, 16, 16, 16, edge) == &cells[4]);
+    CHECK(DioramaLayerOrder_ExtendedRowStampAt(&layer, 19, 16, 16, 16, edge) == &cells[3]);
+  }
 }
 
 static void TestBackgroundPolicyPersistence(void) {
@@ -2113,9 +2122,15 @@ static void TestTrunkSettings(void) {
   copy.map_number=5;CHECK(!DioramaLayerOrder_ParseLine(&copy,line,NULL));
   CHECK(!DioramaTrunk_Resolve(6,5,&copy).enabled);
   CHECK(DioramaTrunk_Resolve(6,7,NULL).enabled);
+  for(int mode=kAction3D_Off;mode<kAction3D_Count;++mode){
+    CHECK(DioramaTrunk_ResolveForMode(mode,6,6,&room).enabled==(mode==kAction3D_Voxel));
+    CHECK(DioramaTrunk_ResolveForMode(mode,6,7,NULL).enabled==(mode==kAction3D_Voxel));
+    CHECK(!DioramaTrunk_ResolveForMode(mode,2,5,NULL).enabled);
+  }
   CHECK(DioramaLayerOrder_ParseLine(&room,
       "trunk = enabled:0 depth:0.38 recess:0.24 wrap:1 gust:1 frost:1 bark:1",NULL));
   CHECK(!DioramaTrunk_Resolve(6,6,&room).enabled);
+  CHECK(!DioramaTrunk_ResolveForMode(kAction3D_Voxel,6,6,&room).enabled);
 }
 
 int main(void) {

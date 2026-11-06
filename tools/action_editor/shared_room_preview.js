@@ -1,6 +1,6 @@
 /* UI/transport only. Whole-room sampling, animation, edits and compositing live
- * in C. Asset packets are built from the embedded level catalogue automatically;
- * no user-generated capture is part of this workflow. */
+ * in C. Scenery comes from the embedded level catalogue; optional finite native
+ * object captures supply exact sprite winners, priority and modeled props. */
 function sharedPreviewOutputSize(choice,customWidth,customHeight,areaWidth,areaHeight) {
   let aspect;
   if(choice==='auto'||choice==='stretch') {
@@ -30,6 +30,17 @@ const SharedRoomPreview = (() => {
   const canvas=document.querySelector('#sharedGl'), label=document.querySelector('#sharedRoomStatus');
   let backend=null, api=null, key='', configDirty=true, config='', lost=false, skyboxKey=0, effectsConfig=null, collision=null, eventConfig=null;
   let placingPlayer=false;
+  let nativeObjects=null;
+  function objectControls(info=null) {
+    nativeObjects=info;
+    $('#sharedResetObjects').disabled=!info;
+    $('#sharedClearObjects').disabled=!info;
+    $('#sharedPlacePlayer').disabled=!!info;
+    $('#sharedPlayerSettings').disabled=!!info;
+    $('#sharedObjectStatus').textContent=info
+      ? `Native frame ${info[3]} · ${info[11]} actors · ${info[10]} modeled pieces · finite capture`
+      : '';
+  }
   const measures=new Map();
   let configVersion=0,configuredRevision=-1;
   const setting=id=>Number(document.querySelector('#shared'+id).value);
@@ -101,6 +112,7 @@ const SharedRoomPreview = (() => {
       if(revision!==configuredRevision){configDirty=true;configuredRevision=revision;}
       const next=sceneKey(room);
       if(key!==next) {
+        objectControls();
         send(SharedActionPreview.encode(DATA,BLOBS,room),api.RoomPreview_Load);
         key=next;collision=null;eventConfig=null;config='';configDirty=true;skyboxKey=0;effectsConfig=null;
       }
@@ -134,7 +146,7 @@ const SharedRoomPreview = (() => {
         if(!api.RoomPreview_SetEvent(...eventValues))throw Error('Invalid event preview parameters.');
         eventConfig=nextEvent;
       }
-      const receiverMask=($('#previewReceivers').checked?1:0)|($('#previewEnemyEnabled').checked?2:0);
+      const receiverMask=nativeObjects?0:(($('#previewReceivers').checked?1:0)|($('#previewEnemyEnabled').checked?2:0));
       if(!api.RoomPreview_SetReceivers(receiverMask,...['previewPlayerX','previewPlayerY','previewEnemyX','previewEnemyY'].map(id=>Number($('#'+id).value)))||
           !api.RoomPreview_ReceiverStyle(Number($('#previewFacing').value),$('#previewRim').checked?1:0))throw Error('Invalid receiver preview settings.');
       const args=viewArguments(),w=args[5],h=args[6];
@@ -160,6 +172,7 @@ const SharedRoomPreview = (() => {
       }
       skyboxKey=source;
       const error=backend.gl.getError();
+      if(!ok&&nativeObjects&&!error)throw Error('Native object view exceeds its captured area or does not match this room section. Choose Captured camera, reduce the orbit, or clear native objects.');
       if(!ok||error)throw Error(`Room rendering failed (${error}). ${backend.warnings.join(' ')}`.trim());
       // Use the capture's stopped camera for UI, picking and subsequent drags.
       // Keeping the requested position would accumulate hidden overscroll.
@@ -169,7 +182,8 @@ const SharedRoomPreview = (() => {
         `${api.RoomPreview_EffectCount()} sources · ${api.RoomPreview_EffectVertices()} effect vertices · ${backend.stats.draws} draws · ${uploads} uploads · ${backend.stats.creates} allocations · `+
         `${(performance.now()-start).toFixed(1)} ms CPU`;
       $('#hud').textContent=`Camera ${nativeCamera.x}, ${nativeCamera.y} · frame ${nativeFrame}. `+
-        (placingPlayer?'Click to place the player’s feet. Esc cancels.':
+        (nativeObjects?'Captured native object poses. Pan within the captured area; orbit to inspect priority and joins.':
+          placingPlayer?'Click to place the player’s feet. Esc cancels.':
           'Drag to pan; arrows move. Shift-click/drag places the player; Alt+Shift places the comparison sprite.');
     } catch(error) { label.textContent=error.message; }
   }
@@ -182,6 +196,35 @@ const SharedRoomPreview = (() => {
       'previewEnemyX','previewEnemyY','previewFacing','previewRim'])$('#'+id).addEventListener('input',()=>draw());
   $('#previewRim').checked=!!window.__ACTION_VIEW__?.rimLight;
   $('#sharedPlayerSettings').onclick=()=>EditorLayout.openSettings('receivers');
+  $('#sharedLoadObjects').onclick=()=>$('#sharedObjectFile').click();
+  $('#sharedObjectFile').onchange=async event=>{
+    const file=event.target.files[0];event.target.value='';if(!file)return;
+    try {
+      ensureRoom();
+      if(file.size>api.DioramaPreview_Capacity())throw Error('Native object capture is too large.');
+      const roomAtLoad=sceneKey(room),bytes=new Uint8Array(await file.arrayBuffer());
+      if(sceneKey(room)!==roomAtLoad)throw Error('The room changed while loading. Select the file again.');
+      api.RoomPreview_SetReceivers(0,0,0,0,0);
+      send(bytes,api.RoomPreview_LoadObjects);
+      if(api.RoomPreview_ObjectInfo()!==14)throw Error('Native object capture metadata is unavailable.');
+      const info=Array.from(new Int32Array(api.memory.buffer,api.DioramaPreview_Input(),14));
+      objectControls(info);placementMode(false);
+      $('#previewReceivers').checked=false;$('#previewEnemyEnabled').checked=false;
+      $('#sharedExtra').value=String(info[12]);
+      const vertical=Math.max(0,Math.min(64,Math.floor((info[9]-224)/2)));
+      $('#sharedVertical').value=String(vertical>=64?64:vertical>=32?32:0);
+      setNativeCamera('x',info[4]);setNativeCamera('y',info[5]);setNativeFrame(info[3]);
+      setMode('shared');draw();
+    } catch(error) {label.textContent=`Cannot load native objects: ${error.message} Check the selected room and region.`;}
+  };
+  $('#sharedClearObjects').onclick=()=>{
+    api?.RoomPreview_ClearObjects();objectControls();draw();
+  };
+  $('#sharedResetObjects').onclick=()=>{
+    if(!nativeObjects)return;
+    setNativeCamera('x',nativeObjects[4]);setNativeCamera('y',nativeObjects[5]);
+    setNativeFrame(nativeObjects[3]);draw();
+  };
   function placementMode(enabled) {
     placingPlayer=enabled;canvas.style.cursor=enabled?'crosshair':'';
     $('#sharedPlacePlayer').setAttribute('aria-pressed',String(enabled));
@@ -190,6 +233,7 @@ const SharedRoomPreview = (() => {
   $('#sharedPlacePlayer').onclick=()=>{placementMode(!placingPlayer);canvas.focus();draw();};
   function placePlayerAt(x,y,center=false,enemy=false) {
     try {
+      if(nativeObjects)throw Error('Clear the native object capture before placing a comparison sprite.');
       ensureRoom();
       const prefix=enemy?'previewEnemy':'previewPlayer';
       $('#'+prefix+'X').value=Math.max(-2048,Math.min(16384,Math.round(x)));
@@ -262,6 +306,7 @@ const SharedRoomPreview = (() => {
     // Context loss invalidates every old GL object; recreate the backend and
     // WASM handles together, then replay the current documents and camera.
     api=null;backend=null;key='';config='';effectsConfig=null;configDirty=true;skyboxKey=0;lost=false;
+    objectControls();
     initialize();
   });
   async function initialize() {

@@ -7,10 +7,14 @@
 #include "room_scene.h"
 #include "room_preview_native.h"
 #include "receiver_preview.h"
+#include "object_preview.h"
 #include "action/action_effect_source.h"
 #include "action/action_effect_mask_texture.h"
 #include "diorama/diorama_snapshot.h"
 #include "diorama/diorama_astral_rift.h"
+#ifndef __EMSCRIPTEN__
+#include "diorama/diorama_depth_gpu.h"
+#endif
 #include "diorama/diorama_rom_backdrop.h"
 #include "action/action_decoration_pass.h"
 #include "action/action_environment_exposure.h"
@@ -49,6 +53,7 @@ unsigned RoomPreview_CloudOpenings(uint32_t seed,unsigned count) {
 }
 
 static EditorRoomScene *s_room;
+static EditorObjectPreview s_objects;
 static ArRenderTexture s_textures[kDioramaPlane_Count];
 static const uint8_t *s_pixels[kDioramaPlane_Count];
 static uint32_t s_storage[7][640 * 352];
@@ -66,6 +71,11 @@ static bool s_dynamic_camera = true;
 
 /* 0 native 4:3, 1 fixed wide ratio, 2 Auto/custom monitor, 3 Stretch.
  * Capture budgets are independent of the display crop, just as in the game. */
+int RoomPreview_Set3DMode(int mode) {
+  if (!s_room || mode < kAction3D_Off || mode > kAction3D_Voxel) return 0;
+  EditorRoomScene_Set3DMode(s_room, (Action3DMode)mode);
+  return 1;
+}
 int RoomPreview_SetView(float distance, float yaw, float pitch, int aspect_mode, int dynamic_camera) {
   if (!isfinite(distance) || distance < 0 || distance > 20 ||
       !isfinite(yaw) || fabsf(yaw) > 0.8f || !isfinite(pitch) || fabsf(pitch) > 0.8f ||
@@ -153,6 +163,7 @@ int RoomPreview_ReceiverStyle(unsigned flipped,unsigned rim) {
   s_receivers.flipped=flipped!=0;s_receiver_rim=rim!=0;return 1;
 }
 int RoomPreview_SetReceivers(int mask,int player_x,int player_y,int enemy_x,int enemy_y) {
+  if(mask && s_objects.snapshot.storage)return 0;
   if(mask<0||mask>3||player_x<-2048||player_x>16384||player_y<-2048||player_y>16384||
       enemy_x<-2048||enemy_x>16384||enemy_y<-2048||enemy_y>16384)return 0;
   if(s_receivers.mask!=(unsigned)mask||s_receivers.x[0]!=player_x||s_receivers.feet_y[0]!=player_y||
@@ -173,6 +184,7 @@ int RoomPreview_PickReceiver(float screen_x,float screen_y) {
 unsigned RoomPreview_EventCount(void){return ActionEffectPreview_Count();}
 unsigned RoomPreview_EventKind(unsigned index){return ActionEffectPreview_Kind(index);}
 int RoomPreview_PreviewBinding(unsigned enabled,unsigned source,int x,int y,unsigned start) {
+  if(enabled && s_objects.snapshot.storage)return 0;
   if(enabled>1||!EditorRoomScene_PreviewBinding(s_room,enabled!=0,source,x,y,start))return 0;
   s_cached=false;return 1;
 }
@@ -346,8 +358,52 @@ unsigned RoomPreview_Width(void) { return s_room ? EditorRoomScene_Width(s_room)
 unsigned RoomPreview_Height(void) { return s_room ? EditorRoomScene_Height(s_room) : 0; }
 int RoomPreview_CameraX(void) { return s_cached ? s_x : 0; }
 unsigned RoomPreview_Uploads(void) { return s_uploads; }
+void RoomPreview_ClearObjects(void) {
+  if(!s_objects.snapshot.storage)return;
+  EditorObjectPreview_Reset(&s_objects,DioramaPreview_Device());
+  for(unsigned band=0;band<4;++band) {
+    const unsigned planes[]={DioramaPlaneForObjectPriority(band),kDioramaPlane_ObjAttributes0+band};
+    for(unsigned i=0;i<2;++i) {
+      ArRenderDevice_DestroyTexture(DioramaPreview_Device(),s_textures[planes[i]]);
+      s_textures[planes[i]]=ArRenderTexture_Invalid();s_pixels[planes[i]]=NULL;
+    }
+  }
+  if(s_room)EditorRoomScene_SetNativeActors(s_room,NULL,0,false);
+  s_cached=false;
+}
+int RoomPreview_LoadObjects(unsigned size) {
+  if(!s_room || size>DioramaPreview_Capacity())return 0;
+  const DioramaScene *scene=EditorRoomScene_Scene(s_room);
+  DioramaObjectSnapshot next={0};
+  if(!DioramaObjectSnapshot_Decode(DioramaPreview_Input(),size,&next))return 0;
+  const DioramaObjectSnapshotView *v=&next.view;
+  unsigned section=0;
+  const bool valid=v->map_group==scene->map_group && v->map_number==scene->map_number &&
+      v->terrain_profile==EditorRoomScene_TerrainProfile(s_room) &&
+      EditorRoomScene_NativeSection(s_room,v->camera_x,v->camera_y,v->game_frame,&section) &&
+      v->layer_section==section && EditorObjectPreview_Adopt(&s_objects,&next);
+  DioramaObjectSnapshot_Release(&next);
+  if(!valid)return 0;
+  s_receivers.mask=0;
+  EditorRoomScene_PreviewBinding(s_room,false,0,0,0,0);
+  EditorRoomScene_SetNativeActors(s_room,s_objects.snapshot.view.actors,
+      s_objects.snapshot.view.actor_count,true);
+  s_cached=false;return 1;
+}
+unsigned RoomPreview_ObjectInfo(void) {
+  if(!s_objects.snapshot.storage)return 0;
+  const DioramaObjectSnapshotView *v=&s_objects.snapshot.view;
+  const int32_t info[]={v->map_group,v->map_number,v->terrain_profile,(int32_t)v->game_frame,
+    v->camera_x,v->camera_y,v->world_x,v->world_y,v->width,v->height,
+    v->voxel_sprites.count,v->actor_count,v->extra_x,v->extra_top};
+  memcpy(DioramaPreview_Input(),info,sizeof(info));return sizeof(info)/sizeof(*info);
+}
 void RoomPreview_Reset(void) {
   ArRenderDevice *device = DioramaPreview_Device();
+  EditorObjectPreview_Reset(&s_objects,device);
+#ifndef __EMSCRIPTEN__
+  DioramaDepthGpu_Reset(device);
+#endif
   ArRenderDevice_DestroyTexture(device,s_effect_masks);s_effect_masks=ArRenderTexture_Invalid();
   Diorama_ResetCompositorResources(device);
   for (unsigned i = 0; i < kDioramaPlane_Count; ++i) {
@@ -809,7 +865,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   if(s_receivers.mask && s_effects_enabled && !ActionEffectReceivers_Prepare(effects.frame,environment->group,environment->room,
       environment->camera_x[0],environment->camera_y[0],environment->camera_x[1],environment->camera_y[1],false,&s_receiver))return 0;
   const int receiver_plane=DioramaPlaneForObjectPriority(2);
-  if(!EditorReceiverPreview_Capture(DioramaPreview_Device(),&s_receivers,
+  if(!s_objects.snapshot.storage && !EditorReceiverPreview_Capture(DioramaPreview_Device(),&s_receivers,
       s_effects_enabled?&s_receiver:NULL,environment->camera_x[0],environment->camera_y[0],extra,
       &capture,&s_textures[receiver_plane],&s_pixels[receiver_plane],
       &s_textures[kDioramaPlane_ObjAttributes2],&s_pixels[kDioramaPlane_ObjAttributes2],&s_uploads))return 0;
@@ -831,7 +887,10 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       kActionEffectProjectionPlane_Bg1,
       environment->camera_x[0]-extra-capture.obj_apron,environment->camera_y[0]-capture.authentic_y0,
       SR_PPU_SURFACE_MAX_WIDTH,SR_PPU_SURFACE_MAX_HEIGHT);
-  scene.effect_obj_priority_mask=EditorReceiverPreview_Ready()?1u<<2:0;
+  scene.effect_obj_priority_mask=!s_objects.snapshot.storage && EditorReceiverPreview_Ready()?1u<<2:0;
+  if(s_objects.snapshot.storage && !EditorObjectPreview_Capture(&s_objects,DioramaPreview_Device(),
+      &capture,&view,&scene,EditorRoomScene_3DMode(s_room)==kAction3D_Voxel,
+      s_textures,s_pixels,&s_uploads))return 0;
   if (s_effects_enabled) {
     scene.actor_light=DrawActorLight;
     scene.sky_weather=ActionBackground_HasSourceEffects(effects.frame,true,true)?DrawSkyWeather:NULL;
@@ -848,6 +907,14 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   }
   DioramaProjection projection;
   DioramaAstralRift_Attach(s_effects_enabled, DioramaPreview_Device(), &scene);
+#ifndef __EMSCRIPTEN__
+  /* Match production's ActionVoxel contract. The specialized curved-tree
+   * enclosure keeps its established multi-plane visibility policy. */
+  if (EditorRoomScene_3DMode(s_room)==kAction3D_Voxel && scene.voxel_geometry) {
+    scene.depth_sink=DioramaDepthGpu_Begin(DioramaPreview_Device());
+    if (!scene.depth_sink) return 0;
+  }
+#endif
   if (!PresentationOutcome_IsUsable(Diorama_Composite(
       DioramaPreview_Device(), &capture, &view, &scene, &projection)) || !effects.valid) return 0;
   s_receiver_projection=projection;

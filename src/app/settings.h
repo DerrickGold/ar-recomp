@@ -596,7 +596,7 @@ typedef struct Settings {
    * type); the live DioramaCamera is seeded from these and writes back on
    * every adjustment, so the menu and the mouse controls share one source of
    * truth. Engages only in action stages, and only on the new PPU path. */
-  bool diorama_mode;
+  int diorama_mode;             /* Action3DMode: Off, Diorama, Voxel 3D */
   int  diorama_tilt_x_mrad;      /* camera pitch, milliradians */
   int  diorama_tilt_y_mrad;      /* camera yaw, milliradians */
   int  diorama_distance_x100;    /* camera distance, hundredths */

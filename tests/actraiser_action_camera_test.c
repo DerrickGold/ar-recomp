@@ -30,6 +30,9 @@ RecompReturn bank_02_BA0B_M0X0(CpuState *cpu) { (void)cpu; s_dy = (int16_t)Read(
 RecompReturn bank_00_A1B0_M0X0(CpuState *cpu) { (void)cpu; ++s_calls; return RECOMP_RETURN_NORMAL; }
 bool ActRaiserActionBg_HleEnabled(void) { return s_hle; }
 bool Diorama_ModeIsOn(void) { return g_settings.diorama_mode; }
+const struct ActionVoxelGeometry *ActRaiserActionBg_VoxelGeometry(unsigned group,unsigned room) {
+  (void)group;(void)room;return NULL;
+}
 const ActionTrunkAssets *ActRaiserActionBg_TrunkAssets(unsigned group,unsigned room,const DioramaRoomOverride *edits) {
   static ActionTrunkAssets assets;
   if(!DioramaTrunk_Resolve(group,room,edits).enabled)return NULL;
@@ -199,7 +202,7 @@ static void NearlyScreenSizedRoom(void) {
 }
 static void TrunkPolicy(void) {
   for(unsigned map=6;map<=7;++map) {
-    Reset();g_settings.diorama_mode=true;
+    Reset();g_settings.diorama_mode=kAction3D_Voxel;
     g_ram[kActRaiserWram_MapGroup]=6;g_ram[kActRaiserWram_CurrentMap]=map;
     Write(kActRaiserWram_Bg1Width,1024);Write(kActRaiserWram_Bg1Height,2048);
     Step(384,1,0);uint16_t lo,hi;assert(ActRaiser_ActionCameraTravel(&lo,&hi));
@@ -211,10 +214,46 @@ static void TrunkPolicy(void) {
       Step(384,1,0);uint16_t a,b;assert(ActRaiser_ActionCameraTravel(&a,&b));
       assert(a==lo&&b==hi&&Read(kActRaiserWram_Bg1CameraX)==385);
     }
+    /* Switching to ordinary Diorama restores the authored policy instead of
+     * retaining the enclosure's capture/camera override. Switching back is
+     * reversible and does not rewrite either saved policy. */
+    g_settings.diorama_layer_bg1=true;g_settings.diorama_skybox=kDioramaSky_Only;
+    g_settings.diorama_mode=kAction3D_Diorama;
+    Step(384,1,0);uint16_t a,b;assert(ActRaiser_ActionCameraTravel(&a,&b));
+    assert(a!=lo||b!=hi);
+    g_settings.diorama_mode=kAction3D_Voxel;
+    Step(384,1,0);assert(ActRaiser_ActionCameraTravel(&a,&b));assert(a==lo&&b==hi);
   }
+}
+static void VoxelTowerInitialFraming(void) {
+  Reset();g_ram[kActRaiserWram_CurrentMap]=4;
+  Write(kActRaiserWram_Bg1Width,512);Write(kActRaiserWram_Bg1Height,256);
+  Write(kActRaiserWram_Bg1CameraY,31);
+  g_settings.diorama_mode=kAction3D_Voxel;
+  g_settings.diorama_dyncam_baseline_tilt_x_mrad=150;
+  g_settings.diorama_dyncam_baseline_tilt_y_mrad=-400;
+  DioramaRoomOverride *room=DioramaLayerOrder_FindOrAdd(&s_layers,1,4);assert(room);
+  assert(DioramaLayerOrder_ParseLine(room,"bg1-policy = horizontal:available vertical:available bands:0",NULL));
+  assert(DioramaLayerOrder_ParseLine(room,"bg1-map:us+jp+eu = bounds:-6,-9,32,16",NULL));
+  assert(DioramaLayerOrder_ParseLine(room,
+      "bg1-stamp:us+jp+eu = cell:-6,-9 metatile:25 words:1056,1057,1066,1067 bands:1,1,1,1",NULL));
+  room->framing[0].set=true;room->framing[0].x=-34;room->framing[0].y=-32;
+  /* This fixture deliberately has no published geometry. The native room
+   * camera must already agree with neutral vertical framing before it exists. */
+  Step(0,0,0);const uint16_t biased=Read(kActRaiserWram_Bg1CameraX);
+  const int biased_delta=s_dx;
+  assert(room->framing[0].y==-32);
+  room->framing[0].y=0;Step(0,0,0);
+  assert(Read(kActRaiserWram_Bg1CameraX)==biased && s_dx==biased_delta);
+  assert(Read(kActRaiserWram_Bg1CameraY)==31 && s_dy==0);
+  /* The regional compositor test checks the restored Diorama projection;
+   * integer horizontal stops can coincide despite different vertical views. */
+  room->framing[0].y=-32;g_settings.diorama_mode=kAction3D_Diorama;
+  Step(0,0,0);assert(room->framing[0].y==-32);
 }
 int main(void) {
   AutoProfiles(); SavedPolicy(); CapturePolicy(); NearlyScreenSizedRoom();TrunkPolicy();
+  VoxelTowerInitialFraming();
   DioramaLayerOrder_ClearTable(&s_layers);
   puts("Production action camera: Auto/manual policies, saved extents, edge stops, native Y and capture guards passed");
   return 0;

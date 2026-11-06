@@ -8,12 +8,16 @@
 #include <string.h>
 
 #include "action/action_room_scene.h"
+#include "action/action_room_terrain.h"
+#include "action/action_voxel.h"
+#include "action/action_voxel_internal.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
 #include "diorama/diorama_layer_order.h"
 #include "snes/ppu.h"
 
 static int failures;
+static uint8_t voxel_terrain;
 uint8_t g_ram[kActRaiserWramSize];
 #define CHECK(e) do { if (!(e)) { \
   fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #e); failures++; \
@@ -140,13 +144,13 @@ static SrResult FakeBorrowU16(
     SrBorrowedU16Span *span) {
   (void)runner;
   if (!span || span->struct_size < SR_BORROWED_U16_SPAN_V2_SIZE ||
-      !s_fake_ppu || region != SR_MEMORY_VRAM)
+      !s_fake_ppu || (region != SR_MEMORY_VRAM && region != SR_MEMORY_CGRAM))
     return SR_RESULT_INVALID_ARGUMENT;
   *span = (SrBorrowedU16Span) {
     .struct_size = sizeof(*span),
     .region = region,
-    .data = s_fake_ppu->vram,
-    .element_count = kVramWords,
+    .data = region == SR_MEMORY_VRAM ? s_fake_ppu->vram : s_fake_ppu->cgram,
+    .element_count = region == SR_MEMORY_VRAM ? kVramWords : 256,
     .lifetime_generation = 1u,
   };
   return SR_RESULT_OK;
@@ -650,8 +654,12 @@ static void TestAuthoredHorizontalExtent(void) {
 static void PopulateNativeRing(const ActionBgWorld *world,
                                const ActRaiserActionBgLayerSnapshot *snapshot,
                                uint16_t *vram) {
-  for (unsigned tile_y = 0; tile_y < ActionBgWorld_TileHeight(world); tile_y++) {
-    for (unsigned tile_x = 0; tile_x < ActionBgWorld_TileWidth(world); tile_x++) {
+  /* A resident ring holds 64x64 tiles, not the entire room. Publishing all
+   * world cells aliases distant scenery over the visible native viewport. */
+  const unsigned x0 = ActionBgWorld_TileWidth(world) <= 64 ? 0 : (snapshot->camera_x >> 3) & ~31u;
+  const unsigned y0 = ActionBgWorld_TileHeight(world) <= 64 ? 0 : (snapshot->camera_y >> 3) & ~31u;
+  for (unsigned tile_y = y0; tile_y < y0 + 64 && tile_y < ActionBgWorld_TileHeight(world); tile_y++) {
+    for (unsigned tile_x = x0; tile_x < x0 + 64 && tile_x < ActionBgWorld_TileWidth(world); tile_x++) {
       uint16_t entry = 0;
       size_t address = 0;
       CHECK(ActionBgWorld_Lookup(world, (int)tile_x, (int)tile_y, &entry) ==
@@ -1888,6 +1896,168 @@ static void TestDeathHeimNativeCaptureEdits(void) {
   free(wram);
 }
 
+/* Exercise both native edit consumers at the same displayed source texel.
+ * The capture callback is in 8px tiles; StampAt is in native pixels. */
+static void CheckNativeExtensionStamp(Ppu *ppu, unsigned bg, int tx, int ty,
+                                     bool present, uint16_t expected,
+                                     uint8_t expected_band, bool expected_blank) {
+  const SrPpuCaptureTileBinding *binding = &ppu->captureTiles[bg];
+  CHECK(binding->lookup);
+  SrPpuCaptureTile tile = {0};
+  if (binding->lookup) {
+    const bool found = binding->lookup(binding->user_data, tx, ty, &tile) != 0;
+    CHECK(found == present);
+    if (found && present) {
+      CHECK(tile.entry == expected && tile.band == expected_band);
+      CHECK(tile.flags == (SR_PPU_CAPTURE_TILE_REPLACE |
+          (expected_blank ? SR_PPU_CAPTURE_TILE_BLANK : 0u)));
+    }
+  }
+  uint16_t entry = 0;
+  uint8_t band = 0, local_x = 0, local_y = 0;
+  bool black = false, blank = false;
+  const bool found = ActRaiserActionBg_StampAt(bg, tx * 8 + 3, ty * 8 + 5,
+      0, 0, &entry, &band, &local_x, &local_y, &black, &blank);
+  CHECK(found == present);
+  if (found && present) {
+    CHECK(entry == expected && band == expected_band && blank == expected_blank && !black);
+    CHECK(local_x == ((tx & 1) * 8 + 3) && local_y == ((ty & 1) * 8 + 5));
+  }
+}
+
+static void TestDeathHeimExtensionRowPolicy(void) {
+  uint8_t *wram = BuildWram();
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(wram && ppu);
+  if (!wram || !ppu) { free(wram); free(ppu); return; }
+  ActRaiserActionBg_Shutdown();
+  CHECK(Test_SetEnv("AR_ACTION_BG_HLE", "0", 1) == 0);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_DeathHeim;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserDeathHeimMap_Hub;
+  wram[kActRaiserWram_DeathHeimProgress] = kActRaiserDeathHeimProgress_FinalBossBeaten;
+  ppu->bgmode = 1; ppu->screenEnabled[0] = 3;
+  ppu->bgXsc[0] = 0x60; ppu->bgXsc[1] = 0x70;
+  for (unsigned bg = 0; bg < 2; ++bg) {
+    const unsigned offset = bg * kActRaiserBgLayerStateStride;
+    /* The native hub stores A/B as two resident 256px pages. */
+    Write16(wram, kActRaiserWram_Bg1Width + offset, 512);
+    Write16(wram, kActRaiserWram_Bg1Height + offset, 256);
+    Write16(wram, kActRaiserWram_Bg1CameraX + offset, 0);
+    Write16(wram, kActRaiserWram_Bg1CameraY + offset, 0);
+  }
+  DioramaRoomOverride room = {.used = true, .map_group = 7, .map_number = 1};
+  /* The hub's authored skull-deck extension is only x6..9/y16..17.
+   * Unique words make an unintended ±256px duplicate unambiguous. */
+  for (int y = 16; y <= 17; ++y) for (int x = 6; x <= 9; ++x) {
+    char line[128];
+    snprintf(line, sizeof(line), "bg1-stamp = cell:%d,%d metatile:C3 "
+        "words:18A0,18BD,18C8,18C9 bands:1,1,1,1", x, y);
+    CHECK(DioramaLayerOrder_ParseLine(&room, line, NULL));
+  }
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-stamp = cell:4,16 metatile:18 words:0011,0012,0013,0014 bands:1,1,1,1", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-stamp = cell:4,-1 metatile:18 words:0011,0012,0013,0014 bands:1,1,1,1", NULL));
+  ActionBgPlan plan; ActionBgPresentationPolicy policy;
+  CHECK(ActRaiserActionBg_BuildPlan(wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_Clamp);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp && plan.layer[1].band_count == 1);
+  ActionBgRowPolicy row;
+  CHECK(ActionBgLayerPlan_ResolveRow(&plan.layer[1], 255, &row));
+  CHECK(row.edge == kActionBgEdge_Repeat);
+  CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(wram, kActRaiserWramSize, &plan, &room, ppu));
+  CHECK(ActRaiserActionBg_BindCaptureTiles(3, 3));
+  for (int y = 16; y <= 17; ++y) for (int x = 6; x <= 9; ++x) {
+    const uint16_t words[] = {0x18a0, 0x18bd, 0x18c8, 0x18c9};
+    for (unsigned q = 0; q < 4; ++q) {
+      const int tx = x * 2 + (q & 1), ty = y * 2 + (q >> 1);
+      CheckNativeExtensionStamp(ppu, 0, tx, ty, true, words[q], 1, false);
+      CheckNativeExtensionStamp(ppu, 0, tx - 32, ty, false, 0, 0, false);
+      CheckNativeExtensionStamp(ppu, 0, tx + 32, ty, false, 0, 0, false);
+    }
+  }
+  /* The lower BG2 band owns the adjacent synthetic rows; the upper margin
+   * remains Clamp. Repeat must survive while the skull deck stops cycling. */
+  CheckNativeExtensionStamp(ppu, 1, 8, 32, true, 0x11, 1, false);
+  CheckNativeExtensionStamp(ppu, 1, -24, 32, true, 0x11, 1, false);
+  CheckNativeExtensionStamp(ppu, 1, 40, 32, true, 0x11, 1, false);
+  CheckNativeExtensionStamp(ppu, 1, 8, -2, true, 0x11, 1, false);
+  CheckNativeExtensionStamp(ppu, 1, -24, -2, false, 0, 0, false);
+  CheckNativeExtensionStamp(ppu, 1, 40, -2, false, 0, 0, false);
+
+  /* Source row256 resolves to authentic144 at camera111, but authentic143
+   * at camera112. Both consumers must apply the same native scanline-one
+   * convention before selecting the hub's lower Repeat band. */
+  for (unsigned camera_y = 111; camera_y <= 112; ++camera_y) {
+    Write16(wram, kActRaiserWram_Bg2CameraY, (uint16_t)camera_y);
+    CHECK(ActRaiserActionBg_BuildPlan(wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+    CHECK(plan.layer[1].camera_y == camera_y);
+    CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(wram, kActRaiserWramSize, &plan, &room, ppu));
+    CHECK(ActRaiserActionBg_BindCaptureTiles(3, 3));
+    const bool cycles = camera_y == 111;
+    const SrPpuCaptureTileBinding *binding = &ppu->captureTiles[1];
+    SrPpuCaptureTile tile = {0};
+    CHECK(binding->lookup);
+    if (binding->lookup) {
+      const bool found = binding->lookup(binding->user_data, 40, 32, &tile) != 0;
+      CHECK(found == cycles);
+      if (found) CHECK(tile.entry == 0x11 && tile.flags == SR_PPU_CAPTURE_TILE_REPLACE);
+    }
+    uint16_t entry = 0; uint8_t band = 0, local_x = 0, local_y = 0;
+    bool black = false, blank = false;
+    const bool found = ActRaiserActionBg_StampAt(1, 323, 256, 0, 0,
+        &entry, &band, &local_x, &local_y, &black, &blank);
+    CHECK(found == cycles);
+    if (found) CHECK(entry == 0x11 && band == 1 && local_x == 3 && !local_y && !black && !blank);
+  }
+  Write16(wram, kActRaiserWram_Bg2CameraY, 0);
+  CHECK(ActRaiserActionBg_BuildPlan(wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+
+  /* Rebinding the same room must replace the captured row policy. */
+  const ActionBgEdgeMode edges[] = {kActionBgEdge_Clamp, kActionBgEdge_Mirror,
+      kActionBgEdge_Transparent, kActionBgEdge_RawWrap};
+  for (unsigned i = 0; i < sizeof(edges) / sizeof(*edges); ++i) {
+    plan.layer[1].default_edge = edges[i]; plan.layer[1].band_count = 0;
+    CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(wram, kActRaiserWramSize, &plan, &room, ppu));
+    CHECK(ActRaiserActionBg_BindCaptureTiles(3, 3));
+    const bool cycles = edges[i] == kActionBgEdge_RawWrap;
+    CheckNativeExtensionStamp(ppu, 1, 8, 32, true, 0x11, 1, false);
+    CheckNativeExtensionStamp(ppu, 1, -24, 32, cycles, 0x11, 1, false);
+    CheckNativeExtensionStamp(ppu, 1, 40, 32, cycles, 0x11, 1, false);
+  }
+  /* Explicit cells and explicit blanks override a cycling source, even
+   * outside its native width. The blank must not reveal the wrapped stamp. */
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-stamp = cell:20,16 metatile:18 words:0021,0022,0023,0024 bands:2,2,2,2", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-stamp = cell:-12,16 metatile:18 words:blank bands:2,2,2,2", NULL));
+  CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(wram, kActRaiserWramSize, &plan, &room, ppu));
+  CHECK(ActRaiserActionBg_BindCaptureTiles(3, 3));
+  CheckNativeExtensionStamp(ppu, 1, 40, 32, true, 0x21, 2, false);
+  CheckNativeExtensionStamp(ppu, 1, -24, 32, true, 0, 2, true);
+
+  /* Completion is a distinct native page: BG1 Clamp and BG2 Mirror neither
+   * repeat missing extension cells, while exact authored cells still win. */
+  ppu->bgXsc[0] = 0x64; ppu->bgXsc[1] = 0x74;
+  room.section = kDioramaLayerSection_DeathHeimCompletion;
+  CHECK(ActRaiserActionBg_BuildPlan(wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_Clamp);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror && !plan.layer[1].band_count);
+  CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(wram, kActRaiserWramSize, &plan, &room, ppu));
+  CHECK(ActRaiserActionBg_BindCaptureTiles(3, 3));
+  CheckNativeExtensionStamp(ppu, 0, 12, 32, true, 0x18a0, 1, false);
+  CheckNativeExtensionStamp(ppu, 0, -20, 32, false, 0, 0, false);
+  CheckNativeExtensionStamp(ppu, 0, 44, 32, false, 0, 0, false);
+  CheckNativeExtensionStamp(ppu, 1, -56, 32, false, 0, 0, false);
+  CheckNativeExtensionStamp(ppu, 1, 72, 32, false, 0, 0, false);
+  CheckNativeExtensionStamp(ppu, 1, 40, 32, true, 0x21, 2, false);
+  CheckNativeExtensionStamp(ppu, 1, -24, 32, true, 0, 2, true);
+  DioramaLayerOrder_ClearRoom(&room);
+  ActRaiserActionBg_Shutdown();
+  CHECK(Test_UnsetEnv("AR_ACTION_BG_HLE") == 0);
+  free(ppu); free(wram);
+}
+
 static void TestDeathHeimRematchCaptureEdits(void) {
   uint8_t *wram = BuildWram();
   Ppu *ppu = calloc(1, sizeof(*ppu));
@@ -2019,9 +2189,459 @@ static void TestNativePixelEditScrollAndPolicy(void) {
   free(ppu); free(wram);
 }
 
-int main(void) {
+static uint64_t PrepareVoxelWithoutChangingNativeArt(
+    Ppu *ppu, uint8_t group, uint8_t room, const DioramaRoomOverride *terrain) {
+  uint16_t *vram=malloc(sizeof(ppu->vram));CHECK(vram);
+  uint16_t palette[sizeof(ppu->cgram)/sizeof(ppu->cgram[0])];
+  if(vram)memcpy(vram,ppu->vram,sizeof(ppu->vram));
+  memcpy(palette,ppu->cgram,sizeof(palette));
+  ActRaiserActionBg_PrepareVoxel(true,terrain);
+  if(vram)CHECK(!memcmp(vram,ppu->vram,sizeof(ppu->vram)));
+  CHECK(!memcmp(palette,ppu->cgram,sizeof(palette)));
+  free(vram);
+  const ActionVoxelGeometry *geometry=ActRaiserActionBg_VoxelGeometry(group,room);
+  CHECK(geometry);
+  return ActionVoxel_Revision(geometry);
+}
+
+static void SameCastlePhase(const ActionVoxelGeometry *a,const ActionVoxelGeometry *b) {
+  CHECK(a&&b);if(!a||!b)return;
+  CHECK(a->width==b->width && a->height==b->height && a->origin_x==b->origin_x && a->origin_y==b->origin_y);
+  if(a->width!=b->width || a->height!=b->height)return;
+  const size_t area=(size_t)a->width*a->height;
+#define SAME_BYTES(FIELD,N) do { CHECK(!!a->FIELD==!!b->FIELD); \
+  if(a->FIELD&&b->FIELD)CHECK(!memcmp(a->FIELD,b->FIELD,(N))); } while(0)
+  SAME_BYTES(front,area);SAME_BYTES(cutouts,area/8);SAME_BYTES(branch_pixels,(area+7)/8);
+  SAME_BYTES(front_recess,area/64);SAME_BYTES(column_cells,area/64);SAME_BYTES(trunk_cells,area/64);
+  SAME_BYTES(thin_trim_cells,area/64);
+  SAME_BYTES(pixel_recess_cells,area/64);SAME_BYTES(rear_relief,area/256);SAME_BYTES(soft_surfaces,area/256);
+#undef SAME_BYTES
+#define SAME_LIST(FIELD,COUNT) do { CHECK(a->COUNT==b->COUNT); \
+  if(a->COUNT==b->COUNT)CHECK(!memcmp(a->FIELD,b->FIELD,a->COUNT*sizeof(*a->FIELD))); } while(0)
+  SAME_LIST(edges,edge_count);SAME_LIST(gates,gate_count);SAME_LIST(patches,patch_count);
+  SAME_LIST(rear_trims,rear_trim_count);SAME_LIST(column_curves,column_curve_count);
+  SAME_LIST(trunk_curves,trunk_curve_count);SAME_LIST(water_surfaces,water_surface_count);
+  SAME_LIST(waterfalls,waterfall_count);SAME_LIST(rear_fills,rear_fill_count);
+#undef SAME_LIST
+  CHECK(!memcmp(a->backing_color,b->backing_color,sizeof(a->backing_color)));
+  CHECK(!memcmp(a->pass_counts,b->pass_counts,sizeof(a->pass_counts)));
+  for(unsigned pass=0;pass<kVoxelPassLists;++pass)
+    if(a->pass_counts[pass]==b->pass_counts[pass])
+      CHECK(!memcmp(a->pass_edges[pass],b->pass_edges[pass],a->pass_counts[pass]*sizeof(uint16_t)));
+}
+/* Build an independent oracle from current native WRAM/VRAM and the public
+ * room compiler. These fixtures keep the camera at zero; a real ring edit
+ * below must appear in both the fresh build and every subsequently cached phase. */
+static ActionVoxelGeometry *FreshCastlePhase(Ppu *ppu,const ActionRoomScene *scene,
+                                           const DioramaRoomOverride *terrain) {
+  ActionRoomScene *live=malloc(sizeof(*live));CHECK(live);if(!live)return NULL;*live=*scene;
+  ActRaiserActionBgLayerSnapshot snapshot;
+  CHECK(ActRaiserActionBg_CaptureLayer(g_ram,sizeof(g_ram),0,ppu->bgXsc[0],&snapshot));
+  ActionBgMapView map;CHECK(ActionBgMapView_Init(&map,g_ram,sizeof(g_ram),snapshot.decode.world_width,
+      snapshot.decode.world_height,snapshot.decode.map_page));
+  memcpy(live->bg[0].map,map.map,map.map_size);
+  for(unsigned i=0;i<kActionRoomSceneMetatileBytes;++i)
+    live->bg[0].metatiles[i]=g_ram[snapshot.decode.metatile_table+(i^1u)];
+  for(unsigned i=0;i<256*32;++i)live->characters[i]=ppu->vram[i/2]>>((i&1)*8);
+  for(unsigned i=0;i<256;++i)live->palette[i]=ppu->cgram[i/2]>>((i&1)*8);
+  const unsigned width=ActionRoomScene_TileWidth(live,1),height=ActionRoomScene_TileHeight(live,1);
+  uint16_t *tiles=malloc((size_t)width*height*sizeof(*tiles));CHECK(tiles);
+  if(!tiles){free(live);return NULL;}
+  for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)
+    CHECK(ActionRoomScene_LookupTile(live,1,x,y,&tiles[y*width+x],NULL));
+  CHECK(!snapshot.camera_x && !snapshot.camera_y && !ppu->hScroll[0] && !ppu->vScroll[0]);
+  for(unsigned y=0;y<=28 && y<height;++y)for(unsigned x=0;x<32 && x<width;++x) {
+    size_t address;CHECK(ActRaiserActionBg_RingAddress(snapshot.tilemap_base,x,y,kVramWords,&address));
+    tiles[y*width+x]=ppu->vram[address];
+  }
+  ActionVoxelGeometry *fresh=ActionVoxel_Create();CHECK(fresh);
+  CHECK(ActionVoxel_BuildWithTiles(fresh,live,terrain,ActionVoxel_SettingsForRoom(scene->group,scene->map),tiles,width));
+  free(tiles);free(live);return fresh;
+}
+static void TestLiveCastleAnimation(Ppu *ppu,const ActionRoomScene *scene,
+                                   const ActionVoxelGeometry *initial) {
+  const unsigned group=scene->group,room=scene->map;
+  size_t offset=0,bytes=0;CHECK(ActionVoxel_AnimationMatches(scene,scene->characters,&offset,&bytes));
+  CHECK(ActionRoomScene_CharacterAnimationPhaseCount(scene)==4);if(!bytes)return;
+  const ActionVoxelGeometry *phases[4]={0};ActionVoxelGeometry *fresh[4]={0};
+  uint64_t revisions[4]={0};uint8_t characters[kActionRoomSceneCharacterBytes];
+  for(unsigned cycle=0;cycle<2;++cycle)for(unsigned phase=0;phase<4;++phase) {
+    CHECK(ActionRoomScene_BuildCharacters(scene,0,phase,characters,sizeof(characters)));
+    for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
+    const uint64_t revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);
+    const ActionVoxelGeometry *geometry=ActRaiserActionBg_VoxelGeometry(group,room);
+    if(!cycle) {
+      phases[phase]=ActionVoxel_Retain(geometry);revisions[phase]=revision;
+      fresh[phase]=FreshCastlePhase(ppu,scene,NULL);
+    } else {CHECK(geometry==phases[phase]);CHECK(revision==revisions[phase]);}
+    SameCastlePhase(geometry,fresh[phase]);
+  }
+  CHECK(phases[0]==initial);
+  CHECK(memcmp(phases[0]->front,phases[1]->front,(size_t)phases[0]->width*phases[0]->height));
+  /* A live doorway/visible ring publication invalidates all four entries. */
+  size_t address=0;CHECK(ActRaiserActionBg_RingAddress((ppu->bgXsc[0]&0xfcu)<<8,0,1,kVramWords,&address));
+  ppu->vram[address]^=1;
+  uint64_t revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);
+  CHECK(revision!=revisions[3]);
+  ActionVoxelGeometry *edited=FreshCastlePhase(ppu,scene,NULL);
+  SameCastlePhase(ActRaiserActionBg_VoxelGeometry(group,room),edited);ActionVoxel_Release(edited);
+  for(unsigned phase=0;phase<4;++phase) {
+    CHECK(ActionRoomScene_BuildCharacters(scene,0,phase,characters,sizeof(characters)));
+    for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
+    CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)!=revisions[phase]);
+    edited=FreshCastlePhase(ppu,scene,NULL);
+    SameCastlePhase(ActRaiserActionBg_VoxelGeometry(group,room),edited);ActionVoxel_Release(edited);
+  }
+  ppu->vram[address]^=1;revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);
+#define INVALIDATE_AND_RESTORE(CHANGE) do { CHANGE; \
+  uint64_t changed=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(changed!=revision); \
+  CHANGE;revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(revision!=changed); \
+} while(0)
+  INVALIDATE_AND_RESTORE(ppu->vram[offset/2]^=0xff); /* Unknown/partial animation. */
+  INVALIDATE_AND_RESTORE(ppu->cgram[1]^=1);
+  INVALIDATE_AND_RESTORE(ppu->vram[128*16]^=1); /* Used art outside the animation. */
+  INVALIDATE_AND_RESTORE(g_ram[kActRaiserWram_Bg1Map]^=1);
+  INVALIDATE_AND_RESTORE(g_ram[kActRaiserWram_Bg1MetatileDefinitions+1]^=2);
+#undef INVALIDATE_AND_RESTORE
+  DioramaRoomOverride terrain={.used=true,.map_group=group,.map_number=room};
+  CHECK(DioramaLayerOrder_ParseLine(&terrain,
+      "bg1-stamp = cell:1,1 metatile:00 words:2001,2001,2001,2001 bands:0,0,0,0",NULL));
+  uint64_t changed=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);CHECK(changed!=revision);
+  CHECK(DioramaLayerOrder_ParseLine(&terrain,
+      "bg1-pixels = cell:1,1 transparent:8000000000000000000000000000000000000000000000000000000000000000",NULL));
+  revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);CHECK(revision!=changed);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain)==revision);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)!=revision);
+  DioramaLayerOrder_ClearRoom(&terrain);
+  ppu->inidisp=0x80;ActRaiserActionBg_PrepareVoxel(true,NULL);
+  CHECK(!ActRaiserActionBg_VoxelGeometry(group,room));ppu->inidisp=15;
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)!=revisions[3]);
+  ActRaiserActionBg_PrepareVoxel(false,NULL);CHECK(!ActRaiserActionBg_VoxelGeometry(group,room));
+  for(unsigned phase=0;phase<4;++phase) {
+    CHECK(ActionVoxel_Active(phases[phase],group,room));
+    CHECK(atomic_load(&phases[phase]->references)==(phase?1:2)); /* Caller retains initial too. */
+    SameCastlePhase(phases[phase],fresh[phase]);
+    ActionVoxel_Release(phases[phase]);ActionVoxel_Release(fresh[phase]);
+  }
+  fprintf(stderr,"[castle-phase-cache] %02x:%02x terrain=%u: two exact cycles, native edits, reset and retained refs passed\n",group,room,voxel_terrain);
+}
+
+static void TestLiveDesertAnimation(Ppu *ppu, const ActionRoomScene *scene,
+                                    const ActionVoxelGeometry *initial) {
+  const uint8_t group=scene->group,room=scene->map;
+  size_t offset=0,bytes=0;
+  CHECK(ActionVoxel_Profile(initial)==kActionVoxelProfile_KassandoraDesert);
+  CHECK(ActionVoxel_AnimationMatches(scene,scene->characters,&offset,&bytes));
+  if(!bytes)return;
+  const uint64_t initial_revision=ActionVoxel_Revision(initial);
+  uint8_t characters[kActionRoomSceneCharacterBytes];
+  bool animated=false;
+  /* Geometry owns a canonical private copy. Native VRAM and palette must
+   * retain every phase, including all bytes outside the animation window. */
+  for(unsigned cycle=0;cycle<2;++cycle)
+    for(unsigned phase=0;phase<ActionRoomScene_CharacterAnimationPhaseCount(scene);++phase) {
+      CHECK(ActionRoomScene_BuildCharacters(scene,0,phase,characters,sizeof(characters)));
+      animated|=memcmp(characters+offset,scene->characters+offset,bytes)!=0;
+      for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
+      CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)==initial_revision);
+      CHECK(ActRaiserActionBg_VoxelGeometry(group,room)==initial);
+    }
+  CHECK(animated);
+  /* An unrecognized publication is not canonicalized. Restoring a reviewed
+   * phase re-establishes the proof without mutating queued old geometry. */
+  ppu->vram[offset/2]^=0xff;
+  uint64_t revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);
+  CHECK(revision!=initial_revision);
+  CHECK(ActionVoxel_Revision(initial)==initial_revision);
+  ppu->vram[offset/2]^=0xff;
+  uint64_t restored=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);
+  CHECK(restored!=revision);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)==restored);
+
+  /* Palette, native map, collision definitions and displayed ring words are
+   * independent geometry inputs; safe animation never suppresses them. */
+  ppu->cgram[1]^=1;
+  revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(revision!=restored);
+  ppu->cgram[1]^=1;
+  restored=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(restored!=revision);
+  g_ram[kActRaiserWram_Bg1Map]^=1;
+  revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(revision!=restored);
+  g_ram[kActRaiserWram_Bg1Map]^=1;
+  restored=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(restored!=revision);
+  g_ram[kActRaiserWram_Bg1MetatileDefinitions+1]^=2;
+  revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(revision!=restored);
+  g_ram[kActRaiserWram_Bg1MetatileDefinitions+1]^=2;
+  restored=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(restored!=revision);
+  size_t ring_address=0;
+  CHECK(ActRaiserActionBg_RingAddress((ppu->bgXsc[0]&0xfcu)<<8,0,1,kVramWords,&ring_address));
+  ppu->vram[ring_address]^=1;
+  revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(revision!=restored);
+  ppu->vram[ring_address]^=1;
+  restored=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(restored!=revision);
+
+  DioramaRoomOverride terrain={.used=true,.map_group=group,.map_number=room};
+  CHECK(DioramaLayerOrder_ParseLine(&terrain,
+      "bg1-stamp = cell:1,1 metatile:00 words:2001,2001,2001,2001 bands:0,0,0,0",NULL));
+  revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);CHECK(revision!=restored);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain)==revision);
+  CHECK(DioramaLayerOrder_ParseLine(&terrain,
+      "bg1-pixels = cell:1,1 transparent:8000000000000000000000000000000000000000000000000000000000000000",NULL));
+  restored=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);CHECK(restored!=revision);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain)==restored);
+  revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(revision!=restored);
+  DioramaLayerOrder_ClearRoom(&terrain);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)==revision);
+  ActRaiserActionBg_PrepareVoxel(false,NULL);
+  CHECK(!ActRaiserActionBg_VoxelGeometry(group,room));
+  CHECK(ActionVoxel_Active(initial,group,room));
+}
+
+/* Optional stock-ROM integration oracle. The normal CTest run stays ROM-free. */
+static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t map_number) {
+  fprintf(stderr,"[voxel-publication] %02x:%02x terrain=%u\n",group,map_number,voxel_terrain);
+  FILE *file=fopen(path,"rb");CHECK(file);if(!file)return;
+  CHECK(!fseek(file,0,SEEK_END));const long size=ftell(file);rewind(file);
+  uint8_t *rom=size>0?malloc((size_t)size):NULL;CHECK(rom);if(!rom){fclose(file);return;}
+  CHECK(fread(rom,1,(size_t)size,file)==(size_t)size);fclose(file);
+  ActionRoomScene *scene=calloc(1,sizeof(*scene));Ppu *ppu=calloc(1,sizeof(*ppu));
+  CHECK(scene&&ppu);if(!scene||!ppu){free(scene);free(ppu);free(rom);return;}
+  CHECK(ActionRoomScene_Load(scene,rom,(size_t)size,group,map_number));
+  CHECK(ActionRoomTerrain_Project(scene,voxel_terrain));
+  ActionRoomSceneFrameState frame;
+  const ActionRoomSceneFrameRequest request={.animation_phase=-1,.page_phase=-1};
+  CHECK(ActionRoomScene_BuildFrameState(scene,&request,&frame));
+  memset(g_ram,0,sizeof(g_ram));g_ram[kActRaiserWram_MapGroup]=group;g_ram[kActRaiserWram_CurrentMap]=map_number;
+  ppu->bgmode=1;ppu->inidisp=15;ppu->screenEnabled[0]=3;
+  for(unsigned layer=0;layer<2;++layer) {
+    CHECK(ActRaiserActionBg_StageRoomSceneLayer(g_ram,sizeof(g_ram),scene,layer+1));
+    const unsigned offset=layer*kActRaiserBgLayerStateStride;
+    Write16(g_ram,kActRaiserWram_BgMapPage+offset,layer?kActRaiserWram_Bg2Map:kActRaiserWram_Bg1Map);
+    Write16(g_ram,kActRaiserWram_BgMetatileTable+offset,layer?kActRaiserWram_Bg2MetatileDefinitions:kActRaiserWram_Bg1MetatileDefinitions);
+    Write16(g_ram,kActRaiserWram_BgWordMask+offset,kActionRoomSceneTileWordMask);
+    g_ram[kActRaiserWram_BgAttributes+offset]=(uint8_t)(ActionRoomScene_BgAttributes(scene,layer+1)>>8);
+    ppu->bgXsc[layer]=frame.bgsc[layer];
+    Write16(g_ram,kActRaiserWram_BgTilemapBase+offset,(frame.bgsc[layer]&0xfcu)<<8);
+    ActionBgWorld *world=ActionBgWorld_Create();CHECK(world);
+    ActRaiserActionBgLayerSnapshot snapshot;
+    CHECK(ActRaiserActionBg_CaptureLayer(g_ram,sizeof(g_ram),layer,ppu->bgXsc[layer],&snapshot));
+    CHECK(ActionBgWorld_Update(world,&snapshot.decode));PopulateNativeRing(world,&snapshot,ppu->vram);
+    ActionBgWorld_Destroy(world);
+  }
+  for(unsigned i=0;i<sizeof(scene->characters)/2;++i)ppu->vram[i]=scene->characters[i*2]|(scene->characters[i*2+1]<<8);
+  for(unsigned i=0;i<128;++i)ppu->cgram[i]=scene->palette[i*2]|(scene->palette[i*2+1]<<8);
+  CHECK(ActRaiserActionBg_InitRoomScenes(rom,(size_t)size));
+  ActRaiserActionBg_BeginRoomVariants(voxel_terrain,0,(ArRegionalMediaBytes){0});
+  BindFakePpu(ppu);
+  ActRaiserActionBg_PrepareVoxel(true,NULL);
+  const ActionVoxelGeometry *closed=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,map_number));CHECK(closed);
+  if (closed && (group==6 || group==7)) {
+    /* New level profiles use the same immutable live publication contract.
+     * Completion reuses 07:01 but owns its presentation independently. */
+    ActRaiserActionBg_PrepareVoxel(true,NULL);
+    CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+    if (group==7 && map_number==1) {
+      /* The hub's upper BG2 matte is authored away when its faces move to
+       * the skybox. Voxel owns BG1 hardware priority, but must preserve that
+       * independent BG2 scene split instead of exposing an opaque rectangle. */
+      DioramaRoomOverride hub={.used=true,.map_group=7,.map_number=1};
+      CHECK(DioramaLayerOrder_ParseLine(&hub,
+          "bg1-stamp = cell:-1,0 metatile:00 words:2001,2001,2001,2001 bands:0,0,0,0",NULL));
+      CHECK(DioramaLayerOrder_ParseLine(&hub,
+          "bg2-stamp = cell:-1,0 metatile:00 words:0DAF,0DAF,0DAF,0DAF bands:0,0,0,0",NULL));
+      ActionBgPlan plan;ActionBgPresentationPolicy policy;
+      CHECK(ActRaiserActionBg_BuildPlan(g_ram,sizeof(g_ram),ppu,true,&plan,&policy));
+      (void)ActRaiserActionBg_BindPlanWithVirtualLayers(g_ram,sizeof(g_ram),&plan,&hub,ppu);
+      CHECK(ActRaiserActionBg_BindCaptureTiles(3,3));
+      for(unsigned bg=0;bg<2;++bg) {
+        const SrPpuCaptureTileBinding *binding=&ppu->captureTiles[bg];
+        CHECK(binding->lookup);
+        if(binding->lookup) {
+          SrPpuCaptureTile tile={0};
+          CHECK(binding->lookup(binding->user_data,-2,0,&tile));
+          CHECK(tile.band==(bg?0:2));
+        }
+      }
+      (void)ActRaiserActionBg_BindPlanWithVirtualLayers(g_ram,sizeof(g_ram),&plan,NULL,ppu);
+      DioramaLayerOrder_ClearRoom(&hub);
+      g_ram[kActRaiserWram_DeathHeimProgress]=kActRaiserDeathHeimProgress_FinalBossBeaten;
+      ActRaiserActionBg_PrepareVoxel(true,NULL);
+      CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+      ppu->bgXsc[0]=0x64;ppu->bgXsc[1]=0x74;
+      ActRaiserActionBg_PrepareVoxel(true,NULL);
+      CHECK(!ActRaiserActionBg_VoxelGeometry(group,map_number));
+      CHECK(ActionVoxel_Active(closed,group,map_number));
+      ppu->bgXsc[0]=frame.bgsc[0];ppu->bgXsc[1]=frame.bgsc[1];
+      g_ram[kActRaiserWram_DeathHeimProgress]=0;
+      ActRaiserActionBg_PrepareVoxel(true,NULL);
+      CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number));
+    }
+    ActRaiserActionBg_PrepareVoxel(false,NULL);
+    CHECK(!ActRaiserActionBg_VoxelGeometry(group,map_number));
+    CHECK(ActionVoxel_Active(closed,group,map_number));
+    ActionVoxel_Release(closed);
+  }
+  if(closed && group==4) {
+    CHECK(ActionVoxel_Profile(closed)==kActionVoxelProfile_AitosCaverns);
+    ActRaiserActionBg_PrepareVoxel(true,NULL);CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+    if(map_number<7) {
+      size_t offset,bytes;CHECK(ActionVoxel_AnimationMatches(scene,scene->characters,&offset,&bytes));
+      uint8_t characters[kActionRoomSceneCharacterBytes];
+      for(unsigned phase=0;phase<ActionRoomScene_CharacterAnimationPhaseCount(scene);++phase) {
+        CHECK(ActionRoomScene_BuildCharacters(scene,0,phase,characters,sizeof(characters)));
+        for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
+        ActRaiserActionBg_PrepareVoxel(true,NULL);
+        if(ActRaiserActionBg_VoxelGeometry(group,map_number)!=closed)
+          fprintf(stderr,"Aitos native cache changed: room=%u phase=%u\n",map_number,phase);
+        CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+        for(size_t i=offset;i<offset+bytes;i+=2)CHECK(ppu->vram[i/2]==(characters[i]|(characters[i+1]<<8)));
+      }
+      ppu->vram[offset/2]^=0xff;ActRaiserActionBg_PrepareVoxel(true,NULL);
+      const ActionVoxelGeometry *edited=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,map_number));
+      CHECK(edited && edited!=closed);
+      ppu->vram[offset/2]^=0xff;ActRaiserActionBg_PrepareVoxel(true,NULL);
+      CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)!=edited);
+      ActionVoxel_Release(edited);
+    }
+    ActRaiserActionBg_PrepareVoxel(false,NULL);CHECK(!ActRaiserActionBg_VoxelGeometry(group,map_number));
+    ActionVoxel_Release(closed);
+  }
+  if(closed && group==3 && map_number<=2) {
+    TestLiveDesertAnimation(ppu,scene,closed);
+    ActionVoxel_Release(closed);
+  }
+  if(closed && ((group==3 && map_number>=3) || group==5)) {
+    size_t offset,bytes;
+    CHECK(ActionVoxel_AnimationMatches(scene,scene->characters,&offset,&bytes));
+    uint8_t characters[kActionRoomSceneCharacterBytes];
+    for(unsigned phase=0;phase<ActionRoomScene_CharacterAnimationPhaseCount(scene);++phase) {
+      CHECK(ActionRoomScene_BuildCharacters(scene,0,phase,characters,sizeof(characters)));
+      for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
+      ActRaiserActionBg_PrepareVoxel(true,NULL);
+      CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+      for(size_t i=offset;i<offset+bytes;i+=2)
+        CHECK(ppu->vram[i/2]==(characters[i]|(characters[i+1]<<8)));
+    }
+    /* Unrecognized bytes must invalidate, then a restored native frame must
+     * re-establish the proof. Neither step changes the queued old geometry. */
+    ppu->vram[offset/2]^=0xff;
+    ActRaiserActionBg_PrepareVoxel(true,NULL);
+    const ActionVoxelGeometry *edited=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,map_number));
+    CHECK(edited && edited!=closed);
+    ppu->vram[offset/2]^=0xff;
+    ActRaiserActionBg_PrepareVoxel(true,NULL);
+    const ActionVoxelGeometry *restored=ActRaiserActionBg_VoxelGeometry(group,map_number);
+    CHECK(restored && restored!=edited);
+    uint64_t revision=ActionVoxel_Revision(restored);
+    ActRaiserActionBg_PrepareVoxel(true,NULL);
+    CHECK(ActionVoxel_Revision(ActRaiserActionBg_VoxelGeometry(group,map_number))==revision);
+    ppu->cgram[1]^=1;
+    ActRaiserActionBg_PrepareVoxel(true,NULL);
+    CHECK(ActionVoxel_Revision(ActRaiserActionBg_VoxelGeometry(group,map_number))!=revision);
+    /* A native collision change on a flame definition makes it structural.
+     * Every subsequent changed phase must rebuild until that input is fixed. */
+    g_ram[kActRaiserWram_Bg1MetatileDefinitions]=offset/32;
+    g_ram[kActRaiserWram_Bg1MetatileDefinitions+1]=2;
+    ActRaiserActionBg_PrepareVoxel(true,NULL);
+    revision=ActionVoxel_Revision(ActRaiserActionBg_VoxelGeometry(group,map_number));
+    CHECK(ActionRoomScene_BuildCharacters(scene,0,1,characters,sizeof(characters)));
+    for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
+    ActRaiserActionBg_PrepareVoxel(true,NULL);
+    CHECK(ActionVoxel_Revision(ActRaiserActionBg_VoxelGeometry(group,map_number))!=revision);
+    ActionVoxel_Release(edited);ActionVoxel_Release(closed);
+  }
+  if(closed && group==2 && (map_number==3 || map_number==5)) {
+    TestLiveCastleAnimation(ppu,scene,closed);ActionVoxel_Release(closed);
+  }
+  if(closed && group==2 && map_number==8) {
+    unsigned before;const VoxelGate *gates=ActionVoxel_Gates(closed,&before);CHECK(before==1);
+    ActRaiserActionBg_PrepareVoxel(true,NULL);CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+    ppu->vram[0x1000]^=1; /* BG2 animation is not geometry input. */
+    ActRaiserActionBg_PrepareVoxel(true,NULL);CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+    unsigned blank=256;
+    for(unsigned ch=0;ch<256;++ch){unsigned bits=0;for(unsigned i=0;i<32;++i)bits|=scene->characters[ch*32+i];if(!bits){blank=ch;break;}}
+    CHECK(blank<256);
+    size_t gate_address=0;
+    for(unsigned i=0;i<before;++i)for(int y=gates[i].y/8;y<(gates[i].y+gates[i].height)/8;++y) {
+      size_t at;CHECK(ActRaiserActionBg_RingAddress((frame.bgsc[0]&0xfcu)<<8,gates[i].x/8,y,kVramWords,&at));
+      ppu->vram[at]=(ppu->vram[at]&0xfc00u)|blank;gate_address=at;
+    }
+    ActRaiserActionBg_PrepareVoxel(true,NULL);
+    const ActionVoxelGeometry *open=ActRaiserActionBg_VoxelGeometry(group,map_number);CHECK(open&&open!=closed);
+    unsigned count;ActionVoxel_Gates(open,&count);CHECK(count==0);
+    ActionVoxel_Gates(closed,&count);CHECK(count==before); /* queued old frame stays closed */
+    ActionBgPlan plan;ActionBgPresentationPolicy policy;
+    CHECK(ActRaiserActionBg_BuildPlan(g_ram,sizeof(g_ram),ppu,true,&plan,&policy));
+    CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(g_ram,sizeof(g_ram),&plan,NULL,ppu)&1);
+    const PpuVirtualTilemapBinding *binding=&ppu->virtualTilemap[0];
+    uint16_t word=0;CHECK(binding->lookup);
+    if(binding->lookup)CHECK(binding->lookup(binding->context,gates[0].x/8,(gates[0].y+gates[0].height)/8-1,&word));
+    CHECK(word==ppu->vram[gate_address]);
+    const ActionVoxelGeometry *display=ActionVoxel_Retain(open);
+    ActRaiserActionBg_PrepareVoxel(false,NULL);CHECK(!ActRaiserActionBg_VoxelGeometry(group,map_number));
+    ActionVoxel_Gates(display,&count);CHECK(count==0);ActionVoxel_Release(display);
+    ActRaiserActionBg_PrepareVoxel(true,NULL);CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number));
+    ppu->inidisp=0x80;ActRaiserActionBg_PrepareVoxel(true,NULL);CHECK(!ActRaiserActionBg_VoxelGeometry(group,map_number));
+    ActionVoxel_Release(closed);
+  }
+  if(closed && group==1) {
+    /* Automatic masks bind without any editor overrides and preserve native
+     * priority. Disabling Voxel must clear the capture binding. */
+    ActionBgPlan cutout_plan;ActionBgPresentationPolicy cutout_policy;
+    CHECK(ActRaiserActionBg_BuildPlan(g_ram,sizeof(g_ram),ppu,true,&cutout_plan,&cutout_policy));
+    CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(g_ram,sizeof(g_ram),&cutout_plan,NULL,ppu)&1);
+    CHECK(ActRaiserActionBg_BindCaptureTiles(3,0));
+    CHECK(ActRaiserActionBg_CaptureTilesBound(0));
+    const SrPpuCaptureTileBinding *binding=&ppu->captureTiles[0];
+    CHECK(binding->lookup);
+    if(binding->lookup) {
+      SrPpuCaptureTile tile={0};
+      CHECK(binding->lookup(binding->user_data,40,47,&tile));
+      CHECK(tile.transparent_rows[7]==0xff && !tile.black_rows[7]);
+      CHECK(tile.band==1 && !tile.flags);
+    }
+    ActRaiserActionBg_PrepareVoxel(false,NULL);
+    CHECK(ActRaiserActionBg_BindCaptureTiles(3,0));
+    CHECK(!ActRaiserActionBg_CaptureTilesBound(0) && !ppu->captureTiles[0].lookup);
+    uint8_t retained_rows[8]={0};
+    CHECK(ActionVoxel_CutoutRows(closed,40,47,retained_rows) && retained_rows[7]==0xff);
+    ActRaiserActionBg_PrepareVoxel(true,NULL);
+    ActionVoxel_Release(closed);
+    closed=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,map_number));CHECK(closed);
+    unsigned count;ActionVoxel_WaterSurfaces(closed,&count);CHECK(count==3);
+    ActRaiserActionBg_PrepareVoxel(true,NULL);CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+    ppu->vram[0x1000]^=1; /* Water phases update texture data, not pool topology. */
+    ActRaiserActionBg_PrepareVoxel(true,NULL);CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+    const unsigned cell=(19/16*scene->bg[1].pages_wide+70/16)*256+(19%16)*16+70%16;
+    g_ram[kActRaiserWram_Bg2Map+cell]=0;
+    ActRaiserActionBg_PrepareVoxel(true,NULL);
+    const ActionVoxelGeometry *split=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,map_number));
+    CHECK(split && split!=closed);ActionVoxel_WaterSurfaces(split,&count);CHECK(count==4);
+    ActionVoxel_WaterSurfaces(closed,&count);CHECK(count==3); /* Old queued frame retains all pools. */
+    DioramaRoomOverride *room=calloc(1,sizeof(*room));CHECK(room);
+    if(room) {
+      room->pixel_layers[1].count=1;
+      DioramaPixelEdit *edit=&room->pixel_layers[1].edits[0];
+      *edit=(DioramaPixelEdit){.by_cell=true,.x=69,.y=19};
+      for(unsigned i=0;i<16;++i)edit->transparent[i]=0xffff;
+      ActRaiserActionBg_PrepareVoxel(true,room);
+      const ActionVoxelGeometry *masked=ActRaiserActionBg_VoxelGeometry(group,map_number);CHECK(masked && masked!=split);
+      const VoxelWaterSurface *water=ActionVoxel_WaterSurfaces(masked,&count);unsigned width=0;
+      for(unsigned i=0;i<count;++i)width+=water[i].width;
+      CHECK(width==1280); /* Native and authored edits each remove one 16px pool cell. */
+      ActRaiserActionBg_PrepareVoxel(true,room);CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==masked);
+      free(room);
+    }
+    ActRaiserActionBg_PrepareVoxel(false,NULL);CHECK(!ActRaiserActionBg_VoxelGeometry(group,map_number));
+    ActionVoxel_WaterSurfaces(split,&count);CHECK(count==4);
+    ActionVoxel_Release(split);ActionVoxel_Release(closed);
+  }
+  ActRaiserActionBg_Shutdown();BindFakePpu(NULL);free(ppu);free(scene);free(rom);
+}
+
+int main(int argc, char **argv) {
   TestNativePixelEditScrollAndPolicy();
   TestDeathHeimNativeCaptureEdits();
+  TestDeathHeimExtensionRowPolicy();
   TestDeathHeimRematchCaptureEdits();
   TestCapture();
   TestVerticalMargins();
@@ -2036,6 +2656,30 @@ int main(void) {
   TestObserverDoesNotRepublishProviderWorld();
   TestVirtualLayerClassificationBinding();
   TestMarahnaCyclicBackdropBinding();
+  if (argc == 2) {
+    TestLiveVoxelPublication(argv[1],2,8);
+    TestLiveVoxelPublication(argv[1],1,2);
+    for(unsigned room=1;room<=6;++room)TestLiveVoxelPublication(argv[1],3,room);
+    for(unsigned room=4;room<=7;++room)TestLiveVoxelPublication(argv[1],4,room);
+    for(unsigned room=4;room<=8;++room)TestLiveVoxelPublication(argv[1],5,room);
+  }
+  if(argc==3 && !strcmp(argv[2],"--desert-animation"))
+    for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain)
+      for(unsigned room=1;room<=2;++room)TestLiveVoxelPublication(argv[1],3,room);
+  if(argc==3 && !strcmp(argv[2],"--castle-animation"))
+    for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain) {
+      TestLiveVoxelPublication(argv[1],2,3);TestLiveVoxelPublication(argv[1],2,5);
+    }
+  /* Scene loading uses canonical US ROM offsets. Regional layouts follow
+   * the same explicit terrain projection and publication setup as the game;
+   * this synthetic PPU check is not a native gameplay traversal. */
+  if (argc == 2 || (argc == 3 && !strcmp(argv[2],"--new-levels"))) {
+    for(voxel_terrain=0;voxel_terrain<(argc==3?3:1);++voxel_terrain) {
+    for(unsigned room=1;room<=8;++room)
+      if (room!=6 && room!=7) TestLiveVoxelPublication(argv[1],6,room);
+    for(unsigned room=1;room<=8;++room)TestLiveVoxelPublication(argv[1],7,room);
+    }
+  }
   if (failures) {
     fprintf(stderr, "%d failure(s)\n", failures);
     return 1;

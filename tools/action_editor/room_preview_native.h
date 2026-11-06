@@ -11,6 +11,14 @@ unsigned RoomPreview_SkyboxRoom(void);
 int RoomPreview_LoadSkybox(unsigned size);
 int RoomPreview_Load(unsigned size);
 int RoomPreview_LoadPlayer(unsigned size);
+/* Raw native .arobj packet, read from DioramaPreview_Input(). Room/terrain
+ * mismatch leaves the previous packet intact. Native and stand-in actors
+ * are mutually exclusive. Clearing restores the ordinary editor preview. */
+int RoomPreview_LoadObjects(unsigned size);
+void RoomPreview_ClearObjects(void);
+/* int32[14]: group, room, terrain, native GF, camera X/Y, world origin X/Y,
+ * capture width/height, prop/actor counts, extra X/top. Returns 0 if absent. */
+unsigned RoomPreview_ObjectInfo(void);
 int RoomPreview_SetReceivers(int mask, int player_x, int player_y, int enemy_x, int enemy_y);
 int RoomPreview_ReceiverStyle(unsigned flipped, unsigned rim);
 void RoomPreview_EnableEffects(int enabled);
@@ -24,6 +32,7 @@ void RoomPreview_Reset(void);
 unsigned RoomPreview_Width(void);
 unsigned RoomPreview_Height(void);
 int RoomPreview_CameraX(void);
+int RoomPreview_Set3DMode(int mode);
 int RoomPreview_SetView(float distance, float yaw, float pitch, int aspect_mode, int dynamic_camera);
 /* Five floats per opening in DioramaPreview_Input(): centre, width, power,
  * edge offset and reach, all relative to the authored region. */

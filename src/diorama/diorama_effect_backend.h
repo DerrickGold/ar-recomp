@@ -66,7 +66,7 @@ typedef struct DioramaPrioritySurfaceEffectParams {
   bool additive;
 } DioramaPrioritySurfaceEffectParams;
 
-/* Incoming light is stored at half strength in an RGBA8 target (range 0..2).
+/* Incoming light is stored at quarter strength in an RGBA8 target (range 0..4).
  * Ambient exposure remains in vertex RGB. The material shades original art
  * with ambient + local light, retaining alpha and the normal layer filtering. */
 typedef struct DioramaSceneryLightEffectParams {

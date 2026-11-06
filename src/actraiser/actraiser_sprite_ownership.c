@@ -28,8 +28,12 @@ void ActRaiserSpriteOwnership_Record(ActRaiserSpriteRole role,
   }
   if (role == kActRaiserSprite_Unowned && end_byte > first_byte)
     s_build.unowned_emitted = true;
-  for (unsigned slot = first_byte / 4; slot < end_byte / 4; ++slot)
+  for (unsigned slot = first_byte / 4; slot < end_byte / 4; ++slot) {
     s_build.slots[slot] = (uint8_t)role;
+    s_build.prop_owner[slot] = 0;
+    s_build.prop_shape[slot] = 0;
+    s_build.prop_origin_x[slot] = s_build.prop_origin_y[slot] = 0;
+  }
 }
 
 void ActRaiserSpriteOwnership_RecordAction(uint16_t source,
@@ -66,6 +70,78 @@ void ActRaiserSpriteOwnership_RecordActionObject(uint16_t source,uint16_t record
   if(role==kActRaiserSprite_Unowned || (end_byte>first_byte && s_build.slots[first_byte/4]==kActRaiserSprite_StatueEyes))return;
   ActRaiserSpriteOwnership_Record(role,first_byte,end_byte);
   for(unsigned slot=first_byte/4;slot<end_byte/4;++slot){s_build.world_x[slot]=x;s_build.world_y[slot]=y;}
+}
+
+static bool WallTorch(uint16_t source,uint16_t animation,uint8_t bank) {
+  return s_build.group==kActRaiserMapGroup_Bloodpool &&
+      (s_build.map==3 || s_build.map==5) && source==0xba01 &&
+      bank==0x7e && animation==0x4000;
+}
+
+void ActRaiserSpriteOwnership_RecordWallTorchPart(uint16_t source,uint16_t record,
+    uint16_t animation,uint8_t bank,int16_t origin_x,int16_t origin_y,
+    int16_t world_x,int16_t world_y,int16_t x,int16_t y,uint16_t tile_attr,uint8_t size) {
+  /* Each reviewed native flame picture is one 16x16 part. An unknown shape or
+   * full metadata list stays native; never publish an inferred replacement. */
+  if (!s_build.valid || !WallTorch(source,animation,bank) || size!=16 ||
+      ActRaiserSpriteOwnership_ActionRole(record)!=kActRaiserSprite_Enemy ||
+      s_build.wall_torch_part_count==kActRaiserWallTorchPartLimit) return;
+  s_build.wall_torch_parts[s_build.wall_torch_part_count++]=(ActRaiserWallTorchPart){
+      .owner=record,.tile_attr=tile_attr,.x=x,.y=y,.origin_x=origin_x,.origin_y=origin_y,
+      .world_x=world_x,.world_y=world_y,.size=size};
+}
+
+void ActRaiserSpriteOwnership_RecordActionVisual(uint16_t source,uint16_t record,
+    uint16_t animation,uint8_t bank,uint16_t composition,
+    int16_t origin_x,int16_t origin_y,
+    unsigned first_byte,unsigned end_byte) {
+  if (!s_build.valid || first_byte > end_byte || end_byte > 512 ||
+      (first_byte & 3) || (end_byte & 3) ||
+      ActRaiserSpriteOwnership_ActionRole(record) != kActRaiserSprite_Enemy)
+    return;
+  /* Bloodpool's $B499/$B4C0 floating/falling log actors retain their native
+   * flat artwork in every state. Their $A686 collision companions and native
+   * priority remain unchanged. Static BG1 bridge logs have their own reviewed
+   * map-material geometry; they do not use this sprite-prop path. */
+  /* The lava crossing's $D601 emitter keeps composition $4750 while falling
+   * under $8661. Its linked $A686 collision record emits no OAM. This is an
+   * observed composition identity, independent of pose, position and handler. */
+  const bool rock = s_build.group==kActRaiserMapGroup_Aitos && s_build.map==5 &&
+      source==0xd601 && bank==0x7e && animation==0x4000 && composition==0x4750;
+  unsigned shape=rock?kActRaiserSpriteProp_RockPlatform:0;
+  /* Bloodpool's stationary $BA01 decoration loops in $BA0D with animation
+   * state 8 (three native flame pictures). Its sconce and existing glow live
+   * on BG1. Source descriptors are canonical US native identities even when
+   * regional terrain/artwork is selected. Do not match fire enemies, their
+   * projectiles, or the neighbouring $BA12/$BA23 scenery descriptors. */
+  if (WallTorch(source,animation,bank))
+    shape=kActRaiserSpriteProp_WallTorch;
+  /* Observed temple emitters, including their falling $8661 states. The
+   * source/animation/composition contract excludes collision helpers and the
+   * similarly moving $E3A1 skull. Native parts still provide pixels/priority. */
+  if (s_build.group==kActRaiserMapGroup_Marahna && bank==0x7e) {
+    if (animation==0x4000) {
+      if (s_build.map==4 && source==0xe42a && composition==0x49f4)
+        shape=kActRaiserSpriteProp_TempleBridge;
+      if ((s_build.map==5 && source==0xe2d1) || (s_build.map==7 && source==0xe2a6)) {
+        if (composition==0x48be) shape=kActRaiserSpriteProp_TemplePlatform;
+      }
+      if (s_build.map==7 && source==0xe292 && composition==0x488f)
+        shape=kActRaiserSpriteProp_TempleCrusher;
+      if (s_build.map==7 && source==0xe2bd && composition==0x48d1)
+        shape=kActRaiserSpriteProp_TempleSpikes;
+    } else if (s_build.map==8 && animation==0x5000) {
+      if (source==0xe5cf && composition==0x5ccd) shape=kActRaiserSpriteProp_TemplePlatform;
+      if (source==0xe606 && composition==0x6022) shape=kActRaiserSpriteProp_TempleSpikeRail;
+    }
+  }
+  for (unsigned slot = first_byte / 4; slot < end_byte / 4; ++slot) {
+    if (s_build.slots[slot] != kActRaiserSprite_Enemy) continue;
+    s_build.prop_owner[slot] = shape ? record : 0;
+    s_build.prop_shape[slot] = shape;
+    s_build.prop_origin_x[slot] = origin_x;
+    s_build.prop_origin_y[slot] = origin_y;
+  }
 }
 
 void ActRaiserSpriteOwnership_RecordSim(uint16_t record, uint16_t family,
@@ -106,6 +182,21 @@ void ActRaiserSpriteOwnership_RecordSim(uint16_t record, uint16_t family,
 }
 
 void ActRaiserSpriteOwnership_Complete(const uint8_t *shadow) {
+  /* OAM owners retain their existing first-slot tags. Apron-only torches use
+   * unused tags from the same bounded domain, so the existing winner mask can
+   * distinguish their pixels from every other modeled owner. */
+  bool used[kActRaiserSpriteSlots+1]={false};
+  for(unsigned i=0;i<kActRaiserSpriteSlots;++i) {
+    const unsigned tag=ActRaiserSpriteOwnership_PropTag(&s_build,s_build.prop_owner[i]);
+    if(tag)used[tag]=true;
+  }
+  for(unsigned i=0;i<s_build.wall_torch_part_count;++i) {
+    ActRaiserWallTorchPart *part=&s_build.wall_torch_parts[i];
+    unsigned tag=ActRaiserSpriteOwnership_PropTag(&s_build,part->owner);
+    if(!tag)for(tag=kActRaiserSpriteSlots;tag && used[tag];--tag) {}
+    part->owner_tag=(uint8_t)tag;
+    if(tag)used[tag]=true;
+  }
   s_staged = s_build;
   s_build.valid = false;
   if (!shadow) s_staged.valid = false;

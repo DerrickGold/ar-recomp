@@ -4,9 +4,14 @@
 #include <SDL3/SDL.h>
 #include <errno.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 #include "benchmark_probe.h"
 #include "room_preview_native.h"
 #include "platform/sdl/action_effect_source_sdl.h"
@@ -18,6 +23,8 @@
 static uint8_t s_input[8 * 1024 * 1024 + 1];
 typedef struct ReceiverRoute {int mask,x[2],y[2];} ReceiverRoute;
 static ReceiverRoute s_receiver_route[100000];
+static char **s_object_sequence;
+static unsigned s_object_sequence_count;
 static ArRenderDevice s_device;
 static ArGpuEffectSource s_source;
 static SDL_GPUBuffer *s_motion;
@@ -155,6 +162,32 @@ static bool SavePng(const char *path) {
   SDL_DestroySurface(image);
   return ok;
 }
+/* Capture-only transport: the same completed SDL target as SavePng, converted
+ * to byte-order RGBA with no row padding or frame headers. A FIFO reader may
+ * encode while rendering continues; ordinary benchmark timing is untouched. */
+static bool SaveRaw(FILE *file, int width, int height) {
+  SDL_Surface *image = SDL_RenderReadPixels(ArSdlRenderBackend_Renderer(&s_device), NULL);
+  if (!image) return false;
+  if (image->format != SDL_PIXELFORMAT_RGBA32) {
+    SDL_Surface *rgba = SDL_ConvertSurface(image, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(image);
+    image = rgba;
+    if (!image) return false;
+  }
+  bool ok = image->w == width && image->h == height && image->pitch >= width * 4;
+  if (!ok) SDL_SetError("raw capture extent is %dx%d, expected %dx%d", image->w, image->h, width, height);
+  if (ok && image->pitch == width * 4) {
+    const size_t bytes = (size_t)width * height * 4;
+    ok = fwrite(image->pixels, 1, bytes, file) == bytes;
+  } else if (ok) {
+    const size_t bytes = (size_t)width * 4;
+    for (int y = 0; y < height && ok; ++y)
+      ok = fwrite((const uint8_t *)image->pixels + (size_t)y * image->pitch, 1, bytes, file) == bytes;
+  }
+  if (!ok && ferror(file)) SDL_SetError("raw capture write failed: %s", strerror(errno));
+  SDL_DestroySurface(image);
+  return ok;
+}
 static bool CloseOutput(FILE **file, const char *path) {
   bool ok = !ferror(*file);
   if (fclose(*file) != 0) ok = false;
@@ -177,6 +210,43 @@ static bool Sibling(char *out, size_t capacity, const char *path, const char *na
   int n = snprintf(out, capacity, "%.*s%s", slash ? (int)(slash - path + 1) : 0, path, name);
   if (n >= 0 && (size_t)n < capacity) return true;
   return SDL_SetError("asset path too long: %s", path);
+}
+/* Exactly one native packet per output frame. Relative names are resolved
+ * beside this manifest; native camera/clock metadata drives the capture.
+ * This is a recorded object sequence, not a simulated editor actor route. */
+static bool ReadObjectSequence(const char *path,unsigned frames) {
+  size_t size=0;char *text=SDL_LoadFile(path,&size);
+  if(!text || !size || size>32*1024*1024 || memchr(text,0,size)) {
+    SDL_free(text);return SDL_SetError("invalid native object manifest: %s",path);
+  }
+  s_object_sequence=calloc(frames,sizeof(*s_object_sequence));
+  if(!s_object_sequence){SDL_free(text);return SDL_SetError("native object manifest allocation failed");}
+  char *cursor=text,*end=text+size;
+  bool ok=true;
+  while(cursor<end && s_object_sequence_count<frames) {
+    char *newline=memchr(cursor,'\n',(size_t)(end-cursor));
+    char *last=newline?newline:end;
+    if(last>cursor && last[-1]=='\r')--last;
+    if(last==cursor){ok=false;break;}
+    *last=0;
+    char resolved[4096];
+    if(cursor[0]=='/' || cursor[0]=='\\' || (cursor[0] && cursor[1]==':')) {
+      if(strlen(cursor)>=sizeof(resolved)){ok=false;break;}
+      strcpy(resolved,cursor);
+    } else if(!Sibling(resolved,sizeof(resolved),path,cursor)){ok=false;break;}
+    FILE *input=fopen(resolved,"rb");
+    if(!input){SDL_SetError("missing native object packet: %s",resolved);ok=false;break;}
+    const int first=fgetc(input);fclose(input);
+    if(first==EOF){SDL_SetError("empty native object packet: %s",resolved);ok=false;break;}
+    size_t length=strlen(resolved)+1;
+    char *copy=malloc(length);
+    if(!copy){ok=false;break;}
+    memcpy(copy,resolved,length);s_object_sequence[s_object_sequence_count++]=copy;
+    cursor=newline?newline+1:end;
+  }
+  if(cursor!=end || s_object_sequence_count!=frames)ok=false;
+  SDL_free(text);
+  return ok?true:SDL_SetError("native object manifest requires exactly %u nonempty existing packet paths",frames);
 }
 static bool InitMotion(SDL_GPUDevice *gpu) {
   const SDL_GPUBufferCreateInfo info = {.size = 256,
@@ -220,7 +290,12 @@ int main(int argc, char **argv) {
             "AR_BENCH_PROFILE=path.csv adds owner-thread CPU and submission diagnostics.\n"
             "AR_BENCH_FRAME_PROBE=library enables the optional Vulkan timestamp probe.\n"
             "AR_BENCH_CAPTURE=directory captures every frame instead of timing.\n"
+            "AR_BENCH_CAPTURE_RAW=file-or-FIFO writes tightly packed RGBA8 frames instead;\n"
+            "'-' writes binary stdout, with diagnostics on stderr. No PNG/profiling options.\n"
             "AR_BENCH_RECEIVER_ROUTE=path.csv supplies mask,player-x,player-y,enemy-x,enemy-y per frame.\n"
+            "AR_BENCH_OBJECT_FRAME=frame.arobj adds a finite frozen native object capture.\n"
+            "AR_BENCH_OBJECT_SEQUENCE=paths.txt supplies one native packet per output frame;\n"
+            "its recorded camera and native clock drive the route (requires player-x=-1).\n"
             "AR_BENCH_FLAT=1 selects standard widescreen (requires effects=0, player-x=-1);\n"
             "flat mode ignores the Diorama layer/effect INIs.\n",
             argv[0]);
@@ -252,15 +327,28 @@ int main(int argc, char **argv) {
     return 2;
   }
   const char *capture_dir = EnvPath("AR_BENCH_CAPTURE");
+  const char *raw_path = EnvPath("AR_BENCH_CAPTURE_RAW");
+  const bool capture_only = capture_dir || raw_path;
   const char *profile_path = EnvPath("AR_BENCH_PROFILE");
   const char *probe_path = EnvPath("AR_BENCH_FRAME_PROBE");
   const char *shot = EnvPath("AR_BENCH_SHOT");
   const char *receiver_route=EnvPath("AR_BENCH_RECEIVER_ROUTE");
+  const char *object_frame=EnvPath("AR_BENCH_OBJECT_FRAME");
+  const char *object_sequence=EnvPath("AR_BENCH_OBJECT_SEQUENCE");
+  const bool objects=object_frame||object_sequence;
+  if(objects && (flat || px>=0 || receiver_route || (object_frame&&object_sequence))) {
+    fprintf(stderr,"[benchmark] native object packets require Diorama/Voxel mode, player-x=-1, and no stand-in route; choose frame or sequence\n");
+    return 2;
+  }
+  const char *yaw_env=EnvPath("AR_BENCH_YAW"), *pitch_env=EnvPath("AR_BENCH_PITCH");
+  const float yaw=yaw_env ? strtof(yaw_env,NULL) : 0;
+  const float pitch=pitch_env ? strtof(pitch_env,NULL) : 0;
   if(receiver_route&&(flat||!ReadReceiverRoute(receiver_route,(unsigned)frames))) {
     fprintf(stderr,"[benchmark] invalid receiver route: expected %d rows of mask,x,y,x,y\n",frames);
     return 2;
   }
-  if ((capture_dir && (probe_path || profile_path)) ||
+  if ((capture_only && (probe_path || profile_path)) ||
+      (raw_path && (capture_dir || shot || !strcmp(raw_path, argv[1]))) ||
       (profile_path && !strcmp(profile_path, argv[1])) ||
       (shot && (!strcmp(shot, argv[1]) || (profile_path && !strcmp(shot, profile_path))))) {
     fprintf(stderr, "[benchmark] capture cannot be profiled; output paths must be distinct\n");
@@ -271,11 +359,13 @@ int main(int argc, char **argv) {
   SDL_Window *window = NULL;
   SDL_GPUDevice *gpu = NULL;
   FILE *trace = NULL, *profile = NULL;
+  FILE *raw = NULL;
   bool preparing = false, probe_open = false;
   /* Diagnostic probes can tag existing work without linking a native GPU API
    * into the shared renderer. The optional library owns its measurements. */
   SDL_SharedObject *probe = NULL;
   ArRoomBenchmarkFrameProbe probe_frame = NULL;
+  if(object_sequence && !ReadObjectSequence(object_sequence,(unsigned)frames))goto cleanup;
   if (probe_path) {
     probe = SDL_LoadObject(probe_path);
     if (!probe ||
@@ -312,6 +402,8 @@ int main(int argc, char **argv) {
         !Load(path, RoomPreview_LoadPlayer) || !RoomPreview_ReceiverStyle(1, 1))
       goto cleanup;
   }
+  if (getenv("AR_BENCH_ACTION_3D") && !RoomPreview_Set3DMode(atoi(getenv("AR_BENCH_ACTION_3D")))) goto cleanup;
+  if(object_frame && !Load(object_frame,RoomPreview_LoadObjects))goto cleanup;
   RoomPreview_EnableEffects(enabled);
   fprintf(stderr, "[benchmark] presentation=%s\n", flat ? "flat-widescreen" : "diorama");
   RoomPreview_SetSourceProjection(Effects, Skybox);
@@ -322,6 +414,24 @@ int main(int argc, char **argv) {
   if (!trace) {
     SDL_SetError("%s: %s", argv[1], strerror(errno));
     goto cleanup;
+  }
+  if (raw_path) {
+    operation = "open raw capture output";
+    raw = !strcmp(raw_path, "-") ? stdout : fopen(raw_path, "wb");
+    if (!raw) {
+      SDL_SetError("%s: %s", raw_path, strerror(errno));
+      goto cleanup;
+    }
+#ifdef _WIN32
+    if (raw == stdout && _setmode(_fileno(stdout), _O_BINARY) == -1) {
+      SDL_SetError("could not select binary stdout: %s", strerror(errno));
+      goto cleanup;
+    }
+#else
+    /* A failed encoder must produce a checked write error, not terminate the
+     * process before the trace and renderer can be closed. */
+    signal(SIGPIPE, SIG_IGN);
+#endif
   }
   if (profile_path) {
     profile = fopen(profile_path, "w");
@@ -339,9 +449,11 @@ int main(int argc, char **argv) {
         "frame,prepare_cpu_ms,compose_cpu_ms,wait_cpu_ms,effects_wall_ms,effects_cpu_ms,sky_wall_"
         "ms,sky_cpu_ms,packets,light_jobs,shadow_rectangles,primitive_bytes,draws,submissions\n");
   }
-  fprintf(trace, capture_dir ? "frame,requested_x,requested_y,clock\n"
+  fprintf(trace, capture_only ? "frame,requested_x,requested_y,clock"
                              : "frame,requested_x,requested_y,clock,primitives,vertices,prepare_ms,"
-                               "compose_submit_ms,submit_elapsed_ms,gpu_wait_ms,complete_ms\n");
+                               "compose_submit_ms,submit_elapsed_ms,gpu_wait_ms,complete_ms");
+  if(objects)fprintf(trace,",object_frame,object_source_x,object_source_y,object_props,object_actors");
+  fputc('\n',trace);
   const double scale = 1000.0 / SDL_GetPerformanceFrequency();
   double total = 0, prepare = 0, compose = 0, wait = 0;
   for (int i = -warmup; i < frames; ++i) {
@@ -352,7 +464,7 @@ int main(int argc, char **argv) {
     if (i == 0) {
       GpuCompileLog_EndPreparation();
       preparing = false;
-      fprintf(stderr, "[benchmark] %s\n", capture_dir ? "capture-only" : "timed-begin");
+      fprintf(stderr, "[benchmark] %s\n", capture_only ? "capture-only" : "timed-begin");
       fflush(stderr);
     }
     /* Warm the whole route and animation interval, then seek back. This
@@ -366,6 +478,14 @@ int main(int argc, char **argv) {
     const unsigned route_frame=i>=0?(unsigned)i:warmup>1?
         (unsigned)(((uint64_t)(i+warmup)*(frames-1)+(warmup-1)/2)/(warmup-1)):0;
     uint32_t tick = (uint32_t)clock + route_frame * (uint32_t)step;
+    int32_t object_info[14]={0};
+    if(objects) {
+      operation="load native object packet";
+      if(object_sequence && !Load(s_object_sequence[route_frame],RoomPreview_LoadObjects))goto cleanup;
+      if(RoomPreview_ObjectInfo()!=14)goto cleanup;
+      memcpy(object_info,s_input,sizeof(object_info));
+      if(object_sequence) {cx=object_info[4];cy=object_info[5];tick=(uint32_t)object_info[3];}
+    }
     result = 5;
     operation = "render frame";
     if(receiver_route) {
@@ -386,7 +506,8 @@ int main(int argc, char **argv) {
     const uint64_t draws = s_source.draws, submissions = s_source.submissions, cpu_start = CpuNow();
     const uint64_t start = SDL_GetPerformanceCounter();
     const bool rendered = flat ? RoomPreview_RenderFlat(cx, cy, tick, width, height, 0) :
-        RoomPreview_Render(cx, cy, tick, 120, 64, width, height, 1, 0, 0, sky, 0);
+        RoomPreview_Render(cx, cy, tick, objects?object_info[12]:120, 64, width, height, 1,
+            yaw, pitch, sky, 0);
     if (!rendered ||
         !ArSdlRenderBackend_SubmitPending(&s_device))
       goto cleanup;
@@ -396,17 +517,23 @@ int main(int argc, char **argv) {
     const uint64_t end = SDL_GetPerformanceCounter();
     const uint64_t cpu_end = CpuNow();
     if (i < 0) continue;
-    if (capture_dir) {
-      char filename[2048];
-      int length = snprintf(filename, sizeof(filename), "%s/frame-%06d.png", capture_dir, i);
+    if (capture_only) {
       result = 6;
-      operation = "write PNG capture";
-      if (length < 0 || (size_t)length >= sizeof(filename)) {
-        SDL_SetError("capture path too long");
-        goto cleanup;
+      operation = raw ? "write raw capture" : "write PNG capture";
+      if (raw) {
+        if (!SaveRaw(raw, width, height)) goto cleanup;
+      } else {
+        char filename[2048];
+        int length = snprintf(filename, sizeof(filename), "%s/frame-%06d.png", capture_dir, i);
+        if (length < 0 || (size_t)length >= sizeof(filename)) {
+          SDL_SetError("capture path too long");
+          goto cleanup;
+        }
+        if (!SavePng(filename)) goto cleanup;
       }
-      if (!SavePng(filename)) goto cleanup;
-      fprintf(trace, "%d,%d,%d,%u\n", i, cx, cy, tick);
+      fprintf(trace, "%d,%d,%d,%u", i, cx, cy, tick);
+      if(objects)fprintf(trace,",%u,%d,%d,%d,%d",(uint32_t)object_info[3],object_info[4],object_info[5],object_info[10],object_info[11]);
+      fputc('\n',trace);
       continue;
     }
     double p = (s_prepared - start) * scale, c = (submitted - s_prepared) * scale;
@@ -415,8 +542,10 @@ int main(int argc, char **argv) {
     compose += c;
     wait += w;
     total += e;
-    fprintf(trace, "%d,%d,%d,%u,%u,%u,%.6f,%.6f,%.6f,%.6f,%.6f\n", i, cx, cy, tick, s_primitives,
+    fprintf(trace, "%d,%d,%d,%u,%u,%u,%.6f,%.6f,%.6f,%.6f,%.6f", i, cx, cy, tick, s_primitives,
             RoomPreview_EffectVertices(), p, c, p + c, w, e);
+    if(objects)fprintf(trace,",%u,%d,%d,%d,%d",(uint32_t)object_info[3],object_info[4],object_info[5],object_info[10],object_info[11]);
+    fputc('\n',trace);
     if (profile)
       fprintf(profile, "%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%u,%u,%u,%llu,%llu\n", i,
               (s_prepared_cpu - cpu_start) * 1e-6, (cpu_submitted - s_prepared_cpu) * 1e-6,
@@ -441,8 +570,10 @@ int main(int argc, char **argv) {
   result = 6;
   operation = "write final PNG";
   if (shot && !SavePng(shot)) goto cleanup;
-  if (capture_dir)
-    printf("capture-only: %d frames; timings intentionally omitted\n", frames);
+  operation = "close raw capture output";
+  if (raw && !CloseOutput(&raw, raw_path)) goto cleanup;
+  if (capture_only)
+    fprintf(raw_path ? stderr : stdout, "capture-only: %d frames; timings intentionally omitted\n", frames);
   else
     printf("backend=%s size=%dx%d frames=%d effects=%u enabled=%d prepare_ms=%.4f "
            "compose_submit_ms=%.4f gpu_wait_ms=%.4f complete_ms=%.4f\n",
@@ -458,6 +589,7 @@ cleanup:
   if (probe_open && gpu && SDL_WaitForGPUIdle(gpu)) probe_frame(kArRoomBenchmarkProbeClosed);
   if (trace) fclose(trace);
   if (profile) fclose(profile);
+  if (raw) fclose(raw);
   if (ArRenderDevice_IsReady(&s_device)) RoomPreview_Reset();
   ArGpuEffectSource_Destroy(&s_source);
   if (s_motion) SDL_ReleaseGPUBuffer(gpu, s_motion);
@@ -465,5 +597,7 @@ cleanup:
   if (window) SDL_DestroyWindow(window);
   SDL_Quit();
   if (probe) SDL_UnloadObject(probe);
+  for(unsigned i=0;i<s_object_sequence_count;++i)free(s_object_sequence[i]);
+  free(s_object_sequence);
   return result;
 }

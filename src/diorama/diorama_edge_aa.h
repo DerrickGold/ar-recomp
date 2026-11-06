@@ -47,4 +47,16 @@ bool DioramaEdgeAa_BuildFringe(
     int32_t *out_indices, int index_capacity,
     int *out_vertex_count, int *out_index_count);
 
+/* Coverage belongs to the boundary sample. Inner and outer fringe vertices
+ * retain that boundary's depth; the transparent rim is not extra solid world
+ * geometry. Depth arrays must either both be supplied or both be NULL. */
+bool DioramaEdgeAa_BuildFringeDepth(
+    const ArRenderVertex2D *grid, const float *depths, int subdiv_x, int subdiv_y,
+    float width_pixels, DioramaEdgeAaMask edge_mask,
+    float u_min, float u_max, float v_min, float v_max,
+    float texel_width, float texel_height,
+    ArRenderVertex2D *out_vertices, float *out_depths, int vertex_capacity,
+    int32_t *out_indices, int index_capacity,
+    int *out_vertex_count, int *out_index_count);
+
 #endif /* AR_DIORAMA_EDGE_AA_H */

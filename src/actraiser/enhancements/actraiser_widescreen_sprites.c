@@ -1099,11 +1099,20 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
             s_action_ppu_state_valid ? &s_action_ppu_state : NULL, part.large);
         if (ActionApron_PartTouchesApron(&apron_geom, exact_x, size)) {
           const ActionApronReceiver receiver = {
+              .owner = object_address,
               .x = (int16_t)cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_WorldX),
               .y = (int16_t)cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_WorldY),
               .role = (uint8_t)ActRaiserSpriteOwnership_ActionRole(object_address)};
-          (void)ActionApron_AddOwnedPart(
-              &apron_geom, exact_x, exact_y, rendered_attributes, size, receiver);
+          if (ActionApron_AddOwnedPart(
+              &apron_geom, exact_x, exact_y, rendered_attributes, size, receiver))
+            ActRaiserSpriteOwnership_RecordWallTorchPart(
+                cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_SourceDescriptor),
+                object_address,
+                cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_AnimationAddress),
+                cpu_read8(cpu,cpu->DB,object_address+kActRaiserActionObject_AnimationBank),
+                (int16)(screen_origin_x-kSpriteDrawBias),
+                (int16)(screen_origin_y-(kSpriteDrawBias+1)),receiver.x,receiver.y,
+                (int16)exact_x,(int16)exact_y,rendered_attributes,size);
         }
       }
 
@@ -1207,6 +1216,16 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
       (int16_t)cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_WorldX),
       (int16_t)cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_WorldY),
       oam_before, oam_offset);
+
+  ActRaiserSpriteOwnership_RecordActionVisual(
+      cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_SourceDescriptor),
+      object_address,
+      cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_AnimationAddress),
+      cpu_read8(cpu,cpu->DB,object_address+kActRaiserActionObject_AnimationBank),
+      cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_Composition),
+      (int16)(screen_origin_x-kSpriteDrawBias),
+      (int16)(screen_origin_y-(kSpriteDrawBias+1)),
+      oam_before,oam_offset);
 
   /* Emulate the replaced RTS; the generated paired caller then restores S. */
   cpu->S = (uint16)(cpu->S + 2);

@@ -1,4 +1,5 @@
 #include <SDL3/SDL.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -66,6 +67,158 @@ static void Benchmark(SDL_GPUDevice *gpu, ArGpuGlobalMotion *global, ArGpuBlockM
         (double)total / (Samples * Batch * 1e6), (double)encode / (Samples * Batch * 1e6));
     fflush(stdout);
   }
+}
+
+/* Cutout foliage, partial-alpha water and native opaque black have different
+ * coverage contracts. Exercise the real GPU kernels against a color/coverage
+ * oracle, not merely atlas/direct agreement (both use the same shader). */
+static uint32_t CoveragePixel(unsigned endpoint, unsigned plane, int x, int y) {
+  const uint32_t leaf = endpoint ? 0x0050c840u : 0x00288018u;
+  const bool odd = (x + y) & 1;
+  switch (plane) {
+    case 0: return odd ? 0 : 0xff000000u | leaf;
+    case 1: return x & 1 ? 0xc01840d0u : 0x40d08020u;
+    case 2: return 0xff000000u | (odd ? 0x00102808u : leaf);
+    case 3: return odd ? 0x00ff19c0u : 0xff000000u | leaf;
+    case 4: return ((x * 29u + y * 43u + endpoint * 61u) << 24) | leaf;
+    case 5: return 0xff000000u;
+    case 6: return 0x70000000u | leaf;
+    default: return 0x00f030a0u; /* Preserve hidden RGB at exact endpoints. */
+  }
+}
+
+static uint32_t CoverageExpected(unsigned plane, int x, int y, int width,
+    int height, float phase, bool correct) {
+  if (plane == 4 || phase == 1) return CoveragePixel(1, plane, x, y);
+  if (phase == 0) return CoveragePixel(0, plane, x, y);
+  const unsigned endpoint = phase >= .5f;
+  const float displacement = endpoint ? -2 * (1 - phase) : 2 * phase;
+  float sx = x - displacement, sy = y - displacement;
+  if (sx < -.5f || sy < -.5f || sx >= width - .5f || sy >= height - .5f) return 0;
+  sx = SDL_clamp(sx, 0, width - 1); sy = SDL_clamp(sy, 0, height - 1);
+  const int ix = (int)floorf(sx), iy = (int)floorf(sy);
+  const float fx = sx - ix, fy = sy - iy;
+  double sum[4] = {0};
+  for (unsigned dy = 0; dy < 2; ++dy) for (unsigned dx = 0; dx < 2; ++dx) {
+    const int xx = SDL_min(ix + (int)dx, width - 1), yy = SDL_min(iy + (int)dy, height - 1);
+    const uint32_t pixel = CoveragePixel(endpoint, plane, xx, yy);
+    const double weight = (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy);
+    const double alpha = (pixel >> 24) / 255.0;
+    for (unsigned c = 0; c < 3; ++c)
+      sum[c] += ((pixel >> (8 * c)) & 255) * weight * (correct ? alpha : 1);
+    sum[3] += (pixel >> 24) * weight;
+  }
+  uint32_t result = 0;
+  for (unsigned c = 0; c < 4; ++c) {
+    double value = c < 3 && correct ? (sum[3] > 0 ? sum[c] * 255 / sum[3] : 0) : sum[c];
+    result |= (uint32_t)lround(value) << (c * 8);
+  }
+  return result;
+}
+
+static void CheckCoverageFiltering(SDL_GPUDevice *gpu, ArGpuGlobalMotion *global) {
+  enum { Height = 6, Bands = 8, ImageBytes = W * Height * Bands * 4 };
+  assert(ArGpuGlobalMotion_Resize(global, W, Height));
+  global->input_plane_count = Bands;
+  SDL_GPUTexture *previous = Texture(gpu, Height * Bands, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+  SDL_GPUTexture *current = Texture(gpu, Height * Bands, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+  ArGpuGlobalMotionTarget targets[Bands] = {0};
+  for (unsigned i = 0; i < Bands; ++i) {
+    targets[i] = (ArGpuGlobalMotionTarget){Texture(gpu, Height,
+        SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET |
+        SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE), W, Height, i * 3, true};
+    global->extents[i][0] = 16 - i; /* Each band must clamp to its own width. */
+  }
+  const SDL_GPUTransferBufferCreateInfo ui = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+      .size = ImageBytes * 2 + Bands * sizeof(ArGpuGlobalMotionResult)};
+  const SDL_GPUTransferBufferCreateInfo di = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
+      .size = ImageBytes * 2};
+  SDL_GPUTransferBuffer *upload = SDL_CreateGPUTransferBuffer(gpu, &ui);
+  SDL_GPUTransferBuffer *download = SDL_CreateGPUTransferBuffer(gpu, &di);
+  assert(upload && download);
+  uint32_t *data = SDL_MapGPUTransferBuffer(gpu, upload, true);
+  assert(data);
+  for (unsigned endpoint = 0; endpoint < 2; ++endpoint)
+    for (unsigned plane = 0; plane < Bands; ++plane)
+      for (int y = 0; y < Height; ++y) for (int x = 0; x < W; ++x)
+        data[((endpoint * Bands + plane) * Height + y) * W + x] = CoveragePixel(endpoint, plane, x, y);
+  ArGpuGlobalMotionResult motion[Bands];
+  for (unsigned i = 0; i < Bands; ++i)
+    motion[i] = (ArGpuGlobalMotionResult){2, 2, -2, -2, i != 4, {0}};
+  memcpy((uint8_t *)data + ImageBytes * 2, motion, sizeof(motion));
+  SDL_UnmapGPUTransferBuffer(gpu, upload);
+  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gpu);
+  assert(cmd);
+  SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+  assert(copy);
+  for (unsigned endpoint = 0; endpoint < 2; ++endpoint) {
+    const SDL_GPUTextureTransferInfo src = {.transfer_buffer = upload, .offset = endpoint * ImageBytes,
+        .pixels_per_row = W, .rows_per_layer = Height * Bands};
+    const SDL_GPUTextureRegion dst = {.texture = endpoint ? current : previous, .w = W, .h = Height * Bands, .d = 1};
+    SDL_UploadToGPUTexture(copy, &src, &dst, true);
+  }
+  const SDL_GPUTransferBufferLocation from = {.transfer_buffer = upload, .offset = ImageBytes * 2};
+  const SDL_GPUBufferRegion to = {.buffer = global->motion, .size = sizeof(motion)};
+  SDL_UploadToGPUBuffer(copy, &from, &to, true);
+  SDL_EndGPUCopyPass(copy);
+  Wait(gpu, cmd);
+  const float phases[] = {0, .25f, .49f, .5f, .51f, .75f, .7664526f, .9999f, 1};
+  const int map_delta[][2] = {{2,0},{-2,0},{0,2},{0,-2},{2,-1},{-2,1},{0,0}};
+  unsigned checks = 0;
+  /* Off first and last checks that a mode change does not leak into legacy
+   * sampling. Fractional .76645/.9999 match the captured Deck dark/bright pair. */
+  for (unsigned mode = 0; mode < 3 + SDL_arraysize(map_delta); ++mode)
+  for (unsigned step = 0; step < SDL_arraysize(phases); ++step) {
+    global->alpha_correct = mode != 0 && mode != 2;
+    global->exact_map_mask = mode >= 3 ? 0x17 : 0; /* Include rejected flow band4. */
+    global->map_camera_dx = mode >= 3 ? map_delta[mode-3][0] : 0;
+    global->map_camera_dy = mode >= 3 ? map_delta[mode-3][1] : 0;
+    const float phase = phases[step];
+    cmd = SDL_AcquireGPUCommandBuffer(gpu);
+    assert(cmd && ArGpuGlobalMotion_WarpLayers(global, cmd, previous, current, phase, targets, 255));
+    assert(ArGpuGlobalMotion_Warp(global, cmd, previous, current, phase));
+    copy = SDL_BeginGPUCopyPass(cmd);
+    assert(copy);
+    const SDL_GPUTextureRegion atlas = {.texture = global->output, .w = W, .h = Height * Bands, .d = 1};
+    SDL_GPUTextureTransferInfo output = {.transfer_buffer = download, .pixels_per_row = W, .rows_per_layer = Height * Bands};
+    SDL_DownloadFromGPUTexture(copy, &atlas, &output);
+    for (unsigned i = 0; i < Bands; ++i) {
+      const SDL_GPUTextureRegion direct = {.texture = targets[i].texture, .w = W, .h = Height, .d = 1};
+      output.offset = ImageBytes + i * W * Height * 4; output.rows_per_layer = Height;
+      SDL_DownloadFromGPUTexture(copy, &direct, &output);
+    }
+    SDL_EndGPUCopyPass(copy);
+    Wait(gpu, cmd);
+    const uint32_t *pixels = SDL_MapGPUTransferBuffer(gpu, download, false);
+    assert(pixels);
+    for (unsigned i = 0; i < Bands; ++i) for (int y = 0; y < Height; ++y)
+      for (int x = 0; x < 16 - (int)i; ++x) {
+        const unsigned at = (i * Height + y) * W + x;
+        const uint32_t actual = pixels[at], direct = pixels[ImageBytes / 4 + at + targets[i].x];
+        const bool exact_map = (global->exact_map_mask & (1u << i)) != 0;
+        const int px = x + global->map_camera_dx, py = y + global->map_camera_dy;
+        const bool previous_map = phase < .5f && px >= 0 && py >= 0 && px < 16 - (int)i && py < Height;
+        const uint32_t expected = exact_map
+            ? CoveragePixel(!previous_map, i, previous_map ? px : x, previous_map ? py : y)
+            : CoverageExpected(i, x, y, 16 - i, Height, phase, global->alpha_correct);
+        assert(actual == direct);
+        for (unsigned c = 0; c < 4; ++c) {
+          const int delta = abs((int)((actual >> (c * 8)) & 255) - (int)((expected >> (c * 8)) & 255));
+          const int tolerance = exact_map || step == 0 || step == SDL_arraysize(phases) - 1 || i == 4 ? 0 : 1;
+          if (delta > tolerance) fprintf(stderr, "coverage mismatch mode=%u phase=%g plane=%u xy=%d,%d actual=%08x expected=%08x channel=%u\n",
+              mode, phase, i, x, y, actual, expected, c);
+          assert(delta <= tolerance);
+        }
+        ++checks;
+      }
+    SDL_UnmapGPUTransferBuffer(gpu, download);
+  }
+  printf("GPU coverage/map sampling: %u oracle pixels, atlas/direct; Voxel and legacy modes, exact map endpoints, signed/vertical rebasing, borders, cutouts, partial alpha, opaque black and rejected motion\n", checks);
+  global->alpha_correct = false;
+  global->exact_map_mask = 0;
+  for (unsigned i = 0; i < Bands; ++i) SDL_ReleaseGPUTexture(gpu, targets[i].texture);
+  SDL_ReleaseGPUTexture(gpu, previous); SDL_ReleaseGPUTexture(gpu, current);
+  SDL_ReleaseGPUTransferBuffer(gpu, upload); SDL_ReleaseGPUTransferBuffer(gpu, download);
 }
 
 int main(int argc, char **argv) {
@@ -241,6 +394,7 @@ int main(int argc, char **argv) {
     SDL_ReleaseGPUTexture(gpu, reference[i]); SDL_ReleaseGPUTexture(gpu, direct[i]);
   }
   SDL_ReleaseGPUTransferBuffer(gpu, upload); SDL_ReleaseGPUTransferBuffer(gpu, download);
+  if (!benchmark) CheckCoverageFiltering(gpu, &global);
   ArGpuGlobalMotion_Destroy(&global); ArGpuBlockMotion_Destroy(&actors);
   SDL_DestroyGPUDevice(gpu); SDL_Quit();
   printf("GPU direct layers: %u atlas/direct cases, all 16 planes including padding; %u rounded actor pixels, max delta %u/255\n",

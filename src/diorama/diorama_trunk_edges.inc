@@ -23,10 +23,11 @@ typedef struct HollowContour {
   bool valid;int map,x,y,left,right,height,count;
   HollowEdge edges[kHollowMaxEdges];
 } HollowContour;
-typedef struct HollowSide {ArRenderVertex2D v[4];float distance;} HollowSide;
+typedef struct HollowSide {ArRenderVertex2D v[4];float depths[4],distance;} HollowSide;
 static HollowContour s_hollow_contours[2];
 static HollowSide s_hollow_sides[kHollowMaxEdges];
 static ArRenderVertex2D s_hollow_side_vertices[kHollowMaxEdges*4];
+static float s_hollow_side_depths[kHollowMaxEdges*4];
 static int32_t s_hollow_side_indices[kHollowMaxEdges*6];
 static int HollowSideCompare(const void *a,const void *b) {
   const float da=((const HollowSide *)a)->distance,db=((const HollowSide *)b)->distance;
@@ -97,6 +98,7 @@ static bool DrawHollowSolidEdges(ArRenderDevice *device,const DioramaCapture *ca
       ok=ok&&Scene3D_TransformToClip(g->matrix,wx,wy,z,&clip)&&
           ProjectWorldPoint(g->matrix,wx,wy,z,g->width,g->height,&next.v[i].position);
       if(!ok)break;
+      if(g->depth_sink)next.depths[i]=clip.z/clip.w*.5f+.5f;
       next.distance+=clip.w*.25f;
       const ArRenderPointF source_uv={(edge.x+.5f)/SR_PPU_SURFACE_MAX_WIDTH,
           (edge.y+.5f)/SR_PPU_SURFACE_MAX_HEIGHT};
@@ -121,12 +123,15 @@ static bool DrawHollowSolidEdges(ArRenderDevice *device,const DioramaCapture *ca
   const int tri[6]={0,1,2,0,2,3};
   for(int i=0;i<count;++i) {
     memcpy(s_hollow_side_vertices+i*4,s_hollow_sides[i].v,sizeof(s_hollow_sides[i].v));
+    if(g->depth_sink)memcpy(s_hollow_side_depths+i*4,s_hollow_sides[i].depths,sizeof(s_hollow_sides[i].depths));
     for(int j=0;j<6;++j)s_hollow_side_indices[i*6+j]=i*4+tri[j];
   }
   DioramaSceneryLightEffectParams light=layer->lighting;
   light.texel_width=kind==0?1.f/32:1.f/SR_PPU_SURFACE_MAX_WIDTH;
   light.texel_height=kind==0?1.f/32:1.f/SR_PPU_SURFACE_MAX_HEIGHT;
   light.mode=0;light.blur_radius=0;light.attributes_uv=(ArRenderRectF){0,0,1,1};
-  return RenderShadedDioramaGeometry(device,kind==0?s_hollow_bark_material:layer->texture,s_hollow_side_vertices,count*4,
-      s_hollow_side_indices,count*6,layer->blend,NULL,(ArRenderRectF){0,0,1,1},&light);
+  return RenderShadedDioramaDepthGeometry(device,kind==0?s_hollow_bark_material:layer->texture,
+      s_hollow_side_vertices,s_hollow_side_depths,count*4,
+      s_hollow_side_indices,count*6,layer->blend,NULL,(ArRenderRectF){0,0,1,1},&light,
+      g->depth_sink,layer->description->plane,false);
 }
