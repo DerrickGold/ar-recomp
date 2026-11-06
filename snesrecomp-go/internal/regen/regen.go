@@ -58,6 +58,8 @@ type Report struct {
 	UnresolvedIndirects, StubHits       int
 	DecodeBudgetStubs                   int
 	ObservedEntryRoots                  int
+	WrapperRoutes                       []WrapperRoute
+	PHARTSRoutes                        []PHARTSRoute
 	InternalTailEntries                 int
 	AnalysisFactsApplied                int
 	AnalysisEntryFactsApplied           int
@@ -203,7 +205,15 @@ func Run(options Options) (Report, error) {
 	logf("loaded %d banks and %d cfg entries", report.Banks, report.InitialEntries)
 
 	repo.expandAutoVectors(logf)
+	report.WrapperRoutes = repo.routeDBWrappers()
+	for _, route := range report.WrapperRoutes {
+		logf("wrapper autoroute: $%06X alias %s bypassed its DB wrapper (body $%06X); now %s", route.Wrapper, route.Name, route.Body, route.Routed)
+	}
 	repo.promoteCrossBankNames()
+	report.PHARTSRoutes = repo.routePHARTSDispatch()
+	for _, route := range report.PHARTSRoutes {
+		logf("PHA/RTS autoroute: $%06X in %s dispatches through $%06X idx:%s count %d", route.Site, route.Owner, route.Table, route.IndexReg, route.Count)
+	}
 	repo.rebuildNames()
 	if report.ObservedEntryRoots, err = repo.applyObservedDispatchCensus(options.ROMPath, options.ObservedDispatchCensus); err != nil {
 		return report, err
