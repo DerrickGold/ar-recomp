@@ -236,7 +236,7 @@ bool ActionVoxel_AnimationMatches(const ActionRoomScene *reference,
 static inline bool ActionVoxel_AnimationCacheCandidate(ActionVoxelProfile profile) {
   return profile==kActionVoxelProfile_KassandoraDesert ||
       profile==kActionVoxelProfile_KassandoraTomb || profile==kActionVoxelProfile_AitosCaverns ||
-      profile==kActionVoxelProfile_MarahnaTemple;
+      profile==kActionVoxelProfile_MarahnaTemple || profile==kActionVoxelProfile_NorthwallSnow;
 }
 bool ActionVoxel_AnimationIsPresentationOnly(const ActionRoomScene *scene,
                                    const ActionRoomScene *reference,

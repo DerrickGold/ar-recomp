@@ -7,7 +7,8 @@
  *
  * A between-ticks re-present reuses the exact captured frame and shared
  * deadline; capturing again would refresh its timestamp and break pair
- * continuity. */
+ * continuity. A camera-reset replacement is allowed only after invalidation;
+ * its zero-tick capture restores the image without seeding temporal history. */
 #include "host_display.h"
 #include "action/action_voxel.h"
 #include "action/present_action_effects.h"
@@ -28,6 +29,7 @@
 #include "present/display_geometry.h"
 #include "host_display_pacing.h"
 #include "host_display_refresh_cache.h"
+#include "host_display_reseed.h"
 #include "host_display_status.h"
 #include "present/present.h"
 #include "present/presentation_frame_generation.h"
@@ -87,6 +89,7 @@ static bool s_widescreen_runtime_allowed;
 static HostDisplayRefreshCache s_display_refresh_cache;
 static SDL_DisplayID s_active_display_id;
 static bool s_retained_upload_complete;
+static HostDisplayReseedState s_camera_reseed;
 static bool s_producer_pacing;
 static bool s_present_trace_enabled;
 static HostDisplayPresentTrace s_present_trace;
@@ -726,10 +729,29 @@ uint64_t HostDisplay_CatchupCapNs(uint64_t emulation_frame_interval_ns,
 }
 
 void HostDisplay_InvalidatePresentHistory(void) {
+  HostDisplayReseed_Invalidate(&s_camera_reseed);
   ActionVoxel_Release(s_retained_frame.slot.diorama_voxel);
   s_retained_frame.slot.diorama_voxel = NULL;
   s_retained_frame.valid = false;
   DioramaFrameGeneration_InvalidateHistory();
+}
+
+uint64_t HostDisplay_BeginVoxelCameraReset(void) {
+  return HostDisplayReseed_Begin(&s_camera_reseed,
+      g_settings.diorama_mode == kAction3D_Voxel &&
+      s_retained_frame.slot.diorama_active &&
+      s_retained_frame.slot.diorama_voxel_mode &&
+      HostDisplay_CanPresentDuringProduction());
+}
+
+void HostDisplay_EndVoxelCameraReset(uint64_t token) {
+  HostDisplayReseed_End(&s_camera_reseed, token,
+      g_settings.diorama_mode == kAction3D_Voxel && !s_retained_frame.valid);
+}
+
+bool HostDisplay_TakeVoxelCameraReseed(bool owner_eligible) {
+  return HostDisplayReseed_Take(&s_camera_reseed, owner_eligible &&
+      g_settings.diorama_mode == kAction3D_Voxel && !s_retained_frame.valid);
 }
 
 static void ReportPresentPerformance(uint64_t render_start_ms,
@@ -806,9 +828,17 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
 
   const bool game_tick = mode == kHostDisplayPresent_GameTick ||
                          mode == kHostDisplayPresent_HeadlessVideo;
+  const bool camera_reseed = mode == kHostDisplayPresent_CameraReseed;
   FrameSlot slot;
   PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Capture);
   FrameSlot_Capture(&slot, annotated_sim);
+  /* The owner has redrawn the same native state after a settings reset. A
+   * changed native counter is a failed reseed, not a replacement endpoint. */
+  if (camera_reseed && (slot.capture_ticks || !slot.diorama_active ||
+                        !slot.diorama_voxel_mode)) {
+    PerformanceMetrics_End(pipeline);
+    return false;
+  }
   RefreshDioramaCamera(&slot);
   RefreshRetainedSimCamera(&slot);
   PerformanceMetrics_End(pipeline);
@@ -819,7 +849,7 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
   PresentUpload(&slot);
   PerformanceMetrics_End(pipeline);
 
-  if (game_tick) {
+  if (game_tick || camera_reseed) {
     RetainFrame(&slot);
   }
   pipeline = PerformanceMetrics_Begin(kPerformance_Presentation);
@@ -832,8 +862,10 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
 
   const uint64_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
-  const bool presented = HostDisplay_PresentCompositedFrame(mode);
+  const bool presented = HostDisplay_PresentCompositedFrame(
+      camera_reseed ? kHostDisplayPresent_GameTick : mode);
   if (presented && game_tick) s_tick_present_count++;
+  if (presented && camera_reseed) s_represent_count++;
   if (presented && performance_enabled)
     ReportPresentPerformance(render_start_ms, vsync_start_ms);
   return presented;

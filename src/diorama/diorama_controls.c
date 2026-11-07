@@ -7,6 +7,7 @@
 #include "app/user_data_dir.h"
 #include "constants.h"
 #include "host/host_clock.h"
+#include "host/host_display.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -138,6 +139,7 @@ bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool input_active) {
 }
 
 void Diorama_ResetCamera(void) {
+  const uint64_t reseed_token = HostDisplay_BeginVoxelCameraReset();
   static const char *const kResetKeys[] = {
     "diorama_tilt_x_mrad",
     "diorama_tilt_y_mrad",
@@ -166,6 +168,7 @@ void Diorama_ResetCamera(void) {
   Diorama_SeedCameraFromSettings();
   s_diorama_settings_dirty = true;
   s_diorama_settings_dirty_at = HostClock_Milliseconds();
+  HostDisplay_EndVoxelCameraReset(reseed_token);
 }
 
 void Diorama_FlushSettingsIfDirty(void) {

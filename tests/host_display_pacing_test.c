@@ -5,6 +5,7 @@
 
 #include "host_display.h"
 #include "host_display_pacing.h"
+#include "host_display_reseed.h"
 
 static const uint64_t kEmulationFrameIntervalNs = 16639263ull;
 static const int kMaximumCatchupFrames = 3;
@@ -395,6 +396,60 @@ static void TestWindowAxisToOutput(void) {
   CHECK(HostDisplayPacing_WindowAxisToOutput(10, -4, -4) == 0);
 }
 
+static void TestCameraResetReseedLifetime(void) {
+  HostDisplayReseedState state = {0};
+  CHECK(!HostDisplayReseed_Take(&state, true));
+
+  /* A reset at defaults has no changed capture; invalidation outside a
+   * reset (resize, graphics reset, ordinary settings) cannot request one. */
+  uint64_t token = HostDisplayReseed_Begin(&state, true);
+  HostDisplayReseed_End(&state, token, true);
+  CHECK(!HostDisplayReseed_Take(&state, true));
+  HostDisplayReseed_Invalidate(&state);
+  CHECK(!HostDisplayReseed_Take(&state, true));
+
+  /* Off/Diorama or an already invalid slot fail the pre-reset eligibility. */
+  token = HostDisplayReseed_Begin(&state, false);
+  HostDisplayReseed_Invalidate(&state);
+  HostDisplayReseed_End(&state, token, true);
+  CHECK(!HostDisplayReseed_Take(&state, true));
+
+  token = HostDisplayReseed_Begin(&state, true);
+  HostDisplayReseed_Invalidate(&state);
+  HostDisplayReseed_Invalidate(&state); /* Several reset settings changed. */
+  HostDisplayReseed_End(&state, token, true);
+  CHECK(HostDisplayReseed_Take(&state, true));
+  CHECK(!HostDisplayReseed_Take(&state, true));
+  HostDisplayReseed_End(&state, token, true); /* Replayed token cannot rearm. */
+  CHECK(!HostDisplayReseed_Take(&state, true));
+
+  token = HostDisplayReseed_Begin(&state, true);
+  HostDisplayReseed_Invalidate(&state);
+  HostDisplayReseed_End(&state, token, true);
+  HostDisplayReseed_Invalidate(&state); /* Later resize/settings expires it. */
+  CHECK(!HostDisplayReseed_Take(&state, true));
+
+  token = HostDisplayReseed_Begin(&state, true);
+  HostDisplayReseed_Invalidate(&state);
+  HostDisplayReseed_End(&state, token, true);
+  CHECK(!HostDisplayReseed_Take(&state, false)); /* Pause/transition/clock. */
+  CHECK(!HostDisplayReseed_Take(&state, true));
+
+  token = HostDisplayReseed_Begin(&state, true);
+  HostDisplayReseed_Invalidate(&state);
+  HostDisplayReseed_End(&state, token, false); /* Mode/slot guard changed. */
+  CHECK(!HostDisplayReseed_Take(&state, true));
+
+  const uint64_t old_token = HostDisplayReseed_Begin(&state, true);
+  token = HostDisplayReseed_Begin(&state, true);
+  CHECK(token != old_token);
+  HostDisplayReseed_Invalidate(&state);
+  HostDisplayReseed_End(&state, old_token, true);
+  CHECK(!HostDisplayReseed_Take(&state, true));
+  HostDisplayReseed_End(&state, token, true);
+  CHECK(!HostDisplayReseed_Take(&state, true));
+}
+
 int main(void) {
   CHECK(HostDisplayPacing_DrawLeadNs(2000000, 0) == 0);
   CHECK(HostDisplayPacing_DrawLeadNs(2000000, 11111111) == 2750000);
@@ -412,6 +467,7 @@ int main(void) {
   TestEmulatedFramePresentModes();
   TestSub60LimitsRetainElapsedTime();
   TestWindowAxisToOutput();
+  TestCameraResetReseedLifetime();
   if (s_failure_count) {
     fprintf(stderr, "host_display_pacing_test: %d failure(s)\n",
             s_failure_count);

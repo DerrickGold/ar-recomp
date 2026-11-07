@@ -639,6 +639,10 @@ void GameLoop_Run(const GameSessionConfig *config) {
       HostDisplay_EmulatedFramePresentMode(
           config->headless, config->headless_video);
   while (running) {
+    /* A reset request is valid only in the owner iteration that handled it.
+     * Early exits (pause, transition, shutdown) must not defer a recapture. */
+    (void)HostDisplay_TakeVoxelCameraReseed(false);
+    bool camera_reseed_handoff = false;
     /* Stream metadata is fixed until ownership returns. Runner memory is only
      * read on the synchronous path, after the producer has acknowledged pause. */
     const uint8 map_group = stream_pending ? stream.map_group : g_ram[kActRaiserWram_MapGroup];
@@ -878,6 +882,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
         continue;
       }
       stream_pending = false;
+      camera_reseed_handoff = !stream.sim_town && !stream.transition &&
+          !stream.stopped && g_settings.diorama_mode == kAction3D_Voxel;
       fprintf(stderr, "[stream-service] frames=%u full-waits=%u event=%u elapsed-ms=%.3f%s",
           stream.frames, stream.full_waits, stream_event,
           (double)(SDL_GetTicksNS() - stream_owner_service_ns) / 1e6,
@@ -1068,12 +1074,34 @@ void GameLoop_Run(const GameSessionConfig *config) {
      * queue must not throttle the game clock down to the requested render rate. */
     const bool low_render_limit = g_settings.refresh_mode == kRefreshMode_Limit &&
         (uint64_t)g_settings.frame_limit_fps < kNanosecondsPerSecond / source_interval_ns;
-    if (stream.queue && !low_render_limit && !s_window_hidden && !HostInput_IsTurbo() &&
+    const bool stream_allowed = stream.queue && !low_render_limit && !s_window_hidden && !HostInput_IsTurbo() &&
         (Diorama_IsActiveThisFrame() || (sim_stream_enabled &&
             ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
                 g_ram[kActRaiserWram_CurrentMap]) &&
             !ActRaiserSimMenu_OwnsInput() && !ActRaiserSimMenu_OwnsPresentation())) &&
-        !g_settings.scene_inspector && HostDisplay_CanPresentDuringProduction()) {
+        !g_settings.scene_inspector;
+    if (HostDisplay_TakeVoxelCameraReseed(camera_reseed_handoff &&
+            stream_allowed && !config->headless && stream.next_ns &&
+            stream.map_group == g_ram[kActRaiserWram_MapGroup] &&
+            stream.map_number == g_ram[kActRaiserWram_CurrentMap])) {
+      /* History is already invalidated and the producer has acknowledged
+       * ownership. Recapture this native state with the reset settings now,
+       * rather than waiting a whole accumulator period to execute a tick.
+       * capture_ticks remains zero; next_ns and the source identity survive. */
+      const uint64_t reseed_start_ns = SDL_GetTicksNS();
+      const int reseed_tick_before = snes_frame_counter;
+      const bool reseeded = DrawAndPresentFrame(kHostDisplayPresent_CameraReseed,
+          kPresentationFrameGenerationPhaseNone);
+      fprintf(stderr, "[camera-reseed] tick-before=%d tick=%d capture-ticks=%d "
+          "source-ns=%llu next-source-ns=%llu "
+          "start-ns=%llu complete-ns=%llu presented=%d\n",
+          reseed_tick_before, snes_frame_counter, reseeded ? 0 : -1,
+          (unsigned long long)stream_endpoint_ns,
+          (unsigned long long)stream.next_ns, (unsigned long long)reseed_start_ns,
+          (unsigned long long)SDL_GetTicksNS(), reseeded);
+      if (!reseeded) HostDisplay_InvalidatePresentHistory();
+    }
+    if (stream_allowed && HostDisplay_CanPresentDuringProduction()) {
       HostDisplay_SetProducerPacing(true);
       stream.sim_town = !Diorama_IsActiveThisFrame();
       stream.underlay_serial = stream.sim_town ? SimWorldMap_Serial() : 0;

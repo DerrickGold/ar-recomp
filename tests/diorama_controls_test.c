@@ -2,6 +2,7 @@
 #include "diorama/diorama_layer_manifest.h"
 #include "diorama/diorama_rom_skybox_resource.h"
 #include "app/settings.h"
+#include "host/host_display.h"
 #include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
@@ -9,14 +10,34 @@
 Settings g_settings;
 static uint64_t now_ms;
 static unsigned saves;
+static bool resetting;
+static unsigned reset_count, reset_begins, reset_ends;
+uint64_t HostDisplay_BeginVoxelCameraReset(void) {
+  assert(!resetting);
+  resetting = true;
+  ++reset_begins;
+  return 42;
+}
+void HostDisplay_EndVoxelCameraReset(uint64_t token) {
+  assert(resetting && token == 42 && reset_count == 15);
+  resetting = false;
+  ++reset_ends;
+}
 uint64_t HostClock_Milliseconds(void) { return now_ms; }
 char *UserDataFile(char *buf, size_t size, const char *leaf) {
   snprintf(buf, size, "%s", leaf); return buf;
 }
 bool Settings_SaveDeferred(const char *path) { (void)path; ++saves; return true; }
-const SettingDesc *Settings_Find(const char *key) { (void)key; return NULL; }
+const SettingDesc *Settings_Find(const char *key) {
+  static const SettingDesc row = {0};
+  (void)key;
+  assert(resetting);
+  return &row;
+}
 SettingChangeResult Settings_Reset(const SettingDesc *desc) {
-  (void)desc; return kSettingChange_Unchanged;
+  assert(resetting && desc);
+  ++reset_count;
+  return kSettingChange_Unchanged;
 }
 const DioramaLayerOrderTable *DioramaLayerManifest_Table(void) { return NULL; }
 bool DioramaRomSkyboxResource_Init(const uint8_t *rom, size_t size) {
@@ -62,6 +83,8 @@ int main(void) {
   Diorama_CaptureCameraPresentationState(&state);
   assert(g_settings.diorama_tilt_y_mrad == 300);
   assert(fabsf(state.free_pose.tilt_y - .3f) < .0001f);
+  Diorama_ResetCamera();
+  assert(!resetting && reset_begins == 1 && reset_ends == 1);
   puts("diorama_controls_test: PASS");
   return 0;
 }

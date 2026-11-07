@@ -18,6 +18,9 @@ typedef enum HostDisplayPresentMode {
   kHostDisplayPresent_HeadlessVideo,
   kHostDisplayPresent_Paused,
   kHostDisplayPresent_Menu,
+  /* Replace an invalidated Voxel camera capture without advancing native
+   * time. Retain its zero-tick image, but never count it as a native tick. */
+  kHostDisplayPresent_CameraReseed,
 } HostDisplayPresentMode;
 
 /* Resolve whether an emulated tick is discarded, presented interactively, or
@@ -77,6 +80,11 @@ uint64_t HostDisplay_CatchupCapNs(uint64_t emulation_frame_interval_ns,
                                   int maximum_catchup_frames);
 
 void HostDisplay_InvalidatePresentHistory(void);
+/* Bracket only the synchronous camera-reset settings transaction. A pending
+ * request is single-use and expires on any later history invalidation. */
+uint64_t HostDisplay_BeginVoxelCameraReset(void);
+void HostDisplay_EndVoxelCameraReset(uint64_t token);
+bool HostDisplay_TakeVoxelCameraReseed(bool owner_eligible);
 struct SimFrameData;
 bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
                              const struct SimFrameData *annotated_sim);

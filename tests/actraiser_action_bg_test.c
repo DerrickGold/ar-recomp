@@ -2326,13 +2326,16 @@ static void TestLiveCastleAnimation(Ppu *ppu,const ActionRoomScene *scene,
   fprintf(stderr,"[castle-phase-cache] %02x:%02x terrain=%u: two exact cycles, native edits, reset and retained refs passed\n",group,room,voxel_terrain);
 }
 
-static void TestLiveDesertAnimation(Ppu *ppu, const ActionRoomScene *scene,
+static void TestLivePresentationAnimation(Ppu *ppu, const ActionRoomScene *scene,
                                     const ActionVoxelGeometry *initial) {
   const uint8_t group=scene->group,room=scene->map;
   size_t offset=0,bytes=0;
-  CHECK(ActionVoxel_Profile(initial)==kActionVoxelProfile_KassandoraDesert);
+  const bool snow=ActionVoxel_Profile(initial)==kActionVoxelProfile_NorthwallSnow;
+  CHECK(snow || ActionVoxel_Profile(initial)==kActionVoxelProfile_KassandoraDesert);
   CHECK(ActionVoxel_AnimationMatches(scene,scene->characters,&offset,&bytes));
   if(!bytes)return;
+  ActionVoxelGeometry *retained_oracle=snow?FreshCastlePhase(ppu,scene,NULL):NULL;
+  if(snow)SameCastlePhase(initial,retained_oracle);
   const uint64_t initial_revision=ActionVoxel_Revision(initial);
   uint8_t characters[kActionRoomSceneCharacterBytes];
   bool animated=false;
@@ -2357,6 +2360,25 @@ static void TestLiveDesertAnimation(Ppu *ppu, const ActionRoomScene *scene,
   uint64_t restored=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);
   CHECK(restored!=revision);
   CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)==restored);
+  if(snow) {
+    /* A DMA containing portions of two real phases is still an unknown
+     * publication. Prove rejection and recovery without touching live art. */
+    bool partial=false;
+    for(size_t split=32;split<bytes && !partial;split+=32) {
+      memcpy(characters,scene->characters,sizeof(characters));
+      memcpy(characters+offset+split,scene->characters+offset+bytes+split,bytes-split);
+      size_t at=0,length=0;
+      partial=!ActionVoxel_AnimationMatches(scene,characters,&at,&length);
+    }
+    CHECK(partial);
+    for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
+    revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(revision!=restored);
+    CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)==revision);
+    CHECK(ActionRoomScene_BuildCharacters(scene,0,0,characters,sizeof(characters)));
+    for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
+    restored=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(restored!=revision);
+    CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)==restored);
+  }
 
   /* Palette, native map, collision definitions and displayed ring words are
    * independent geometry inputs; safe animation never suppresses them. */
@@ -2388,12 +2410,27 @@ static void TestLiveDesertAnimation(Ppu *ppu, const ActionRoomScene *scene,
       "bg1-pixels = cell:1,1 transparent:8000000000000000000000000000000000000000000000000000000000000000",NULL));
   restored=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);CHECK(restored!=revision);
   CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain)==restored);
+  if(snow) {
+    terrain.stamp_layers[0].set_bounds=true;
+    terrain.stamp_layers[0].x0=-1;terrain.stamp_layers[0].y0=-1;
+    terrain.stamp_layers[0].x1=ActionRoomScene_TileWidth(scene,1)/2;
+    terrain.stamp_layers[0].y1=ActionRoomScene_TileHeight(scene,1)/2;
+    revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);CHECK(revision!=restored);
+    CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain)==revision);
+    terrain.stamp_layers[0].set_bounds=false;
+    restored=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);CHECK(restored!=revision);
+  }
   revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL);CHECK(revision!=restored);
   DioramaLayerOrder_ClearRoom(&terrain);
   CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)==revision);
   ActRaiserActionBg_PrepareVoxel(false,NULL);
   CHECK(!ActRaiserActionBg_VoxelGeometry(group,room));
   CHECK(ActionVoxel_Active(initial,group,room));
+  if(snow) {
+    CHECK(ActionVoxel_Revision(initial)==initial_revision);
+    SameCastlePhase(initial,retained_oracle);ActionVoxel_Release(retained_oracle);
+    fprintf(stderr,"[snow-animation-cache] %02x:%02x terrain=%u: two exact cycles, partial/unknown DMA, input invalidation, native art and retained geometry passed\n",group,room,voxel_terrain);
+  }
 }
 
 /* Optional stock-ROM integration oracle. The normal CTest run stays ROM-free. */
@@ -2439,6 +2476,7 @@ static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t ma
      * Completion reuses 07:01 but owns its presentation independently. */
     ActRaiserActionBg_PrepareVoxel(true,NULL);
     CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+    if(group==6 && map_number==5)TestLivePresentationAnimation(ppu,scene,closed);
     if (group==7 && map_number==1) {
       /* The hub's upper BG2 matte is authored away when its faces move to
        * the skybox. Voxel owns BG1 hardware priority, but must preserve that
@@ -2506,7 +2544,7 @@ static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t ma
     ActionVoxel_Release(closed);
   }
   if(closed && group==3 && map_number<=2) {
-    TestLiveDesertAnimation(ppu,scene,closed);
+    TestLivePresentationAnimation(ppu,scene,closed);
     ActionVoxel_Release(closed);
   }
   if(closed && ((group==3 && map_number>=3) || group==5)) {
@@ -2666,6 +2704,9 @@ int main(int argc, char **argv) {
   if(argc==3 && !strcmp(argv[2],"--desert-animation"))
     for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain)
       for(unsigned room=1;room<=2;++room)TestLiveVoxelPublication(argv[1],3,room);
+  if(argc==3 && !strcmp(argv[2],"--snow-animation"))
+    for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain)
+      TestLiveVoxelPublication(argv[1],6,5);
   if(argc==3 && !strcmp(argv[2],"--castle-animation"))
     for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain) {
       TestLiveVoxelPublication(argv[1],2,3);TestLiveVoxelPublication(argv[1],2,5);
