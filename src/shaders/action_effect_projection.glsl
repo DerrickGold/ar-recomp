@@ -18,26 +18,41 @@ float sky_shift(EffectPlane p) {
     return clamp(settings.follow.w + (settings.follow.z + dy), settings.follow.x, settings.follow.y) -
            clamp(settings.follow.w + settings.follow.z, settings.follow.x, settings.follow.y);
 }
-// settings.sky_mapping read in place; see AR_RESOLVE_SKY_BAND_BODY.
-bool resolve_effect_sky_band(int index, float dy, out vec4 uv, out vec2 rows) {
-    AR_RESOLVE_SKY_BAND_BODY(settings.sky_mapping)
+// Fit once for a projection or bounds query, then reuse these five scalars
+// while selecting/resolving bands. Read the large uniform mapping in place;
+// passing that struct by value breaks some Adreno compilers (see the macro).
+void prepare_effect_sky_window(out vec4 prepared_window, out float prepared_width) {
+    if(settings.sky_mapping.meta.x<=0) {
+        prepared_window=vec4(0);prepared_width=0;return;
+    }
+    float dy=motion_offset(int(settings.planes[2].offset.z)).y;
+    AR_PREPARE_SKY_WINDOW_BODY(settings.sky_mapping)
+    prepared_window=window;
+    prepared_width=width;
 }
-SkyBand sky_band(int index) {
+bool resolve_effect_sky_band(int index, vec4 window, float width, out vec4 uv, out vec2 rows) {
+    AR_RESOLVE_PREPARED_SKY_BAND_BODY(settings.sky_mapping)
+}
+SkyBand sky_band_with_window(int index, vec4 window, float width) {
     SkyBand band = settings.sky_bands[index];
     if(settings.sky_mapping.meta.x>0) {
         vec4 uv; vec2 rows;
-        bool valid=resolve_effect_sky_band(index,
-            motion_offset(int(settings.planes[2].offset.z)).y,uv,rows);
+        bool valid=resolve_effect_sky_band(index,window,width,uv,rows);
         band.bounds=valid ? uv*settings.sky_mapping.meta.yzyz-settings.sky_mapping.output_size.zwzw : vec4(0);
         band.rows.xy=rows;
     } else band.bounds.yw += vec2(sky_shift(settings.planes[2]));
     return band;
 }
-int sky_band_at(float y) {
+SkyBand sky_band(int index) {
+    precise vec4 window;precise float width;
+    prepare_effect_sky_window(window,width);
+    return sky_band_with_window(index,window,width);
+}
+int sky_band_at(float y, vec4 window, float width) {
     int selected = 0;
     float nearest = 1e30;
     for (int i=0;i<int(settings.sky_meta.x);++i) {
-        SkyBand b=sky_band(i);
+        SkyBand b=sky_band_with_window(i,window,width);
         if(b.rows.y<=b.rows.x)continue;
         float d=max(0,max(b.bounds.y-y,y-b.bounds.w));
         if(d<nearest){nearest=d;selected=i;}
@@ -45,18 +60,20 @@ int sky_band_at(float y) {
     return selected;
 }
 vec4 sky_bounds(float anchor, bool anchored) {
+    precise vec4 window;precise float width;
+    prepare_effect_sky_window(window,width);
     int first=settings.sky_meta.y<0?0:int(settings.sky_meta.y);
     int end=settings.sky_meta.y<0?int(settings.sky_meta.x):first+1;
     vec4 bounds=vec4(1e30,1e30,-1e30,-1e30);
     vec2 rows=vec2(1,-1);
     for(int i=first;i<end;++i) {
-        SkyBand b=sky_band(i);
+        SkyBand b=sky_band_with_window(i,window,width);
         if(b.rows.y<=b.rows.x)continue;
         bounds=vec4(min(bounds.xy,b.bounds.xy),max(bounds.zw,b.bounds.zw));
         rows=vec2(min(rows.x,b.rows.x),max(rows.y,b.rows.y));
     }
     if(anchored) {
-        SkyBand b=sky_band(sky_band_at(anchor));
+        SkyBand b=sky_band_with_window(sky_band_at(anchor,window,width),window,width);
         if(b.rows.y<=b.rows.x)return bounds;
         float height=(b.bounds.w-b.bounds.y)/(b.rows.y-b.rows.x);
         bounds=vec4(b.bounds.x,b.bounds.y+(rows.x-b.rows.x)*height,
@@ -85,10 +102,12 @@ bool project_effect(int plane, vec2 source, float anchor, bool anchored, out vec
     vec2 motion=effect_motion(plane);
     source += motion;
     if (p.sky.z == 1) {
+        precise vec4 window;precise float width;
+        prepare_effect_sky_window(window,width);
         source += p.sky.xy;
-        int selected=anchored?sky_band_at(anchor+motion.y+p.sky.y):
-            (settings.sky_meta.y<0?sky_band_at(source.y):int(settings.sky_meta.y));
-        SkyBand band=sky_band(selected);
+        int selected=anchored?sky_band_at(anchor+motion.y+p.sky.y,window,width):
+            (settings.sky_meta.y<0?sky_band_at(source.y,window,width):int(settings.sky_meta.y));
+        SkyBand band=sky_band_with_window(selected,window,width);
         if(band.rows.y<=band.rows.x)return false;
         vec2 q=(source-band.bounds.xy)/(band.bounds.zw-band.bounds.xy);
         pixel=settings.viewport.xy+vec2(q.x,band.rows.x+q.y*(band.rows.y-band.rows.x))*settings.viewport.zw;

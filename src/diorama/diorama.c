@@ -1815,7 +1815,12 @@ static PresentationOutcome DrawDioramaSkybox(
         draw.vertices=heat_vertices;draw.indices=heat_indices;
         draw.vertex_count=kHeatVertices;draw.index_count=kHeatIndices;draw.heat=*heat;
       }
-      for (unsigned i = 0; i < span_count; ++i) {
+      /* These resident draws share a target and have no ordinary renderer
+       * work between them. Submit the ordered bands together. */
+      const DioramaSourceEffectBatch batch = options->source_effect_batch;
+      const bool began = !batch || batch(device, true);
+      if (!began) outcome = kPresentationOutcome_CoreFailure;
+      for (unsigned i = 0; began && i < span_count; ++i) {
         DioramaRasterRowRun runs[SR_PPU_SURFACE_MAX_HEIGHT];
         DioramaSkyboxRowShift row_runs[SR_PPU_SURFACE_MAX_HEIGHT];
         const unsigned run_count = span_count < kDioramaSkyboxSourceBands
@@ -1830,6 +1835,7 @@ static PresentationOutcome DrawDioramaSkybox(
         if (!options->draw_resident_skybox(device, skybox_texture, &draw))
           outcome = kPresentationOutcome_CoreFailure;
       }
+      if (began && batch && !batch(device, false)) outcome = kPresentationOutcome_CoreFailure;
       draw.row_shifts = NULL;
       draw.row_shift_count = 0;
       if (projection) {
@@ -2132,6 +2138,45 @@ static PresentationOutcome DioramaSubmitPlaneEffect(
     submitted = !batch || batch(output_frame->device, false);
   }
   DioramaPerformance_End(callback_performance);
+  if (!ArRenderOutputFrame_RestoreViewport(output_frame))
+    return kPresentationOutcome_CoreFailure;
+  return submitted ? kPresentationOutcome_Complete : kPresentationOutcome_CoreFailure;
+}
+
+static PresentationOutcome DioramaSubmitSkyboxEffects(
+    ArRenderOutputFrame *output_frame, const DioramaScene *scene,
+    DioramaProjection *projection) {
+  projection->bg2_skybox.active_band = -1;
+  if (!scene->plane_effect || !projection->valid)
+    return kPresentationOutcome_Complete;
+  const DioramaSourceEffectBatch batch = scene->render->source_effect_batch;
+  if (!batch) {
+    PresentationOutcome outcome = kPresentationOutcome_Complete;
+    for (unsigned i = 0; i < projection->bg2_skybox.count; ++i) {
+      projection->bg2_skybox.active_band = (int)i;
+      const PresentationOutcome effect = DioramaSubmitPlaneEffect(output_frame, scene->plane_effect,
+          scene->plane_effect_userdata, SR_PPU_OVERLAY_BG2, projection, NULL);
+      outcome = PresentationOutcome_Combine(outcome, effect);
+      if (!PresentationOutcome_IsUsable(effect)) break;
+    }
+    projection->bg2_skybox.active_band = -1;
+    return outcome;
+  }
+  if (!ArRenderOutputFrame_EnterFullOutput(output_frame))
+    return kPresentationOutcome_OptionalOmitted;
+  DioramaPerformanceScope performance = DioramaPerformance_Begin(kDioramaPerformance_Callback);
+  bool submitted = batch(output_frame->device, true);
+  if (submitted) {
+    /* Keep band-major callback order. Only resident source draws can opt into
+     * this batch; target/viewport changes remain outside its lifetime. */
+    for (unsigned i = 0; i < projection->bg2_skybox.count; ++i) {
+      projection->bg2_skybox.active_band = (int)i;
+      scene->plane_effect(scene->plane_effect_userdata, SR_PPU_OVERLAY_BG2, projection);
+    }
+    submitted = batch(output_frame->device, false);
+  }
+  projection->bg2_skybox.active_band = -1;
+  DioramaPerformance_End(performance);
   if (!ArRenderOutputFrame_RestoreViewport(output_frame))
     return kPresentationOutcome_CoreFailure;
   return submitted ? kPresentationOutcome_Complete : kPresentationOutcome_CoreFailure;
@@ -4519,15 +4564,9 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
     /* The skybox replaces BG2-low. Draw its attached enhancements here once
      * per UV band, before enclosure, foreground scenery and actors. Keep the
      * mapping published for later moon-lit water and timber receivers. */
-    for (unsigned i = 0; i < out_projection->bg2_skybox.count; i++) {
-      out_projection->bg2_skybox.active_band = (int)i;
-      const PresentationOutcome effect = DioramaSubmitPlaneEffect(
-          &output_frame, scene->plane_effect, scene->plane_effect_userdata,
-          SR_PPU_OVERLAY_BG2, out_projection, scene->render->source_effect_batch);
-      outcome = PresentationOutcome_Combine(outcome,effect);
-      if (!PresentationOutcome_IsUsable(effect)) goto failed;
-    }
-    out_projection->bg2_skybox.active_band = -1;
+    const PresentationOutcome effect = DioramaSubmitSkyboxEffects(&output_frame, scene, out_projection);
+    outcome = PresentationOutcome_Combine(outcome, effect);
+    if (!PresentationOutcome_IsUsable(effect)) goto failed;
   }
   if (scene->render->shoebox) {
     DioramaPerformance_SetPlane(-1);

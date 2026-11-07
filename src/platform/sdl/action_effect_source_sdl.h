@@ -27,13 +27,14 @@ typedef struct ArGpuEffectSource {
   SDL_GPUBuffer *vertices, *coverage, *sky_vertices;
   SDL_GPUTexture *masks;
   SDL_GPUBuffer *moon_work, *moon_mask, *moon_light;
-  SDL_GPUTransferBuffer *upload;
+  SDL_GPUTransferBuffer *upload, *sky_upload;
   ArGpuEffectPacket packets[kActionSourcePacketSlots], transient;
   SDL_GPUSampler *sampler, *nearest_sampler, *wrap_sampler, *wrap_nearest_sampler;
   SDL_GPUCommandBuffer *commands;
   bool batch_open, batch_failed, batching_enabled, packing_enabled;
   uint64_t draws, submissions;
   unsigned pending_draws, largest_batch;
+  uint32_t command_writes;
 } ArGpuEffectSource;
 
 bool ArGpuEffectSource_Init(ArGpuEffectSource *, SDL_GPUDevice *);

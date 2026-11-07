@@ -14,7 +14,7 @@ float rounded_divide(float x, float y) {
 // (730, driver 512.615) rejects the by-value copy of this 256-byte struct with
 // VK_ERROR_UNKNOWN after seconds of work once callers loop over sky bands. The
 // precise arithmetic is shared token for token so both stages agree exactly.
-#define AR_RESOLVE_SKY_BAND_BODY(M) \
+#define AR_PREPARE_SKY_WINDOW_BODY(M) \
     precise vec4 window=M.vertical;                                                                         \
     if(M.fit.x>0) {                                                                                         \
         precise float top=clamp(M.follow.w+(M.follow.z+dy),M.follow.x,M.follow.y);                          \
@@ -35,7 +35,9 @@ float rounded_divide(float x, float y) {
         precise float texture_inset=(window.w-window.z)*inset;                                              \
         window+=vec4(capture_inset,-capture_inset,texture_inset,-texture_inset);                            \
         width=available;                                                                                    \
-    }                                                                                                       \
+    }
+
+#define AR_RESOLVE_PREPARED_SKY_BAND_BODY(M) \
     vec4 band=M.bands[index];                                                                               \
     precise float y0=max(band.z,window.x), y1=min(band.w,window.y);                                         \
     if(y1<=y0 || width<=0 || band.y<=band.x) {uv=vec4(0);rows=vec2(0);return false;}                        \
@@ -46,6 +48,10 @@ float rounded_divide(float x, float y) {
     precise float v1=window.z+(window.w-window.z)*rows.y;                                                   \
     uv=vec4(center-half_width,v0,center+half_width,v1);                                                     \
     return true;
+
+#define AR_RESOLVE_SKY_BAND_BODY(M) \
+    AR_PREPARE_SKY_WINDOW_BODY(M) \
+    AR_RESOLVE_PREPARED_SKY_BAND_BODY(M)
 
 bool resolve_sky_band(SkyMapping m, int index, float dy, out vec4 uv, out vec2 rows) {
     AR_RESOLVE_SKY_BAND_BODY(m)

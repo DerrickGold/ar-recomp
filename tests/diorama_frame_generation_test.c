@@ -1,4 +1,5 @@
 #include <math.h>
+#include <inttypes.h>
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,6 +95,347 @@ static SDL_Renderer *CreateTestRenderer(SDL_Window *window) {
     renderer = SDL_CreateRenderer(window, NULL);
   }
   return renderer;
+}
+
+static uint64_t SourceFixtureHash(uint64_t hash, const void *bytes, size_t size) {
+  const unsigned char *data = bytes;
+  for (size_t i = 0; i < size; ++i) {
+    hash ^= data[i];
+    hash *= UINT64_C(1099511628211);
+  }
+  return hash;
+}
+
+/* Keep sky and effects as separate ordered scopes, as the compositor does.
+ * In particular, never download intermediate vertices while a scope is open:
+ * all ten bands must preserve uploaded bytes and ordered results until End. */
+static void TestResidentSkyBatch(ArRenderDevice *device, SDL_Renderer *renderer,
+    ArGpuEffectSource *effect, SDL_GPUBuffer *motion, DioramaProjection *view,
+    const ActionEffectSourceBatch *batch, float phase, unsigned reference_case) {
+  ActionEffectSourceBatch draw_batch = *batch;
+  static ActionEffectSourceLightJob lights[2];
+  SDL_GPUTransferBuffer *light_download = NULL;
+  if (reference_case == 9) {
+    /* Job zero is the existing fully lit, unoccluded kind-0 fixture. Job one
+     * has an anchored kind-2 receiver whose clip excludes every sample. Its
+     * scratch writes must neither erase job zero nor retain old illumination. */
+    CHECK(batch->light_count == 1 && batch->count == 6);
+    lights[0] = lights[1] = batch->lights[0];
+    lights[1].data.meta[1] = 2;
+    const float excluded[] = {1000,1000,1010,1010};
+    memcpy(lights[1].data.clip, excluded, sizeof(excluded));
+    draw_batch.lights = lights;
+    draw_batch.light_count = draw_batch.light_capacity = 2;
+    const SDL_GPUTransferBufferCreateInfo desc = {
+        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, .size = 12 * sizeof(float)};
+    light_download = SDL_CreateGPUTransferBuffer(effect->device, &desc);
+    CHECK(light_download != NULL);
+    if (!light_download) return;
+  }
+  SDL_Surface *source = SDL_CreateSurface(256, 160, SDL_PIXELFORMAT_RGBA32);
+  CHECK(source != NULL);
+  if (!source) { SDL_ReleaseGPUTransferBuffer(effect->device, light_download); return; }
+  for (int y = 0; y < source->h; ++y) for (int x = 0; x < source->w; ++x) {
+    unsigned char *pixel = (unsigned char *)source->pixels + y * source->pitch + x * 4;
+    pixel[0] = (unsigned char)(20 + ((x * 17 + y * 3) & 31));
+    pixel[1] = (unsigned char)(30 + ((x * 5 + y * 11) & 31));
+    pixel[2] = (unsigned char)(40 + ((x * 7 + y * 13) & 31));
+    pixel[3] = 255;
+  }
+  SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, source);
+  SDL_DestroySurface(source);
+  CHECK(texture && SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST));
+  if (!texture) { SDL_ReleaseGPUTransferBuffer(effect->device, light_download); return; }
+  const ArRenderVertex2D vertices[] = {
+      {{0,0},{1,1,1,1},{0,0}}, {{64,0},{1,1,1,1},{1,0}},
+      {{64,64},{1,1,1,1},{1,1}}, {{0,64},{1,1,1,1},{0,1}}};
+  const int32_t indices[] = {0,1,2,0,2,3};
+  DioramaSkyboxSourceDraw sky = {.vertices = vertices, .indices = indices,
+      .vertex_count = 4, .index_count = 6, .blend = kArRenderBlendMode_Opaque,
+      .texture_width = 256, .texture_height = 160,
+      .mapping = view->bg2_skybox.resident};
+  SDL_Surface *images[2] = {NULL, NULL}, *sky_image = NULL;
+  const bool original_batching = effect->batching_enabled;
+  uint64_t hashes[2] = {0};
+  unsigned changed_pixels = 0;
+  for (unsigned mode = 0; mode < 2; ++mode) {
+    effect->batching_enabled = mode != 0;
+    CHECK(!effect->commands && !effect->batch_open);
+    CHECK(SDL_SetRenderDrawColor(renderer, 7, 11, 13, 255) && SDL_RenderClear(renderer));
+    uint64_t submitted = effect->submissions, draws = effect->draws;
+    bool began = ArGpuEffectSource_BeginBatch(effect);
+    CHECK(began);
+    if (!began) break;
+    for (unsigned band = 0; band < 10; ++band) {
+      const DioramaSkyboxRowShift shifts[] = {
+          {band * 16, band * 16 + 8, -.375f},
+          {band * 16 + 8, (band + 1) * 16, .625f}};
+      sky.band = band;
+      sky.row_shifts = shifts;
+      sky.row_shift_count = 2;
+      const bool ok = ArGpuEffectSource_Skybox(effect, device, motion, 6, phase,
+          ArSdlRenderBackend_BorrowTexture(texture), &sky);
+      CHECK(ok);
+      if (!ok) break;
+    }
+    CHECK(effect->submissions == submitted + (mode ? 0 : 10));
+    const bool sky_ended = ArGpuEffectSource_EndBatch(effect);
+    CHECK(sky_ended && !effect->commands && !effect->batch_open && !effect->command_writes);
+    CHECK(effect->submissions == submitted + (mode ? 1 : 10));
+    CHECK(effect->draws == draws + 10);
+    if (!sky_ended) break;
+    if (mode == 0) {
+      SDL_Surface *pixels = SDL_RenderReadPixels(renderer, NULL);
+      sky_image = pixels ? SDL_ConvertSurface(pixels, SDL_PIXELFORMAT_RGBA32) : NULL;
+      CHECK(sky_image && sky_image->w == 64 && sky_image->h == 64);
+      SDL_DestroySurface(pixels);
+    }
+    submitted = effect->submissions;
+    draws = effect->draws;
+    began = ArGpuEffectSource_BeginBatch(effect);
+    CHECK(began);
+    if (!began) break;
+    for (unsigned band = 0; band < 10; ++band) {
+      view->bg2_skybox.active_band = (int)band;
+      const bool ok = ArGpuEffectSource_Draw(effect, device, motion, 1u << 6, phase,
+          &draw_batch, view, NULL, kArRenderBlendMode_Alpha, 1);
+      CHECK(ok);
+      if (!ok) break;
+    }
+    CHECK(effect->submissions == submitted + (mode ? 0 : 9));
+    const bool effects_ended = ArGpuEffectSource_EndBatch(effect);
+    CHECK(effects_ended && !effect->commands && !effect->batch_open && !effect->command_writes);
+    CHECK(effect->submissions == submitted + (mode ? 1 : 9));
+    CHECK(effect->draws == draws + 9); /* Raw-empty band four stays empty. */
+    if (!effects_ended) break;
+    if (light_download) {
+      SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(effect->device);
+      SDL_GPUCopyPass *copy = command ? SDL_BeginGPUCopyPass(command) : NULL;
+      CHECK(copy != NULL);
+      if (!copy) { if (command) SDL_CancelGPUCommandBuffer(command); break; }
+      for (unsigned job = 0; job < 2; ++job) {
+        const SDL_GPUBufferRegion from = {.buffer = effect->moon_light,
+            .offset = job * kActionSourceMaxLightPoints * sizeof(float), .size = 6 * sizeof(float)};
+        const SDL_GPUTransferBufferLocation to = {
+            .transfer_buffer = light_download, .offset = job * 6 * sizeof(float)};
+        SDL_DownloadFromGPUBuffer(copy, &from, &to);
+      }
+      SDL_EndGPUCopyPass(copy);
+      SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+      const bool ready = fence && SDL_WaitForGPUFences(effect->device, true, &fence, 1);
+      CHECK(ready);
+      if (fence) SDL_ReleaseGPUFence(effect->device, fence);
+      if (!ready) break;
+      const float *values = SDL_MapGPUTransferBuffer(effect->device, light_download, false);
+      CHECK(values != NULL);
+      if (!values) break;
+      for (unsigned sample = 0; sample < 6; ++sample) {
+        CHECK(values[sample] == 1);
+        CHECK(values[6 + sample] == 0);
+      }
+      SDL_UnmapGPUTransferBuffer(effect->device, light_download);
+      printf("[sky-batch-light] reference-case=%02u mode=%u jobs=2 expected=1,0\n", reference_case, mode);
+    }
+    SDL_Surface *pixels = SDL_RenderReadPixels(renderer, NULL);
+    images[mode] = pixels ? SDL_ConvertSurface(pixels, SDL_PIXELFORMAT_RGBA32) : NULL;
+    SDL_DestroySurface(pixels);
+    CHECK(images[mode] && images[mode]->w == 64 && images[mode]->h == 64);
+    if (!images[mode]) break;
+    hashes[mode] = UINT64_C(14695981039346656037);
+    for (int y = 0; y < 64; ++y) {
+      const unsigned char *row = (const unsigned char *)images[mode]->pixels + y * images[mode]->pitch;
+      hashes[mode] = SourceFixtureHash(hashes[mode], row, 64 * 4);
+      if (mode && images[0])
+        CHECK(!memcmp(row, (const unsigned char *)images[0]->pixels + y * images[0]->pitch, 64 * 4));
+      if (!mode && sky_image) {
+        const unsigned char *background = (const unsigned char *)sky_image->pixels + y * sky_image->pitch;
+        for (int x = 0; x < 64; ++x) changed_pixels += memcmp(row + x * 4, background + x * 4, 4) != 0;
+      }
+    }
+  }
+  CHECK(images[0] && images[1] && changed_pixels > 0);
+  CHECK(hashes[0] == hashes[1]);
+  printf("[sky-batch-case] reference-case=%02u phase=%.2f scalar=%016" PRIx64
+         " batched=%016" PRIx64 " effect-pixels=%u sky-draws=10 effect-draws=9 scopes=2\n",
+      reference_case, phase, hashes[0], hashes[1], changed_pixels);
+  effect->batching_enabled = original_batching;
+  SDL_DestroySurface(sky_image);
+  for (unsigned i = 0; i < 2; ++i) SDL_DestroySurface(images[i]);
+  SDL_DestroyTexture(texture);
+  SDL_ReleaseGPUTransferBuffer(effect->device, light_download);
+}
+
+/* The same fixture source is linked with reference and candidate shader blobs.
+ * Printed hashes compare exact downloaded vertex/light bytes and RGBA pixels;
+ * the independent checks below only establish meaningful, finite output. */
+static void TestResidentSkyWindow(ArRenderDevice *device, SDL_GPUDevice *gpu,
+    SDL_Renderer *renderer, ArGpuEffectSource *effect, SDL_GPUBuffer *motion,
+    SDL_GPUTransferBuffer *upload) {
+  enum { kPrimitives = 6, kVertexBytes = kPrimitives * 15 * 32,
+         kLightBytes = kPrimitives * sizeof(float) };
+  const SDL_GPUTransferBufferCreateInfo desc = {
+      .usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, .size = kVertexBytes + kLightBytes};
+  SDL_GPUTransferBuffer *download = SDL_CreateGPUTransferBuffer(gpu, &desc);
+  CHECK(download != NULL);
+  if (!download) return;
+  int32_t *vectors = SDL_MapGPUTransferBuffer(gpu, upload, true);
+  CHECK(vectors != NULL);
+  if (!vectors) { SDL_ReleaseGPUTransferBuffer(gpu, download); return; }
+  memset(vectors, 0, 256);
+  const int32_t back[] = {3, -5, -2, 3, 1};
+  memcpy(vectors + 6 * 8, back, sizeof(back));
+  SDL_UnmapGPUTransferBuffer(gpu, upload);
+  SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(gpu);
+  CHECK(command != NULL);
+  SDL_GPUCopyPass *copy = command ? SDL_BeginGPUCopyPass(command) : NULL;
+  CHECK(copy != NULL);
+  if (!copy) {
+    if (command) SDL_CancelGPUCommandBuffer(command);
+    SDL_ReleaseGPUTransferBuffer(gpu, download);
+    return;
+  }
+  const SDL_GPUTransferBufferLocation motion_from = {.transfer_buffer = upload};
+  const SDL_GPUBufferRegion motion_to = {.buffer = motion, .size = 256};
+  SDL_UploadToGPUBuffer(copy, &motion_from, &motion_to, true);
+  SDL_EndGPUCopyPass(copy);
+  CHECK(SDL_SubmitGPUCommandBuffer(command));
+
+  for (unsigned scenario = 0; scenario < 14; ++scenario) {
+    const unsigned reference_case = scenario < 12 ? scenario : scenario == 12 ? 9 : 11;
+    const bool moon = reference_case >= 8;
+    const unsigned kind = reference_case < 10 ? 0 : reference_case - 9;
+    const bool anchored = moon ? kind == 0 : (reference_case & 4) != 0;
+    const bool narrow = moon ? reference_case == 9 || reference_case == 10 : (reference_case & 2) != 0;
+    const float phase = reference_case & 1 ? .75f : .25f;
+    DioramaProjection view = {.valid = true, .texture_width = 256, .texture_height = 160,
+        .output_width = 64, .output_height = 64, .aspect_x = 2, .height_scale = 2,
+        .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
+        .bg1_plane = {.valid = true, .u1 = 1, .v1 = 1},
+        .bg2_skybox = {.count = 10, .active_band = 0, .motion_source = 0,
+            .resident = {.meta = {10,256,160,1}, .output = {64,64},
+                .vertical = {0,160,0,1}, .follow = {0,32,6,8}, .fit = {128}}}};
+    for (unsigned band = 0; band < 10; ++band) {
+      const float width = narrow ? (band == 7 ? 64 : 96 + 8 * (band % 3)) : 192 + 8 * (band % 3);
+      const float left = (narrow ? 80 : 16) + 12 * ((int)(band % 3) - 1);
+      float *raw = view.bg2_skybox.resident.bands[band];
+      raw[0] = left / 256; raw[1] = (left + width) / 256;
+      raw[2] = band * 16; raw[3] = (band + 1) * 16;
+      if (band == 4) raw[1] = raw[0]; /* A genuinely empty source band. */
+      view.bg2_skybox.bands[band] = (DioramaSkyboxBandProjection){
+          left, band * 16, band == 4 ? left : left + width, (band + 1) * 16,
+          band / 10.f, (band + 1) / 10.f};
+    }
+    ActionEffectSourcePrimitive primitives[kPrimitives];
+    static ActionEffectSourceLightJob light;
+    const ActionMoonlightOcclusion occlusion = {.valid = true};
+    light = (ActionEffectSourceLightJob){.occlusion = &occlusion,
+        .data = {.meta = {kPrimitives,kind,10}, .light = {128,24,2,6},
+            .receiver = {128,24,2,anchored ? 6 : 4}, .clip = {-256,-160,256,320},
+            .transport = {.5f,.5f,.5f}, .surface = {.5f,.5f},
+            .rays = {{0,10,1},{0,1,0},{0,1,0},{0,1,0},{0,1,0},{0,1,0}}}};
+    for (unsigned i = 0; i < kPrimitives; ++i) {
+      const float x = -36 + (float)i * 12, y = 8 + (float)i * 16;
+      light.data.points[i][0] = x;
+      light.data.points[i][1] = y;
+      primitives[i] = (ActionEffectSourcePrimitive){
+          .meta = {moon ? kActionSourceLitTriangle : kActionSourceTriangle,2},
+          .origin = {128,24,anchored ? 6 : 4}, .clip = {-256,-160,256,320},
+          .points = {{x,y,moon ? i+1 : 0},{x+6,y,moon ? i+1 : 0},{x,y+8,moon ? i+1 : 0}},
+          .colors = {{.8f,.3f,.2f,.6f},{.8f,.3f,.2f,.6f},{.8f,.3f,.2f,.6f}},
+          .extra = {1}};
+    }
+    const ActionEffectSourceBatch batch = {.primitives = primitives,
+        .count = kPrimitives, .capacity = kPrimitives,
+        .lights = moon ? &light : NULL, .light_count = moon, .light_capacity = moon,
+        .revision = UINT64_C(0x534b5900) + scenario, .packet_slot = 1};
+    if (scenario >= 12) {
+      TestResidentSkyBatch(device, renderer, effect, motion, &view, &batch, phase, reference_case);
+      continue;
+    }
+    CHECK(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) && SDL_RenderClear(renderer));
+    uint64_t vertex_hash = UINT64_C(14695981039346656037);
+    uint64_t light_hash = UINT64_C(14695981039346656037);
+    unsigned active_vertices = 0, drawn_bands = 0, skipped_bands = 0;
+    unsigned light_zero = 0, light_positive = 0;
+    for (unsigned band = 0; band < 10; ++band) {
+      view.bg2_skybox.active_band = (int)band;
+      const uint64_t previous_draws = effect->draws;
+      const bool drawn = ArGpuEffectSource_Draw(effect, device, motion, 1u << 6, phase,
+          &batch, &view, NULL, kArRenderBlendMode_Alpha, 1);
+      CHECK(drawn);
+      if (!drawn) break;
+      CHECK(effect->draws == previous_draws + (band != 4));
+      if (band == 4) { ++skipped_bands; continue; }
+      ++drawn_bands;
+      command = SDL_AcquireGPUCommandBuffer(gpu);
+      CHECK(command != NULL);
+      copy = command ? SDL_BeginGPUCopyPass(command) : NULL;
+      CHECK(copy != NULL);
+      if (!copy) { if (command) SDL_CancelGPUCommandBuffer(command); break; }
+      const SDL_GPUBufferRegion vertices = {.buffer = effect->vertices, .size = kVertexBytes};
+      const SDL_GPUTransferBufferLocation vertices_to = {.transfer_buffer = download};
+      SDL_DownloadFromGPUBuffer(copy, &vertices, &vertices_to);
+      if (moon) {
+        const SDL_GPUBufferRegion lights = {.buffer = effect->moon_light, .size = kLightBytes};
+        const SDL_GPUTransferBufferLocation lights_to = {.transfer_buffer = download, .offset = kVertexBytes};
+        SDL_DownloadFromGPUBuffer(copy, &lights, &lights_to);
+      }
+      SDL_EndGPUCopyPass(copy);
+      SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+      const bool ready = fence && SDL_WaitForGPUFences(gpu, true, &fence, 1);
+      CHECK(ready);
+      if (fence) SDL_ReleaseGPUFence(gpu, fence);
+      if (!ready) break;
+      const float *output = SDL_MapGPUTransferBuffer(gpu, download, false);
+      CHECK(output != NULL);
+      if (!output) break;
+      vertex_hash = SourceFixtureHash(vertex_hash, output, kVertexBytes);
+      for (unsigned i = 0; i < kVertexBytes / sizeof(float); ++i) CHECK(isfinite(output[i]));
+      for (unsigned i = 0; i < kPrimitives * 15; ++i) {
+        const float alpha = output[i * 8 + 7];
+        if (alpha > 0) {
+          ++active_vertices;
+          if (!moon || kind == 0) CHECK(alpha == .6f);
+        }
+      }
+      if (moon) {
+        const float *values = output + kVertexBytes / sizeof(float);
+        light_hash = SourceFixtureHash(light_hash, values, kLightBytes);
+        for (unsigned i = 0; i < kPrimitives; ++i) {
+          CHECK(isfinite(values[i]) && values[i] >= 0 && values[i] <= 1);
+          light_zero += values[i] == 0;
+          light_positive += values[i] > 0;
+          /* No blockers: the anchored kind-0 transport is exactly lit. */
+          if (kind == 0) CHECK(values[i] == 1);
+        }
+      }
+      SDL_UnmapGPUTransferBuffer(gpu, download);
+    }
+    CHECK(drawn_bands == 9 && skipped_bands == 1 && active_vertices > 0);
+    if (moon) CHECK(light_positive > 0);
+    if (moon && kind > 0) CHECK(light_zero > 0);
+    SDL_Surface *pixels = SDL_RenderReadPixels(renderer, NULL);
+    SDL_Surface *rgba = pixels ? SDL_ConvertSurface(pixels, SDL_PIXELFORMAT_RGBA32) : NULL;
+    CHECK(rgba && rgba->w == 64 && rgba->h == 64);
+    uint64_t pixel_hash = UINT64_C(14695981039346656037);
+    unsigned lit_pixels = 0;
+    if (rgba) {
+      for (int y = 0; y < rgba->h; ++y) {
+        const unsigned char *row = (const unsigned char *)rgba->pixels + y * rgba->pitch;
+        pixel_hash = SourceFixtureHash(pixel_hash, row, (size_t)rgba->w * 4);
+        for (int x = 0; x < rgba->w; ++x) lit_pixels += row[x * 4] || row[x * 4 + 1] || row[x * 4 + 2];
+      }
+    }
+    CHECK(lit_pixels > 0);
+    printf("[sky-window-case] case=%02u kind=%s%u anchor=%u fit=%s phase=%.2f "
+           "vertices=%016" PRIx64 " light=%016" PRIx64 " pixels=%016" PRIx64
+           " active-vertices=%u lit-pixels=%u drawn-bands=%u empty-bands=%u\n",
+        scenario, moon ? "moon" : "plain", moon ? kind : 0, (unsigned)anchored, narrow ? "clamped" : "unclamped",
+        phase, vertex_hash, light_hash, pixel_hash, active_vertices, lit_pixels, drawn_bands, skipped_bands);
+    SDL_DestroySurface(rgba);
+    SDL_DestroySurface(pixels);
+  }
+  SDL_ReleaseGPUTransferBuffer(gpu, download);
 }
 
 /* Download only in this oracle: live source projection never reads vertices
@@ -276,7 +618,7 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     }
     SDL_UnmapGPUTransferBuffer(gpu,download);
   }
-  /* Consecutive packets must retain transfer/scratch generations, blend order
+  /* Consecutive packets must retain uploaded bytes and ordered pass results, blend order
    * and slot replacement until submission. A cancelled upload must never be
    * mistaken for valid retained data on the next scope. */
   SDL_Surface *batch_images[4] = {0};
@@ -319,7 +661,8 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
       CHECK(!ArGpuEffectSource_Draw(&effect,device,motion,0,0,&invalid,&shadow_view,NULL,
           kArRenderBlendMode_Add,1));
       CHECK(!ArGpuEffectSource_EndBatch(&effect));
-      CHECK(!effect.commands && !effect.packets[0].revision && !effect.packets[0].input_revision);
+      CHECK(!effect.commands && !effect.command_writes &&
+          !effect.packets[0].revision && !effect.packets[0].input_revision);
     }
   }
   for (unsigned i=0;i<4;++i) SDL_DestroySurface(batch_images[i]);
@@ -539,6 +882,7 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
       SDL_DestroySurface(rgba);SDL_DestroySurface(pixels);
     }
   }
+  TestResidentSkyWindow(device, gpu, renderer, &effect, motion, upload);
   CHECK(SDL_SetRenderTarget(renderer,previous_target));
   SDL_DestroyTexture(target); ArGpuEffectSource_Destroy(&effect);
   SDL_ReleaseGPUBuffer(gpu,motion); SDL_ReleaseGPUTransferBuffer(gpu,upload);

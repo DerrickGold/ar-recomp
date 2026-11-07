@@ -32,6 +32,11 @@ typedef struct RootMesh {
   bool after_actor[1024], front[1024];
   unsigned count;
 } RootMesh;
+typedef struct SkyBatchProbe {
+  bool grouped, failed;
+  unsigned attempts, sky_calls, effect_calls, actor_calls;
+  unsigned fail_begin, fail_end, fail_draw;
+} SkyBatchProbe;
 typedef struct Recorder {
   ArRenderTargetState state;
   ArRenderTextureDesc textures[128];
@@ -48,6 +53,7 @@ typedef struct Recorder {
   bool baked_uploads;
   unsigned uploads, fail_create_at, fail_upload_at;
   bool batch_open, fail_light, fail_submit;
+  SkyBatchProbe sky_batch;
   DioramaSkyboxProjection light_skybox;
   float exposure_u0, exposure_u1;
   uint32_t skybox_inputs;
@@ -211,6 +217,8 @@ static bool Size(void *ctx, int *w, int *h) {
 static bool Viewport(void *ctx, const ArRenderRectI *rect) {
   Recorder *r = ctx;
   assert(!r->batch_open);
+  if(rect && r->sky_batch.grouped && r->sky_batch.effect_calls)
+    assert(r->projection->bg2_skybox.active_band==-1);
   r->state.viewport_set = rect != NULL;
   if (rect) r->state.viewport = *rect;
   Record(5);
@@ -1795,10 +1803,119 @@ static unsigned VoxelCloudPriorityFixture(unsigned scenario) {
   for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
   assert(!r.live);return s_count;
 }
-unsigned DioramaFixture_Count(void) { return 374; }
+
+/* Resident sky draws and later attached effects each own one ordered scope.
+ * The two scopes must not span intervening target or ordinary renderer work. */
+enum { kSkyBatchBands = 10 };
+static bool SkyBandBatch(ArRenderDevice *device,bool begin) {
+  Recorder *r=device->context;SkyBatchProbe *p=&r->sky_batch;
+  if(begin) {
+    assert(!r->batch_open);
+    ++p->attempts;
+    if(p->attempts==p->fail_begin)return false;
+    p->failed=false;
+  }
+  const bool ok=SourceBatch(device,begin);
+  return ok && (begin || (!p->failed && p->attempts!=p->fail_end));
+}
+static bool SkyBandDraw(ArRenderDevice *device,ArRenderTexture texture,
+    const DioramaSkyboxSourceDraw *draw) {
+  Recorder *r=device->context;SkyBatchProbe *p=&r->sky_batch;
+  assert(texture.value && r->batch_open==p->grouped);
+  assert(!r->state.target.value && !p->effect_calls);
+  assert(draw->mapping.meta[0]==kSkyBatchBands && draw->band==p->sky_calls);
+  /* Keep the raw empty span in both ordered callback sequences. */
+  if(draw->band==4)assert(draw->mapping.bands[4][0]==draw->mapping.bands[4][1]);
+  Record(24);Record(draw->band);
+  ++p->sky_calls;
+  if(p->fail_draw==1 && draw->band==3)p->failed=true;
+  return !p->failed;
+}
+static void SkyBandEffect(void *context,int plane,const DioramaProjection *projection) {
+  Recorder *r=context;SkyBatchProbe *p=&r->sky_batch;
+  assert(r->batch_open==p->grouped && !r->state.target.value && !r->state.viewport_set);
+  assert(projection->valid);
+  if(plane!=SR_PPU_OVERLAY_BG2) {
+    assert(plane==kDioramaPlane_Obj2);
+    assert(!p->grouped || p->attempts==3); /* Separate native actor slot scope. */
+    assert(p->effect_calls==kSkyBatchBands && projection->bg2_skybox.active_band==-1);
+    ++p->actor_calls;return;
+  }
+  assert(projection->bg2_skybox.count==kSkyBatchBands && p->sky_calls==kSkyBatchBands);
+  assert(projection->bg2_skybox.active_band==(int)p->effect_calls);
+  assert(!r->actor_seen); /* Native foreground/actor work follows EndBatch. */
+  Record(25);Record(projection->bg2_skybox.active_band);
+  ++p->effect_calls;
+  if(p->fail_draw==2 && projection->bg2_skybox.active_band==3)p->failed=true;
+}
+static unsigned SkyBatchFixture(unsigned scenario) {
+  s_count=0;memset(&s_layers,0,sizeof(s_layers));
+  Recorder r={.width=976,.height=620,.bound_effect=-1};
+  ArRenderDevice device;
+  assert(ArRenderDevice_Init(&device,&kOps,&r,(ArRenderCapabilities){.flags=UINT64_MAX}));
+  ArRenderTexture textures[kDioramaPlane_Count];
+  const uint8_t *pixels[kDioramaPlane_Count];const uint8_t present=255;
+  for(int i=0;i<kDioramaPlane_Count;++i) {
+    assert(Create(&r,&(ArRenderTextureDesc){.width=SR_PPU_SURFACE_MAX_WIDTH,
+        .height=SR_PPU_SURFACE_MAX_HEIGHT,.format=kArRenderPixelFormat_Argb8888,
+        .usage=kArRenderTextureUsage_Streaming},&textures[i]));
+    pixels[i]=&present;
+  }
+  DioramaBgValidSpanPlan spans={.count=kSkyBatchBands};
+  for(unsigned i=0;i<kSkyBatchBands;++i)
+    spans.spans[i]=(DioramaBgValidSpan){i*224/kSkyBatchBands,(i+1)*224/kSkyBatchBands,
+        i%2?8:0,i==4?0:256};
+  const DioramaCapture capture={.width=256,.height=224,.textures=textures,.pixels=pixels,
+      .bg2_valid_spans=&spans};
+  const DioramaView view={.viewport={8,10,960,600},.visible_width=256,.distance_scale=1,
+      .camera={.tilt_y=.2f}};
+  const DioramaRenderOptions options={.visible_planes=(1u<<SR_PPU_OVERLAY_BG2)|(1u<<kDioramaPlane_Obj2),
+      .skybox=kDioramaSky_Only,.margin_fix=true,.layers=&s_layers,
+      .draw_resident_skybox=SkyBandDraw,.source_effect_batch=scenario==1?NULL:SkyBandBatch};
+  const DioramaScene scene={.render=&options,.map_group=2,.map_number=1,
+      .effect_bg_plane_mask=1u<<SR_PPU_OVERLAY_BG2,
+      .plane_effect=SkyBandEffect,.plane_effect_userdata=&r};
+  r.actor_texture=textures[kDioramaPlane_Obj2];
+  DioramaProjection projection;r.capture=&capture;r.projection=&projection;
+  for(unsigned frame=0;frame<2;++frame) {
+    r.batch_begins=r.batch_ends=0;r.actor_seen=false;
+    r.sky_batch=(SkyBatchProbe){.grouped=scenario!=1};
+    const bool failing=!frame && scenario>=2;
+    if(failing) {
+      if(scenario==2 || scenario==5)r.sky_batch.fail_begin=scenario==2?1:2;
+      if(scenario==3 || scenario==6)r.sky_batch.fail_end=scenario==3?1:2;
+      if(scenario==4 || scenario==7)r.sky_batch.fail_draw=scenario==4?1:2;
+    }
+    const PresentationOutcome outcome=Diorama_Composite(&device,&capture,&view,&scene,&projection);
+    assert(!r.batch_open && r.batch_begins==r.batch_ends);
+    assert(!r.state.target.value && !r.state.viewport_set && !r.state.clip_enabled);
+    if(failing) {
+      assert(outcome==kPresentationOutcome_CoreFailure && !projection.valid && !r.actor_seen);
+      assert(!projection.bg2_skybox.count); /* Failed frames invalidate the complete projection. */
+      const bool sky_failure=scenario<=4;
+      assert(r.sky_batch.attempts==(sky_failure?1u:2u));
+      assert(r.sky_batch.sky_calls==(scenario==2?0u:kSkyBatchBands));
+      assert(r.sky_batch.effect_calls==(scenario<=5?0u:kSkyBatchBands));
+      assert(r.batch_ends==(scenario==2?0u:scenario<=5?1u:2u));
+      assert(!r.sky_batch.actor_calls);
+    } else {
+      assert(PresentationOutcome_IsUsable(outcome) && projection.valid);
+      assert(projection.bg2_skybox.active_band==-1);
+      assert(r.sky_batch.sky_calls==kSkyBatchBands && r.sky_batch.effect_calls==kSkyBatchBands);
+      assert(r.sky_batch.actor_calls==1);
+      assert(r.batch_begins==(scenario==1?0u:3u));
+    }
+    Record(outcome);Record(r.batch_begins);Record(r.batch_ends);
+  }
+  Diorama_ResetCompositorResources(&device);
+  for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
+  assert(!r.live);return s_count;
+}
+unsigned DioramaFixture_Count(void) { return 382; }
 const float *DioramaFixture_Trace(void) { return s_trace; }
 unsigned DioramaFixture_Run(unsigned scenario) {
   assert(scenario < DioramaFixture_Count());
+  if(scenario>=374)return SkyBatchFixture(scenario-374);
   if(scenario>=370) {
     s_depth_fixture=scenario>=372;
     return VoxelCloudPriorityFixture((scenario-370)%2);

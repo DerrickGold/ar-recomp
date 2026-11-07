@@ -39,7 +39,14 @@ enum {
   kFrameUploadBytes = kPrimitiveBytes + kOccluderBytes +
       kActionSourceMaxLightJobs * (sizeof(ActionEffectSourceLightData) + kOccluderBytes),
   kMaskUploadBytes = kActionMaskAtlasWidth*kActionMaskAtlasHeight*sizeof(uint32_t),
-  kUploadBytes = kFrameUploadBytes > kMaskUploadBytes ? kFrameUploadBytes : kMaskUploadBytes
+  kUploadBytes = kFrameUploadBytes > kMaskUploadBytes ? kFrameUploadBytes : kMaskUploadBytes,
+  kSkyUploadBytes = kDioramaSkyboxSourceMaxIndices * sizeof(ArRenderVertex2D),
+  kScratchVertices = 1u << 0,
+  kScratchCoverage = 1u << 1,
+  kScratchMoonWork = 1u << 2,
+  kScratchMoonMask = 1u << 3,
+  kScratchMoonLight = 1u << 4,
+  kScratchSkyVertices = 1u << 5
 };
 _Static_assert(kUploadBytes >= kActionMaskAtlasWidth*kActionMaskAtlasHeight*sizeof(uint32_t),
                "effect upload buffer holds the startup mask atlas");
@@ -73,6 +80,7 @@ static void InvalidateInputs(ArGpuEffectSource *p) {
 static void CancelCommands(ArGpuEffectSource *p) {
   if (p->commands) SDL_CancelGPUCommandBuffer(p->commands);
   p->commands = NULL;
+  p->command_writes = 0;
   p->pending_draws = 0;
   p->batch_failed = true;
   InvalidateInputs(p);
@@ -83,6 +91,7 @@ static bool SubmitCommands(ArGpuEffectSource *p) {
   if (!p->commands) return true;
   SDL_GPUCommandBuffer *commands = p->commands;
   p->commands = NULL; /* Submit consumes the handle even on failure. */
+  p->command_writes = 0;
   if (!SDL_SubmitGPUCommandBuffer(commands)) {
     CancelCommands(p);
     return false;
@@ -111,7 +120,18 @@ static SDL_GPUCommandBuffer *Commands(ArGpuEffectSource *p, ArRenderDevice *devi
   if (p->commands) return p->commands;
   if (!ArSdlRenderBackend_SubmitPending(device)) return NULL;
   p->commands = SDL_AcquireGPUCommandBuffer(p->device);
+  p->command_writes = 0;
   return p->commands;
+}
+
+/* GPU writes and their readers occupy separate ordered passes. Cycle each
+ * scratch resource on its first write in a command buffer to preserve earlier
+ * submissions, then reuse that backing through the pass barriers. CPU-mapped
+ * transfer storage still cycles on every upload: those writes are immediate. */
+static bool CycleScratch(ArGpuEffectSource *p, uint32_t resource) {
+  const bool first = !(p->command_writes & resource);
+  p->command_writes |= resource;
+  return first;
 }
 
 static bool FinishDraw(ArGpuEffectSource *p, bool ok) {
@@ -147,6 +167,7 @@ void ArGpuEffectSource_Destroy(ArGpuEffectSource *p) {
   SDL_ReleaseGPUBuffer(p->device, p->coverage);
   SDL_ReleaseGPUBuffer(p->device, p->sky_vertices);
   SDL_ReleaseGPUTransferBuffer(p->device, p->upload);
+  SDL_ReleaseGPUTransferBuffer(p->device, p->sky_upload);
   SDL_ReleaseGPUTexture(p->device, p->masks);
   SDL_ReleaseGPUSampler(p->device, p->sampler);
   SDL_ReleaseGPUSampler(p->device, p->nearest_sampler);
@@ -244,11 +265,16 @@ bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
   buffer.size = kOutputBytes;
   p->vertices = SDL_CreateGPUBuffer(gpu, &buffer);
   buffer.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-  buffer.size = kDioramaSkyboxSourceMaxIndices * sizeof(ArRenderVertex2D);
+  buffer.size = kSkyUploadBytes;
   p->sky_vertices = SDL_CreateGPUBuffer(gpu, &buffer);
   const SDL_GPUTransferBufferCreateInfo upload = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
                                                   .size = kUploadBytes};
   p->upload = SDL_CreateGPUTransferBuffer(gpu, &upload);
+  /* Sky uploads contain only indexed vertices, never the 4 MiB mask atlas or
+   * effect packets. Keep each cycled backing proportional to that contract. */
+  const SDL_GPUTransferBufferCreateInfo sky_upload = {
+      .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = kSkyUploadBytes};
+  p->sky_upload = SDL_CreateGPUTransferBuffer(gpu, &sky_upload);
   SDL_GPUSamplerCreateInfo sampler = {.min_filter = SDL_GPU_FILTER_LINEAR,
                                       .mag_filter = SDL_GPU_FILTER_LINEAR,
                                       .mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
@@ -284,7 +310,7 @@ bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
     }
   } else ok=false;
   if (ok && p->wrap_sampler && p->wrap_nearest_sampler && p->coverage && p->vertices && p->sky_vertices &&
-      p->upload && p->sampler && p->nearest_sampler && p->moon_work &&
+      p->upload && p->sky_upload && p->sampler && p->nearest_sampler && p->moon_work &&
       p->moon_mask && p->moon_light)
     return true;
   ArGpuEffectSource_Destroy(p);
@@ -570,7 +596,8 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
     for (unsigned stage = 0; stage < 2; ++stage) {
       u.clock[3] = stage;
       SDL_PushGPUComputeUniformData(cmd, 0, &u, sizeof(u));
-      const SDL_GPUStorageBufferReadWriteBinding out = {.buffer = p->coverage, .cycle = stage == 0};
+      const SDL_GPUStorageBufferReadWriteBinding out = {
+          .buffer = p->coverage, .cycle = stage == 0 && CycleScratch(p, kScratchCoverage)};
       SDL_GPUComputePass *compute = SDL_BeginGPUComputePass(cmd, NULL, 0, &out, 1);
       if (!compute) goto failed;
       SDL_BindGPUComputePipeline(compute, p->shadow);
@@ -579,7 +606,6 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
       SDL_DispatchGPUCompute(compute, stage ? shadow_count : (400 * 176 + 63) / 64, 1, 1);
       SDL_EndGPUComputePass(compute);
     }
-  bool light_cycled = false;
   for (unsigned i = 0; i < batch->light_count; ++i) {
     const ArGpuEffectLight *light = &packet->lights[i];
     u.moon[0] = i*kActionSourceMaxLightPoints; u.moon[1] = light->occluder_count;
@@ -589,9 +615,12 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
       if (stage==1 && !light->occluder_count) continue;
       u.clock[3] = stage;
       SDL_PushGPUComputeUniformData(cmd,0,&u,sizeof(u));
+      const bool cycle_work = stage == 0 && CycleScratch(p, kScratchMoonWork);
+      const bool cycle_mask = stage == 0 && CycleScratch(p, kScratchMoonMask);
+      const bool cycle_light = stage == 0 && CycleScratch(p, kScratchMoonLight);
       const SDL_GPUStorageBufferReadWriteBinding outputs[] = {
-          {.buffer=p->moon_work,.cycle=stage==0}, {.buffer=p->moon_mask,.cycle=stage==0},
-          {.buffer=p->moon_light,.cycle=!light_cycled&&stage==0}};
+          {.buffer=p->moon_work,.cycle=cycle_work}, {.buffer=p->moon_mask,.cycle=cycle_mask},
+          {.buffer=p->moon_light,.cycle=cycle_light}};
       SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(cmd,NULL,0,outputs,3);
       if (!pass) goto failed;
       SDL_BindGPUComputePipeline(pass,p->moon);
@@ -602,13 +631,13 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
           stage==1 ? light->occluder_count : (count+63)/64;
       SDL_DispatchGPUCompute(pass,groups,1,1);SDL_EndGPUComputePass(pass);
     }
-    light_cycled = true;
   }
   /* Shadow/light preparation uses clock.w as its stage. Projection reuses
    * that slot for the sky-source destination; clock.z remains shadow count. */
   u.clock[3] = view->bg2_skybox.to_texture;
   SDL_PushGPUComputeUniformData(cmd, 0, &u, sizeof(u));
-  const SDL_GPUStorageBufferReadWriteBinding out = {.buffer = p->vertices, .cycle = true};
+  const SDL_GPUStorageBufferReadWriteBinding out = {
+      .buffer = p->vertices, .cycle = CycleScratch(p, kScratchVertices)};
   SDL_GPUComputePass *compute = SDL_BeginGPUComputePass(cmd, NULL, 0, &out, 1);
   if (!compute) goto failed;
   SDL_BindGPUComputePipeline(compute, p->project);
@@ -734,18 +763,18 @@ static bool Skybox(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *
   if (!source || source == target ||
       (blend != kArRenderBlendMode_Opaque && blend != kArRenderBlendMode_Alpha))
     return false;
-  ArRenderVertex2D *mapped = SDL_MapGPUTransferBuffer(p->device, p->upload, true);
+  ArRenderVertex2D *mapped = SDL_MapGPUTransferBuffer(p->device, p->sky_upload, true);
   if (!mapped) return false;
   for (unsigned i = 0; i < input->index_count; ++i)
     mapped[i] = vertices[input->indices[i]];
-  SDL_UnmapGPUTransferBuffer(p->device, p->upload);
+  SDL_UnmapGPUTransferBuffer(p->device, p->sky_upload);
   SDL_GPUCommandBuffer *cmd = Commands(p, device);
   if (!cmd) return false;
   SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
   if (!copy) goto failed;
-  const SDL_GPUTransferBufferLocation from = {.transfer_buffer = p->upload};
+  const SDL_GPUTransferBufferLocation from = {.transfer_buffer = p->sky_upload};
   const SDL_GPUBufferRegion to = {.buffer = p->sky_vertices, .size = input->index_count * sizeof(*vertices)};
-  SDL_UploadToGPUBuffer(copy, &from, &to, true);
+  SDL_UploadToGPUBuffer(copy, &from, &to, CycleScratch(p, kScratchSkyVertices));
   SDL_EndGPUCopyPass(copy);
   const SDL_GPUColorTargetInfo color = {
       .texture = target, .load_op = SDL_GPU_LOADOP_LOAD, .store_op = SDL_GPU_STOREOP_STORE};
