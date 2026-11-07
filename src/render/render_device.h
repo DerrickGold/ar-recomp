@@ -44,6 +44,9 @@ typedef struct ArRenderBackendOps {
   /* Optional boot/reset boundary: materialize backend-owned drawing variants
    * and finish queued preparation before gameplay can use the device. */
   bool (*finish_preparation)(void *context);
+  /* Optional pair; see BeginTextureUploads/EndTextureUploads below. */
+  bool (*begin_texture_uploads)(void *context);
+  bool (*end_texture_uploads)(void *context, bool commit);
 } ArRenderBackendOps;
 
 typedef struct ArRenderDevice {
@@ -73,6 +76,18 @@ bool ArRenderDevice_UpdateTexture(ArRenderDevice *device,
                                   ArRenderTexture texture,
                                   const ArRenderRectI *destination,
                                   const void *pixels, int pitch_bytes);
+/* Owner-thread upload-only scope. A successful Begin must be paired with one
+ * End; no draws, target/state changes or resource creation/destruction may
+ * intervene. Updates may be deferred until End(true). On any failed update,
+ * call End(false) and invalidate every speculative upload mirror in the scope.
+ * A failed End(true) likewise invalidates all mirrors; do not draw that frame.
+ * End(false) reports whether cancellation completed, not successful uploads.
+ * Backends without this optional pair execute normal immediate updates and
+ * treat both boundaries as successful no-ops; cancellation does not roll back
+ * those updates. Callers must therefore recover by uploading again, never by
+ * relying on unchanged old texture contents after a failure. */
+bool ArRenderDevice_BeginTextureUploads(ArRenderDevice *device);
+bool ArRenderDevice_EndTextureUploads(ArRenderDevice *device, bool commit);
 /* An invalid target selects the platform's default output. NULL viewport or
  * clip rectangles restore the complete target extent / disable clipping. */
 bool ArRenderDevice_SetRenderTarget(ArRenderDevice *device,

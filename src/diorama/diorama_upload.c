@@ -10,14 +10,14 @@ static PresentationUploadMirror
 static DioramaCoverageMask s_coverage_masks[kDioramaPlane_Count];
 static uint32_t s_coverage_valid_mask;
 
-DioramaUploadResult Diorama_UploadResolved(
+DioramaUploadResult Diorama_UploadResolvedWithChanges(
     ArRenderDevice *device,
     ArRenderTexture textures[kDioramaPlane_Count],
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
     int snes_width, int snes_height, int obj_apron, unsigned bg_apron_mask,
     uint32_t plane_mask, uint32_t gpu_mask, uint32_t gpu_changed,
-    bool collect_coverage) {
+    bool collect_coverage, const DioramaUploadChanges *changes) {
   DioramaUploadResult upload = {0};
   /* Do this before device/source validation too. A disabled-coverage capture
    * may fail to upload; its next unchanged successful capture must still
@@ -35,7 +35,9 @@ DioramaUploadResult Diorama_UploadResolved(
     DioramaPerformance_End(performance);
     return upload;
   }
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+  const bool began = ArRenderDevice_BeginTextureUploads(device);
+  bool complete = began;
+  for (int plane = 0; complete && plane < kDioramaPlane_Count; plane++) {
     /* Mode 1 never draws BG4; unlike the other primary/split planes it has no
      * persistent texture and is not part of the compositor layer table. */
     if (plane == SR_PPU_OVERLAY_BG4) continue;
@@ -55,14 +57,16 @@ DioramaUploadResult Diorama_UploadResolved(
       s_upload_mirrors[plane].valid = false;
       plane_upload.changed = (gpu_changed & (1u << plane)) != 0;
     }
-    const bool synchronized = on_gpu || PresentationUploadMirror_UploadArgb8888(
+    const PresentationUploadChanges *known = changes && (changes->plane_mask & (1u << plane))
+        ? &changes->source : NULL;
+    const bool synchronized = on_gpu || PresentationUploadMirror_UploadArgb8888WithChanges(
         &s_upload_mirrors[plane], device, textures[plane], source,
         region.width, region.height, (int)pitch_bytes[plane],
-        region.x, 0, &plane_upload);
+        region.x, 0, known, &plane_upload);
     DioramaPerformance_AddPlaneSync(
         synchronized, synchronized && plane_upload.changed,
         plane_upload.uploaded_bytes);
-    if (!synchronized) continue;
+    if (!synchronized) { complete = false; break; }
     upload.synchronized_plane_mask |= 1u << plane;
     if (plane_upload.changed) upload.changed_plane_mask |= 1u << plane;
     upload.coverage_masks[plane] = DioramaCoverage_FullMask();
@@ -86,8 +90,32 @@ DioramaUploadResult Diorama_UploadResolved(
       upload.coverage_masks[plane] = s_coverage_masks[plane];
     }
   }
+  if (began && !ArRenderDevice_EndTextureUploads(device, complete)) complete = false;
+  if (!complete) {
+    /* Copies may have been cancelled after mirrors accepted speculative bytes.
+     * Force complete retry, even for planes skipped after the first failure. */
+    const uint32_t cpu_mask = plane_mask & ~gpu_mask;
+    for (unsigned plane = 0; plane < kDioramaPlane_Count; ++plane)
+      if (cpu_mask & (1u << plane)) {
+        s_upload_mirrors[plane].valid = false;
+        s_upload_mirrors[plane].source_revision = 0;
+        upload.coverage_masks[plane] = 0;
+      }
+    s_coverage_valid_mask &= ~cpu_mask;
+    upload.synchronized_plane_mask &= ~cpu_mask;
+    upload.changed_plane_mask &= ~cpu_mask;
+  }
   DioramaPerformance_End(performance);
   return upload;
+}
+
+DioramaUploadResult Diorama_UploadResolved(
+    ArRenderDevice *device, ArRenderTexture textures[kDioramaPlane_Count],
+    const uint8_t *const pixels[kDioramaPlane_Count], const size_t pitches[kDioramaPlane_Count],
+    int width, int height, int apron, unsigned bg_apron, uint32_t mask,
+    uint32_t gpu_mask, uint32_t gpu_changed, bool coverage) {
+  return Diorama_UploadResolvedWithChanges(device, textures, pixels, pitches,
+      width, height, apron, bg_apron, mask, gpu_mask, gpu_changed, coverage, NULL);
 }
 
 DioramaUploadResult Diorama_Upload(ArRenderDevice *device,

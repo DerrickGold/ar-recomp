@@ -320,22 +320,33 @@ bool ArGpuDioramaDepthPass_EncodeHybridMaterials(ArGpuDioramaDepthPass *p,SDL_GP
       !ArGpuDioramaDepthPass_PrepareHybrid(p,width,height,nv,ni))return false;
   unsigned offsets[kDioramaDepthMaximumDraws];
   ArGpuDioramaDepthAlpha *a=p->alpha;
-  if(ni) {
+  unsigned retained_indices=0;
+  for(unsigned i=0;i<count;++i) {
+    offsets[i]=retained_indices;
+    if(draws[i].depth_mode==kDioramaDepth_Write||draws[i].depth_mode==kDioramaDepth_Read)
+      retained_indices+=draws[i].index_count;
+  }
+  /* Native/disabled bands upload through EncodeMaterials below. Keep only
+   * world geometry here, while preserving its original triangle ordinals. */
+  if(retained_indices) {
     AlphaVertex *mapped=SDL_MapGPUTransferBuffer(p->device,a->upload,true);
     if(!mapped)return false;
-    unsigned at=0;
+    unsigned logical_index=0;
     for(unsigned i=0;i<count;++i) {
-      offsets[i]=at;
-      for(unsigned j=0;j<draws[i].index_count;++j,++at) {
-        mapped[at]=(AlphaVertex){.vertex=draws[i].vertices[draws[i].indices[j]],.ordinal=(float)(at/3)};
-        if(!draws[i].textured)mapped[at].vertex.uv.x=-1;
-      }
+      if(draws[i].depth_mode==kDioramaDepth_Write||draws[i].depth_mode==kDioramaDepth_Read)
+        for(unsigned j=0;j<draws[i].index_count;++j) {
+          AlphaVertex *vertex=&mapped[offsets[i]+j];
+          *vertex=(AlphaVertex){.vertex=draws[i].vertices[draws[i].indices[j]],
+            .ordinal=(float)((logical_index+j)/3)};
+          if(!draws[i].textured)vertex->vertex.uv.x=-1;
+        }
+      logical_index+=draws[i].index_count;
     }
     SDL_UnmapGPUTransferBuffer(p->device,a->upload);
     SDL_GPUCopyPass *copy=SDL_BeginGPUCopyPass(cmd);
     if(!copy)return false;
     const SDL_GPUTransferBufferLocation source={.transfer_buffer=a->upload};
-    const SDL_GPUBufferRegion destination={.buffer=a->vertices,.size=ni*sizeof(AlphaVertex)};
+    const SDL_GPUBufferRegion destination={.buffer=a->vertices,.size=retained_indices*sizeof(AlphaVertex)};
     SDL_UploadToGPUBuffer(copy,&source,&destination,true);SDL_EndGPUCopyPass(copy);
   }
   /* Prepare/Validate above already guarantees initialized matching depth for

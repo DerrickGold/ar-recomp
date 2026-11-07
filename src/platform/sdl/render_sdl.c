@@ -105,7 +105,13 @@ static SDL_TextureAddressMode ToSdlTextureAddressMode(
   return SDL_TEXTURE_ADDRESS_INVALID;
 }
 
-static bool FlushExternal(ArSdlRenderBackend *backend) {
+static bool UploadBoundary(ArSdlRenderBackend *backend) {
+  if (!backend || !backend->upload_open) return true;
+  backend->upload_failed = true;
+  return SDL_SetError("render operation inside texture upload scope");
+}
+
+static bool DrainExternal(ArSdlRenderBackend *backend) {
   if (!backend || !backend->external_flush) return true;
   if (backend->external_flushing)
     return SDL_SetError("recursive external GPU batch flush");
@@ -115,9 +121,49 @@ static bool FlushExternal(ArSdlRenderBackend *backend) {
   return ok;
 }
 
+static bool FlushExternal(ArSdlRenderBackend *backend) {
+  return UploadBoundary(backend) && DrainExternal(backend);
+}
+
+static bool CancelTextureUploads(ArSdlRenderBackend *backend) {
+  if (backend->upload_copy) SDL_EndGPUCopyPass(backend->upload_copy);
+  backend->upload_copy = NULL;
+  SDL_GPUCommandBuffer *commands = backend->upload_commands;
+  backend->upload_commands = NULL;
+  return !commands || SDL_CancelGPUCommandBuffer(commands);
+}
+
+static bool BeginTextureUploads(void *context) {
+  ArSdlRenderBackend *backend = context;
+  /* Preserve SDL's normal upload/conversion path on legacy adapters. */
+  if (!backend->reuse_texture_uploads) return true;
+  if (!UploadBoundary(backend)) return false;
+  backend->upload_open = true;
+  backend->upload_failed = false;
+  return true;
+}
+
+static bool EndTextureUploads(void *context, bool commit) {
+  ArSdlRenderBackend *backend = context;
+  if (!backend->reuse_texture_uploads) return true;
+  if (!backend->upload_open) return SDL_SetError("no texture upload scope is open");
+  const bool failed = backend->upload_failed;
+  backend->upload_open = backend->upload_failed = false;
+  if (!commit || failed) {
+    const bool canceled = CancelTextureUploads(backend);
+    return canceled && (!commit || !failed);
+  }
+  if (backend->upload_copy) SDL_EndGPUCopyPass(backend->upload_copy);
+  backend->upload_copy = NULL;
+  SDL_GPUCommandBuffer *commands = backend->upload_commands;
+  backend->upload_commands = NULL;
+  return !commands || SDL_SubmitGPUCommandBuffer(commands);
+}
+
 static bool CreateTexture(void *context, const ArRenderTextureDesc *desc,
                           ArRenderTexture *out_texture) {
   ArSdlRenderBackend *backend = context;
+  if (!UploadBoundary(backend)) return false;
   SDL_PixelFormat format = ToSdlPixelFormat(desc->format);
   SDL_BlendMode blend = ToSdlBlendMode(desc->blend);
   if (!backend || !backend->renderer || format == SDL_PIXELFORMAT_UNKNOWN ||
@@ -139,6 +185,10 @@ static bool CreateTexture(void *context, const ArRenderTextureDesc *desc,
 }
 
 static void DestroyTexture(void *context, ArRenderTexture texture) {
+  ArSdlRenderBackend *backend = context;
+  /* This void operation is rejected during an upload scope. The owner must
+   * close the failed scope before retrying destruction. */
+  if (!UploadBoundary(backend)) return;
   /* A failed drain discards the batch; the texture can then be released. */
   (void)FlushExternal(context);
   SDL_DestroyTexture(ArSdlRenderBackend_UnwrapTexture(texture));
@@ -176,8 +226,11 @@ static bool UpdateGpuTexture(ArSdlRenderBackend *backend, SDL_Texture *texture,
   if (!gpu_texture || (format != SDL_PIXELFORMAT_RGBA32 && format != SDL_PIXELFORMAT_BGRA32) ||
       region.w <= 0 || region.h <= 0 || region.x < 0 || region.y < 0 ||
       region.w > width || region.h > height || region.x > width - region.w ||
-      region.y > height - region.h || region.w > INT_MAX / 4 || pitch < region.w * 4)
+      region.y > height - region.h || region.w > INT_MAX / 4 || pitch < region.w * 4) {
+    if (backend->upload_open)
+      return SDL_SetError("texture upload scope requires an in-bounds 32-bit native texture");
     return SDL_UpdateTexture(texture, rect, pixels, pitch);
+  }
   Uint32 size = 0;
   ArSdlTextureUploadLayout layout;
   const bool aligned = !strcmp(SDL_GetGPUDeviceDriver(backend->gpu_device), "direct3d12");
@@ -215,11 +268,20 @@ static bool UpdateGpuTexture(ArSdlRenderBackend *backend, SDL_Texture *texture,
   /* Publish all earlier SDL draws/uploads before writing the borrowed native
    * texture. The offscreen renderer's present submits without a window swap.
    * Keep the texture uncycled: SDL caches its native binding across draws. */
-  if (!SDL_FlushRenderer(backend->renderer) || !SDL_RenderPresent(backend->renderer)) return false;
-  SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(upload->device);
-  if (!commands) return false;
-  SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(commands);
-  if (!copy) { SDL_CancelGPUCommandBuffer(commands); return false; }
+  SDL_GPUCommandBuffer *commands = backend->upload_commands;
+  SDL_GPUCopyPass *copy = backend->upload_copy;
+  if (!commands) {
+    if ((backend->upload_open && !DrainExternal(backend)) ||
+        !SDL_FlushRenderer(backend->renderer) || !SDL_RenderPresent(backend->renderer)) return false;
+    commands = SDL_AcquireGPUCommandBuffer(upload->device);
+    if (!commands) return false;
+    copy = SDL_BeginGPUCopyPass(commands);
+    if (!copy) { SDL_CancelGPUCommandBuffer(commands); return false; }
+    if (backend->upload_open) {
+      backend->upload_commands = commands;
+      backend->upload_copy = copy;
+    }
+  }
   const SDL_GPUTextureTransferInfo source = {
     .transfer_buffer = upload->buffer, .pixels_per_row = layout.row_pitch / 4,
     .rows_per_layer = (Uint32)region.h,
@@ -229,6 +291,7 @@ static bool UpdateGpuTexture(ArSdlRenderBackend *backend, SDL_Texture *texture,
     .w = (Uint32)region.w, .h = (Uint32)region.h, .d = 1,
   };
   SDL_UploadToGPUTexture(copy, &source, &destination, false);
+  if (backend->upload_open) return true;
   SDL_EndGPUCopyPass(copy);
   return SDL_SubmitGPUCommandBuffer(commands);
 }
@@ -236,7 +299,8 @@ static bool UpdateGpuTexture(ArSdlRenderBackend *backend, SDL_Texture *texture,
 static bool UpdateTexture(void *context, ArRenderTexture texture,
                           const ArRenderRectI *destination,
                           const void *pixels, int pitch_bytes) {
-  if (!FlushExternal(context)) return false;
+  ArSdlRenderBackend *backend = context;
+  if (backend->upload_open ? backend->upload_failed : !FlushExternal(backend)) return false;
   SDL_Rect converted;
   const SDL_Rect *rect = NULL;
   if (destination) {
@@ -259,11 +323,11 @@ static bool UpdateTexture(void *context, ArRenderTexture texture,
         ? (uint64_t)width * height * SDL_BYTESPERPIXEL(format) : 0);
   }
   const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_TextureUpdate);
-  ArSdlRenderBackend *backend = context;
   const bool ok = backend->reuse_texture_uploads
       ? UpdateGpuTexture(backend, native, rect, pixels, pitch_bytes)
       : SDL_UpdateTexture(native, rect, pixels, pitch_bytes);
   PerformanceMetrics_End(scope);
+  if (!ok && backend->upload_open) backend->upload_failed = true;
   return ok;
 }
 
@@ -315,12 +379,14 @@ static bool SetRenderTarget(void *context, ArRenderTexture target) {
 
 static bool UseOutputCoordinates(void *context) {
   ArSdlRenderBackend *backend = context;
+  if (!UploadBoundary(backend)) return false;
   return SDL_SetRenderLogicalPresentation(
       backend->renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
 }
 
 static bool GetOutputSize(void *context, int *width, int *height) {
   ArSdlRenderBackend *backend = context;
+  if (!UploadBoundary(backend)) return false;
   SDL_Texture *target = SDL_GetRenderTarget(backend->renderer);
   if (backend->output_window && target == backend->output_target) {
     if (!EnsureOutputTarget(backend)) return false;
@@ -340,6 +406,7 @@ static bool GetOutputSize(void *context, int *width, int *height) {
 
 static bool SetViewport(void *context, const ArRenderRectI *viewport) {
   ArSdlRenderBackend *backend = context;
+  if (!UploadBoundary(backend)) return false;
   SDL_Rect converted;
   const SDL_Rect *rect = NULL;
   if (viewport) {
@@ -352,6 +419,7 @@ static bool SetViewport(void *context, const ArRenderRectI *viewport) {
 
 static bool SetClipRect(void *context, const ArRenderRectI *clip) {
   ArSdlRenderBackend *backend = context;
+  if (!UploadBoundary(backend)) return false;
   SDL_Rect converted;
   const SDL_Rect *rect = NULL;
   if (clip) {
@@ -365,6 +433,7 @@ static bool CaptureRenderTargetState(void *context,
                                      ArRenderTargetState *state) {
   ArSdlRenderBackend *backend = context;
   if (!backend || !backend->renderer || !state) return false;
+  if (!UploadBoundary(backend)) return false;
   SDL_Rect viewport;
   if (!SDL_GetRenderViewport(backend->renderer, &viewport)) return false;
   SDL_Texture *target = SDL_GetRenderTarget(backend->renderer);
@@ -388,6 +457,7 @@ static bool RestoreRenderTargetState(
     void *context, const ArRenderTargetState *state) {
   ArSdlRenderBackend *backend = context;
   if (!backend || !backend->renderer || !state || !state->valid) return false;
+  if (!UploadBoundary(backend)) return false;
   const SDL_Rect viewport = {
     state->viewport.x, state->viewport.y,
     state->viewport.w, state->viewport.h,
@@ -714,6 +784,8 @@ static const ArRenderBackendOps kSdlRenderOps = {
   .present = Present,
   .last_error = LastError,
   .finish_preparation = FinishPreparation,
+  .begin_texture_uploads = BeginTextureUploads,
+  .end_texture_uploads = EndTextureUploads,
 };
 
 void ArSdlRenderBackend_EnablePresentTrace(const ArRenderDevice *device, bool enabled) {
@@ -1101,6 +1173,8 @@ void ArSdlRenderBackend_Destroy(ArRenderDevice *device) {
     return;
   }
   ArSdlRenderBackend *backend = device->context;
+  (void)CancelTextureUploads(backend);
+  backend->upload_open = backend->upload_failed = false;
   (void)FlushExternal(backend);
   backend->external_flush = NULL;
   backend->external_userdata = NULL;

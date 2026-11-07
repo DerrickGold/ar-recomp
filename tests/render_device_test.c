@@ -36,6 +36,8 @@ typedef struct FakeBackend {
   bool fail_restore_target_state;
   bool fail_clear;
   bool fail_draw_geometry;
+  int upload_begin_count, upload_end_count;
+  bool upload_commit, fail_upload_begin, fail_upload_end;
   int output_width;
   int output_height;
 } FakeBackend;
@@ -465,6 +467,58 @@ static void TestPreparationBoundary(void) {
   assert(backend.present_count == 0);
 }
 
+static bool BeginUploads(void *context) {
+  FakeBackend *backend = context;
+  ++backend->upload_begin_count;
+  return !backend->fail_upload_begin;
+}
+
+static bool EndUploads(void *context, bool commit) {
+  FakeBackend *backend = context;
+  ++backend->upload_end_count;
+  backend->upload_commit = commit;
+  return !backend->fail_upload_end;
+}
+
+static void TestUploadBoundaries(void) {
+  FakeBackend backend = {0};
+  ArRenderDevice device = {0};
+  assert(!ArRenderDevice_BeginTextureUploads(&device));
+  assert(!ArRenderDevice_EndTextureUploads(&device, true));
+  assert(ArRenderDevice_Init(&device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
+  /* The mandatory baseline remains usable without any transaction support. */
+  const uint32_t pixel = 0x12345678;
+  const ArRenderRectI rect = {0,0,1,1};
+  assert(ArRenderDevice_BeginTextureUploads(&device));
+  assert(ArRenderDevice_UpdateTexture(&device, (ArRenderTexture){1}, &rect, &pixel, 4));
+  assert(ArRenderDevice_EndTextureUploads(&device, false));
+  assert(backend.update_count == 1 && backend.upload_begin_count == 0 && backend.upload_end_count == 0);
+
+  ArRenderBackendOps ops = kFakeOps;
+  ops.begin_texture_uploads = BeginUploads;
+  ArRenderDevice_Reset(&device);
+  assert(!ArRenderDevice_Init(&device, &ops, &backend, (ArRenderCapabilities){0}));
+  ops.end_texture_uploads = EndUploads;
+  assert(ArRenderDevice_Init(&device, &ops, &backend, (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_BeginTextureUploads(&device));
+  assert(ArRenderDevice_EndTextureUploads(&device, true));
+  assert(backend.upload_begin_count == 1 && backend.upload_end_count == 1 && backend.upload_commit);
+  assert(ArRenderDevice_BeginTextureUploads(&device));
+  assert(ArRenderDevice_EndTextureUploads(&device, false));
+  assert(!backend.upload_commit);
+  backend.fail_upload_begin = true;
+  assert(!ArRenderDevice_BeginTextureUploads(&device));
+  assert(backend.upload_end_count == 2); /* A failed Begin does not require End. */
+  backend.fail_upload_begin = false;
+  backend.fail_upload_end = true;
+  assert(ArRenderDevice_BeginTextureUploads(&device));
+  assert(!ArRenderDevice_EndTextureUploads(&device, true));
+  assert(backend.upload_end_count == 3 && backend.upload_commit);
+  ops.begin_texture_uploads = NULL;
+  ArRenderDevice_Reset(&device);
+  assert(!ArRenderDevice_Init(&device, &ops, &backend, (ArRenderCapabilities){0}));
+}
+
 static void TestOutputFrameScope(void) {
   const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   const ArRenderColorF navy = {0.1f, 0.1f, 0.2f, 1.0f};
@@ -632,6 +686,7 @@ static void TestDirtyUploadWorksWithoutANativeRenderer(void) {
 }
 
 int main(void) {
+  TestUploadBoundaries();
   TestPreparationBoundary();
   TestDeviceDispatchAndCapabilities();
   TestIncompleteBackendIsRejected();

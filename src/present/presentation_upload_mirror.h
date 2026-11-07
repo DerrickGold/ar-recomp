@@ -20,7 +20,19 @@ typedef struct PresentationUploadMirror {
   int width, height;
   int destination_x, destination_y;
   bool valid;
+  uint64_t source_revision;
 } PresentationUploadMirror;
+
+/* Exact source-owner change evidence, relative to previous_revision. A mirror
+ * may use it only after synchronizing that revision to the same texture region.
+ * Equal nonzero revisions mean unchanged pixels. Otherwise changed_rows, when
+ * present, marks every row that may differ; NULL requests ordinary comparison.
+ * Revisions must identify content across skipped/failed uploads and resets. */
+typedef struct PresentationUploadChanges {
+  uint64_t previous_revision, revision;
+  const uint8_t *changed_rows;
+  unsigned row_count;
+} PresentationUploadChanges;
 
 typedef struct PresentationUploadResult {
   ArRenderRectI destination;
@@ -48,5 +60,12 @@ bool PresentationUploadMirror_UploadArgb8888(
     ArRenderTexture texture,
     const uint8_t *source, int width, int height, int source_pitch,
     int destination_x, int destination_y, PresentationUploadResult *result);
+
+bool PresentationUploadMirror_UploadArgb8888WithChanges(
+    PresentationUploadMirror *mirror, ArRenderDevice *device,
+    ArRenderTexture texture,
+    const uint8_t *source, int width, int height, int source_pitch,
+    int destination_x, int destination_y, const PresentationUploadChanges *changes,
+    PresentationUploadResult *result);
 
 #endif /* AR_PRESENTATION_UPLOAD_MIRROR_H */

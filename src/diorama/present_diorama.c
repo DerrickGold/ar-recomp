@@ -41,6 +41,9 @@ static uint32_t *s_bg_fallback[kDioramaPlane_Count + 1];
 static uint32_t *s_trunk_fallback[3];
 static uint32_t *s_voxel_fallback[2];
 static DioramaVoxelSourceCache s_voxel_source_cache;
+/* Monotonic content identity for the retained split. Never derive this from
+ * packet pointers/timestamps: native reloads can reuse both. */
+static uint64_t s_voxel_upload_revision;
 static ArRenderTexture s_voxel_sprite_atlas;
 static PresentationUploadMirror s_voxel_sprite_mirror;
 static ActionVoxelSpriteFrame s_voxel_sprites_previous, s_voxel_sprites_current;
@@ -581,13 +584,12 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   const bool retained_voxel_source = cache_voxel_source &&
       s_voxel_fallback[0] && s_voxel_fallback[1];
   DioramaVoxelSourceRowPlan voxel_rows;
-  const bool plan_voxel_rows = retained_voxel_source && slot->background_packet->words[7] &&
+  const bool plan_voxel_rows = retained_voxel_source &&
       DioramaVoxelSourceCache_PlanRows(&s_voxel_source_cache,
           slot->background_packet, &voxel_source_key, &voxel_rows);
-  const bool reuse_voxel_source = retained_voxel_source &&
-      (plan_voxel_rows ? !voxel_rows.count :
-       DioramaVoxelSourceCache_Matches(&s_voxel_source_cache,
-          slot->background_packet, &voxel_source_key));
+  /* The planner covers both ordinary and full-add packets. A rejected plan
+   * cannot reuse the source; don't repeat its validation and full comparison. */
+  const bool reuse_voxel_source = plan_voxel_rows && !voxel_rows.count;
   const DioramaVoxelSourceRowPlan *changed_voxel_rows =
       plan_voxel_rows && voxel_rows.count ? &voxel_rows : NULL;
   static int trace_voxel_source = -1;
@@ -615,6 +617,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     const unsigned plane=i==0?SR_PPU_OVERLAY_BG1:i==1?kDioramaPlane_Bg1Hi:kDioramaPlane_Bg1Far;
     gpu_mask&=~(1u<<plane);s_resolved_textures[plane]=s_plane_textures[plane];
   }
+  DioramaUploadChanges voxel_changes = {0};
   if (castle) {
     const bool source_materialized = pixels[SR_PPU_OVERLAY_BG1] != NULL;
     /* A failed optional decode must never publish a partially updated split.
@@ -623,6 +626,16 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
         source_materialized ? changed_voxel_rows : NULL)) {
       SessionFatal_Request("Cannot allocate castle enclosure surfaces"); return;
     }
+    uint64_t previous_revision = s_voxel_upload_revision;
+    if (!reuse_voxel_source && ++s_voxel_upload_revision == 0) {
+      s_voxel_upload_revision = 1;
+      previous_revision = 0;
+    }
+    voxel_changes = (DioramaUploadChanges){
+      .plane_mask = cache_voxel_source ? castle_planes : 0,
+      .source = {.previous_revision = previous_revision, .revision = s_voxel_upload_revision,
+        .changed_rows = source_materialized && changed_voxel_rows ? changed_voxel_rows->changed : NULL,
+        .row_count = (unsigned)voxel_source_key.height}};
     if (!reuse_voxel_source && cache_voxel_source && source_materialized)
       DioramaVoxelSourceCache_Retain(&s_voxel_source_cache,
           slot->background_packet, &voxel_source_key);
@@ -634,12 +647,12 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   }
   /* Row 0 is the top of the captured world band. Upload both sides; the
    * authentic frame begins at ws_extra_top and the lower band follows it. */
-  const DioramaUploadResult upload = Diorama_UploadResolved(
+  const DioramaUploadResult upload = Diorama_UploadResolvedWithChanges(
       device, s_resolved_textures, pixels, pitch_bytes,
       slot->snes_width + slot->obj_apron * 2,
       slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
       slot->obj_apron, slot->diorama_bg_apron_mask, upload_mask, gpu_mask, gpu_changed,
-      collect_coverage);
+      collect_coverage, &voxel_changes);
   s_diorama_uploaded_plane_mask = upload.synchronized_plane_mask;
   uint32_t trunk_changed=upload.changed_plane_mask;
   if(gpu_trunk&&!DioramaTrunkGpu_Upload(device,slot,s_resolved_textures,upload.changed_plane_mask,&trunk_changed)) {

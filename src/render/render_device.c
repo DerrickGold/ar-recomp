@@ -9,7 +9,8 @@ static bool HasRequiredOps(const ArRenderBackendOps *ops) {
       ops->set_render_target && ops->use_output_coordinates &&
       ops->get_output_size && ops->set_viewport && ops->set_clip_rect &&
       ops->clear && ops->draw_texture && ops->draw_geometry && ops->present &&
-      ops->last_error;
+      ops->last_error &&
+      (!!ops->begin_texture_uploads == !!ops->end_texture_uploads);
 }
 
 bool ArRenderDevice_Init(ArRenderDevice *device,
@@ -70,6 +71,18 @@ bool ArRenderDevice_UpdateTexture(ArRenderDevice *device,
    * of an opaque texture when destination is NULL. */
   return device->ops->update_texture(
       device->context, texture, destination, pixels, pitch_bytes);
+}
+
+bool ArRenderDevice_BeginTextureUploads(ArRenderDevice *device) {
+  return ArRenderDevice_IsReady(device) &&
+      (!device->ops->begin_texture_uploads ||
+       device->ops->begin_texture_uploads(device->context));
+}
+
+bool ArRenderDevice_EndTextureUploads(ArRenderDevice *device, bool commit) {
+  return ArRenderDevice_IsReady(device) &&
+      (!device->ops->end_texture_uploads ||
+       device->ops->end_texture_uploads(device->context, commit));
 }
 
 bool ArRenderDevice_SetRenderTarget(ArRenderDevice *device,

@@ -57,7 +57,7 @@ static inline bool DioramaVoxelSourceRowEqual(const SrPpuBgPacket *a,
   if (!ar[0]) return true;
   /* Compact rows and edit cells address three palette bits and four color
    * bits: only entries 0..127. Format 1 can address all 256. Restrict this
-   * exact dependency to the full-add row planner; ordinary whole-source
+   * exact dependency to the row planner; whole-source
    * comparison retains its existing 256-entry behavior. */
   const unsigned words = format_palette && ar[0] >= 2 ? 128u : 256u;
   if (ar[6] != palette->a || br[6] != palette->b || words != palette->words) {
@@ -134,10 +134,12 @@ static inline bool DioramaVoxelSourceCache_Matches(const DioramaVoxelSourceCache
   return true;
 }
 
-/* Full-add decoding and the Voxel split have no dependency on adjacent
- * capture rows. Retain unchanged output rows when animated artwork or native
- * actors change only part of the capture, comparing every source and winner
- * dependency, including all palette entries addressable by each row format.
+/* BG1 decoding and the Voxel split have no dependency on adjacent capture
+ * rows: sparse backing donors, columns and masks are immutable geometry,
+ * indexed by world coordinates rather than neighboring captured pixels.
+ * Retain unchanged output rows when artwork changes only part of the capture.
+ * Ordinary rows depend only on BG1; full-add also depends on BG2 and native
+ * winners. Compare all palette entries addressable by each row format.
  * Geometry, camera, layout and color changes still take the complete path.
  * Both retained split buffers must exist before the caller uses this plan. */
 static inline bool DioramaVoxelSourceCache_PlanRows(const DioramaVoxelSourceCache *cache,
@@ -145,13 +147,14 @@ static inline bool DioramaVoxelSourceCache_PlanRows(const DioramaVoxelSourceCach
     DioramaVoxelSourceRowPlan *plan) {
   memset(plan, 0, sizeof(*plan));
   if (!DioramaVoxelSourceCache_ContextMatches(cache, p, key) ||
-      !p->words[7] || !cache->packet->words[7] ||
-      ((p->words[2] ^ cache->packet->words[2]) & 3u)) return false;
+      !!p->words[7] != !!cache->packet->words[7]) return false;
+  const bool full_add = p->words[7] != 0;
+  if ((p->words[2] ^ cache->packet->words[2]) & (full_add ? 3u : 1u)) return false;
   DioramaVoxelSourcePalettePair palette[2] = {{0}, {0}};
   for (unsigned y = 0; y < p->words[1]; ++y) {
     const bool bg1 = DioramaVoxelSourceRowEqual(p, cache->packet, 0, y, &palette[0], true);
-    const bool bg2 = DioramaVoxelSourceRowEqual(p, cache->packet, 1, y, &palette[1], true);
-    const bool winner = DioramaVoxelSourceWinnerRowEqual(p, cache->packet, y);
+    const bool bg2 = !full_add || DioramaVoxelSourceRowEqual(p, cache->packet, 1, y, &palette[1], true);
+    const bool winner = !full_add || DioramaVoxelSourceWinnerRowEqual(p, cache->packet, y);
     plan->changed[y] = !bg1 || !bg2 || !winner;
     plan->count += plan->changed[y];
   }

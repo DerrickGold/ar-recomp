@@ -1,6 +1,7 @@
 /* Owned native-packet cache: semantic relocation, real invalidations and
  * decoded/split pixel equivalence. No ROM, SDL or user settings are needed. */
 #include "diorama/diorama_voxel_source_cache.h"
+#include "diorama/diorama_bg_decode.h"
 #include "action/action_voxel.h"
 #include "support/test_assert.h"
 #include <stdio.h>
@@ -8,6 +9,9 @@
 enum { W=24, H=4, PITCH=29 };
 static SrPpuBgPacket original, candidate;
 static unsigned hits, misses, compared_pixels, row_plans, partial_spans, anchored_splits;
+
+static void CheckRows(const DioramaVoxelSourceCache *cache,const SrPpuBgPacket *packet,
+    const DioramaVoxelSourceKey *key,unsigned expected);
 
 static void CopyPacket(SrPpuBgPacket *to,const SrPpuBgPacket *from) {
   memcpy(to,from,SrPpuBgPacket_Size(from));
@@ -121,8 +125,7 @@ static void Formats(DioramaVoxelSourceCache *cache,const DioramaVoxelSourceKey *
   for(unsigned format=1;format<=4;++format) {
     Build(&original,format,false,false);Build(&candidate,format,true,false);
     Retain(cache,&original,key);
-    DioramaVoxelSourceRowPlan rows;
-    assert(!DioramaVoxelSourceCache_PlanRows(cache,&candidate,key,&rows));
+    CheckRows(cache,&candidate,key,0);
     assert(SrPpuBgPacket_Meta(&original,0,0)[6]!=SrPpuBgPacket_Meta(&candidate,0,0)[6]);
     assert(SrPpuBgPacket_Meta(&original,0,0)[7]!=SrPpuBgPacket_Meta(&candidate,0,0)[7]);
     if(format==4)assert(SrPpuBgPacket_Meta(&original,0,0)[5]!=SrPpuBgPacket_Meta(&candidate,0,0)[5]);
@@ -132,7 +135,7 @@ static void Formats(DioramaVoxelSourceCache *cache,const DioramaVoxelSourceKey *
     candidate.request_flags^=SR_PPU_BG_PACKET_VALIDATE_TILES;candidate.last_palette[0]=0;
     uint32_t *bg2=SrPpuBgPacket_Meta(&candidate,1,1);
     bg2[1]^=0x00800000;candidate.words[bg2[6]+1]^=0x00008000;candidate.words[bg2[7]]^=1;
-    Expect(cache,&candidate,key,true);
+    Expect(cache,&candidate,key,true);CheckRows(cache,&candidate,key,0);
     for(unsigned mutation=0;mutation<6;++mutation) {
       CopyPacket(&candidate,&original);
       uint32_t *row=SrPpuBgPacket_Meta(&candidate,0,mutation==1?2:0);
@@ -155,6 +158,7 @@ static void Formats(DioramaVoxelSourceCache *cache,const DioramaVoxelSourceKey *
         else candidate.words[row[7]+1]=0x80000000u;
       }
       assert(SrPpuBgPacket_Valid(&candidate));Expect(cache,&candidate,key,false);
+      CheckRows(cache,&candidate,key,mutation==0?3:mutation==1?4:1);
       /* Metadata-only backing-width changes can be conservative misses;
        * art, palette, phase and matte mutations visibly alter the source. */
       if(mutation!=2&&!(mutation==3&&format<3))assert(PixelDifference(&original,&candidate));
@@ -222,7 +226,9 @@ static void CheckRows(const DioramaVoxelSourceCache *cache,const SrPpuBgPacket *
     if(!plan.changed[y]){++y;continue;}
     const unsigned first=y;
     do {
-      for(unsigned x=0;x<W;++x)previous[y*W+x]=SrPpuBgPacket_Color(packet,0,0,x,y);
+      /* Use the production optimized row decoder for the partial path,
+       * compared against full SrPpuBgPacket_Color decoding above. */
+      DioramaBgDecode_Row(packet,0,0,y,W,previous+y*W);
       ++y;
     } while(y<H&&plan.changed[y]);
     assert(ActionVoxel_Split(key->geometry,key->world_x,key->world_y+first,W,y-first,
@@ -232,6 +238,46 @@ static void CheckRows(const DioramaVoxelSourceCache *cache,const SrPpuBgPacket *
   /* Includes unchanged gaps and padding, not just dirty samples. */
   assert(!memcmp(previous,current,sizeof(previous)));
   assert(!memcmp(rear,full_rear,sizeof(rear))&&!memcmp(front,full_front,sizeof(front)));
+}
+
+static void OrdinaryRows(DioramaVoxelSourceCache *cache,const DioramaVoxelSourceKey *key) {
+  for(unsigned format=1;format<=4;++format) {
+    Build(&original,format,false,false);Retain(cache,&original,key);
+    CopyPacket(&candidate,&original);
+    candidate.words[2]&=~2u;candidate.owned_sources&=~2u;
+    /* Ordinary BG1 is independent of BG2 availability, ranks and edits. */
+    Expect(cache,&candidate,key,true);CheckRows(cache,&candidate,key,0);
+    CopyPacket(&candidate,&original);
+    SrPpuBgPacket_Meta(&candidate,0,1)[7]=0;
+    assert(SrPpuBgPacket_Valid(&candidate));CheckRows(cache,&candidate,key,2);
+    CopyPacket(&candidate,&original);
+    SrPpuBgPacket_Meta(&candidate,0,3)[6]=SrPpuBgPacket_Meta(&candidate,0,0)[6];
+    candidate.words[SrPpuBgPacket_Meta(&candidate,0,0)[6]+3]^=0x1000;
+    /* Every reference to a changed palette counts, including a nonadjacent
+     * row after a different palette has replaced the memoized comparison. */
+    CheckRows(cache,&candidate,key,11);
+    CopyPacket(&candidate,&original);
+    uint32_t *last=SrPpuBgPacket_Meta(&candidate,0,H-1);
+    if(format==1)candidate.words[last[7]+5]|=1u<<9;
+    else if(format==2)candidate.words[last[7]+3]^=1;
+    else candidate.words[last[7]+1]^=1u<<3;
+    /* Native band changes are retained conservatively, even where the
+     * changed high-priority sample does not alter BG1-low's decoded color. */
+    CheckRows(cache,&candidate,key,8);
+    CopyPacket(&candidate,&original);SrPpuBgPacket_Meta(&candidate,0,0)[1]^=0x1000;
+    CheckRows(cache,&candidate,key,1);Retain(cache,&candidate,key);CheckRows(cache,&candidate,key,0);
+    SrPpuBgPacket_Meta(&candidate,0,3)[1]^=0x1000;
+    CheckRows(cache,&candidate,key,8);Retain(cache,&candidate,key);CheckRows(cache,&candidate,key,0);
+  }
+  for(unsigned full_add=0;full_add<2;++full_add) {
+    Build(&original,4,false,full_add);Build(&candidate,4,true,!full_add);
+    Retain(cache,&original,key);
+    DioramaVoxelSourceRowPlan plan;memset(&plan,0xa5,sizeof(plan));
+    assert(!DioramaVoxelSourceCache_PlanRows(cache,&candidate,key,&plan));
+    assert(!plan.count);
+    for(unsigned y=0;y<SR_PPU_BG_PACKET_HEIGHT;++y)assert(!plan.changed[y]);
+    Expect(cache,&candidate,key,false);
+  }
 }
 
 static void FullAddRows(DioramaVoxelSourceCache *cache,const DioramaVoxelSourceKey *key) {
@@ -314,6 +360,27 @@ static void ChangeSharedPalette(SrPpuBgPacket *packet,unsigned source,
 }
 
 static void PaletteSpans(DioramaVoxelSourceCache *cache,const DioramaVoxelSourceKey *key) {
+  for(unsigned format=1;format<=4;++format) {
+    Build(&original,format,false,false);
+    uint32_t *meta=SrPpuBgPacket_Meta(&original,0,0);
+    if(format==1)original.words[meta[7]+5]=256;
+    else if(format==2)Cell(original.words+meta[7],5,15,7,0);
+    else {
+      original.words[meta[7]]=UINT32_MAX;
+      original.words[meta[7]+1]|=7u;
+      if(format==4)Cell(original.words+meta[5],5,15,7,1u<<24);
+    }
+    Retain(cache,&original,key);
+    CopyPacket(&candidate,&original);ChangeSharedPalette(&candidate,0,128,256);
+    Expect(cache,&candidate,key,false);
+    CheckRows(cache,&candidate,key,format==1?15:0);
+    assert(!!PixelDifference(&original,&candidate)==(format==1));
+    CopyPacket(&candidate,&original);
+    candidate.words[meta[6]+(format==1?255:127)]^=0x00808000;
+    assert(PixelDifference(&original,&candidate));CheckRows(cache,&candidate,key,3);
+    CopyPacket(&candidate,&original);ChangeSharedPalette(&candidate,1,0,256);
+    Expect(cache,&candidate,key,true);CheckRows(cache,&candidate,key,0);
+  }
   for(unsigned format=2;format<=4;++format) {
     Build(&original,format==2?3:format,false,true);
     if(format==2)for(unsigned y=0;y<2;++y) {
@@ -335,8 +402,8 @@ static void PaletteSpans(DioramaVoxelSourceCache *cache,const DioramaVoxelSource
     assert(SrPpuBgPacket_Valid(&original));Retain(cache,&original,key);
     for(unsigned source=0;source<2;++source) {
       CopyPacket(&candidate,&original);ChangeSharedPalette(&candidate,source,128,256);
-      /* Ordinary whole-source matching remains conservative. Only the
-       * full-add row plan uses the exact format-specific reachable span. */
+      /* Whole-source matching remains conservative. The row planner uses
+       * the exact format-specific reachable span in either full-add mode. */
       Expect(cache,&candidate,key,false);assert(!PixelDifference(&original,&candidate));
       CheckRows(cache,&candidate,key,0);
       SrPpuBgPacket_FullAddRow(&candidate,2)[4+3]^=1u<<18;
@@ -406,8 +473,9 @@ static void AnchoredSplitRows(const char *rom_path) {
   free(scene);free(rom);
 }
 
-static void KeysAndFailures(DioramaVoxelSourceCache *cache,const DioramaVoxelSourceKey *key) {
-  Build(&original,4,false,true);Retain(cache,&original,key);
+static void KeysAndFailures(DioramaVoxelSourceCache *cache,const DioramaVoxelSourceKey *key,
+    bool full_add) {
+  Build(&original,4,false,full_add);Retain(cache,&original,key);
   for(unsigned mutation=0;mutation<12;++mutation) {
     DioramaVoxelSourceKey changed=*key;
     switch(mutation) {
@@ -476,12 +544,13 @@ int main(int argc,char **argv) {
     .world_x=17,.world_y=29,.width=W,.height=H,.output_pitch=PITCH,.brightness=13,
     .cgwsel=2,.cgadsub=0x41,.fixed_color=0x3946};
   Expect(&cache,&original,&key,false);
-  Formats(&cache,&key);FullAdd(&cache,&key);FullAddRows(&cache,&key);
-  PaletteSpans(&cache,&key);KeysAndFailures(&cache,&key);
+  Formats(&cache,&key);OrdinaryRows(&cache,&key);FullAdd(&cache,&key);FullAddRows(&cache,&key);
+  PaletteSpans(&cache,&key);
+  for(unsigned full_add=0;full_add<2;++full_add)KeysAndFailures(&cache,&key,full_add);
   ActionVoxel_Release(geometry);
   if(argc==2)AnchoredSplitRows(argv[1]);
   printf("Voxel source cache: %u semantic hits, %u invalidations, %u decoded pixels plus rear/front split equivalence; formats 1–4, relocated arenas, HDMA, phase, mattes, full-add ownership, key fields and owned lifetime passed\n",hits,misses,compared_pixels);
-  printf("Full-add rows: %u exact row plans, %u partial spans, %u world-anchored real-art splits passed\n",
+  printf("Ordinary/full-add rows: %u exact row plans, %u partial spans, %u world-anchored real-art splits passed\n",
       row_plans,partial_spans,anchored_splits);
   return 0;
 }

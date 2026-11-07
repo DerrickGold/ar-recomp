@@ -24,6 +24,10 @@ typedef struct ArSdlRenderBackend {
   bool metal_drawable_policy, metal_drawable_warning;
   unsigned metal_drawable_override, reported_metal_drawables;
   bool reuse_texture_uploads; /* Ordered output only; staging owned by each texture. */
+  /* Upload-only owner scope; commands are acquired lazily on the first update. */
+  SDL_GPUCommandBuffer *upload_commands;
+  SDL_GPUCopyPass *upload_copy;
+  bool upload_open, upload_failed;
   bool owns_renderer;
   bool owns_context;
   bool owns_gpu_device;

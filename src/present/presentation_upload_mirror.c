@@ -55,10 +55,10 @@ static bool ValidRegion(const uint8_t *pixels, int pitch,
       (size_t)pitch <= SIZE_MAX / (size_t)height;
 }
 
-bool PresentationUploadMirror_FindDirtyRect(
+static bool FindDirtyRectRows(
     const uint8_t *current, int current_pitch,
     const uint8_t *previous, int previous_pitch,
-    int width, int height, ArRenderRectI *dirty) {
+    int width, int height, const uint8_t *changed_rows, ArRenderRectI *dirty) {
   if (!dirty) return false;
   *dirty = (ArRenderRectI){0, 0, width > 0 ? width : 0,
                           height > 0 ? height : 0};
@@ -74,6 +74,7 @@ bool PresentationUploadMirror_FindDirtyRect(
   uint64_t scanned = 0;
   int x0 = width, y0 = height, x1 = 0, y1 = 0;
   for (int y = 0; y < height; y++) {
+    if (changed_rows && !changed_rows[y]) continue;
     const uint8_t *current_row = current + (size_t)y * (size_t)current_pitch;
     const uint8_t *previous_row =
         previous + (size_t)y * (size_t)previous_pitch;
@@ -100,6 +101,7 @@ bool PresentationUploadMirror_FindDirtyRect(
        * suffixes unconditionally harms streaming locality on those images. */
       int bottom = height;
       while (bottom > y1) {
+        if (changed_rows && !changed_rows[bottom - 1]) { --bottom; continue; }
         scanned += (uint64_t)row_bytes * 2;
         if (memcmp(current + (size_t)(bottom - 1) * current_pitch,
             previous + (size_t)(bottom - 1) * previous_pitch,row_bytes)) break;
@@ -116,6 +118,14 @@ bool PresentationUploadMirror_FindDirtyRect(
   }
   *dirty = (ArRenderRectI){x0, y0, x1 - x0, y1 - y0};
   return true;
+}
+
+bool PresentationUploadMirror_FindDirtyRect(
+    const uint8_t *current, int current_pitch,
+    const uint8_t *previous, int previous_pitch,
+    int width, int height, ArRenderRectI *dirty) {
+  return FindDirtyRectRows(current, current_pitch, previous, previous_pitch,
+      width, height, NULL, dirty);
 }
 
 /* Grow-only: a changed extent invalidates the CONTENTS but keeps the
@@ -146,11 +156,12 @@ static bool EnsureStorage(PresentationUploadMirror *mirror,
   return mirror->pixels != NULL;
 }
 
-bool PresentationUploadMirror_UploadArgb8888(
+bool PresentationUploadMirror_UploadArgb8888WithChanges(
     PresentationUploadMirror *mirror, ArRenderDevice *device,
     ArRenderTexture texture,
     const uint8_t *source, int width, int height, int source_pitch,
-    int destination_x, int destination_y, PresentationUploadResult *result) {
+    int destination_x, int destination_y, const PresentationUploadChanges *changes,
+    PresentationUploadResult *result) {
   if (result) *result = (PresentationUploadResult){0};
   if (!mirror || !ArRenderDevice_IsReady(device) ||
       !ArRenderTexture_IsValid(texture) ||
@@ -171,10 +182,20 @@ bool PresentationUploadMirror_UploadArgb8888(
   const bool have_storage = EnsureStorage(mirror, width, height);
   ArRenderRectI dirty = {0, 0, width, height};
   const int mirror_pitch = width * kArgb8888BytesPerPixel;
+  const uint64_t revision = changes ? changes->revision : 0;
+  const bool known = have_storage && mirror->valid && revision &&
+      changes->previous_revision && mirror->source_revision == changes->previous_revision;
+  if (known && revision == changes->previous_revision) {
+    PerformanceMetrics_Add(kPerformanceCount_UploadSkipped, 1);
+    return true;
+  }
+  const uint8_t *rows = known && changes->changed_rows && changes->row_count == (unsigned)height
+      ? changes->changed_rows : NULL;
   if (have_storage && mirror->valid &&
-      !PresentationUploadMirror_FindDirtyRect(
+      !FindDirtyRectRows(
           source, source_pitch, mirror->pixels, mirror_pitch,
-          width, height, &dirty)) {
+          width, height, rows, &dirty)) {
+    mirror->source_revision = revision;
     PerformanceMetrics_Add(kPerformanceCount_UploadSkipped, 1);
     return true;
   }
@@ -207,6 +228,7 @@ bool PresentationUploadMirror_UploadArgb8888(
              (size_t)dirty.w * (size_t)kArgb8888BytesPerPixel);
     }
     mirror->valid = true;
+    mirror->source_revision = revision;
   }
   if (result) {
     result->uploaded_bytes =
@@ -214,4 +236,12 @@ bool PresentationUploadMirror_UploadArgb8888(
         (uint64_t)kArgb8888BytesPerPixel;
   }
   return true;
+}
+
+bool PresentationUploadMirror_UploadArgb8888(
+    PresentationUploadMirror *mirror, ArRenderDevice *device,
+    ArRenderTexture texture, const uint8_t *source, int width, int height, int source_pitch,
+    int destination_x, int destination_y, PresentationUploadResult *result) {
+  return PresentationUploadMirror_UploadArgb8888WithChanges(mirror, device, texture,
+      source, width, height, source_pitch, destination_x, destination_y, NULL, result);
 }
