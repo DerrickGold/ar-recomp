@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "render_types.h"
+#include "presentation_options.h"
 
 /* World producers supply their own coverage limits. These are per-side
  * logical pixels, independent of the drawable, HUD skin, or hardware BG layer.
@@ -50,5 +51,11 @@ ArRenderRectI ArPresentationLayout_ResolveViewport(
 ArRenderRectF ArPresentationLayout_CaptureDestination(
     ArRenderRectI viewport, int visible_height, int requested_top,
     int capture_height, int capture_top);
+
+/* Anchor an aspect-correct inset inside the game viewport, including when the
+ * host letterboxes the game. Margin leaves room for its decorative frame. */
+ArRenderRectF ArPresentationLayout_PictureInPictureDestination(
+    ArRenderRectI viewport, int width, int height, int margin,
+    PictureInPictureCorner corner);
 
 #endif /* AR_PRESENTATION_LAYOUT_H */

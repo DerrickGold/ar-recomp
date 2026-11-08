@@ -294,6 +294,10 @@ const SettingDesc *Settings_Find(const char * key) {
 bool Settings_GetLong(const SettingDesc * desc, long * value) {
   return 0;
 }
+int Settings_FormatValue(const SettingDesc *desc, char *buffer, int capacity) {
+  (void)desc;
+  return snprintf(buffer, (size_t)capacity, "%d", g_settings.diorama_mode);
+}
 bool Settings_IsAvailable(const SettingDesc * desc) {
   return 0;
 }

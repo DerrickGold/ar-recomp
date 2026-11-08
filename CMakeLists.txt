@@ -3219,6 +3219,14 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_render_comparison
         COMMAND actraiser_render_comparison_test)
 
+    add_executable(actraiser_host_comparison_window_test
+        tests/host_comparison_window_test.c
+        src/render/presentation_layout.c)
+    target_include_directories(actraiser_host_comparison_window_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_host_comparison_window_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_host_comparison_window COMMAND actraiser_host_comparison_window_test)
+
     add_executable(actraiser_session_fatal_test
         tests/session_fatal_test.c
         src/app/session_fatal.c

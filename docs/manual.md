@@ -499,6 +499,22 @@ as picture-in-picture. Releasing the hold leaves PiP active; another long hold
 returns to the unchanged base view, while a short click exits PiP and switches
 base views.
 
+Choose **Settings → Video → General → PiP corner** to place the inset in the
+bottom right (the default), bottom left, top right or top left. The inset
+stays in the selected corner across scenes and menus.
+
+On desktop, **PiP separate window** opens the authentic comparison in its own
+resizable window. Drag it to a second monitor, then enable **PiP fullscreen**
+to fill that monitor independently of the main game window. Double-click the
+separate window to toggle fullscreen, or press **Esc** there to leave
+fullscreen. Closing the separate window returns PiP to the inset. The same
+long-hold comparison control opens and closes both forms of PiP, and a short
+click still switches base views.
+
+The placement preferences are saved as `picture_in_picture_corner`,
+`picture_in_picture_window` and `picture_in_picture_fullscreen` in
+`settings.ini`. The comparison itself still starts off each session.
+
 The authentic view is the ROM's complete 256×224 PPU composition and native SPC
 audio. It bypasses widescreen, diorama/town 3D, HD replacements, other enhanced
 host graphics effects, enhanced music replacements, and the dialogue-blip mute.
@@ -507,9 +523,11 @@ BG1/BG2 raster camera phases and native world-sprite framing; fixed HUD sprites
 remain screen-relative. The scanout is armed while either comparison binding is
 configured or a comparison view needs it, and otherwise remains dormant.
 CRT is an independent output treatment rather than part of the enhanced game
-renderer, so the player's current CRT configuration continues to apply in
-authentic and side-by-side views. The side-by-side view keeps the enhanced
-audio. Host master volume and output device settings still apply in every view.
+renderer. The player's current CRT configuration applies to the main game
+window, including authentic mode and the PiP inset. The separate comparison
+window shows the clean authentic image without CRT effects and retains native
+help text. Both forms of PiP keep the enhanced audio. Host master volume and
+output device settings still apply in every view.
 
 This is a session-only presentation override: it does not edit any video or
 audio setting, it carries between action and simulation modes, and it resets to

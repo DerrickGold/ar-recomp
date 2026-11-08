@@ -101,6 +101,33 @@ static void TestNativeOverlayPlacement(void) {
   assert(shifted.x==95 && shifted.y==137);
 }
 
+static void TestPictureInPictureCorners(void) {
+  const ArRenderRectI viewport = {40, 70, 1280, 720};
+  static const struct {
+    PictureInPictureCorner corner;
+    int x, y;
+  } cases[] = {
+    {kPictureInPicture_BottomRight, 912, 478},
+    {kPictureInPicture_BottomLeft, 64, 478},
+    {kPictureInPicture_TopRight, 912, 94},
+    {kPictureInPicture_TopLeft, 64, 94},
+    {(PictureInPictureCorner)-1, 912, 478},
+    {kPictureInPictureCorner_Count, 912, 478},
+  };
+  for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    const ArRenderRectF destination =
+        ArPresentationLayout_PictureInPictureDestination(
+            viewport, 384, 288, 24, cases[i].corner);
+    assert(destination.x == cases[i].x && destination.y == cases[i].y);
+    assert(destination.w == 384 && destination.h == 288);
+    /* All four corners leave the frame within the letterboxed game image. */
+    assert(destination.x - 16 >= viewport.x);
+    assert(destination.y - 16 >= viewport.y);
+    assert(destination.x + destination.w + 16 <= viewport.x + viewport.w);
+    assert(destination.y + destination.h + 16 <= viewport.y + viewport.h);
+  }
+}
+
 static uint32_t Pixel(SDL_Surface *surface, int x, int y) {
   return *(const uint32_t *)((const uint8_t *)surface->pixels +
       (size_t)y * surface->pitch + x * 4);
@@ -169,6 +196,7 @@ int main(void) {
   TestGeometry();
   TestSceneCanvasLimits();
   TestNativeOverlayPlacement();
+  TestPictureInPictureCorners();
   assert(SDL_Init(0));
   TestCapturePlacement();
   SDL_Quit();

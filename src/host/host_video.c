@@ -5,6 +5,7 @@
 
 #include "app/settings.h"
 #include "host/host_display.h"
+#include "host/host_comparison_window.h"
 #include "platform/sdl/render_sdl.h"
 #include "platform/sdl/dev_tools_readback_sdl.h"
 #include "present/preparation_indicator.h"
@@ -233,6 +234,7 @@ void HostVideo_TakeFocus(void) {
 }
 
 void HostVideo_Destroy(void) {
+  HostComparisonWindow_Destroy();
   ArSdlRenderBackend_Destroy(&g_render_device);
   SDL_DestroyWindow(g_window);
   g_window = NULL;

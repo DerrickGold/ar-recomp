@@ -639,8 +639,30 @@ bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
   return ArRenderOutputFrame_Finish(&output_frame);
 }
 
+bool PresentAuthenticComparisonImage(const FrameSlot *slot,
+                                     ArRenderRectI viewport) {
+  if (!slot || !ArRenderDevice_IsReady(&g_render_device) ||
+      !ArRenderTexture_IsValid(g_authentic_texture) ||
+      viewport.w <= 0 || viewport.h <= 0)
+    return false;
+  const ArRenderRectF source = {
+    (float)slot->authentic_x0, (float)slot->authentic_y0,
+    (float)kFrameSlotAuthenticWidth, (float)kFrameSlotAuthenticHeight,
+  };
+  const ArRenderRectF destination = {
+    (float)viewport.x, (float)viewport.y,
+    (float)viewport.w, (float)viewport.h,
+  };
+  if (!ArRenderDevice_DrawTexture(
+          &g_render_device, g_authentic_texture, &source, &destination))
+    return false;
+  PresentSimMenu_DrawNativeHelp(slot, viewport);
+  return true;
+}
+
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
-                                      ArRenderRectI priority_viewport) {
+                                      ArRenderRectI priority_viewport,
+                                      PictureInPictureCorner corner) {
   if (!slot || !ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_authentic_texture) ||
       priority_viewport.w <= 0 || priority_viewport.h <= 0)
@@ -667,12 +689,8 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
   int margin = priority_viewport.h * kPipMarginPercent / 100;
   if (margin < frame_size + 8) margin = frame_size + 8;
   /* Menu phases within a scene do not move or resize the comparison inset. */
-  ArRenderRectF destination = {
-    (float)(priority_viewport.x + priority_viewport.w - margin - width),
-    (float)(priority_viewport.y + priority_viewport.h - margin - height),
-    (float)width, (float)height,
-  };
-  PresentChurch_PlaceComparison(slot, priority_viewport, margin, frame_size, &destination);
+  ArRenderRectF destination = ArPresentationLayout_PictureInPictureDestination(
+      priority_viewport, width, height, margin, corner);
   const ArRenderRectI frame = {
     (int)destination.x - frame_size,
     (int)destination.y - frame_size,
@@ -695,15 +713,8 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
           &g_render_device, &destination,
           (ArRenderColorF){0.0f, 0.0f, 0.0f, 1.0f},
           kArRenderBlendMode_Opaque);
-  const ArRenderRectF source = {
-    (float)slot->authentic_x0, (float)slot->authentic_y0,
-    (float)kFrameSlotAuthenticWidth, (float)kFrameSlotAuthenticHeight,
-  };
   if (rendered)
-    rendered = ArRenderDevice_DrawTexture(
-        &g_render_device, g_authentic_texture, &source, &destination);
-  if (rendered)
-    PresentSimMenu_DrawNativeHelp(slot, (ArRenderRectI){
+    rendered = PresentAuthenticComparisonImage(slot, (ArRenderRectI){
         destination.x, destination.y, destination.w, destination.h});
   return rendered;
 }

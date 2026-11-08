@@ -29,6 +29,7 @@
 #include "dev/oracle_trace.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_performance.h"
+#include "host/host_comparison_window.h"
 #include "host/host_display.h"
 #include "host/host_display_pacing.h"
 #include "host/host_input.h"
@@ -392,6 +393,7 @@ static void RunPostTickHousekeeping(void) {
 /* Drop resource caches before checking the rebuilt feature set. A retained
  * frame carries old texture handles, so it must be discarded after reset. */
 static void AppLoop_HandleGraphicsReset(const GameSessionConfig *config, Uint32 event_type) {
+  HostComparisonWindow_Destroy();
   HostDisplay_ResetVsyncPacing();
   if (event_type == SDL_EVENT_RENDER_DEVICE_RESET) {
     CrtPost_Shutdown(&g_render_device);
@@ -425,7 +427,8 @@ static void AppLoop_HandleGraphicsReset(const GameSessionConfig *config, Uint32 
 static void AppLoop_PumpEvents(const GameSessionConfig *config, bool *running) {
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
-    if (ImportedWorldTravel_HandleEvent(&event) || HostInput_HandleEvent(&event))
+    if (HostComparisonWindow_HandleEvent(&event) ||
+        ImportedWorldTravel_HandleEvent(&event) || HostInput_HandleEvent(&event))
       continue;
     switch (event.type) {
     case SDL_EVENT_QUIT:
@@ -675,6 +678,13 @@ void GameLoop_Run(const GameSessionConfig *config) {
       while (SDL_PeepEvents(&pending_event, 1, SDL_PEEKEVENT,
                  SDL_EVENT_FIRST, SDL_EVENT_LAST) > 0) {
         const unsigned type = pending_event.type;
+        /* Auxiliary controls can change settings or destroy their window.
+         * Leave their events queued until the producer returns ownership;
+         * neither camera input nor the main-window shortcuts may consume them. */
+        if (HostComparisonWindow_OwnsEvent(&pending_event)) {
+          has_event = true;
+          break;
+        }
         /* These notifications are ignored by the ordinary event loop too. */
         const bool ignored = (type >= SDL_EVENT_JOYSTICK_AXIS_MOTION &&
             type <= SDL_EVENT_JOYSTICK_UPDATE_COMPLETE) ||

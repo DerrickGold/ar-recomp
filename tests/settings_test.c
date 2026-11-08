@@ -116,6 +116,9 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.pixel_aspect == kPixelAspect_Crt43);
   CHECK(g_settings.window_scale == 3);
   CHECK(g_settings.window_mode == kWindowMode_Windowed);
+  CHECK(g_settings.picture_in_picture_corner == kPictureInPicture_BottomRight);
+  CHECK(!g_settings.picture_in_picture_window);
+  CHECK(!g_settings.picture_in_picture_fullscreen);
   CHECK(g_settings.refresh_mode == kRefreshMode_Vsync);
   CHECK(g_settings.gpu_interp_source_rate == kInterpolationSource_Native);
   {
@@ -2148,6 +2151,63 @@ static void TestSupportedAspectTransitions(void) {
   }
 }
 
+static void TestPictureInPictureSettings(void) {
+  const char *path = "settings-picture-in-picture-test.ini";
+  ClearSettingsEnv();
+  Settings_Init();
+  const SettingDesc *corner = Settings_Find("picture_in_picture_corner");
+  const SettingDesc *window = Settings_Find("picture_in_picture_window");
+  const SettingDesc *fullscreen = Settings_Find("picture_in_picture_fullscreen");
+  CHECK(corner && window && fullscreen);
+  CHECK(corner->category == kSettingCat_Display);
+  CHECK(window->category == kSettingCat_Display);
+  CHECK(fullscreen->category == kSettingCat_Display);
+  CHECK(Settings_IsMenuVisible(corner));
+  CHECK(Settings_IsMenuVisible(window));
+  CHECK(Settings_IsMenuVisible(fullscreen));
+  CHECK(!Settings_IsAvailable(fullscreen));
+#ifdef __ANDROID__
+  CHECK(!Settings_IsAvailable(window));
+#else
+  CHECK(Settings_IsAvailable(window));
+  CHECK(Settings_SetText(window, "On") == kSettingChange_Applied);
+  CHECK(Settings_IsAvailable(fullscreen));
+  CHECK(Settings_SetText(fullscreen, "On") == kSettingChange_Applied);
+#endif
+  static const char *const labels[] = {
+    "Bottom right", "Bottom left", "Top right", "Top left",
+  };
+  for (int i = 0; i < kPictureInPictureCorner_Count; ++i) {
+    CHECK(Settings_SetText(corner, labels[i]) != kSettingChange_Rejected);
+    CHECK(g_settings.picture_in_picture_corner == i);
+    CHECK(Settings_Save(path));
+    CHECK(FileContains(path, labels[i]));
+    Settings_InitWithFile(path);
+    CHECK(g_settings.picture_in_picture_corner == i);
+#ifndef __ANDROID__
+    CHECK(g_settings.picture_in_picture_window);
+    CHECK(g_settings.picture_in_picture_fullscreen);
+#endif
+  }
+  CHECK(Settings_SetText(corner, "middle") == kSettingChange_Rejected);
+  CHECK(g_settings.picture_in_picture_corner == kPictureInPicture_TopLeft);
+  /* Files from older releases retain the original inset placement. Invalid
+   * labels cannot silently select a different corner. */
+  CHECK(WriteTextFile(path, "window_scale = 4\n"));
+  Settings_InitWithFile(path);
+  CHECK(g_settings.picture_in_picture_corner == kPictureInPicture_BottomRight);
+  CHECK(!g_settings.picture_in_picture_window);
+  CHECK(!g_settings.picture_in_picture_fullscreen);
+  CHECK(WriteTextFile(path, "picture_in_picture_corner = middle\n"));
+  Settings_InitWithFile(path);
+  CHECK(g_settings.picture_in_picture_corner == kPictureInPicture_BottomRight);
+  Test_SetEnv("AR_PICTURE_IN_PICTURE_CORNER", "Top right", 1);
+  Settings_InitWithFile(path);
+  CHECK(g_settings.picture_in_picture_corner == kPictureInPicture_TopRight);
+  ClearSettingsEnv();
+  remove(path);
+}
+
 static void TestVideoSettingAudit(void) {
   const char *legacy_path = "settings-video-legacy-test.ini";
   const char *saved_path = "settings-video-saved-test.ini";
@@ -2879,6 +2939,7 @@ int main(int argc, char **argv) {
   TestConnectedWorldDefaults();
   TestCompletionSettings();
   TestVideoSettingAudit();
+  TestPictureInPictureSettings();
   TestSupportedAspectTransitions();
   TestSim3DEnvironmentLabels();
   TestLandscapeHeightDefaultAndPersistence();

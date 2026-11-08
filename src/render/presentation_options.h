@@ -17,6 +17,15 @@ typedef enum {
   kPixelAspect_Count,
 } PixelAspect;
 
+/* Persisted corner order keeps the original inset position as the default. */
+typedef enum {
+  kPictureInPicture_BottomRight = 0,
+  kPictureInPicture_BottomLeft,
+  kPictureInPicture_TopRight,
+  kPictureInPicture_TopLeft,
+  kPictureInPictureCorner_Count,
+} PictureInPictureCorner;
+
 /* BG2 can remain a finite plane, fill the viewport as a skybox, or do both. */
 typedef enum {
   kDioramaSky_Off = 0,

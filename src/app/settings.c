@@ -708,6 +708,10 @@ static const char *const kWindowModeLabels[] = {
   "Fullscreen",
 };
 
+static const char *const kPictureInPictureCornerLabels[] = {
+  "Bottom right", "Bottom left", "Top right", "Top left",
+};
+
 static const char *const kRefreshModeLabels[] = {
   "Vsync",
   "Uncapped",
@@ -819,6 +823,18 @@ static void OnLegacyUncappedChanged(const SettingDesc *desc) {
 static bool WidescreenActive(void) { return g_ws_active; }
 static bool WindowScaleAvailable(void) {
   return g_settings.window_mode == kWindowMode_Windowed;
+}
+
+static bool PictureInPictureWindowAvailable(void) {
+#ifdef __ANDROID__
+  return false;
+#else
+  return true;
+#endif
+}
+
+static bool PictureInPictureFullscreenAvailable(void) {
+  return PictureInPictureWindowAvailable() && g_settings.picture_in_picture_window;
 }
 
 static bool s_ar2_master_available;
@@ -1411,6 +1427,24 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.window_scale, 3, 1, 8, 1, false, NULL, 0,
     WindowScaleAvailable, NULL, NULL, NULL, .modern_env = true },
+  { "picture_in_picture_corner", "AR_PICTURE_IN_PICTURE_CORNER", "PiP corner",
+    "Place the authentic picture-in-picture in this corner. Hold Render "
+    "comparison to toggle the picture-in-picture view.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Display,
+    &g_settings.picture_in_picture_corner, kPictureInPicture_BottomRight,
+    kPictureInPicture_BottomRight, kPictureInPicture_TopLeft, 1, false,
+    kPictureInPictureCornerLabels, kPictureInPictureCorner_Count,
+    NULL, NULL, NULL, NULL, .modern_env = true },
+  BOOL_SETTING_MODERN(picture_in_picture_window, "AR_PICTURE_IN_PICTURE_WINDOW",
+    "PiP separate window", "Show the authentic picture-in-picture in its own "
+    "window. Move it to another display for side-by-side viewing. Hold Render "
+    "comparison to toggle it.", kSettingCat_Display, 0, false,
+    PictureInPictureWindowAvailable, NULL),
+  BOOL_SETTING_MODERN(picture_in_picture_fullscreen, "AR_PICTURE_IN_PICTURE_FULLSCREEN",
+    "PiP fullscreen", "Fill the separate PiP window's display. Move that window "
+    "to the desired display before enabling this. The main window keeps its "
+    "own window mode.", kSettingCat_Display, 0, false,
+    PictureInPictureFullscreenAvailable, NULL),
   { "ignore_aspect_ratio", "AR_IGNORE_ASPECT_RATIO", "Stretch to window",
     "Legacy compatibility alias for Screen ratio > Stretch.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Display,

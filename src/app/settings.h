@@ -361,6 +361,9 @@ typedef struct Settings {
   int pixel_aspect;
   int window_scale;         /* windowed client-size multiple */
   int window_mode;          /* WindowMode: windowed / borderless / exclusive */
+  int picture_in_picture_corner; /* PictureInPictureCorner; inset placement */
+  bool picture_in_picture_window; /* authentic comparison in a second window */
+  bool picture_in_picture_fullscreen; /* fullscreen for that second window */
   /* Load-only compatibility alias. Runtime code must use
    * Settings_IgnoreAspectRatio(), derived from extended_aspect. */
   bool ignore_aspect_ratio;

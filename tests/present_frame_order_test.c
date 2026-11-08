@@ -9,6 +9,7 @@
 #include "present/render_comparison.h"
 #include "app/session_fatal.h"
 #include "app/settings.h"
+#include "host/host_comparison_window.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -29,6 +30,8 @@ static uint64_t s_authentic_uploaded_serial;
 static bool s_dialogue_ready;
 static bool s_fail_scene;
 static int s_menu_draws;
+static bool s_separate_window;
+static int s_separate_draws;
 static const ArRenderRectI kFallback = {160, 0, 960, 720};
 static const ArRenderRectI kResolved = {161, 1, 958, 718};
 
@@ -47,6 +50,19 @@ static bool RectsEqual(ArRenderRectI left, ArRenderRectI right) {
 
 bool ArRenderDevice_IsReady(const ArRenderDevice *device) {
   return device == &g_render_device;
+}
+
+bool HostComparisonWindow_Prepare(bool active) {
+  CHECK(active == (RenderComparison_PresentView() == kRenderComparison_SideBySide));
+  return active && s_separate_window;
+}
+
+bool HostComparisonWindow_Draw(const FrameSlot *slot, bool blank) {
+  CHECK(slot == s_expected_slot && s_separate_window);
+  CHECK(blank == ((slot->inidisp & 0x80) || !(slot->inidisp & 15)));
+  CHECK(s_stage++ == 4); /* Main CRT has finished; host UI has not drawn. */
+  s_separate_draws++;
+  return true;
 }
 
 const char *ArRenderDevice_LastError(const ArRenderDevice *device) {
@@ -116,11 +132,13 @@ bool PresentBlankScene(void) {
 }
 
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
-                                      ArRenderRectI priority_viewport) {
+                                      ArRenderRectI priority_viewport,
+                                      PictureInPictureCorner corner) {
   CHECK(s_stage++ == 3);
   CHECK(s_expected_view == kRenderComparison_SideBySide);
   CHECK(slot == s_expected_slot);
   CHECK(RectsEqual(priority_viewport, kFallback));
+  CHECK(corner == g_settings.picture_in_picture_corner);
   return true;
 }
 
@@ -142,7 +160,7 @@ ArRenderRectI CrtPost_End(ArRenderDevice *device,
                           int scan_columns, int scan_lines,
                           ArRenderRectI image) {
   const int expected_stage =
-      s_expected_view == kRenderComparison_SideBySide &&
+      s_expected_view == kRenderComparison_SideBySide && !s_separate_window &&
       !(s_expected_slot->inidisp & 0x80) && (s_expected_slot->inidisp & 15) ? 4 : 3;
   CHECK(s_stage++ == expected_stage);
   CHECK(device == &g_render_device);
@@ -313,7 +331,21 @@ int main(int argc, char **argv) {
   s_expected_view = kRenderComparison_SideBySide;
   s_expected_host_viewport = kResolved;
   s_expected_stages = 6;
+  g_settings.picture_in_picture_corner = kPictureInPicture_TopLeft;
   RunCase(&slot);
+
+  /* A detached view replaces the inset, retaining enhanced main composition
+   * and current authentic pixels. Blanking also clears the second window. */
+  s_separate_window = true;
+  RunCase(&slot);
+  CHECK(s_separate_draws == 1);
+  slot.inidisp = 0x80;
+  slot.authentic_frame_serial = 0;
+  RunCase(&slot);
+  CHECK(s_separate_draws == 2);
+  slot.inidisp = 15;
+  slot.authentic_frame_serial = s_authentic_uploaded_serial;
+  s_separate_window = false;
 
   /* PiP stays latched across blank room loading, omits its stale inset, and
    * resumes on the destination's first synchronized visible capture. */

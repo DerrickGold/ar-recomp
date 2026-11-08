@@ -75,6 +75,20 @@ ArRenderRectF ArPresentationLayout_CaptureDestination(
   };
 }
 
+ArRenderRectF ArPresentationLayout_PictureInPictureDestination(
+    ArRenderRectI viewport, int width, int height, int margin,
+    PictureInPictureCorner corner) {
+  const bool left = corner == kPictureInPicture_BottomLeft ||
+      corner == kPictureInPicture_TopLeft;
+  const bool top = corner == kPictureInPicture_TopRight ||
+      corner == kPictureInPicture_TopLeft;
+  return (ArRenderRectF){
+    (float)(viewport.x + (left ? margin : viewport.w - margin - width)),
+    (float)(viewport.y + (top ? margin : viewport.h - margin - height)),
+    (float)width, (float)height,
+  };
+}
+
 void ArPresentationLayout_ResolveLogicalSize(
     bool crt_pixel_aspect, int visible_width, int visible_height,
     int *logical_width, int *logical_height) {

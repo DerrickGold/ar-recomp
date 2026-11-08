@@ -493,11 +493,20 @@ audio without changing any saved settings:
   again to close PiP without switching the base view, or press it briefly to
   close PiP and switch views.
 
+In **Settings → Video → General**, **PiP corner** selects any of the four
+corners. On desktop, **PiP separate window** opens the authentic view in a
+separate, resizable window. Move it to another monitor and enable **PiP
+fullscreen** for full-screen comparison beside the main game. Double-click
+the separate window to toggle its fullscreen mode; **Esc** leaves fullscreen.
+Closing that window returns the comparison to its inset. These placement
+preferences are saved for your next session.
+
 The comparison state is shared by action and simulation modes and resets to
 the enhanced view each time the game launches. Gameplay pauses during the
 brief transition, but quality-of-life options and cheats remain active in both
 views. The CRT pass follows the current Video settings and can be used with
-either view.
+either view in the main game window. The separate comparison window shows
+the clean authentic image, including native help text, without CRT effects.
 
 ![An enhanced widescreen action stage with CRT styling, with the authentic 4:3 renderer running in a framed picture-in-picture inset](/assets/picture-in-picture.png)
 

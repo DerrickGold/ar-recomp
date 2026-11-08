@@ -12,6 +12,7 @@
 #include "app/settings.h"
 #include "app/performance_metrics.h"
 #include "host/host_video.h"
+#include "host/host_comparison_window.h"
 
 
 CrtPostConfig Present_CaptureCrtConfig(void) {
@@ -67,6 +68,8 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
 
   ArRenderExtentI output_size = {0};
   const RenderComparisonView view = RenderComparison_PresentView();
+  const bool separate_window = HostComparisonWindow_Prepare(
+      view == kRenderComparison_SideBySide);
   const bool blank = (slot->inidisp & 0x80) || !(slot->inidisp & 0x0f);
   /* Room loading can retire the exact camera while INIDISP holds black.
    * Black needs no native texture; never sample the preceding room's capture. */
@@ -110,8 +113,9 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
           slot->visible_width, FrameSlot_VisibleHeight(slot), image);
       return image;
     }
-    if (!blank && view == kRenderComparison_SideBySide &&
-        !PresentAuthenticPictureInPicture(slot, image)) {
+    if (!blank && view == kRenderComparison_SideBySide && !separate_window &&
+        !PresentAuthenticPictureInPicture(slot, image,
+            (PictureInPictureCorner)g_settings.picture_in_picture_corner)) {
       RequestComparisonDrawFailure("picture-in-picture view");
       (void)EndCrtPost(
           slot->visible_width, FrameSlot_VisibleHeight(slot), image);
@@ -121,6 +125,10 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
         slot->visible_width, FrameSlot_VisibleHeight(slot), image);
   }
   if (SessionFatal_Requested()) return image;
+  if (separate_window && !HostComparisonWindow_Draw(slot, blank)) {
+    RequestComparisonDrawFailure("separate window");
+    return image;
+  }
   const uint8_t fade = RenderComparison_TransitionFadeAlpha();
   if (fade && !PresentComparisonTransitionOverlay(
                   fade, RenderComparison_ViewName(
