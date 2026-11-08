@@ -2,10 +2,12 @@
  * fixture is linked natively and as WASM; shader math/pixels are a separate gate. */
 #include "diorama/diorama.h"
 #include "diorama/diorama_depth_pass.h"
+#include "diorama/diorama_voxel_cull.h"
 #include "diorama/diorama_astral_rift.h"
 #include "action/action_voxel_internal.h"
 #include "action/action_voxel_sprites.h"
 #include "action/action_trunk.h"
+#include "action/action_ground_cover.h"
 #include "render/scenery_shading.h"
 #include "render/scene3d_math.h"
 #include "diorama/diorama_effect_backend.h"
@@ -21,6 +23,8 @@ static float s_trace[TRACE_CAPACITY];
 static unsigned s_count;
 static DioramaLayerOrderTable s_layers;
 static bool s_depth_fixture;
+static bool s_jungle_water_fixture;
+static void (*s_waterfall_cloud_observe)(const DioramaSceneryLightEffectParams *);
 
 typedef struct CapMesh {
   ArRenderVertex2D vertices[2048];
@@ -40,7 +44,7 @@ typedef struct SkyBatchProbe {
 typedef struct AuthoredCapProbe {
   DioramaVoxelPickFace faces[512];
   bool submitted[512], after_actor[512];
-  unsigned count, automatic_caps, explicit_caps, transparent_explicit, transparent_front;
+  unsigned count, automatic_caps, explicit_caps, material_caps, transparent_explicit, transparent_front;
   unsigned priorities[2];
   uint32_t atlas[512*16];
   ArRenderTexture texture;
@@ -54,11 +58,34 @@ typedef struct NativeAffineProbe {
   unsigned count;
   uint32_t atlas[512*16];
   uint32_t crisp_pixels[2048*64];
-  ArRenderTexture texture,native_texture,crisp_texture,face_textures[512];
+  ArRenderTexture texture,native_texture,rear_texture,crisp_texture,face_textures[512];
   unsigned crisp_height;
   int source_shift;
   bool uploaded,crisp_uploaded;
 } NativeAffineProbe;
+typedef struct VoxelCullProbe {
+  DioramaVoxelPickFace faces[128];
+  bool submitted[128];
+  unsigned count;
+} VoxelCullProbe;
+typedef struct TrunkSideProbe {
+  ArRenderTexture material;
+  int snow_start;
+  unsigned caps[2], snow_caps, bark_caps, taper_vertices, full_vertices;
+  unsigned far_vertices, high_vertices, atlas_uploads;
+  unsigned one_pixel_risers, two_pixel_risers, white_walls, blue_walls, undersides;
+} TrunkSideProbe;
+typedef struct GroundCoverProbe {
+  bool shared_depth,dedicated,empty,unsupported,snow_receiver,pressure_transform;
+  unsigned kind,begins,ends,supports,caps,triangles,draw_triangles,vertices;
+  unsigned before_actor,after_actor;
+  unsigned lip_triangles,top_vertices;
+  float lip_feather_area;
+  float x0,x1,gap0,gap1,floor_y,z0,z1,seen_z0,seen_z1;
+  unsigned char snow_columns[48];
+  float pressure_xyz[8192][3];
+  ArRenderVertex2D mesh[8192];
+} GroundCoverProbe;
 typedef struct Recorder {
   ArRenderTargetState state;
   ArRenderTextureDesc textures[128];
@@ -121,7 +148,13 @@ typedef struct Recorder {
   unsigned cloud_vertices[2], cloud_depth_vertices[2];
   AuthoredCapProbe *authored_caps;
   NativeAffineProbe *native_affine;
+  VoxelCullProbe *voxel_cull;
+  TrunkSideProbe *trunk_side;
+  GroundCoverProbe *ground_cover;
 } Recorder;
+
+static void CheckTrunkSideCaps(Recorder *,const ArRenderVertex2D *,int,const float *);
+static void CheckGroundCoverDraw(Recorder *,const ArRenderVertex2D *,int,const float *);
 
 static float Exposure(void *context,float u,float v,float inside_u,float inside_v) {
   (void)inside_u;(void)inside_v;
@@ -207,6 +240,21 @@ static void Destroy(void *ctx, ArRenderTexture texture) {
 static bool Update(void *ctx, ArRenderTexture t, const ArRenderRectI *rect,
                    const void *pixels, int pitch) {
   Recorder *r=ctx;
+  if(r->ground_cover) {
+    const ArRenderTextureDesc *d=&r->textures[t.value];
+    if((r->ground_cover->kind==1||r->ground_cover->pressure_transform)&&d->width==512&&d->height==2048) {
+      assert(rect&&rect->x==0&&rect->y==0&&rect->w==512&&rect->h==16&&pixels&&pitch==512*4);
+      ++r->uploads;return true;
+    }
+    if(r->ground_cover->pressure_transform&&d->width==2048&&d->height<=64&&d->usage==kArRenderTextureUsage_Static) {
+      assert(pixels&&pitch==2048*4);
+      assert(!rect||(rect->x==0&&rect->w==2048&&rect->y>=0&&rect->y+rect->h<=d->height));
+      ++r->uploads;return true;
+    }
+    if(r->ground_cover->dedicated&&d->width==32&&(d->height==32||d->height==64)) {
+      assert(!rect&&pixels&&pitch==32*4);++r->uploads;return true;
+    }
+  }
   if(r->native_affine && t.value==r->native_affine->crisp_texture.value) {
     NativeAffineProbe *probe=r->native_affine;
     const ArRenderRectI area=rect?*rect:(ArRenderRectI){0,0,2048,(int)probe->crisp_height};
@@ -238,6 +286,14 @@ static bool Update(void *ctx, ArRenderTexture t, const ArRenderRectI *rect,
   }
   if(r->trunk && r->textures[t.value].width==32 && r->textures[t.value].height==32) {
     assert(!rect && pixels==r->trunk->bark && pitch==32*4);++r->uploads;return true;
+  }
+  if(r->trunk_side && r->textures[t.value].width==32 && r->textures[t.value].height==64) {
+    assert(!rect && pixels && pitch==32*4);
+    const uint32_t *atlas=pixels;
+    for(unsigned y=0;y<64;++y)for(unsigned x=0;x<32;++x)
+      assert(atlas[y*32+x]==(y<32?r->trunk->bark[y*32+x]:
+          r->trunk->side_snow[(y&15)*16+(x&15)]));
+    r->trunk_side->material=t;++r->trunk_side->atlas_uploads;++r->uploads;return true;
   }
   if (r->baked_uploads) {
     assert(t.value<128 && r->textures[t.value].usage==kArRenderTextureUsage_Static);
@@ -330,7 +386,7 @@ static bool Texture(void *ctx, ArRenderTexture t, const ArRenderRectF *src,
   assert(t.value < 128 && r->textures[t.value].width > 0);
   if(r->state.target.value && (r->water_texture.value || r->grass_texture.value ||
       r->fold_front_texture.value || r->cap_texture.value || r->root_texture.value ||
-      r->cloud_textures[0].value || r->perspective_capture || r->check_subscreen || r->authored_caps || r->native_affine))
+      r->cloud_textures[0].value || r->perspective_capture || r->check_subscreen || r->authored_caps || r->native_affine || r->trunk_side))
     r->copied_sources[r->state.target.value]=r->copied_sources[t.value].value
         ?r->copied_sources[t.value]:t;
   Record(9);
@@ -364,6 +420,27 @@ static void CheckAuthoredCapGeometry(AuthoredCapProbe *probe,const ArRenderVerte
     const DioramaVoxelPickFace *face=&probe->faces[found];++probe->priorities[face->priority];
     const bool front=face->kind==kDioramaVoxelFace_Front;
     const bool automatic=!front && (probe->automatic_art&(1u<<face->art_index));
+    const bool material=face->art_source_size>1;
+    if(material) {
+      ++probe->material_caps;
+      assert(face->art_source_x==512 && face->art_source_y==256);
+      const bool side=face->kind==kDioramaVoxelFace_Left || face->kind==kDioramaVoxelFace_Right;
+      for(unsigned j=0;j<4;++j) {
+        assert(face->art_uv[j*2]>=.5f && face->art_uv[j*2]<=(side?15.5f:face->art_source_size-.5f));
+        assert(face->art_uv[j*2+1]>=.5f && face->art_uv[j*2+1]<=(side?face->art_source_size-.5f:15.5f));
+        if(side)assert(fabsf(face->art_uv[j*2+1]-(.5f+15*(face->world_xy[j*2+1]-96)/16))<.0001f);
+      }
+      /* Full patches preserve their phase where native actor-priority
+       * clipping divides the cap, including one-pixel contour stairs. */
+      for(unsigned other=0;other<found;++other)if(probe->submitted[other] &&
+          probe->after_actor[other]!=after_actor && probe->faces[other].kind==face->kind)
+        for(unsigned j=0;j<4;++j)for(unsigned k=0;k<4;++k)
+          if(fabsf(face->screen_xy[j*2]-probe->faces[other].screen_xy[k*2])<.001f &&
+              fabsf(face->screen_xy[j*2+1]-probe->faces[other].screen_xy[k*2+1])<.001f) {
+            assert(fabsf(face->art_uv[j*2]-probe->faces[other].art_uv[k*2])<.0001f);
+            assert(fabsf(face->art_uv[j*2+1]-probe->faces[other].art_uv[k*2+1])<.0001f);
+          }
+    }
     if(!front) {
       if(automatic)++probe->automatic_caps;else ++probe->explicit_caps;
       /* Opposite depth vertices retain the same native contour texel only
@@ -384,7 +461,7 @@ static void CheckAuthoredCapGeometry(AuthoredCapProbe *probe,const ArRenderVerte
       const int px=(int)floorf(u*512),py=(int)floorf(w*2048);
       assert(px>=0 && px<512 && py>=0 && py<16);
       const bool opaque=(probe->atlas[py*512+px]>>24)!=0;
-      if(automatic)assert(opaque);
+      if(automatic || material)assert(opaque);
       else if(!opaque) {
         if(front)++probe->transparent_front;else ++probe->transparent_explicit;
       }
@@ -396,9 +473,23 @@ static bool Geometry(void *ctx, ArRenderTexture t, const ArRenderVertex2D *v,
   Recorder *r = ctx;
   assert(!t.value || (t.value < 128 && r->textures[t.value].width > 0));
   const ArRenderTexture source=r->copied_sources[t.value].value?r->copied_sources[t.value]:t;
+  if(r->ground_cover&&!t.value&&!r->ground_cover->shared_depth)
+    CheckGroundCoverDraw(r,v,nv,NULL);
+  if(r->trunk_side && r->trunk_side->material.value && t.value==r->trunk_side->material.value)
+    CheckTrunkSideCaps(r,v,nv,NULL);
+  if(r->voxel_cull)for(unsigned f=0;f<r->voxel_cull->count;++f) {
+    const DioramaVoxelPickFace *face=&r->voxel_cull->faces[f];
+    for(int first=0;first+3<nv;first+=4) {
+      bool same=true;
+      for(unsigned j=0;j<4;++j)same&=fabsf(v[first+j].position.x-face->screen_xy[j*2])<.001f &&
+          fabsf(v[first+j].position.y-face->screen_xy[j*2+1])<.001f;
+      if(same)r->voxel_cull->submitted[f]=true;
+    }
+  }
   if(r->native_affine && (t.value==r->native_affine->texture.value ||
       t.value==r->native_affine->crisp_texture.value ||
-      source.value==r->native_affine->native_texture.value)) {
+      source.value==r->native_affine->native_texture.value ||
+      (r->native_affine->rear_texture.value && source.value==r->native_affine->rear_texture.value))) {
     NativeAffineProbe *probe=r->native_affine;
     for(int first=0;first+3<nv;first+=4) {
       unsigned found=probe->count;
@@ -651,6 +742,7 @@ bool DioramaEffectBackend_Unbind(ArRenderDevice *d) {
 bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *d,
     const DioramaSceneryLightEffectParams *p) {
   Recorder *r = d->context;
+  if(s_waterfall_cloud_observe)s_waterfall_cloud_observe(p);
   assert(p && p->illumination.value < 128 &&
       r->textures[p->illumination.value].width > 0);
   assert(p->illumination.value != r->state.target.value);
@@ -665,7 +757,7 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *d,
   Record(p->mode);
   Color(p->shade);
   Rectangle(&p->light_uv);
-  if (r->state.target.value) {
+  if (r->state.target.value && !s_jungle_water_fixture) {
     /* Grouped thickness draws cover only the viewport. They must sample the
      * matching subregion of the light map, including letterbox offsets. */
     assert(fabsf(p->light_uv.x-8.0f/r->width)<.00001f);
@@ -761,11 +853,118 @@ static float PlaneDepth(const DioramaProjection *p,float world_z,ArRenderPointF 
   const double wx=(u*d-b*v)/det,wy=(a*v-u*c)/det;
   return (float)(.5+.5*(m[2]*wx+m[6]*wy+m[10]*z+m[14])/(m[3]*wx+m[7]*wy+m[11]*z+m[15]));
 }
+/* Independent camera-ray recovery: the two front corners must still lie on
+ * actual native pixel endpoints at the actor plane, regardless of orbit or
+ * capture origin. The rear corners then use that same world-space endpoint. */
+static ArRenderPointF TrunkSideNativePoint(const Recorder *r,ArRenderPointF point) {
+  const DioramaProjection *p=r->projection;const float *m=p->matrix;
+  const double x=2.0*point.x/p->output_width-1,y=1-2.0*point.y/p->output_height,z=-.24;
+  const double a=m[0]-x*m[3],b=m[4]-x*m[7],c=m[1]-y*m[3],d=m[5]-y*m[7];
+  const double u=(x*m[11]-m[8])*z+x*m[15]-m[12],v=(y*m[11]-m[9])*z+y*m[15]-m[13];
+  const double det=a*d-b*c;assert(fabs(det)>.000001);
+  const double wx=(u*d-b*v)/det,wy=(a*v-u*c)/det;
+  const float ox=r->capture->bg1_camera_x-(r->capture->width-256)*.5f;
+  const float oy=r->capture->camera_y-r->capture->authentic_y0+1;
+  const float nx=ox+(wx/p->aspect_x+.5)*r->capture->width;
+  const float ny=oy+(.5-wy/p->height_scale)*r->capture->height;
+  assert(fabsf(nx-roundf(nx))<.004f && fabsf(ny-roundf(ny))<.004f);
+  return (ArRenderPointF){roundf(nx),roundf(ny)};
+}
+static float TrunkSideExpectedSpan(float x) {
+  const float distance=x<320?320-x:x>704?x-704:0;
+  return .18f*fminf(1,distance/32.f);
+}
+static void CheckTrunkSideCaps(Recorder *r,const ArRenderVertex2D *vertices,int count,const float *depths) {
+  assert(count>0 && count%4==0);
+  TrunkSideProbe *probe=r->trunk_side;
+  for(int first=0;first<count;first+=4) {
+    const ArRenderVertex2D *v=vertices+first;
+    const ArRenderPointF a=TrunkSideNativePoint(r,v[0].position),b=TrunkSideNativePoint(r,v[1].position);
+    const int dx=(int)(b.x-a.x),dy=(int)(b.y-a.y);
+    assert(abs(dx)+abs(dy)==1);
+    const unsigned side=dx==1?0:dy==1?1:dx==-1?2:3;
+    const int x=(int)(side==2?b.x:side==1?a.x-1:a.x);
+    const int y=(int)(side==3?b.y:side==2?a.y-1:a.y);
+    assert(ActionTrunk_SideSolid(r->trunk,x,y,kActionTrunkSideSolid));
+    const bool high=ActionTrunk_SideSolid(r->trunk,x,y,kActionTrunkSidePriority);
+    /* These four positions are the known terrace's two 1px steps and two
+     * 2px steps, not a reimplementation of the renderer's run detector. */
+    const bool one_pixel=!high && y==110 &&
+        ((side==1 && x==probe->snow_start+7)||(side==3 && x==probe->snow_start+32));
+    const bool two_pixel=!high && (y==111 || y==112) &&
+        ((side==1 && x==probe->snow_start+15)||(side==3 && x==probe->snow_start+24));
+    const bool snow_riser=one_pixel||two_pixel;
+    const bool white_wall=!high && (side&1) &&
+        (x==probe->snow_start || x==probe->snow_start+47);
+    const bool blue_wall=high && (side&1);
+    if(white_wall)assert(ActionTrunk_SideSolid(r->trunk,x,y,kActionTrunkSideSnowFace));
+    if(blue_wall)assert(ActionTrunk_SideSolid(r->trunk,x,y,kActionTrunkSideSnow) &&
+        !ActionTrunk_SideSolid(r->trunk,x,y,kActionTrunkSideSnowFace));
+    const bool vertical_snow=snow_riser||white_wall;
+    const bool snow=(side==0 && ActionTrunk_SideSolid(r->trunk,x,y,kActionTrunkSideSnow))||vertical_snow;
+    assert(r->actor_seen==high);
+    if(!depths) {
+      ++probe->caps[high];
+      if(snow)++probe->snow_caps;else ++probe->bark_caps;
+      if(one_pixel)++probe->one_pixel_risers;
+      if(two_pixel)++probe->two_pixel_risers;
+      if(white_wall)++probe->white_walls;
+      if(blue_wall)++probe->blue_walls;
+      if(!high && side==2)++probe->undersides;
+    }
+    if(vertical_snow)assert(fabsf(v[2].color.r-v[0].color.r*.86f)<.000001f &&
+        fabsf(v[3].color.r-v[1].color.r*.86f)<.000001f);
+    for(unsigned j=0;j<4;++j) {
+      const ArRenderPointF native=(j==1||j==2)?b:a;
+      const float span=TrunkSideExpectedSpan(native.x),z=-.24f-(j>=2?span:0);
+      const float ox=r->capture->bg1_camera_x-(r->capture->width-256)*.5f;
+      const float oy=r->capture->camera_y-r->capture->authentic_y0+1;
+      Scene3DClipPoint clip;
+      assert(Scene3D_TransformToClip(r->projection->matrix,
+          ((native.x-ox)/r->capture->width-.5f)*r->projection->aspect_x,
+          (.5f-(native.y-oy)/r->capture->height)*r->projection->height_scale,z,&clip));
+      const float sx=(clip.x/clip.w*.5f+.5f)*r->projection->output_width;
+      const float sy=(.5f-clip.y/clip.w*.5f)*r->projection->output_height;
+      assert(fabsf(v[j].position.x-sx)<.003f && fabsf(v[j].position.y-sy)<.003f);
+      if(depths)assert(fabsf(depths[first+j]-(clip.z/clip.w*.5f+.5f))<.000002f);
+      const float along=(side&1)?native.y-y:native.x-x;
+      const float across=j>=2?span/.18f:0;
+      const float u=snow_riser?((x&31)+native.x-x)/32.f:
+          (side&1)?(.5f+31*across)/32.f:((x&31)+along)/32.f;
+      const float vv=(side&1)&&!snow_riser?(snow?.5f:0)+fminf(31.5f,(y&31)+along+.5f)/64.f:
+          (snow?.5f:0)+(.5f+31*across)/64.f;
+      assert(fabsf(v[j].tex_coord.x-u)<.000001f && fabsf(v[j].tex_coord.y-vv)<.000001f);
+      if(!depths && j>=2) {
+        if(span>0 && span<.1799f)++probe->taper_vertices;
+        if(span>=.1799f)++probe->full_vertices;
+      }
+    }
+  }
+}
 static bool DepthGeometry(void *context,ArRenderDevice *device,const DioramaDepthSubmission *draw) {
   Recorder *r=context;
-  assert(draw && draw->depths && draw->lighting && draw->vertex_count>0 && draw->index_count>0);
+  assert(draw && draw->depths && draw->vertex_count>0 && draw->index_count>0);
   ++r->depth_draws;r->depth_vertices+=draw->vertex_count;
   if(r->fail_depth)return false;
+  const bool ground_cover=r->ground_cover&&!draw->texture.value;
+  if(ground_cover) {
+    assert(!draw->native_actor && draw->blend==kArRenderBlendMode_Alpha && draw->clip_w);
+    assert(!draw->lighting && draw->vertex_count%3==0);
+    assert(draw->plane==kDioramaPlane_Bg1Far||draw->plane==kDioramaPlane_Bg1Hi||draw->plane==SR_PPU_OVERLAY_BG1);
+    CheckGroundCoverDraw(r,draw->vertices,draw->vertex_count,draw->depths);
+    Record(22);Record(draw->plane);Record(false);Record(draw->vertex_count);
+    for(int i=0;i<draw->vertex_count;++i) {
+      assert(isfinite(draw->depths[i])&&draw->depths[i]>0&&draw->depths[i]<1);
+      assert(isfinite(draw->clip_w[i])&&draw->clip_w[i]>0);
+      Record(draw->depths[i]);Record(draw->clip_w[i]);
+    }
+    const ArRenderDrawState cover_state={.flags=kArRenderDrawState_Blend,.blend=kArRenderBlendMode_Alpha};
+    return ArRenderDevice_DrawGeometryWithState(device,draw->texture,draw->vertices,draw->vertex_count,
+        draw->indices,draw->index_count,&cover_state);
+  }
+  assert(draw->lighting);
+  if(r->trunk_side && r->trunk_side->material.value && draw->texture.value==r->trunk_side->material.value)
+    CheckTrunkSideCaps(r,draw->vertices,draw->vertex_count,draw->depths);
   const int priority=DioramaPlaneObjectPriority(draw->plane);
   if(draw->native_actor)assert(priority>=0 && draw->texture.value!=r->prop_texture.value && !draw->clip_w);
   if(draw->clip_w) {
@@ -799,9 +998,25 @@ static bool DepthGeometry(void *context,ArRenderDevice *device,const DioramaDept
       const float x=r->capture->bg1_camera_x-(r->capture->width-256)*.5f+
           (uv.x+draw->vertices[i].tex_coord.x*uv.w)*SR_PPU_SURFACE_MAX_WIDTH;
       const DioramaTrunkSettings settings=DioramaTrunk_Default();
-      const float q=(x-512)/160,world_z=-settings.recess-settings.depth*fmaxf(0,1-q*q);
+      const float q=(x-512)/160;
+      const bool side=r->trunk->side_width && (x<=320 || x>=704);
+      const float world_z=side?-settings.recess-TrunkSideExpectedSpan(x):
+          -settings.recess-settings.depth*fmaxf(0,1-q*q);
       assert(fabsf(z-PlaneDepth(r->projection,world_z,draw->vertices[i].position))<.000002f);
       ++r->depth_trunk_vertices;
+      if(side && r->trunk_side)++r->trunk_side->far_vertices;
+    }
+    if(r->trunk_side && draw->plane==kDioramaPlane_Bg1Hi &&
+        draw->texture.value!=r->trunk_side->material.value &&
+        r->textures[draw->texture.value].width!=32) {
+      const ArRenderRectF uv=draw->lighting->attributes_uv;
+      const float x=r->capture->bg1_camera_x-(r->capture->width-256)*.5f+
+          (uv.x+draw->vertices[i].tex_coord.x*uv.w)*SR_PPU_SURFACE_MAX_WIDTH;
+      if(x<320-.001f || x>704+.001f) {
+        assert(r->actor_seen && !draw->native_actor);
+        assert(fabsf(z-PlaneDepth(r->projection,-.24f,draw->vertices[i].position))<.000002f);
+        ++r->trunk_side->high_vertices;
+      }
     }
     if(r->root_voxel && draw->plane==kDioramaPlane_Bg1Far &&
         draw->vertex_count%4==0 && fabsf(draw->vertices[i].color.r-1)<.00001f) {
@@ -981,8 +1196,9 @@ static unsigned VoxelGrowthFixture(unsigned scenario) {
   const bool visible=scenario<10,active=scenario<8 || scenario>=10;
   const int x=visible?80:640;
   voxel->patch_count=2;
-  voxel->patches[0]=(VoxelPatch){x,80,32,16,0,kVoxelPatch_RearGrass};
-  voxel->patches[1]=(VoxelPatch){x,112,32,16,!!(scenario&4),kVoxelPatch_Thorns};
+  voxel->patches[0]=(VoxelPatch){.x=x,.y=80,.width=32,.height=16,.kind=kVoxelPatch_RearGrass};
+  voxel->patches[1]=(VoxelPatch){.x=x,.y=112,.width=32,.height=16,
+      .high_priority=!!(scenario&4),.kind=kVoxelPatch_Thorns};
   const DioramaCapture capture={.width=256,.height=224,.obj_apron=scenario&2?64:0,
       .bg_apron_mask=3,.textures=textures,.pixels=pixels};
   const DioramaView view={.viewport={0,0,960,600},.visible_width=256,.distance_scale=1,
@@ -1385,6 +1601,7 @@ static unsigned AuthoredContourCapFixture(unsigned scenario) {
   AuthoredCapProbe probe={.automatic_art=(1u<<1)|(1u<<4)|(1u<<5)|(1u<<6)};
   if(scenario==1)probe.automatic_art&=~(1u<<1); /* Explicit top alpha. */
   if(scenario==2)probe.automatic_art&=~((1u<<4)|(1u<<5)|(1u<<6)); /* Shared side alpha. */
+  if(scenario==3)probe.automatic_art&=~((1u<<1)|(1u<<4)|(1u<<5)); /* Verified full material patches. */
   Recorder r={.width=960,.height=600,.bound_effect=-1,.authored_caps=&probe};
   ArRenderDevice device;
   assert(ArRenderDevice_Init(&device,&kOps,&r,(ArRenderCapabilities){.flags=UINT64_MAX}));
@@ -1405,7 +1622,7 @@ static unsigned AuthoredContourCapFixture(unsigned scenario) {
   voxel->authored_art_count=voxel->authored_art_capacity=2;
   for(int y=0;y<16;++y)for(int x=0;x<16;++x) {
     voxel->authored_art[0][y*16+x]=x==y?0x83e0:0;
-    voxel->authored_art[1][y*16+x]=(y&1)?0x801f:0;
+    voxel->authored_art[1][y*16+x]=scenario==3?0x8000|x|(y<<5):((y&1)?0x801f:0);
   }
   uint16_t original[256];memcpy(original,voxel->authored_art[0],sizeof(original));
   VoxelAuthoredCell *a=voxel->authored;
@@ -1414,7 +1631,9 @@ static unsigned AuthoredContourCapFixture(unsigned scenario) {
   for(unsigned q=0;q<4;++q){a->front[q]=-.24f;a->back[q]=.3f;a->priority[q]=q&1;}
   for(unsigned face=0;face<7;++face) {
     const bool explicit_art=face==1?scenario==1:face>=4&&scenario==2;
-    a->art_id[face]=explicit_art?1:0;a->pixels[face]=voxel->authored_art[a->art_id[face]];
+    const bool material=scenario==3 && (face==1 || face==4 || face==5);
+    a->art_id[face]=explicit_art||material?1:0;a->pixels[face]=voxel->authored_art[a->art_id[face]];
+    if(material) {a->surface_sample_x[face]=512;a->surface_sample_y[face]=256;a->surface_sample_size[face]=face==1?8:16;}
   }
   voxel->authored_contours=calloc(64,sizeof(*voxel->authored_contours));assert(voxel->authored_contours);
   voxel->authored_contour_count=voxel->authored_contour_capacity=a->contour_count=64;
@@ -1434,7 +1653,8 @@ static unsigned AuthoredContourCapFixture(unsigned scenario) {
   assert(probe.uploaded && probe.automatic_caps && probe.transparent_front);
   assert(probe.priorities[0] && probe.priorities[1]);
   assert((probe.explicit_caps>0)==(scenario!=0));
-  assert((probe.transparent_explicit>0)==(scenario!=0));
+  assert((probe.material_caps>0)==(scenario==3));
+  assert((probe.transparent_explicit>0)==(scenario==1 || scenario==2));
   for(unsigned i=0;i<probe.count;++i)assert(probe.submitted[i]);
   assert(!memcmp(original,voxel->authored_art[0],sizeof(original)));
   for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)
@@ -1834,7 +2054,7 @@ static unsigned VoxelRootFixture(unsigned scenario) {
   voxel->trunk_cells=calloc((size_t)voxel->width/8,voxel->height/8);
   assert(voxel->front_recess && voxel->trunk_cells);
   const bool non_grid=scenario>=4;
-  voxel->trunk_curves[0]=non_grid?(VoxelTrunkCurve){66,126}:(VoxelTrunkCurve){64,128};
+  voxel->trunk_curves[0]=non_grid?(VoxelTrunkCurve){.top_y=66,.base_y=126}:(VoxelTrunkCurve){.top_y=64,.base_y=128};
   for(int y=8;y<16;++y)for(int x=12;x<16;++x) {
     voxel->front_recess[y*(voxel->width/8)+x]=2;voxel->trunk_cells[y*(voxel->width/8)+x]=1;
   }
@@ -2019,6 +2239,10 @@ static unsigned VoxelStumpContourFixture(unsigned scenario) {
   assert(!r.live);return s_count;
 }
 #include "diorama_native_transform.inc"
+#include "diorama_surface_texture.inc"
+#include "diorama_surface_native_x.inc"
+#include "diorama_native_actor_priority.inc"
+#include "diorama_profile_surface.inc"
 typedef struct SubscreenNested {
   ArRenderDevice *device;
   ArRenderTexture target;
@@ -2035,19 +2259,27 @@ static void SubscreenNestedEffect(void *context,int plane,const DioramaProjectio
   ++nested->calls;
 }
 static unsigned VoxelSubscreenFixture(unsigned scenario) {
+  const bool complete_sources=scenario>=8;
+  if(complete_sources)scenario-=8;
   s_count=0;
   Recorder r={.width=960,.height=600,.bound_effect=-1};
   ArRenderDevice device;
   assert(ArRenderDevice_Init(&device,&kOps,&r,(ArRenderCapabilities){.flags=UINT64_MAX}));
   ArRenderTexture textures[kDioramaPlane_Count]={0};
   const uint8_t *pixels[kDioramaPlane_Count]={0};const uint8_t present=255;
-  const unsigned planes[]={SR_PPU_OVERLAY_BG2,SR_PPU_OVERLAY_BG1,kDioramaPlane_Bg1Far,kDioramaPlane_Obj2};
-  for(unsigned i=0;i<4;++i) {
+  const unsigned planes[]={SR_PPU_OVERLAY_BG2,SR_PPU_OVERLAY_BG1,kDioramaPlane_Bg1Far,kDioramaPlane_Obj2,
+      SR_PPU_OVERLAY_OBJ,kDioramaPlane_Obj1,kDioramaPlane_Bg2Hi,kDioramaPlane_Bg1Hi,
+      kDioramaPlane_Obj3,SR_PPU_OVERLAY_BG3};
+  const unsigned plane_count=complete_sources?10:4;
+  const uint32_t additive=(1u<<SR_PPU_OVERLAY_BG1)|(1u<<kDioramaPlane_Bg1Far)|(1u<<kDioramaPlane_Obj2)|
+      (complete_sources?((1u<<SR_PPU_OVERLAY_OBJ)|(1u<<kDioramaPlane_Obj1)|
+          (1u<<kDioramaPlane_Bg1Hi)|(1u<<kDioramaPlane_Obj3)):0);
+  for(unsigned i=0;i<plane_count;++i) {
     assert(Create(&r,&(ArRenderTextureDesc){.width=SR_PPU_SURFACE_MAX_WIDTH,
         .height=SR_PPU_SURFACE_MAX_HEIGHT,.format=kArRenderPixelFormat_Argb8888,
         .usage=kArRenderTextureUsage_Streaming},&textures[planes[i]]));
     pixels[planes[i]]=&present;
-    r.subscreen_sources[textures[planes[i]].value]=i!=0;
+    r.subscreen_sources[textures[planes[i]].value]=(additive&(1u<<planes[i]))!=0;
   }
   SubscreenNested nested={.device=&device};
   if(scenario==1)assert(Create(&r,&(ArRenderTextureDesc){.width=32,.height=32,
@@ -2061,7 +2293,7 @@ static unsigned VoxelSubscreenFixture(unsigned scenario) {
   const DioramaRenderOptions options={.visible_planes=(1u<<kDioramaPlane_Count)-1};
   const DioramaScene scene={.render=&options,.map_group=5,.map_number=scenario==6?2:1,
       .voxel_geometry=scenario==5?NULL:voxel,
-      .additive_plane_mask=scenario==7?0:(1u<<SR_PPU_OVERLAY_BG1)|(1u<<kDioramaPlane_Bg1Far)|(1u<<kDioramaPlane_Obj2),
+      .additive_plane_mask=scenario==7?0:additive,
       .plane_effect=scenario==1?SubscreenNestedEffect:NULL,.plane_effect_userdata=&nested};
   r.check_subscreen=scenario<5;
   /* The main layer's supersample is the first scratch allocation. Fail the
@@ -2075,11 +2307,20 @@ static unsigned VoxelSubscreenFixture(unsigned scenario) {
     DioramaProjection projection;
     const PresentationOutcome outcome=Diorama_Composite(&device,&capture,&view,&scene,&projection);
     assert(PresentationOutcome_IsUsable(outcome)!=failure && projection.valid!=failure);
+    if(complete_sources && !failure) {
+      float x0,y0,x1,y1;
+      assert(projection.bg1_plane.source_bounds_valid);
+      assert(Diorama_PlaneCaptureBounds(&projection,&projection.bg1_plane,&x0,&y0,&x1,&y1));
+      assert(fabsf(x0)<.001f && fabsf(y0)<.001f &&
+          fabsf(x1-capture.width)<.001f && fabsf(y1-capture.height)<.001f);
+      assert(!projection.bg2_plane.source_bounds_valid && !projection.object_planes[2].source_bounds_valid);
+    }
     if(failure)assert(r.subscreen_adds==adds);
     else if(r.check_subscreen) {
-      if(r.subscreen_adds!=adds+1 || r.subscreen_draws<draws+3)
+      const unsigned minimum_sources=complete_sources?7:3;
+      if(r.subscreen_adds!=adds+1 || r.subscreen_draws<draws+minimum_sources)
         fprintf(stderr,"subscreen case=%u adds=%u sources=%u\n",scenario,r.subscreen_adds-adds,r.subscreen_draws-draws);
-      assert(r.subscreen_adds==adds+1 && r.subscreen_draws>=draws+3);
+      assert(r.subscreen_adds==adds+1 && r.subscreen_draws>=draws+minimum_sources);
     }
     if(frame)assert(r.creates==creates);
     if(scenario!=4)assert(!r.state.target.value && !r.state.viewport_set);
@@ -2089,7 +2330,7 @@ static unsigned VoxelSubscreenFixture(unsigned scenario) {
   r.fail_restore=false;r.state.target=ArRenderTexture_Invalid();
   ActionVoxel_Release(voxel);Diorama_ResetCompositorResources(&device);
   if(nested.target.value)Destroy(&r,nested.target);
-  for(unsigned i=0;i<4;++i)Destroy(&r,textures[planes[i]]);
+  for(unsigned i=0;i<plane_count;++i)Destroy(&r,textures[planes[i]]);
   assert(!r.live);return s_count;
 }
 static unsigned TrunkDepthFixture(unsigned scenario) {
@@ -2125,6 +2366,79 @@ static unsigned TrunkDepthFixture(unsigned scenario) {
   }
   if(scenario<2)assert(r.depth_draws && r.depth_actor_vertices && r.depth_trunk_vertices);
   else assert(!r.depth_draws);
+  Diorama_ResetCompositorResources(&device);
+  for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
+  assert(!r.live);return s_count;
+}
+static unsigned TrunkSideFixture(unsigned scenario) {
+  s_count=0;
+  const bool right=!!(scenario&1),positive_yaw=!!(scenario&2),shared_depth=scenario<4;
+  static ActionTrunkAssets trunk;memset(&trunk,0,sizeof(trunk));
+  trunk.room=6;trunk.height=512;trunk.revision=1000+scenario*2;trunk.side_width=1024;
+  const int start=right?706:270,end=right?754:318;
+  for(unsigned high=0;high<2;++high)for(unsigned y=110+high*40;y<118+high*40;++y)
+    for(int x=start;x<end;++x) {
+      /* Snow terrace descends by 1px, then 2px, and returns by 2px then
+       * 1px. Both yaw signs see each short-riser length. The outer walls
+       * remain 8px tall and the underside is one unbroken horizontal run. */
+      const int offset=x-start;
+      const unsigned snow_top=offset<8?110:offset<16?111:offset<24?113:offset<32?111:110;
+      if(!high && y<snow_top)continue;
+      const unsigned at=y*kActionTrunkSideMaskPitch+(unsigned)x/8,bit=1u<<(x&7);
+      trunk.side_masks[kActionTrunkSideSolid][at]|=bit;
+      if(high) {trunk.side_masks[kActionTrunkSidePriority][at]|=bit;++trunk.side_high_pixels;}
+      trunk.side_masks[kActionTrunkSideSnow][at]|=bit;
+      /* Both bodies are a reviewed snow family. Only the first one's
+       * vertical outline is native white snow ink; the second one's blue
+       * body must not become snow merely because of that shared family. */
+      if(!high && (x==start || x==end-1))trunk.side_masks[kActionTrunkSideSnowFace][at]|=bit;
+    }
+  /* Deliberately distinct two-dimensional art catches swapped rows, atlas
+   * quadrants, accidental 1px bands and camera-relative source phase. */
+  for(unsigned y=0;y<32;++y)for(unsigned x=0;x<32;++x)
+    trunk.bark[y*32+x]=0xff200000u|(x<<8)|y;
+  for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)
+    trunk.side_snow[y*16+x]=0xffa00000u|(y<<8)|x;
+  TrunkSideProbe probe={.snow_start=start};
+  Recorder r={.width=960,.height=600,.bound_effect=-1,.shaders=true,.trunk=&trunk,.trunk_side=&probe};
+  ArRenderDevice device;
+  assert(ArRenderDevice_Init(&device,&kOps,&r,(ArRenderCapabilities){.flags=UINT64_MAX,
+      .maximum_texture_width=8192,.maximum_texture_height=8192,
+      .maximum_render_target_width=8192,.maximum_render_target_height=8192}));
+  ArRenderTexture textures[kDioramaPlane_Count];const uint8_t *pixels[kDioramaPlane_Count];const uint8_t present=255;
+  for(int i=0;i<kDioramaPlane_Count;++i) {
+    assert(Create(&r,&(ArRenderTextureDesc){.width=640,.height=352,.format=kArRenderPixelFormat_Argb8888,
+        .usage=kArRenderTextureUsage_Streaming},&textures[i]));pixels[i]=&present;
+  }
+  r.actor_texture=textures[kDioramaPlane_Obj2];
+  DioramaCapture capture={.width=256,.height=224,.bg1_camera_x=right?608:160,
+      .camera_y=31,.textures=textures,.pixels=pixels};
+  DioramaView view={.viewport={8,10,944,580},.visible_width=256,.distance_scale=1,
+      .camera={.tilt_x=.18f,.tilt_y=positive_yaw?.4f:-.4f}};
+  const DioramaRenderOptions options={.visible_planes=(1u<<kDioramaPlane_Count)-1};
+  const DioramaDepthSink sink={.submit=DepthGeometry,.userdata=&r};
+  const DioramaScene scene={.render=&options,.map_group=6,.map_number=6,
+      .trunk=&trunk,.trunk_settings=DioramaTrunk_Default(),.depth_sink=shared_depth?&sink:NULL};
+  DioramaProjection projection;r.projection=&projection;r.capture=&capture;
+  for(unsigned frame=0;frame<5;++frame) {
+    if(frame==2) {capture.bg1_camera_x+=7;capture.camera_y+=11;view.camera.tilt_y*=.8f;}
+    if(frame==3)view.camera.tilt_x=-.18f;
+    if(frame==4) {++trunk.revision;trunk.bark[5]^=0x00000100;}
+    const unsigned creates=r.creates,uploads=r.uploads,atlas_uploads=probe.atlas_uploads;
+    probe.caps[0]=probe.caps[1]=probe.snow_caps=probe.bark_caps=0;
+    probe.taper_vertices=probe.full_vertices=probe.far_vertices=probe.high_vertices=0;
+    probe.one_pixel_risers=probe.two_pixel_risers=probe.white_walls=probe.blue_walls=probe.undersides=0;
+    r.actor_seen=false;
+    assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
+    assert(projection.valid && r.actor_seen && probe.caps[0] && probe.caps[1]);
+    assert(probe.snow_caps && probe.bark_caps && probe.taper_vertices && probe.full_vertices);
+    assert(probe.one_pixel_risers && probe.two_pixel_risers>=2 && probe.white_walls && probe.blue_walls);
+    if(frame>=3)assert(probe.undersides);
+    if(shared_depth)assert(probe.far_vertices && probe.high_vertices && r.depth_actor_vertices);
+    else assert(!r.depth_draws);
+    if(frame>0 && frame<4)assert(r.creates==creates && r.uploads==uploads);
+    if(frame==4)assert(r.creates==creates+2 && r.uploads==uploads+2 && probe.atlas_uploads==atlas_uploads+1);
+  }
   Diorama_ResetCompositorResources(&device);
   for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
   assert(!r.live);return s_count;
@@ -2349,10 +2663,90 @@ static unsigned SkyBatchFixture(unsigned scenario) {
   for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
   assert(!r.live);return s_count;
 }
-unsigned DioramaFixture_Count(void) { return 404; }
+#include "diorama_voxel_cull.inc"
+#include "diorama_voxel_endpoint.inc"
+#include "diorama_ground_cover_compositor.inc"
+#include "diorama_waterfall_continuation.inc"
+#include "diorama_death_heim_water.inc"
+#include "diorama_trunk_guard_compositor.inc"
+#include "diorama_owned_heat_compositor.inc"
+#include "diorama_tomb_contour_skin.inc"
+#include "diorama_voxel_guard_compositor.inc"
+#include "diorama_desert_columns.inc"
+#include "diorama_waterfall_effect_bounds.inc"
+#include "diorama_waterfall_cloud_coords.inc"
+#include "diorama_jungle_water_color.inc"
+#include "diorama_castle_terminal_matte.inc"
+#include "diorama_jungle_terminal.inc"
+#include "diorama_summit_crest_skin.inc"
+#include "diorama_death_heim_nebula.inc"
+#include "diorama/diorama_sand_surface.h"
+#include "diorama_sand_transitions.inc"
+#include "diorama_snow_closing_riser_compositor.inc"
+#include "diorama_voxel_clipped_cover.inc"
+#include "diorama_ramp_taper.inc"
+unsigned DioramaFixture_Count(void) { return 662; }
 const float *DioramaFixture_Trace(void) { return s_trace; }
 unsigned DioramaFixture_Run(unsigned scenario) {
   assert(scenario < DioramaFixture_Count());
+  if(scenario>=654)return RampTaperFixture(scenario-654);
+  if(scenario>=650)return ClippedCoverFixture(scenario-650);
+  if(scenario>=644)return NativeActorPriorityFixture(scenario-644);
+  if(scenario>=640)return VoxelNativeXSurfaceFixture(scenario-640);
+  if(scenario>=636) { SnowCoverRender(scenario-636); return s_count; }
+  if(scenario>=632)return JungleTerminalFixture(scenario-632);
+  if(scenario>=624) { DesertFrontFixture(scenario-624); return s_count; }
+  if(scenario>=608) {
+    if(scenario==608)SandTransitionBoundsFixture();
+    SandTransitionRenderFixture(scenario-608);
+    return s_count;
+  }
+  if(scenario>=600)return DeathHeimNebulaFixture(scenario-600);
+  if(scenario>=592)return SummitCrestSkinRenderFixture(scenario-592);
+  if(scenario>=584)return CastleTerminalMatteFixture(scenario-584);
+  if(scenario>=580)return JungleWaterColorFixture(scenario-580);
+  if(scenario>=572)return WaterfallCloudFixture(scenario-572);
+  if(scenario>=564)return WaterfallEffectBoundsFixture(scenario-564);
+  if(scenario>=556)return VoxelGuardFixture(scenario-556);
+  if(scenario>=540) {
+    s_depth_fixture=scenario>=548;
+    return TombContourSkinRenderFixture((scenario-540)%8);
+  }
+  if(scenario>=536)return OwnedHeatTransportFixture(scenario-536);
+  if(scenario>=528)return TrunkGuardFixture(scenario-528);
+  if(scenario>=520)return GroundCoverTransformTaperFixture(scenario-520);
+  if(scenario>=512)return DeathHeimWaterFixture(scenario-512);
+  if(scenario>=504)return WaterfallContinuationFixture(scenario-504);
+  if(scenario>=500)return GroundCoverSnowFixture(scenario-500);
+  if(scenario>=484)return GroundCoverFixture(scenario-484);
+  if(scenario>=476)return TrunkSideFixture(scenario-476);
+  if(scenario>=472)return VoxelEndpointFixture(scenario-472);
+  if(scenario>=468)return VoxelCullFixture(scenario-468);
+  if(scenario>=466)return VoxelSubscreenFixture(8+scenario-466);
+  if(scenario>=450) {
+    s_depth_fixture=scenario>=458;
+    return VoxelMaterialSkinFixture(16+(scenario-450)%8);
+  }
+  if(scenario>=442) {
+    s_depth_fixture=scenario>=446;
+    return VoxelProfileSurfaceFixture((scenario-442)%4);
+  }
+  if(scenario>=438) {
+    s_depth_fixture=scenario>=440;
+    return VoxelFlatRearJoinFixture((scenario-438)%2);
+  }
+  if(scenario>=422) {
+    s_depth_fixture=scenario>=430;
+    return VoxelMaterialSkinFixture(8+(scenario-422)%8);
+  }
+  if(scenario>=420) {
+    s_depth_fixture=scenario>=421;
+    return AuthoredContourCapFixture(3);
+  }
+  if(scenario>=404) {
+    s_depth_fixture=scenario>=412;
+    return VoxelMaterialSkinFixture((scenario-404)%8);
+  }
   if(scenario>=400) {
     s_depth_fixture=scenario>=402;
     return NativeAffineFixture((scenario-400)%2);

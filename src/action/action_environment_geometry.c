@@ -278,11 +278,19 @@ static ActionEffectSourcePrimitive *SourcePrimitive(ActionEffectSourceBatch *b,
                (e->render_layer == kActionEffectRenderLayer_Atmosphere ? 1 : 0) |
                (e->flags & kActionEffectFlag_StaticAnchor ? 2 : 0) |
                (e->flags & kActionEffectFlag_ClippedMesh ? 4 : 0) |
-               (ActionStorm_CustomParallax(e) ? 16 : 0), e->field_style.storm.parallax_x},
+               (ActionStorm_CustomParallax(e) ? 16 : 0) |
+               (ActionEffectProjection_AuthoredCloudExtent(&b->context, e) ? 32 : 0),
+               e->field_style.storm.parallax_x},
     .clip = {-1e9f, -1e9f, 1e9f, 1e9f}};
   if ((e->flags & kActionEffectFlag_ClipToRect) && !(e->flags & kActionEffectFlag_ClippedMesh)) {
     const ActionEffectLocalRect *r = &e->clip_rect;
     p->clip[0] = r->x0; p->clip[1] = r->y0; p->clip[2] = r->x1; p->clip[3] = r->y1;
+  }
+  if (ActionEffectProjection_AuthoredCloudExtent(&b->context, e)) {
+    const ActionEffectLocalRect *r = &e->geometry.data.rect;
+    /* Preserve old side/top admission; only the newly relaxed lower limit
+     * needs an authored bound. Mask triangles supply their finite clip below. */
+    p->clip[3] = fminf(p->clip[3], r->y1);
   }
   return p;
 }

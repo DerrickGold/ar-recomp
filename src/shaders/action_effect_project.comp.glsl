@@ -122,7 +122,7 @@ bool local_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
             // the mapping itself would shift/stretch lights on the scenery.
             precise vec2 source=p.origin.xy+point+effect_motion(int(p.meta.y));
             if(any(lessThan(source,plane.bounds.xy)) || source.x>plane.bounds.z ||
-               (source.y>plane.bounds.w && plane.fold.x==0))return false;
+               (source.y>plane.bounds.w && plane.fold.x==0 && (flags&32u)==0u))return false;
         }
     }
     if(!project_effect(int(p.meta.y), p.origin.xy+point, p.origin.y, (flags&2u)!=0u, screen))return false;

@@ -119,6 +119,11 @@ bool DioramaSnapshot_Describe(DioramaSnapshot *out,
   s.scene.scenery_exposure = NULL;
   s.scene.scenery_light = NULL;
   s.scene.actor_light = NULL;
+  s.scene.ground_cover_light = NULL;
+  /* Auxiliary native guard textures are not part of the snapshot format.
+   * Never serialize a borrowed presenter/editor cache pointer. */
+  s.scene.trunk_guard = NULL;
+  s.scene.voxel_guard = NULL;
   memset(s.scene.actor_lightmaps,0,sizeof(s.scene.actor_lightmaps));
   s.scene.scenery_lightmap = ArRenderTexture_Invalid();
   s.scene.effect_bg_plane_mask = 0;
@@ -129,6 +134,7 @@ bool DioramaSnapshot_Describe(DioramaSnapshot *out,
   s.options.skybox_userdata = NULL;
   s.options.draw_resident_skybox = NULL;
   s.options.source_effect_batch = NULL;
+  s.options.voxel_observe_ground_cover = NULL;
   s.options.waterfall_diagnostics = false;
   s.layer_count = Diorama_ResolveSceneLayers(scene, s.layers);
   s.plane_mask = plane_mask;

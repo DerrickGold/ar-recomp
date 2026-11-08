@@ -19,6 +19,8 @@ typedef struct HostFramePacket {
   const struct ActionVoxelGeometry *voxel_storage;
   struct SimFrameInputs *sim_storage; /* Lazy town source snapshot. */
   SrPpuBgPacket *background_storage; /* Allocated only when the optional export is used. */
+  uint32_t *trunk_guard_storage; /* Lazy bounded native source, separate from primary surfaces. */
+  uint32_t *voxel_guard_storage; /* Three independent 640x64 native lanes. */
 } HostFramePacket;
 typedef struct HostFrameQueue HostFrameQueue;
 /* Shared eligibility for retention and packet capture. Unsupported scenes

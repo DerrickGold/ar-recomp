@@ -4734,6 +4734,8 @@ static void TestGroundSnowCover(void) {
 #undef BUILD_COVER
 #undef BUILD_TOP
 }
+#include "action_ground_cover_render.inc"
+
 static bool IsCloudBodyMask(ArRenderPointF uv) {
   const unsigned column=(unsigned)(uv.x*kActionMaskAtlasWidth/kActionMaskCellSize);
   const unsigned row=(unsigned)(uv.y*kActionMaskAtlasHeight/kActionMaskCellSize);
@@ -5023,13 +5025,108 @@ static void TestDioramaEffectsUseDrawnGuards(void) {
   CHECK(bounds.x0==-62.75f && bounds.x1==561.25f);
 }
 
+static void TestVoxelEffectsUseFullSourceExtent(void) {
+  DioramaProjection projection=RakedApronProjection();
+  projection.texture_width=640;projection.texture_height=352;projection.texture_x_origin=64;
+  const float u0=64.f/640,u1=560.f/640,scale=1.2f;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,
+      .u0=(u0+u1)*.5f-(u1-u0)*.5f/scale,.u1=(u0+u1)*.5f+(u1-u0)*.5f/scale,
+      .v0=.5f-.5f/scale,.v1=.5f+.5f/scale,
+      .source_bounds_valid=true,.source_u0=u0,.source_u1=u1,.source_v1=1,
+      .capture_offset={-1.25f,.5f}};
+  ActionEffectProjectionContext context={.bg1_camera_x=752,.bg1_camera_y=144,
+      .ws_extra=120,.ws_extra_top=64,.diorama_projection=&projection};
+  ActionEffectInstance effect=SceneEffect(kActionEffect_AuthoredCloud,632);
+  effect.world_y=256;effect.projection_plane=kActionEffectProjectionPlane_Bg1;
+  effect.geometry=(ActionEffectGeometry){.kind=kActionEffectGeometry_Rect,.data.rect={-80,-200,600,200}};
+  ArRenderPointF point,expected;ActionEffectLocalRect bounds;
+  CHECK(ActionEffectProjection_ClipBounds(&context,&effect,&bounds));
+  CHECK(bounds.x0==1.25f && bounds.x1==497.25f && bounds.y0==-176.5f && bounds.y1==175.5f);
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&effect,10,0,&point));
+  CHECK(Diorama_ProjectCapturedBg1Point(&projection,10,176,&expected,NULL,NULL));
+  CHECK(fabsf(point.x-expected.x)<.001f && fabsf(point.y-expected.y)<.001f);
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&effect,10,170,&point));
+  CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,0,0,&point));
+  CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,498,0,&point));
+  CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,10,176,&point));
+  /* A small authored bank keeps its own finite boundary; only the incorrect
+   * interior capture crop is removed. Ordinary mappings retain their policy. */
+  effect.geometry.data.rect=(ActionEffectLocalRect){10,-10,20,10};
+  CHECK(ActionEffectProjection_ClipBounds(&context,&effect,&bounds));
+  CHECK(bounds.x0==10 && bounds.x1==20 && bounds.y0==-10 && bounds.y1==10);
+  projection.bg1_plane.source_bounds_valid=false;
+  CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,10,0,&point));
+}
+
+static void TestWaterfallEffectsUseFiniteLowerGuard(void) {
+  DioramaProjection projection=RakedApronProjection();
+  projection.texture_width=640;projection.texture_height=352;projection.texture_x_origin=64;
+  const float u0=64.f/640,u1=560.f/640,scale=3.45f/3.25f;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,.capture_apron=64,
+      .u0=(u0+u1)*.5f-(u1-u0)*.5f/scale,.u1=(u0+u1)*.5f+(u1-u0)*.5f/scale,
+      .v0=.5f-.5f/scale,.v1=.5f+.5f/scale,.z_world=-.2f,
+      .source_bounds_valid=true,.source_u0=u0,.source_u1=u1,.source_v1=1};
+  ActionEffectProjectionContext context={.bg1_camera_x=72,.bg1_camera_y=16,
+      .ws_extra=120,.ws_extra_top=64,.diorama_projection=&projection};
+  const DioramaProjection native=projection;
+  const unsigned kinds[]={kActionEffect_AuthoredCloud,kActionEffect_AuthoredSpray,kActionEffect_AuthoredParticleArea};
+  for(unsigned i=0;i<sizeof(kinds)/sizeof(kinds[0]);++i) {
+    ActionEffectInstance effect=SceneEffect(kinds[i],256);
+    effect.world_y=322; /* CaptureY370: within actual47-row continuation. */
+    effect.flags=kActionEffectFlag_Visible;
+    effect.projection_plane=kActionEffectProjectionPlane_Bg1;
+    effect.render_layer=i?kActionEffectRenderLayer_WorldDust:kActionEffectRenderLayer_Bg2Alpha;
+    effect.geometry=(ActionEffectGeometry){.kind=kActionEffectGeometry_Rect,.data.rect={-20,-30,20,30}};
+    effect.field_style.rolling=.7f;effect.field_style.textured=1;
+    ArRenderPointF point,unchanged,expected;
+    ActionEffectLocalRect clip;
+    projection=native;
+    CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,0,0,&point));
+    CHECK(ActionEffectProjection_ProjectPoint(&context,&effect,0,-20,&unchanged));
+    CHECK(ActionEffectProjection_ClipBounds(&context,&effect,&clip)&&clip.y1==-18);
+    ActionEffectProjectionSnapshot snapshot={0};
+    ActionEffectProjection_Remember(&snapshot,&context);
+    CHECK(ActionEffectProjection_Matches(&snapshot,&context));
+    projection.bg1_plane.source_v1=399.f/352;
+    CHECK(!ActionEffectProjection_Matches(&snapshot,&context));
+    CHECK(ActionEffectProjection_ProjectPoint(&context,&effect,0,0,&point));
+    CHECK(Diorama_ProjectCapturedBg1Point(&native,304,370,&expected,NULL,NULL));
+    CHECK(point.x==expected.x&&point.y==expected.y);
+    CHECK(ActionEffectProjection_ProjectPoint(&context,&effect,0,-20,&point));
+    CHECK(point.x==unchanged.x&&point.y==unchanged.y);
+    CHECK(ActionEffectProjection_ClipBounds(&context,&effect,&clip));
+    CHECK(clip.x0==-20&&clip.x1==20&&clip.y0==-30&&fabsf(clip.y1-29)<.0001f);
+    CHECK(ActionEffectProjection_ProjectPoint(&context,&effect,0,28.5f,&point));
+    CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,0,30,&point));
+    /* The GPU uniform uses this same capture-bound reader, independently of
+     * source packet motion aprons. Never promote the47 rows to a full64. */
+    float x0,y0,x1,y1;
+    CHECK(Diorama_PlaneCaptureBounds(&projection,&projection.bg1_plane,&x0,&y0,&x1,&y1));
+    CHECK(x0==-64&&x1==560&&y0==0&&fabsf(y1-399)<.0001f);
+    effect.flags|=kActionEffectFlag_ClipToRect;
+    effect.clip_rect=(ActionEffectLocalRect){-3,-2,3,2};
+    CHECK(ActionEffectProjection_ClipBounds(&context,&effect,&clip));
+    CHECK(clip.x0==-3&&clip.x1==3&&clip.y0==-2&&clip.y1==2);
+    CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,0,3,&point));
+    const ActionEffectInstance original=effect;
+    projection=native;
+    CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,0,0,&point));
+    CHECK(!memcmp(&effect,&original,sizeof(effect))); /* No alpha, priority, position or recipe mutation. */
+  }
+}
+
+#include "action_effect_cloud_extent.inc"
+
 int main(void) {
+  TestVoxelCloudAuthoredLowerExtent();
   const ActionEffectInstance background_torch={.kind=kActionEffect_AuthoredTorch,
       .render_layer=kActionEffectRenderLayer_Bg2SourceAlpha,
       .tuning={.light_receivers_set=1,.light_receivers=kActionReceiver_Scenery}};
   assert(ActionEffectReceivers_Layer(&background_torch)==kActionEffectRenderLayer_Bg2Alpha);
   assert(ActionEffectReceivers_SurfaceLayer(&background_torch)==kActionEffectRenderLayer_Bg1Plane);
   TestDioramaEffectsUseDrawnGuards();
+  TestVoxelEffectsUseFullSourceExtent();
+  TestWaterfallEffectsUseFiniteLowerGuard();
   TestAutoFlatProjection();
   TestRetainedShadowParity();
   TestAuthoredTorchReach();
@@ -5043,6 +5140,7 @@ int main(void) {
   TestAuthoredMoteStyle();
   TestAuthoredFloorMist();
   TestGroundSnowCover();
+  TestVoxelGroundCoverLightingAndClaims();
   TestReactiveSnow();
   TestSlopePowder();
   TestDistantWaveCapsFollowRaster();

@@ -3,6 +3,31 @@
 
 #include <float.h>
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int PointOrder(const void *a,const void *b) {
+  const ArRenderPointF *p=a,*q=b;
+  return p->x<q->x?-1:p->x>q->x?1:p->y<q->y?-1:p->y>q->y?1:0;
+}
+static double PointCross(ArRenderPointF a,ArRenderPointF b,ArRenderPointF c) {
+  return ((double)b.x-a.x)*((double)c.y-a.y)-((double)b.y-a.y)*((double)c.x-a.x);
+}
+unsigned EditorVoxelPick_Hull(ArRenderPointF *points,unsigned count,ArRenderPointF *out) {
+  if(!count)return 0;
+  if(count<3){memcpy(out,points,count*sizeof(*points));return count;}
+  qsort(points,count,sizeof(*points),PointOrder);unsigned n=0;
+  for(unsigned i=0;i<count;++i) {
+    while(n>1&&PointCross(out[n-2],out[n-1],points[i])<=0)--n;
+    out[n++]=points[i];
+  }
+  const unsigned lower=n;
+  for(unsigned i=count-1;i-- >0;) {
+    while(n>lower&&PointCross(out[n-2],out[n-1],points[i])<=0)--n;
+    out[n++]=points[i];
+  }
+  return n>1?n-1:n;
+}
 
 static double Cross(double ax, double ay, double bx, double by) {
   return ax * by - ay * bx;

@@ -4,6 +4,7 @@
 #include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 static void Near(float actual, float expected) {
   assert(fabsf(actual - expected) < 0.0001f);
@@ -16,7 +17,46 @@ static DioramaVoxelPickFace Quad(void) {
     .depth = {.1f, .3f, .9f, .7f}, .clip_w = {1, 1, 1, 1}};
 }
 
+static void CompleteOutline(const ArRenderPointF *observed,unsigned count) {
+  ArRenderPointF points[32],hull[64];assert(count<=32);
+  memcpy(points,observed,count*sizeof(*points));
+  const unsigned n=EditorVoxelPick_Hull(points,count,hull);assert(n>=3);
+  for(unsigned p=0;p<count;++p)for(unsigned i=0;i<n;++i) {
+    const ArRenderPointF a=hull[i],b=hull[(i+1)%n],c=observed[p];
+    const double cross=((double)b.x-a.x)*((double)c.y-a.y)-((double)b.y-a.y)*((double)c.x-a.x);
+    assert(cross>=-1e-8); /* Every submitted face remains inside its outline. */
+  }
+}
+static void SegmentedOutlineCorners(void) {
+  /* Actual clipped preview vertices: Marahna1 cell42,19 left; Marahna2
+   * cell27,39 right; Northwall1 cell48,30 left; Northwall2 cell38,15 left.
+   * A one-ULP x difference makes a 15px support corner's cross product only
+   * .00048. The former absolute .001 threshold silently removed that corner. */
+  static const ArRenderPointF jungle[]={
+    {480.f,297.894745f},{480.000031f,282.247864f},{472.746704f,276.444336f},
+    {472.766418f,292.126312f},{480.f,313.45697f},{472.786011f,307.723389f},
+    {454.655029f,261.968719f},{454.72406f,277.738403f},{454.792725f,293.422424f},
+    {460.836273f,298.225769f}};
+  static const ArRenderPointF temple[]={
+    {489.142975f,306.190216f},{489.118286f,321.712311f},{509.844879f,305.293701f},
+    {509.926025f,289.671997f},{489.093658f,337.150665f},{509.76416f,320.830933f},
+    {480.f,313.45697f},{480.f,328.935272f},{479.999969f,344.330261f}};
+  static const ArRenderPointF snow[]={
+    {472.766418f,292.126312f},{472.746704f,276.444336f},{454.655029f,261.968719f},
+    {454.72406f,277.738403f},{472.786011f,307.723389f},{454.792725f,293.422424f},
+    {480.f,297.894745f},{480.000031f,282.247864f},{480.f,313.45697f}};
+  static const ArRenderPointF ice[]={
+    {471.475189f,291.096588f},{471.451965f,275.408325f},{452.269989f,260.060364f},
+    {452.345551f,275.841675f},{471.498199f,306.69986f},{452.420715f,291.53717f},
+    {480.f,297.894745f},{480.000031f,282.247864f},{480.f,313.45697f}};
+  CompleteOutline(jungle,sizeof(jungle)/sizeof(*jungle));
+  CompleteOutline(temple,sizeof(temple)/sizeof(*temple));
+  CompleteOutline(snow,sizeof(snow)/sizeof(*snow));
+  CompleteOutline(ice,sizeof(ice)/sizeof(*ice));
+}
+
 int main(void) {
+  SegmentedOutlineCorners();
   DioramaVoxelPickFace face = Quad();
   EditorVoxelPickHit hit = {0};
   /* Both triangles, outer edges, and their shared diagonal remain selectable. */

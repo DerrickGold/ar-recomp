@@ -426,6 +426,14 @@ static void set_solid_4bpp_tile(Ppu *ppu, unsigned tile, unsigned color) {
     }
 }
 
+static void count_guard_scanout_lines(void *user, const SrPpuScanoutLineContext *context) {
+    unsigned *counts = user;
+    ++counts[(context->flags & SR_PPU_SCANOUT_LINE_BEFORE) ? 0 : 1];
+}
+static void ignore_guard_scanout_irq(void *user, uint32_t line) {
+    (void)user; (void)line;
+}
+
 static int test_public_vertical_margin_scanout(
         const SnesRunnerApi *api, SrRunnerHandle *runner, Snes *snes) {
     enum {
@@ -700,6 +708,124 @@ static int test_public_vertical_margin_scanout(
         api->run_ppu_scanout_with_background_view(runner, &scanout, &view, &result) ==
         SR_RESULT_OK && (result.flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY),
         "native background view was not published independently of viewport height");
+    /* Optional source guards neither enlarge primary storage nor add native
+     * scanout callbacks. Old prefix-sized requests ignore this entire tail. */
+    static uint32_t guard_pixels[2][256 * 64];
+    SrPpuBackgroundGuardRequest guards[2];
+    for (unsigned i = 0; i < 2; ++i)
+        guards[i] = (SrPpuBackgroundGuardRequest){.struct_size = sizeof(guards[i]), .layer = 0,
+            .screen_y0 = i ? SR_PPU_NATIVE_HEIGHT + kBottom : -kTop - 64,
+            .width = 256, .height = 64, .source_width = 512, .source_height = 512,
+            .pixels = guard_pixels[i], .pitch_bytes = 256 * 4,
+            .pixel_byte_size = sizeof(guard_pixels[i])};
+    scanout.background_guards = guards; scanout.background_guard_count = 2;
+    failed |= check((api->capabilities & SR_RUNNER_CAP_PPU_BACKGROUND_GUARDS) != 0,
+        "native background guard capability missing");
+    for (unsigned invalid = 0; invalid < 9; ++invalid) {
+        SrPpuBackgroundGuardRequest bad[2] = {guards[0], guards[1]};
+        SrPpuScanoutRequest request = scanout; request.background_guards = bad;
+        if (invalid == 0) bad[0].height = 65;
+        if (invalid == 1) bad[0].screen_y0++;
+        if (invalid == 2) bad[0].pixels = s_main_surface;
+        if (invalid == 3) bad[1].pixels = bad[0].pixels;
+        if (invalid == 4) bad[0].pixel_byte_size--;
+        if (invalid == 5) bad[0].struct_size = 4;
+        if (invalid == 6) request.background_guard_count = 3;
+        if (invalid == 7) request.background_guard_reserved = 1;
+        if (invalid == 8) bad[1].screen_y0 = bad[0].screen_y0;
+        const bool even = snes->ppu->evenFrame;
+        failed |= check(api->run_ppu_scanout(runner, &request, &result) == SR_RESULT_INVALID_ARGUMENT &&
+            snes->ppu->evenFrame == even, "invalid native guard changed scanout");
+    }
+    unsigned counts[2] = {0};
+    scanout.line_callback = count_guard_scanout_lines; scanout.user_data = counts;
+    scanout.irq_callback = ignore_guard_scanout_irq;
+    snes->ppu->inidisp = 0x80;
+    memset(guard_pixels, 0xa5, sizeof(guard_pixels));
+    failed |= check(api->run_ppu_scanout_with_background_view(runner, &scanout, &view, &result) == SR_RESULT_OK &&
+        (result.flags & SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY) &&
+        (result.flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY), "guards failed to coexist with BG2 view");
+    failed |= check(counts[0] == 225 && counts[1] == 225,
+        "native guards added scanout callbacks or HDMA opportunities");
+    for (unsigned i = 0; i < 2; ++i) for (unsigned x = 0; x < 256 * 64; ++x)
+        if (guard_pixels[i][x]) { failed |= check(0, "blank native guard retained pixels"); break; }
+    /* The new independent outputs live in an outer optional tail. The old
+     * two-element guard array and old request prefix remain exact. */
+    static uint32_t guard_band_pixels[2][3][256 * 64];
+    SrPpuBackgroundGuardBands guard_bands[2];
+    for (unsigned i = 0; i < 2; ++i) {
+        guard_bands[i] = (SrPpuBackgroundGuardBands){.struct_size = sizeof(guard_bands[i])};
+        for (unsigned b = 0; b < 3; ++b)
+            guard_bands[i].bands[b] = (SrPpuBackgroundGuardBandOutput){
+                .pixels = guard_band_pixels[i][b], .pitch_bytes = 256 * 4,
+                .pixel_byte_size = sizeof(guard_band_pixels[i][b])};
+        scanout.background_guard_bands[i] = &guard_bands[i];
+    }
+    failed |= check((api->capabilities & SR_RUNNER_CAP_PPU_BACKGROUND_GUARD_BANDS) != 0,
+        "native background guard band capability missing");
+    for (unsigned invalid = 0; invalid < 14; ++invalid) {
+        SrPpuBackgroundGuardBands bad = guard_bands[0];
+        SrPpuScanoutRequest request = scanout; request.background_guard_bands[0] = &bad;
+        if (invalid == 0) bad.struct_size = 4;
+        if (invalid == 1) bad.flags = 0x80000000u;
+        if (invalid == 2) bad.bands[0].pixels = NULL;
+        if (invalid == 3) bad.bands[0].pitch_bytes--;
+        if (invalid == 4) bad.bands[0].pixel_byte_size--;
+        if (invalid == 5) bad.bands[0].pixels = guard_pixels[0];
+        if (invalid == 6) bad.bands[0].pixels = bad.bands[1].pixels;
+        if (invalid == 7) bad.bands[0].pixels = guard_pixels[1];
+        if (invalid == 8) bad.bands[0].pixels = guard_band_pixels[1][2];
+        if (invalid == 9) bad.bands[0].pixels = s_main_surface;
+        if (invalid == 10) bad.bands[0].pixels = view.pixels;
+        if (invalid == 11) request.background_guard_count = 1;
+        if (invalid == 12) bad.bands[0].pixels = (void *)(uintptr_t)(UINTPTR_MAX - 3u);
+        if (invalid == 13) request.background_guard_bands[0] =
+            (const SrPpuBackgroundGuardBands *)(uintptr_t)1;
+        const bool even = snes->ppu->evenFrame;
+        failed |= check(api->run_ppu_scanout_with_background_view(runner, &request, &view, &result) ==
+            SR_RESULT_INVALID_ARGUMENT && snes->ppu->evenFrame == even,
+            "invalid guard band output changed scanout");
+    }
+    memset(guard_band_pixels, 0xa5, sizeof(guard_band_pixels));
+    counts[0] = counts[1] = 0;
+    failed |= check(api->run_ppu_scanout_with_background_view(runner, &scanout, &view, &result) == SR_RESULT_OK &&
+        (result.flags & SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY) && counts[0] == 225 && counts[1] == 225,
+        "independent guard outputs changed native callbacks or readiness");
+    for (unsigned i = 0; i < 2; ++i) for (unsigned b = 0; b < 3; ++b)
+        for (unsigned x = 0; x < 256 * 64; ++x)
+            if (guard_band_pixels[i][b][x]) { failed |= check(0, "blank independent guard retained pixels"); break; }
+    SrPpuBackgroundGuardRequest bands_only[2] = {guards[0], guards[1]};
+    for (unsigned i = 0; i < 2; ++i) {
+        bands_only[i].pixels = NULL;
+        bands_only[i].pitch_bytes = bands_only[i].pixel_byte_size = 0;
+    }
+    scanout.background_guards = bands_only;
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_OK &&
+        (result.flags & SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY), "bands-only native guards failed");
+    scanout.background_guards = guards;
+    scanout.struct_size = SR_PPU_SCANOUT_REQUEST_BACKGROUND_GUARDS_SIZE;
+    scanout.background_guard_bands[0] = scanout.background_guard_bands[1] =
+        (const SrPpuBackgroundGuardBands *)(uintptr_t)1;
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_OK &&
+        (result.flags & SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY), "legacy guard request read the new band tail");
+    scanout.background_guard_bands[0] = &guard_bands[0];
+    scanout.background_guard_bands[1] = &guard_bands[1];
+    scanout.struct_size = SR_PPU_SCANOUT_REQUEST_BG_PACKET_SIZE;
+    scanout.background_guards = (const SrPpuBackgroundGuardRequest *)(uintptr_t)1;
+    scanout.background_guard_count = UINT32_MAX;
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_OK &&
+        !(result.flags & SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY), "old request read guard tail");
+    scanout.struct_size = sizeof(scanout); scanout.background_guards = guards;
+    scanout.background_guard_count = 2; snes->ppu->inidisp = 15; snes->ppu->bgmode = 7;
+    memset(guard_pixels, 0xa5, sizeof(guard_pixels));
+    memset(guard_band_pixels, 0xa5, sizeof(guard_band_pixels));
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_OK &&
+        !(result.flags & SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY), "unsupported guard broke ordinary scanout");
+    for (unsigned i = 0; i < 2; ++i) for (unsigned x = 0; x < 256 * 64; ++x)
+        if (guard_pixels[i][x]) { failed |= check(0, "failed native guard retained partial pixels"); break; }
+    for (unsigned i = 0; i < 2; ++i) for (unsigned b = 0; b < 3; ++b)
+        for (unsigned x = 0; x < 256 * 64; ++x)
+            if (guard_band_pixels[i][b][x]) { failed |= check(0, "failed native guard retained partial bands"); break; }
     return failed;
 }
 

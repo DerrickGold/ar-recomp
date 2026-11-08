@@ -112,6 +112,13 @@ static const VoxelProfilePolicy *ProfilePolicy(const ActionVoxelGeometry *c) {
 ActionVoxelProfile ActionVoxel_Profile(const ActionVoxelGeometry *geometry) {
   return geometry ? geometry->profile : kActionVoxelProfile_None;
 }
+const VoxelTerminalMatte *ActionVoxel_TerminalMatte(const ActionVoxelGeometry *c) {
+  return c&&c->ready&&(c->terminal_matte.bottom_opaque_black||c->terminal_matte.right_opaque_black)
+      ? &c->terminal_matte:NULL;
+}
+const VoxelJungleTerminal *ActionVoxel_JungleTerminal(const ActionVoxelGeometry *c) {
+  return c&&c->ready?c->jungle_terminal:NULL;
+}
 bool ActionVoxel_ValidBounds(int x0, int y0, int x1, int y1) {
   if (x0 < INT16_MIN || y0 < INT16_MIN || x1 > INT16_MAX || y1 > INT16_MAX ||
       x1 <= x0 || y1 <= y0) return false;
@@ -139,9 +146,11 @@ void ActionVoxel_Release(const ActionVoxelGeometry *geometry) {
   if (c && atomic_fetch_sub_explicit(&c->references, 1, memory_order_acq_rel) == 1) {
     free(c->front);
     free(c->semantic_cells);
+    free(c->native_priority_decks);
     free(c->cutouts);
     free(c->branch_pixels);
     free(c->front_recess);
+    free(c->raised_scenery_cells);
     free(c->thin_trim_cells);
     free(c->pixel_recess_cells);
     free(c->trunk_cells);
@@ -149,11 +158,13 @@ void ActionVoxel_Release(const ActionVoxelGeometry *geometry) {
     free(c->rear_relief);
     free(c->soft_surfaces);
     free(c->rear_fills);
+    free(c->jungle_terminal);
     free(c->authored);
     free(c->authored_at);
     free(c->authored_art);
     free(c->authored_cap_art);
     free(c->authored_contours);
+    free(c->profile_surfaces);
     free(c);
   }
 }
@@ -193,14 +204,17 @@ float ActionVoxel_SceneryRecess(const ActionVoxelGeometry *c) {
        * without changing object positions, priority or the trunk's thickness. */
       return fmaxf(0,ActionVoxel_PlayRecess(c)-.01f);
     default:
-      return 0;
+      if(c && c->material_rear_mounted)return ActionVoxel_RearFaceDepth(c);
+      return c && c->contact_scenery ? fmaxf(0,ActionVoxel_PlayRecess(c)-.01f) : 0;
   }
 }
 float ActionVoxel_FrontRecess(const ActionVoxelGeometry *c,int tile_x,int tile_y) {
   if(!c || !c->ready || !c->front_recess)return 0;
   const int64_t x=(int64_t)tile_x-c->origin_x/8,y=(int64_t)tile_y-c->origin_y/8;
   if(x<0 || y<0 || x>=c->width/8 || y>=c->height/8)return 0;
-  return c->front_recess[(size_t)y*(c->width/8)+(size_t)x] ? ActionVoxel_SceneryRecess(c) : 0;
+  const size_t at=(size_t)y*(c->width/8)+(size_t)x;
+  return ActionVoxel_SceneryFront(c,c->front_recess[at],
+      c->raised_scenery_cells && c->raised_scenery_cells[at]);
 }
 const uint8_t *ActionVoxel_PixelRecessRows(const ActionVoxelGeometry *c,int tile_x,int tile_y) {
   if(!c || !c->ready || !c->pixel_recess_cells)return NULL;
@@ -208,6 +222,24 @@ const uint8_t *ActionVoxel_PixelRecessRows(const ActionVoxelGeometry *c,int tile
   if(x<0 || y<0 || x>=c->width/8 || y>=c->height/8)return NULL;
   const unsigned owner=c->pixel_recess_cells[(size_t)y*(c->width/8)+(size_t)x];
   return owner ? c->pixel_recess_rows[owner-1] : NULL;
+}
+bool ActionVoxel_SnowReceiverRun(const ActionVoxelGeometry *c,int world_x,int world_y,int *bottom) {
+  if(!bottom||!c||!c->ready||c->profile!=kActionVoxelProfile_NorthwallSnow||
+      !c->front||!c->soft_surfaces)return false;
+  const int64_t x=(int64_t)world_x-c->origin_x,y=(int64_t)world_y-c->origin_y;
+  if(x<0||y<0||x>=c->width||y>=c->height||
+      !c->soft_surfaces[(size_t)(y/16)*(c->width/16)+(size_t)x/16])return false;
+  const unsigned pixel=c->front[(size_t)y*c->width+(size_t)x];
+  if((pixel&kVoxelKindMask)!=kVoxelSolid)return false;
+  if(y>0&&(c->front[(size_t)(y-1)*c->width+(size_t)x]&kVoxelKindMask)==kVoxelSolid)return false;
+  const unsigned material=pixel&(kVoxelKindMask|kVoxelHighPriority);
+  int end=(int)y,limit=((int)y/16+1)*16;
+  if(limit>y+8)limit=(int)y+8;
+  if(limit>c->height)limit=c->height;
+  while(end<limit&&(c->front[(size_t)end*c->width+(size_t)x]&
+      (kVoxelKindMask|kVoxelHighPriority))==material)++end;
+  if(end==y)return false;
+  *bottom=c->origin_y+end;return true;
 }
 const VoxelAuthoredCell *ActionVoxel_AuthoredCells(const ActionVoxelGeometry *c, unsigned *count) {
   if (count) *count = c ? c->authored_count : 0;
@@ -222,6 +254,9 @@ const VoxelAuthoredCell *ActionVoxel_AuthoredCellAt(const ActionVoxelGeometry *c
 }
 unsigned ActionVoxel_AuthoredArtCount(const ActionVoxelGeometry *c) {
   return c?c->authored_art_count:0;
+}
+const VoxelSurfaceStats *ActionVoxel_SurfaceStats(const ActionVoxelGeometry *c) {
+  return c ? &c->surface_stats : NULL;
 }
 const uint16_t *ActionVoxel_AuthoredCapArt(const ActionVoxelGeometry *c,unsigned *count) {
   if(count)*count=c?c->authored_cap_art_count:0;
@@ -332,15 +367,16 @@ bool ActionVoxel_HasTransformedBacks(const ActionVoxelGeometry *c) {
 #include "action_voxel_groups.inc"
 bool ActionVoxel_CellOwnsArtwork(const DioramaVoxelCell *cell) {
   if(!cell)return false;
-  uint32_t fields=cell->fields &
+  uint32_t fields=DioramaVoxelCell_EffectiveFields(cell) &
       ~(cell->faces==kDioramaVoxelFaceMask_All?kDioramaVoxelCell_Faces:0u);
   if(ActionVoxel_CellKeepsNativeIdentity(cell))fields&=~kDioramaVoxelCell_Transform;
   return fields && !(fields==kDioramaVoxelCell_Faces &&
       cell->faces==(kDioramaVoxelFaceMask_All&~kDioramaVoxelFaceMask_Front));
 }
 bool ActionVoxel_CellUsesNativeTransform(const DioramaVoxelCell *cell) {
-  return cell && (cell->fields&kDioramaVoxelCell_Transform) &&
-      !(cell->fields&~(kDioramaVoxelCell_Transform|kDioramaVoxelCell_Faces));
+  const uint32_t fields=DioramaVoxelCell_EffectiveFields(cell);
+  return (fields&kDioramaVoxelCell_Transform) &&
+      !(fields&~(kDioramaVoxelCell_Transform|kDioramaVoxelCell_Faces));
 }
 bool ActionVoxel_CellKeepsNativeIdentity(const DioramaVoxelCell *cell) {
   if(!ActionVoxel_CellUsesNativeTransform(cell) || !ActionVoxel_TransformValid(&cell->transform))return false;
@@ -376,11 +412,15 @@ bool ActionVoxel_CellGeometry(const ActionVoxelGeometry *c,int x,int y,VoxelCell
     out->back[q]=ActionVoxel_Depth(c);
     if(kind==kVoxelForeground || kind==kVoxelThin || kind==kVoxelFoliage) {
       const bool thin=c->thin_trim_cells && c->thin_trim_cells[(size_t)(my/8)*(c->width/8)+mx/8];
-      out->back[q]=out->front[q]+ActionVoxel_LocalTrimDepth(c,thin);
+      const bool raised=c->raised_scenery_cells && c->raised_scenery_cells[(size_t)(my/8)*(c->width/8)+mx/8];
+      out->back[q]=ActionVoxel_SceneryBack(c,out->front[q],thin,raised);
     }
     if(branch)out->back[q]=ActionVoxel_BranchBackDepth(c);
     const VoxelTrunkCurve *curve=ActionVoxel_ColumnCurveForCell(c,tx,ty);
-    if(curve)out->front[q]=ActionVoxel_ColumnFrontDepth(c,curve,ty*8+4);
+    if(curve) {
+      VoxelTrunkCurve section;ActionVoxel_ColumnSection(curve,tx*8+4,&section);
+      out->front[q]=ActionVoxel_ColumnFrontDepth(c,&section,ty*8+4);
+    }
     curve=ActionVoxel_TrunkCurveForCell(c,tx,ty);
     if(curve) {out->front[q]=ActionVoxel_TrunkFrontDepth(c,curve,ty*8+4);
       out->back[q]=ActionVoxel_TrunkBackDepth(c,curve,ty*8+4);}
@@ -440,6 +480,10 @@ const VoxelPatch *ActionVoxel_Patches(const ActionVoxelGeometry *c, unsigned *co
   *count = c ? c->patch_count : 0;
   return c ? c->patches : NULL;
 }
+const VoxelProfileSurface *ActionVoxel_ProfileSurfaces(const ActionVoxelGeometry *c,unsigned *count) {
+  *count=c?c->profile_surface_count:0;
+  return c?c->profile_surfaces:NULL;
+}
 const VoxelWaterSurface *ActionVoxel_WaterSurfaces(const ActionVoxelGeometry *c, unsigned *count) {
   *count = c ? c->water_surface_count : 0;
   return c ? c->water_surfaces : NULL;
@@ -479,7 +523,7 @@ bool ActionVoxel_HasHighDecks(const ActionVoxelGeometry *c) {
   return c && c->high_deck_count != 0;
 }
 float ActionVoxel_EdgeRecess(const ActionVoxelGeometry *c,const VoxelEdge *e) {
-  return c && c->mixed_scenery && !e->rear_mounted ? 0 : ActionVoxel_SceneryRecess(c);
+  return ActionVoxel_SceneryFront(c,!(c && c->mixed_scenery && !e->rear_mounted),e->raised_scenery);
 }
 bool ActionVoxel_HasColumns(const ActionVoxelGeometry *c) {
   return c && c->ready && c->column_curve_count;
@@ -495,8 +539,27 @@ const VoxelTrunkCurve *ActionVoxel_ColumnCurveForEdge(const ActionVoxelGeometry 
   return ActionVoxel_HasColumns(c) && e && e->column_curve && e->column_curve<=c->column_curve_count
       ? &c->column_curves[e->column_curve-1]:NULL;
 }
+void ActionVoxel_ColumnSection(const VoxelTrunkCurve *curve,float world_x,VoxelTrunkCurve *section) {
+  if(!section)return;
+  *section=curve?*curve:(VoxelTrunkCurve){0};
+  if(!curve || curve->contact_count!=8 || !isfinite(world_x))return;
+  int column=(int)floorf((world_x-curve->contact_x)*.5f);
+  if(column<0)column=0;else if(column>7)column=7;
+  const short contact=curve->contact[column];
+  section->top_y=contact+4;section->base_y=contact+16;
+  section->contact_x=0;section->contact_count=0;
+  memset(section->contact,0,sizeof(section->contact));
+}
 float ActionVoxel_ColumnFrontDepth(const ActionVoxelGeometry *c,const VoxelTrunkCurve *curve,float world_y) {
-  return ActionVoxel_Depth(c)*TrunkCurveWeight(curve,world_y);
+  /* Only grounded reviewed desert shafts receive a column owner. Preserve
+   * their full cap join with one native8px underside taper, then clear the actor
+   * contact (.01 ahead of PlayRecess) by .025. Elevated shafts have no owner. */
+  const float weight=curve && curve->linear && curve->base_y>curve->top_y && isfinite(world_y)
+      ? fmaxf(0,fminf(1,(world_y-curve->top_y)/(curve->base_y-curve->top_y)))
+      : TrunkCurveWeight(curve,world_y);
+  if(c && c->profile==kActionVoxelProfile_KassandoraDesert && curve)
+    return fminf(ActionVoxel_Depth(c),ActionVoxel_PlayRecess(c)+.015f)*weight;
+  return ActionVoxel_Depth(c)*weight;
 }
 bool ActionVoxel_ResolveEdgeSpanAtY(const ActionVoxelGeometry *c, const VoxelEdge *e,
                                      VoxelEdgePass pass, float near_depth, float far_depth,
@@ -514,9 +577,10 @@ bool ActionVoxel_ResolveEdgeSpanAtY(const ActionVoxelGeometry *c, const VoxelEdg
      * foreground slot. Its extension behind actors is submitted earlier. */
     far_depth = fminf(far_depth, actor_depth);
   }
-  /* Preserve native-low decorative lips wholly behind actors: they can sit
-   * above the collision floor and must not cut through the actor's shins. */
-  const bool behind_actors = !e->high_priority && (!e->colliding || e->far_rank == 1);
+  /* Preserve native-low scenery and reviewed pass-through beams wholly behind
+   * actors. Their exposed caps must not cut through a passing actor. */
+  const bool behind_actors = !e->high_priority &&
+      (!e->colliding || e->far_rank == 1 || e->native_actor_priority);
   if (behind_actors && far_depth < depth) return false;
   /* A column mounted against the rear wall covers the back of a ledge.
    * Its exposed cap is in front of the column, unlike the castle's forward
@@ -530,16 +594,33 @@ bool ActionVoxel_ResolveEdgeSpanAtY(const ActionVoxelGeometry *c, const VoxelEdg
     /* Subtract the neighbour's physical interval, not just its thickness.
      * A full deck exposes its front beside a rear column, and its back beside
      * a front jamb. Disjoint trim leaves both silhouettes exposed. */
-    exposed_near=e->rear_mounted?ActionVoxel_SceneryRecess(c):0;
-    if(e->column_curve && e->column_curve<=c->column_curve_count)
-      exposed_near=ActionVoxel_ColumnFrontDepth(c,&c->column_curves[e->column_curve-1],world_y);
-    exposed_far=e->far_rank==1?exposed_near+ActionVoxel_LocalTrimDepth(c,e->thin_trim):depths[e->far_rank];
-    float neighbor_near=e->neighbor_rear_mounted?ActionVoxel_SceneryRecess(c):0;
-    if(e->neighbor_column_curve && e->neighbor_column_curve<=c->column_curve_count)
-      neighbor_near=ActionVoxel_ColumnFrontDepth(c,&c->column_curves[e->neighbor_column_curve-1],world_y);
-    const float neighbor_far=e->near_rank==1?neighbor_near+ActionVoxel_LocalTrimDepth(c,e->neighbor_thin_trim):depths[e->near_rank];
+    exposed_near=ActionVoxel_SceneryFront(c,e->rear_mounted,e->raised_scenery);
+    if(e->column_curve && e->column_curve<=c->column_curve_count) {
+      VoxelTrunkCurve section;
+      ActionVoxel_ColumnSection(&c->column_curves[e->column_curve-1],e->x+.5f,&section);
+      exposed_near=ActionVoxel_ColumnFrontDepth(c,&section,world_y);
+    }
+    exposed_far=e->far_rank==1?ActionVoxel_SceneryBack(c,exposed_near,e->thin_trim,e->raised_scenery):depths[e->far_rank];
+    float neighbor_near=ActionVoxel_SceneryFront(c,e->neighbor_rear_mounted,e->neighbor_raised_scenery);
+    if(e->neighbor_column_curve && e->neighbor_column_curve<=c->column_curve_count) {
+      VoxelTrunkCurve section;
+      ActionVoxel_ColumnSection(&c->column_curves[e->neighbor_column_curve-1],
+          e->x+.5f+(e->side==1?1:e->side==3?-1:0),&section);
+      neighbor_near=ActionVoxel_ColumnFrontDepth(c,&section,world_y);
+    }
+    const float neighbor_far=e->near_rank==1?ActionVoxel_SceneryBack(c,neighbor_near,e->neighbor_thin_trim,
+        e->neighbor_raised_scenery):depths[e->near_rank];
     if(neighbor_far>exposed_near && neighbor_near<exposed_far) {
-      if(neighbor_near<=exposed_near)exposed_near=neighbor_far;
+      const bool ramp=(e->column_curve && e->column_curve<=c->column_curve_count &&
+          c->column_curves[e->column_curve-1].contact_count==8) ||
+          (e->neighbor_column_curve && e->neighbor_column_curve<=c->column_curve_count &&
+           c->column_curves[e->neighbor_column_curve-1].contact_count==8);
+      /* An emerging ramp seam collapses at its owner's front, not at the
+       * back of the fully covering neighbour. The projected endpoint must
+       * meet the next visible slice instead of drawing a diagonal wedge. */
+      if(ramp && neighbor_near<=exposed_near && neighbor_far>=exposed_far)
+        exposed_far=exposed_near;
+      else if(neighbor_near<=exposed_near)exposed_near=neighbor_far;
       else exposed_far=neighbor_near;
     }
   }
@@ -554,6 +635,50 @@ bool ActionVoxel_ResolveEdgeSpan(const ActionVoxelGeometry *c,const VoxelEdge *e
   const float y=e->y+(e->side==2);
   if(!(e->side&1) || (!e->column_curve && !e->neighbor_column_curve))
     return ActionVoxel_ResolveEdgeSpanAtY(c,e,pass,near_depth,far_depth,y,out);
+  const unsigned owners[]={e->column_curve,e->neighbor_column_curve};
+  bool ramp=false;
+  for(unsigned i=0;i<2;++i)ramp|=owners[i] && owners[i]<=c->column_curve_count &&
+      c->column_curves[owners[i]-1].contact_count==8;
+  if(ramp) {
+    /* A thin seam may exist only near one end of a tapered span. Start,
+     * midpoint and end alone can all lie outside an actor-clipped interval.
+     * Linear ramp sections change only at their lip/base and clip crossings;
+     * their endpoints plus intervening midpoints give the complete union. */
+    float knots[12]={y,y+e->length};unsigned count=2;
+    const float depth=ActionVoxel_Depth(c);
+    const float limits[]={near_depth,far_depth,fmaxf(0,ActionVoxel_PlayRecess(c)-.01f)};
+    for(unsigned i=0;i<2;++i)if(owners[i] && owners[i]<=c->column_curve_count) {
+      VoxelTrunkCurve section;
+      ActionVoxel_ColumnSection(&c->column_curves[owners[i]-1],
+          e->x+.5f+(i?(e->side==1?1:e->side==3?-1:0):0),&section);
+      const float endpoints[]={section.top_y,section.base_y};
+      for(unsigned k=0;k<2;++k)
+        if(endpoints[k]>y && endpoints[k]<y+e->length)knots[count++]=endpoints[k];
+      if(section.linear && depth>0)for(unsigned k=0;k<3;++k) {
+        if(!isfinite(limits[k]) || limits[k]<=0 || limits[k]>=depth)continue;
+        const float crossing=section.top_y+(section.base_y-section.top_y)*limits[k]/depth;
+        if(crossing>y && crossing<y+e->length)knots[count++]=crossing;
+      }
+    }
+    for(unsigned i=1;i<count;++i) {
+      const float value=knots[i];unsigned j=i;
+      while(j && knots[j-1]>value){knots[j]=knots[j-1];--j;}knots[j]=value;
+    }
+    bool any=false,bounds=false;
+    for(unsigned i=0;i<count*2-1;++i) {
+      const float at=(i&1)?(knots[i/2]+knots[i/2+1])*.5f:knots[i/2];
+      VoxelEdgeSpan sample={NAN,NAN};
+      any|=ActionVoxel_ResolveEdgeSpanAtY(c,e,pass,near_depth,far_depth,at,&sample);
+      /* Collapsed limiting endpoints bound a visible adjacent interval,
+       * but never make an otherwise empty edge visible on their own. */
+      if(!isfinite(sample.near_depth) || !isfinite(sample.far_depth) ||
+          sample.far_depth<sample.near_depth)continue;
+      if(!bounds)*out=sample;
+      else {out->near_depth=fminf(out->near_depth,sample.near_depth);out->far_depth=fmaxf(out->far_depth,sample.far_depth);}
+      bounds=true;
+    }
+    return any;
+  }
   bool any=false;
   for(unsigned i=0;i<3;++i) {
     VoxelEdgeSpan sample;
@@ -580,6 +705,18 @@ static uint32_t BackingColor(unsigned color, unsigned subtract, unsigned brightn
 }
 uint32_t ActionVoxel_AuthoredColor(unsigned color,const ActionRoomSceneFrameState *frame) {
   return color&0x8000 ? BackingColor(color,frame?BackingSubtract(frame):0,frame?frame->brightness:15) : 0;
+}
+uint32_t ActionVoxel_WaterSurfaceColor(const VoxelWaterSurface *surface, unsigned background,
+    const ActionRoomSceneFrameState *frame) {
+  if (!surface || background > 1 || !(surface->uniform_color[0] & 0x8000) ||
+      !(surface->uniform_color[1] & 0x8000)) return 0;
+  /* BG2 is a separate main-screen term. Do not reuse AuthoredColor's BG1-only
+   * fixed-color eligibility; full-add remains the compositor's existing job. */
+  const unsigned subtract = frame && DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+      frame->cgwsel, frame->cgadsub, frame->fixed_color, background + 1)
+      ? frame->fixed_color : 0;
+  return BackingColor(surface->uniform_color[background], subtract,
+      frame ? frame->brightness : 15);
 }
 static void BuildBacking(const ActionVoxelGeometry *c, const ActionRoomSceneFrameState *f, uint32_t backing[512]) {
   const unsigned subtract = BackingSubtract(f);
@@ -681,8 +818,10 @@ bool ActionVoxel_Split(const ActionVoxelGeometry *c, int ox, int oy, int width, 
           c->trunk_cells[(size_t)(my/8)*(c->width/8)+mx/8];
       const unsigned column=kind==kVoxelSolid && c->column_cells
           ? c->column_cells[(size_t)(my/8)*(c->width/8)+mx/8] : 0;
-      const bool rear_column=column && column<=c->column_curve_count &&
-          wy>=c->column_curves[column-1].base_y;
+      VoxelTrunkCurve section={0};
+      if(column && column<=c->column_curve_count)
+        ActionVoxel_ColumnSection(&c->column_curves[column-1],wx+.5f,&section);
+      const bool rear_column=column && column<=c->column_curve_count && wy>=section.base_y;
       /* Native high priority is an independent source, not a material hint.
        * Never merge it into either low-priority image or condition it on the
        * depth classifier. The ordinary high slot stays above OBJ2/below OBJ3. */
@@ -726,10 +865,12 @@ bool ActionVoxel_Split(const ActionVoxelGeometry *c, int ox, int oy, int width, 
     for (int y = y0 < 0 ? -y0 : 0; y < 16 && y0 + y < h; ++y)
       for (int x = x0 < 0 ? -x0 : 0; x < 16 && x0 + x < width; ++x) {
         const unsigned color = fill->colors[y * 16 + x];
-        if ((color & 0x8000) &&
-            (!fill->preserve_existing || !(rear[(size_t)(y0+y)*output_pitch+x0+x] >> 24)))
-          rear[(size_t)(y0 + y) * output_pitch + x0 + x] =
-              BackingColor(color, subtract, frame->brightness);
+        if(color & 0x8000) {
+          const size_t at=(size_t)(y0+y)*output_pitch+x0+x;
+          const uint32_t replacement=BackingColor(color,subtract,frame->brightness);
+          if(!fill->preserve_existing || !(rear[at]>>24))rear[at]=replacement;
+          if(fill->replace_front)foreground[at]=replacement;
+        }
       }
   }
   const int authored_x0=(int)floorf(ox/16.f),authored_y0=(int)floorf(oy/16.f);

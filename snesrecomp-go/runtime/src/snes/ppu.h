@@ -625,6 +625,20 @@ int PpuGetCurrentRenderScale(Ppu *, uint32_t);
  * The public boundary validates storage/geometry; false invalidates this
  * optional view, never the normal scanout. */
 bool PpuRenderBackgroundViewLine(Ppu *, const SrPpuBackgroundViewRequest *, int);
+bool PpuRenderBackgroundGuard(Ppu *, const SrPpuBackgroundGuardRequest *);
+bool PpuRenderBackgroundGuardBands(Ppu *, const SrPpuBackgroundGuardRequest *,
+    const SrPpuBackgroundGuardBands *);
+/* Shared runner/editor storage validation; index0 is the optional legacy
+ * union and indices1..3 are independent Low/High/Far. */
+SrPpuBackgroundGuardBandOutput PpuBackgroundGuardOutput(
+    const SrPpuBackgroundGuardRequest *, const SrPpuBackgroundGuardBands *, unsigned index);
+bool PpuBackgroundGuardStorageValid(const Ppu *, const SrPpuBackgroundGuardRequest *,
+    const SrPpuBackgroundGuardBands *);
+bool PpuBackgroundGuardsStorageOverlap(const SrPpuBackgroundGuardRequest *,
+    const SrPpuBackgroundGuardBands *, const SrPpuBackgroundGuardRequest *,
+    const SrPpuBackgroundGuardBands *);
+void PpuClearBackgroundGuard(const SrPpuBackgroundGuardRequest *,
+    const SrPpuBackgroundGuardBands *);
 bool PpuRenderNativeBackgroundView(Ppu *, const SrPpuBackgroundViewRequest *);
 
 #endif

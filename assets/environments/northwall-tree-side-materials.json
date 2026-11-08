@@ -1,0 +1,5854 @@
+{
+  "description": "Reviewed Northwall side-hall native artwork, outside the unchanged curved core. Palette roles are restricted to these exact displayed-art/collision fingerprints. Native word addresses and IDs are provenance only. Pure tunnel black and green foliage remain real rear artwork; transparent sky stays empty. Unknown colored detail is untouched.",
+  "snow_donor": {
+    "key": "fc27ebdfb6d0c588",
+    "crop": [
+      2,
+      2,
+      8
+    ],
+    "palette": 4,
+    "opaque_indices": [
+      13,
+      14,
+      15
+    ]
+  },
+  "materials": [
+    {
+      "key": "01481e92d6e9f6f2",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        32768,
+        61440,
+        32768
+      ],
+      "rear_colors": [
+        128,
+        0,
+        128,
+        0
+      ],
+      "snow_colors": [
+        61440,
+        32768,
+        61440,
+        32768
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          142
+        ],
+        [
+          7,
+          0,
+          142
+        ],
+        [
+          6,
+          1,
+          142
+        ],
+        [
+          7,
+          1,
+          142
+        ],
+        [
+          6,
+          2,
+          142
+        ],
+        [
+          7,
+          2,
+          142
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        32768,
+        61440,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "02b9ba989bbe0bd0",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        57344,
+        57344,
+        32768,
+        61440
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        57344,
+        57344,
+        32768,
+        61440
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          73
+        ],
+        [
+          6,
+          1,
+          73
+        ],
+        [
+          6,
+          2,
+          73
+        ]
+      ],
+      "snow_face_colors": [
+        57344,
+        57344,
+        32768,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "031dba74248bc263",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        15872,
+        64512,
+        48640,
+        30720
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        15872,
+        64512,
+        48640,
+        30720
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          64
+        ],
+        [
+          6,
+          1,
+          64
+        ],
+        [
+          6,
+          2,
+          64
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "053137938be1c477",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        57344,
+        57344,
+        32768,
+        32768
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        57344,
+        57344,
+        32768,
+        32768
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          132
+        ],
+        [
+          7,
+          0,
+          132
+        ],
+        [
+          6,
+          1,
+          132
+        ],
+        [
+          7,
+          1,
+          132
+        ],
+        [
+          6,
+          2,
+          132
+        ],
+        [
+          7,
+          2,
+          132
+        ]
+      ],
+      "snow_face_colors": [
+        57344,
+        57344,
+        32768,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "0698d3ff8fa3bed8",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        57344,
+        57344,
+        32768,
+        32768
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        57344,
+        57344,
+        32768,
+        32768
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          131
+        ],
+        [
+          7,
+          0,
+          131
+        ],
+        [
+          6,
+          1,
+          131
+        ],
+        [
+          7,
+          1,
+          131
+        ],
+        [
+          6,
+          2,
+          131
+        ],
+        [
+          7,
+          2,
+          131
+        ]
+      ],
+      "snow_face_colors": [
+        57344,
+        57344,
+        32768,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "085f2045ebf873e2",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          65
+        ],
+        [
+          7,
+          0,
+          65
+        ],
+        [
+          6,
+          1,
+          65
+        ],
+        [
+          7,
+          1,
+          65
+        ],
+        [
+          6,
+          2,
+          65
+        ],
+        [
+          7,
+          2,
+          65
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "08b154f429107b07",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        32768,
+        32768,
+        62976,
+        62976
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        32768,
+        32768,
+        62976,
+        62976
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          74
+        ],
+        [
+          6,
+          1,
+          74
+        ],
+        [
+          6,
+          2,
+          74
+        ]
+      ],
+      "snow_face_colors": [
+        32768,
+        32768,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "09d5b712a2e813f0",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        57344,
+        57344,
+        61440,
+        32768
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        57344,
+        57344,
+        61440,
+        32768
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          75
+        ],
+        [
+          6,
+          1,
+          75
+        ],
+        [
+          6,
+          2,
+          75
+        ]
+      ],
+      "snow_face_colors": [
+        57344,
+        57344,
+        61440,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "0badc95bcf4a3b3b",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        240,
+        240,
+        240,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          134
+        ],
+        [
+          7,
+          0,
+          134
+        ],
+        [
+          6,
+          1,
+          134
+        ],
+        [
+          7,
+          1,
+          134
+        ],
+        [
+          6,
+          2,
+          134
+        ],
+        [
+          7,
+          2,
+          134
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "0cf0b634f542b15b",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        240,
+        240,
+        240,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          119
+        ],
+        [
+          6,
+          1,
+          119
+        ],
+        [
+          6,
+          2,
+          119
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "0d4366ba166cce19",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        32512,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          255
+        ],
+        [
+          6,
+          1,
+          255
+        ],
+        [
+          6,
+          2,
+          255
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "0de0193e44cb71d9",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        65280,
+        0,
+        65280,
+        0
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        65280,
+        0,
+        65280,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          191
+        ],
+        [
+          6,
+          1,
+          191
+        ],
+        [
+          6,
+          2,
+          191
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "0f0aa13b5b211800",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        0,
+        32768,
+        61440
+      ],
+      "rear_colors": [
+        128,
+        176,
+        0,
+        128
+      ],
+      "snow_colors": [
+        61440,
+        0,
+        32768,
+        61440
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          7,
+          0,
+          118
+        ],
+        [
+          7,
+          1,
+          118
+        ],
+        [
+          7,
+          2,
+          118
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        0,
+        32768,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "13b6f40ca9e9345d",
+      "role": "frozen_bark_course",
+      "solid_colors": [
+        65024,
+        64512,
+        0,
+        0
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        65024,
+        64512,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          71
+        ],
+        [
+          6,
+          1,
+          71
+        ],
+        [
+          6,
+          2,
+          71
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "1d9e4df5b555707b",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        240,
+        240,
+        240,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          105
+        ],
+        [
+          7,
+          0,
+          105
+        ],
+        [
+          6,
+          1,
+          105
+        ],
+        [
+          7,
+          1,
+          105
+        ],
+        [
+          6,
+          2,
+          105
+        ],
+        [
+          7,
+          2,
+          105
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "203aad52b00e677e",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        62976,
+        65024,
+        3584,
+        7680
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        62976,
+        65024,
+        3584,
+        7680
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          81
+        ],
+        [
+          6,
+          1,
+          81
+        ],
+        [
+          6,
+          2,
+          81
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        61440,
+        0,
+        0
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "21789c94ddb147f0",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          76
+        ],
+        [
+          6,
+          1,
+          76
+        ],
+        [
+          6,
+          2,
+          76
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "25a9620dcf0190a1",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          67
+        ],
+        [
+          7,
+          0,
+          67
+        ],
+        [
+          6,
+          1,
+          67
+        ],
+        [
+          7,
+          1,
+          67
+        ],
+        [
+          6,
+          2,
+          67
+        ],
+        [
+          7,
+          2,
+          67
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "25d02ff5b3060eb7",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        7680,
+        15872,
+        15872,
+        0
+      ],
+      "rear_colors": [
+        2,
+        2,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          93
+        ],
+        [
+          6,
+          1,
+          93
+        ],
+        [
+          6,
+          2,
+          93
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "263db9913e186637",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        0,
+        28672,
+        0,
+        0
+      ],
+      "rear_colors": [
+        240,
+        128,
+        128,
+        128
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          121
+        ],
+        [
+          7,
+          0,
+          121
+        ],
+        [
+          6,
+          1,
+          121
+        ],
+        [
+          7,
+          1,
+          121
+        ],
+        [
+          6,
+          2,
+          121
+        ],
+        [
+          7,
+          2,
+          121
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "2c1411aa789389b1",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        28672,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        128,
+        128,
+        176,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          120
+        ],
+        [
+          7,
+          0,
+          120
+        ],
+        [
+          6,
+          1,
+          120
+        ],
+        [
+          7,
+          1,
+          120
+        ],
+        [
+          6,
+          2,
+          120
+        ],
+        [
+          7,
+          2,
+          120
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "2c3f28608e3b9621",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        3584,
+        3584,
+        3584,
+        3584
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          152
+        ],
+        [
+          6,
+          1,
+          152
+        ],
+        [
+          6,
+          2,
+          152
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "2cac77a689c311c2",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        176,
+        240,
+        128,
+        128
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          110
+        ],
+        [
+          7,
+          0,
+          110
+        ],
+        [
+          6,
+          1,
+          110
+        ],
+        [
+          7,
+          1,
+          110
+        ],
+        [
+          6,
+          2,
+          110
+        ],
+        [
+          7,
+          2,
+          110
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "326aae6fc0398652",
+      "role": "frozen_bark_course",
+      "solid_colors": [
+        65024,
+        65024,
+        65024,
+        48640
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        65024,
+        65024,
+        65024,
+        48640
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          58
+        ],
+        [
+          6,
+          1,
+          58
+        ],
+        [
+          6,
+          2,
+          58
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "3295c6b9e99e9f83",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        32256,
+        32256,
+        15872,
+        32256
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          59
+        ],
+        [
+          6,
+          1,
+          59
+        ],
+        [
+          6,
+          2,
+          59
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "34603971726daa23",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        15872,
+        15872,
+        65024,
+        48640
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        15872,
+        15872,
+        65024,
+        48640
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          90
+        ],
+        [
+          6,
+          1,
+          90
+        ],
+        [
+          6,
+          2,
+          90
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        61440,
+        45056
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "375a90dcaa84662d",
+      "role": "frozen_bark_course",
+      "solid_colors": [
+        64512,
+        65024,
+        0,
+        0
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        64512,
+        65024,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          46
+        ],
+        [
+          6,
+          1,
+          46
+        ],
+        [
+          6,
+          2,
+          46
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "377808567d4c1fd2",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        0,
+        65280,
+        0,
+        32512
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        65280,
+        0,
+        32512
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          196
+        ],
+        [
+          6,
+          1,
+          196
+        ],
+        [
+          6,
+          2,
+          196
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "3a6c269b1cfc762d",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        32256,
+        31744,
+        3584,
+        7680
+      ],
+      "rear_colors": [
+        2,
+        2,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          30
+        ],
+        [
+          6,
+          1,
+          30
+        ],
+        [
+          6,
+          2,
+          30
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "3cb27adb152854f0",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        3584,
+        15872,
+        15872,
+        15872
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          63
+        ],
+        [
+          6,
+          1,
+          63
+        ],
+        [
+          6,
+          2,
+          63
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "3d4921880f2062ed",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          66
+        ],
+        [
+          7,
+          0,
+          66
+        ],
+        [
+          6,
+          1,
+          66
+        ],
+        [
+          7,
+          1,
+          66
+        ],
+        [
+          6,
+          2,
+          66
+        ],
+        [
+          7,
+          2,
+          66
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "3e680dd7cf3dd9ff",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        7680,
+        3584,
+        31744,
+        32256
+      ],
+      "rear_colors": [
+        0,
+        0,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          92
+        ],
+        [
+          6,
+          1,
+          92
+        ],
+        [
+          6,
+          2,
+          92
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "3e9519fa872e8d65",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        32256,
+        3584,
+        32256,
+        3584
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          155
+        ],
+        [
+          6,
+          1,
+          155
+        ],
+        [
+          6,
+          2,
+          155
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "42df8ff03c6d074c",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        128,
+        176,
+        176,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          7,
+          0,
+          127
+        ],
+        [
+          7,
+          1,
+          127
+        ],
+        [
+          7,
+          2,
+          127
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "4442ad8a0fa30545",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        65280,
+        65280,
+        65280,
+        65280
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        65280,
+        65280,
+        65280,
+        65280
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          252
+        ],
+        [
+          6,
+          1,
+          252
+        ],
+        [
+          6,
+          2,
+          252
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "48351eb47de5a12a",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        65024,
+        62976,
+        7680,
+        3584
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        65024,
+        62976,
+        7680,
+        3584
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          83
+        ],
+        [
+          6,
+          1,
+          83
+        ],
+        [
+          6,
+          2,
+          83
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        61440,
+        0,
+        0
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "4c8f05e5eedbd924",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        32768,
+        28672,
+        61440
+      ],
+      "rear_colors": [
+        128,
+        0,
+        128,
+        128
+      ],
+      "snow_colors": [
+        61440,
+        32768,
+        28672,
+        61440
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          113
+        ],
+        [
+          7,
+          0,
+          113
+        ],
+        [
+          6,
+          1,
+          113
+        ],
+        [
+          7,
+          1,
+          113
+        ],
+        [
+          6,
+          2,
+          113
+        ],
+        [
+          7,
+          2,
+          113
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        32768,
+        28672,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "4d1f096293997444",
+      "role": "frozen_bark_course",
+      "solid_colors": [
+        15872,
+        15872,
+        64512,
+        65024
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        15872,
+        15872,
+        64512,
+        65024
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          47
+        ],
+        [
+          6,
+          1,
+          47
+        ],
+        [
+          6,
+          2,
+          47
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "4e2c4f9e60b2f74e",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        176,
+        240,
+        240,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          106
+        ],
+        [
+          7,
+          0,
+          106
+        ],
+        [
+          6,
+          1,
+          106
+        ],
+        [
+          7,
+          1,
+          106
+        ],
+        [
+          6,
+          2,
+          106
+        ],
+        [
+          7,
+          2,
+          106
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "4f9b9a4133d3931b",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "rear_colors": [
+        176,
+        240,
+        128,
+        128
+      ],
+      "snow_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          129
+        ],
+        [
+          6,
+          1,
+          129
+        ],
+        [
+          6,
+          2,
+          129
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "50c04f18f29f0723",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        61440,
+        32768,
+        32768
+      ],
+      "rear_colors": [
+        128,
+        128,
+        0,
+        0
+      ],
+      "snow_colors": [
+        61440,
+        61440,
+        32768,
+        32768
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          128
+        ],
+        [
+          6,
+          1,
+          128
+        ],
+        [
+          6,
+          2,
+          128
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        61440,
+        32768,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "50c9cee4a7c7b5d7",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        7680,
+        14848,
+        1536,
+        512
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          77
+        ],
+        [
+          6,
+          1,
+          77
+        ],
+        [
+          6,
+          2,
+          77
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "50e3e0f3ffd2dc4f",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "rear_colors": [
+        240,
+        176,
+        128,
+        128
+      ],
+      "snow_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          125
+        ],
+        [
+          7,
+          0,
+          125
+        ],
+        [
+          6,
+          1,
+          125
+        ],
+        [
+          7,
+          1,
+          125
+        ],
+        [
+          6,
+          2,
+          125
+        ],
+        [
+          7,
+          2,
+          125
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "543d4e41d3dc6dda",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        240,
+        240,
+        240,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          96
+        ],
+        [
+          7,
+          0,
+          96
+        ],
+        [
+          6,
+          1,
+          96
+        ],
+        [
+          7,
+          1,
+          96
+        ],
+        [
+          6,
+          2,
+          96
+        ],
+        [
+          7,
+          2,
+          96
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "544560e9a3840779",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        32768,
+        57344,
+        32768,
+        32768
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        32768,
+        57344,
+        32768,
+        32768
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          175
+        ],
+        [
+          6,
+          1,
+          175
+        ],
+        [
+          6,
+          2,
+          175
+        ]
+      ],
+      "snow_face_colors": [
+        32768,
+        57344,
+        32768,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "55b26205bb6bc549",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        0,
+        32512,
+        0,
+        0
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          247
+        ],
+        [
+          6,
+          1,
+          247
+        ],
+        [
+          6,
+          2,
+          247
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "59e5b88c2ecbdd61",
+      "role": "native_tunnel_matte",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          7
+        ],
+        [
+          6,
+          1,
+          7
+        ],
+        [
+          6,
+          2,
+          7
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "5ae3000dca04fa07",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        65280,
+        65280,
+        65024,
+        65280
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        65280,
+        65280,
+        65024,
+        65280
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          249
+        ],
+        [
+          6,
+          1,
+          249
+        ],
+        [
+          6,
+          2,
+          249
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "5ec3613050b6631d",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        65280,
+        32512,
+        65280,
+        0
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        65280,
+        32512,
+        65280,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          254
+        ],
+        [
+          6,
+          1,
+          254
+        ],
+        [
+          6,
+          2,
+          254
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "624e630cd03087b4",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        176,
+        128,
+        240,
+        176
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          103
+        ],
+        [
+          7,
+          0,
+          103
+        ],
+        [
+          6,
+          1,
+          103
+        ],
+        [
+          7,
+          1,
+          103
+        ],
+        [
+          6,
+          2,
+          103
+        ],
+        [
+          7,
+          2,
+          103
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "652ea75419d39f74",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        32256,
+        31744
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          31
+        ],
+        [
+          6,
+          1,
+          31
+        ],
+        [
+          6,
+          2,
+          31
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "6d8b6cf7de01bba7",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        65280,
+        65280,
+        32512,
+        32512
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        65280,
+        65280,
+        32512,
+        32512
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          251
+        ],
+        [
+          6,
+          1,
+          251
+        ],
+        [
+          6,
+          2,
+          251
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "7189665f06080c42",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "rear_colors": [
+        128,
+        128,
+        128,
+        128
+      ],
+      "snow_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          123
+        ],
+        [
+          7,
+          0,
+          123
+        ],
+        [
+          6,
+          1,
+          123
+        ],
+        [
+          7,
+          1,
+          123
+        ],
+        [
+          6,
+          2,
+          123
+        ],
+        [
+          7,
+          2,
+          123
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "73e6fb19c99f580c",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        65280,
+        0,
+        32512,
+        0
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        65280,
+        0,
+        32512,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          199
+        ],
+        [
+          6,
+          1,
+          199
+        ],
+        [
+          6,
+          2,
+          199
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "77c87eb4062a7fd2",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        61440,
+        0,
+        0
+      ],
+      "rear_colors": [
+        128,
+        128,
+        128,
+        128
+      ],
+      "snow_colors": [
+        61440,
+        61440,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          114
+        ],
+        [
+          6,
+          1,
+          114
+        ],
+        [
+          6,
+          2,
+          114
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        61440,
+        0,
+        0
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "7998a65fcff2e6d3",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        61440,
+        61440,
+        32768
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        61440,
+        61440,
+        32768
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          101
+        ],
+        [
+          7,
+          0,
+          101
+        ],
+        [
+          6,
+          1,
+          101
+        ],
+        [
+          7,
+          1,
+          101
+        ],
+        [
+          6,
+          2,
+          101
+        ],
+        [
+          7,
+          2,
+          101
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        61440,
+        61440,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "79ca6263bbe4fd95",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        1536,
+        512,
+        1536,
+        512
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          85
+        ],
+        [
+          6,
+          1,
+          85
+        ],
+        [
+          6,
+          2,
+          85
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "81b669d57cf30312",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        240,
+        240,
+        240,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          98
+        ],
+        [
+          7,
+          0,
+          98
+        ],
+        [
+          6,
+          1,
+          98
+        ],
+        [
+          7,
+          1,
+          98
+        ],
+        [
+          6,
+          2,
+          98
+        ],
+        [
+          7,
+          2,
+          98
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "823fdcada101e4a5",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        176,
+        240,
+        240,
+        128
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          111
+        ],
+        [
+          7,
+          0,
+          111
+        ],
+        [
+          6,
+          1,
+          111
+        ],
+        [
+          7,
+          1,
+          111
+        ],
+        [
+          6,
+          2,
+          111
+        ],
+        [
+          7,
+          2,
+          111
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "8707700f686b6b78",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        32768,
+        61440,
+        61440,
+        28672
+      ],
+      "rear_colors": [
+        0,
+        128,
+        128,
+        128
+      ],
+      "snow_colors": [
+        32768,
+        61440,
+        61440,
+        28672
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          112
+        ],
+        [
+          7,
+          0,
+          112
+        ],
+        [
+          6,
+          1,
+          112
+        ],
+        [
+          7,
+          1,
+          112
+        ],
+        [
+          6,
+          2,
+          112
+        ],
+        [
+          7,
+          2,
+          112
+        ]
+      ],
+      "snow_face_colors": [
+        32768,
+        61440,
+        61440,
+        28672
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "894be256c314d81f",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          133
+        ],
+        [
+          7,
+          0,
+          133
+        ],
+        [
+          6,
+          1,
+          133
+        ],
+        [
+          7,
+          1,
+          133
+        ],
+        [
+          6,
+          2,
+          133
+        ],
+        [
+          7,
+          2,
+          133
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "89f36184a92bfbfe",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        24576,
+        61440,
+        61440,
+        64512
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        24576,
+        61440,
+        61440,
+        64512
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          70
+        ],
+        [
+          6,
+          1,
+          70
+        ],
+        [
+          6,
+          2,
+          70
+        ]
+      ],
+      "snow_face_colors": [
+        24576,
+        61440,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "8a75ab67412aef33",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        240,
+        240,
+        240,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          107
+        ],
+        [
+          7,
+          0,
+          107
+        ],
+        [
+          6,
+          1,
+          107
+        ],
+        [
+          7,
+          1,
+          107
+        ],
+        [
+          6,
+          2,
+          107
+        ],
+        [
+          7,
+          2,
+          107
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "8f049b84dbc1e077",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        240,
+        240,
+        240,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          135
+        ],
+        [
+          7,
+          0,
+          135
+        ],
+        [
+          6,
+          1,
+          135
+        ],
+        [
+          7,
+          1,
+          135
+        ],
+        [
+          6,
+          2,
+          135
+        ],
+        [
+          7,
+          2,
+          135
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "8fff3de72fe8607a",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        3584,
+        7680,
+        15872,
+        3584
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          39
+        ],
+        [
+          6,
+          1,
+          39
+        ],
+        [
+          6,
+          2,
+          39
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "9004c469ee3b0de5",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        128,
+        128,
+        128,
+        128
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          100
+        ],
+        [
+          7,
+          0,
+          100
+        ],
+        [
+          6,
+          1,
+          100
+        ],
+        [
+          7,
+          1,
+          100
+        ],
+        [
+          6,
+          2,
+          100
+        ],
+        [
+          7,
+          2,
+          100
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "9030a0c92a0bd527",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        63488,
+        0,
+        61440,
+        63488
+      ],
+      "rear_colors": [
+        240,
+        240,
+        240,
+        240
+      ],
+      "snow_colors": [
+        63488,
+        0,
+        61440,
+        63488
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          97
+        ],
+        [
+          7,
+          0,
+          97
+        ],
+        [
+          6,
+          1,
+          97
+        ],
+        [
+          7,
+          1,
+          97
+        ],
+        [
+          6,
+          2,
+          97
+        ],
+        [
+          7,
+          2,
+          97
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        0,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "93a6cf2dffbc70bb",
+      "role": "rear_decorative_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        31810,
+        64578,
+        56386,
+        64578
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          6
+        ],
+        [
+          6,
+          1,
+          6
+        ],
+        [
+          6,
+          2,
+          6
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_reason": "Reviewed noncolliding side-hall decoration and its opaque black matte stay together on the rear plane. This material creates no structural or snow surface; transparent and native-high source handling remain unchanged."
+    },
+    {
+      "key": "9438baa3a8d97fcc",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        61440,
+        49152,
+        49152
+      ],
+      "rear_colors": [
+        128,
+        128,
+        0,
+        0
+      ],
+      "snow_colors": [
+        61440,
+        61440,
+        49152,
+        49152
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          126
+        ],
+        [
+          7,
+          0,
+          126
+        ],
+        [
+          6,
+          1,
+          126
+        ],
+        [
+          7,
+          1,
+          126
+        ],
+        [
+          6,
+          2,
+          126
+        ],
+        [
+          7,
+          2,
+          126
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        61440,
+        49152,
+        49152
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "97326886e2910a7f",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        61440,
+        61440,
+        32768
+      ],
+      "rear_colors": [
+        240,
+        128,
+        128,
+        0
+      ],
+      "snow_colors": [
+        0,
+        61440,
+        61440,
+        32768
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          7,
+          0,
+          115
+        ],
+        [
+          7,
+          1,
+          115
+        ],
+        [
+          7,
+          2,
+          115
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        61440,
+        61440,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "97760c4e8c9b3d23",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        32768,
+        61440,
+        61440
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        61440,
+        32768,
+        61440,
+        61440
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          79
+        ],
+        [
+          7,
+          0,
+          79
+        ],
+        [
+          6,
+          1,
+          79
+        ],
+        [
+          7,
+          1,
+          79
+        ],
+        [
+          6,
+          2,
+          79
+        ],
+        [
+          7,
+          2,
+          79
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        32768,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "97b4993f3f2ae106",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        128,
+        240,
+        128,
+        128
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          109
+        ],
+        [
+          7,
+          0,
+          109
+        ],
+        [
+          6,
+          1,
+          109
+        ],
+        [
+          7,
+          1,
+          109
+        ],
+        [
+          6,
+          2,
+          109
+        ],
+        [
+          7,
+          2,
+          109
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "9a4bde24a9029d1f",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        32768,
+        61440,
+        61440,
+        61440
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        32768,
+        61440,
+        61440,
+        61440
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          7,
+          0,
+          87
+        ],
+        [
+          7,
+          1,
+          87
+        ],
+        [
+          7,
+          2,
+          87
+        ]
+      ],
+      "snow_face_colors": [
+        32768,
+        61440,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "9fa5017f51a6d975",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        3584,
+        32256,
+        3584,
+        32256
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          154
+        ],
+        [
+          6,
+          1,
+          154
+        ],
+        [
+          6,
+          2,
+          154
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "a25ee68413db124e",
+      "role": "rear_decorative_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        56386,
+        2,
+        56386,
+        56386
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          1
+        ],
+        [
+          6,
+          1,
+          1
+        ],
+        [
+          6,
+          2,
+          1
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_reason": "Reviewed noncolliding side-hall decoration and its opaque black matte stay together on the rear plane. This material creates no structural or snow surface; transparent and native-high source handling remain unchanged."
+    },
+    {
+      "key": "a67c52f8196eee74",
+      "role": "frozen_bark_course",
+      "solid_colors": [
+        15872,
+        15872,
+        65024,
+        64512
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        15872,
+        15872,
+        65024,
+        64512
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          61
+        ],
+        [
+          6,
+          1,
+          61
+        ],
+        [
+          6,
+          2,
+          61
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "a836ece6fcc274da",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        7680,
+        3584,
+        3584,
+        15872
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          62
+        ],
+        [
+          6,
+          1,
+          62
+        ],
+        [
+          6,
+          2,
+          62
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "a9904c3b17d7e292",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        32256,
+        32256,
+        3584,
+        3584
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          60
+        ],
+        [
+          6,
+          1,
+          60
+        ],
+        [
+          6,
+          2,
+          60
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "ae24f8329368ab2e",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        32256,
+        31744,
+        0,
+        0
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          89
+        ],
+        [
+          6,
+          1,
+          89
+        ],
+        [
+          6,
+          2,
+          89
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "b0b725d79e6270b7",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        15872,
+        7680,
+        0,
+        15872
+      ],
+      "rear_colors": [
+        2,
+        2,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          94
+        ],
+        [
+          6,
+          1,
+          94
+        ],
+        [
+          6,
+          2,
+          94
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "b2c02ccffe812c80",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        15872,
+        3584,
+        15872,
+        15872
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          38
+        ],
+        [
+          6,
+          1,
+          38
+        ],
+        [
+          6,
+          2,
+          38
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "b32b1c70ab9f4b3e",
+      "role": "frozen_bark_course",
+      "solid_colors": [
+        15872,
+        15872,
+        65024,
+        48640
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        15872,
+        15872,
+        65024,
+        48640
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          57
+        ],
+        [
+          6,
+          1,
+          57
+        ],
+        [
+          6,
+          2,
+          57
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "b4528d45dd2c5c2e",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        24576,
+        64512,
+        61440
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        61440,
+        24576,
+        64512,
+        61440
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          69
+        ],
+        [
+          6,
+          1,
+          69
+        ],
+        [
+          6,
+          2,
+          69
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        24576,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "b654ed24267c4976",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        32768,
+        61440,
+        62976,
+        65024
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        32768,
+        61440,
+        62976,
+        65024
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          80
+        ],
+        [
+          6,
+          1,
+          80
+        ],
+        [
+          6,
+          2,
+          80
+        ]
+      ],
+      "snow_face_colors": [
+        32768,
+        61440,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "b94c7ccdd5a01a49",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        0,
+        65280,
+        0,
+        65280
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        65280,
+        0,
+        65280
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          188
+        ],
+        [
+          6,
+          1,
+          188
+        ],
+        [
+          6,
+          2,
+          188
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "bcc8f519aa05c1d6",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        32768,
+        57344,
+        32768,
+        57344
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        32768,
+        57344,
+        32768,
+        57344
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          167
+        ],
+        [
+          6,
+          1,
+          167
+        ],
+        [
+          6,
+          2,
+          167
+        ]
+      ],
+      "snow_face_colors": [
+        32768,
+        57344,
+        32768,
+        57344
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "beee1fe85d5071f6",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        3584,
+        3584,
+        3584,
+        3584
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          156
+        ],
+        [
+          6,
+          1,
+          156
+        ],
+        [
+          6,
+          2,
+          156
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "c08eaddbd5683039",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        240,
+        176,
+        128,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          108
+        ],
+        [
+          7,
+          0,
+          108
+        ],
+        [
+          6,
+          1,
+          108
+        ],
+        [
+          7,
+          1,
+          108
+        ],
+        [
+          6,
+          2,
+          108
+        ],
+        [
+          7,
+          2,
+          108
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "c2b3e5cffc2fd243",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        0,
+        32768,
+        61440
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        61440,
+        0,
+        32768,
+        61440
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          102
+        ],
+        [
+          7,
+          0,
+          102
+        ],
+        [
+          6,
+          1,
+          102
+        ],
+        [
+          7,
+          1,
+          102
+        ],
+        [
+          6,
+          2,
+          102
+        ],
+        [
+          7,
+          2,
+          102
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        0,
+        32768,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "c43ee4706772a67e",
+      "role": "rear_branch_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        240,
+        176,
+        240,
+        240
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          104
+        ],
+        [
+          7,
+          0,
+          104
+        ],
+        [
+          6,
+          1,
+          104
+        ],
+        [
+          7,
+          1,
+          104
+        ],
+        [
+          6,
+          2,
+          104
+        ],
+        [
+          7,
+          2,
+          104
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "c47f2802ea897e3f",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        14848,
+        7680,
+        512,
+        1536
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          78
+        ],
+        [
+          6,
+          1,
+          78
+        ],
+        [
+          6,
+          2,
+          78
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "c4beccfa9050e014",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        31744,
+        32256
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          54
+        ],
+        [
+          6,
+          1,
+          54
+        ],
+        [
+          6,
+          2,
+          54
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "c65240614e2113ae",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        3584,
+        3584,
+        32256,
+        32256
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          82
+        ],
+        [
+          6,
+          1,
+          82
+        ],
+        [
+          6,
+          2,
+          82
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "c937fbb2a945f2de",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        31744,
+        32256,
+        0,
+        0
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          91
+        ],
+        [
+          6,
+          1,
+          91
+        ],
+        [
+          6,
+          2,
+          91
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "d2167c31e3d85b43",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        63488,
+        63488,
+        61440
+      ],
+      "rear_colors": [
+        240,
+        240,
+        240,
+        240
+      ],
+      "snow_colors": [
+        0,
+        63488,
+        63488,
+        61440
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          99
+        ],
+        [
+          7,
+          0,
+          99
+        ],
+        [
+          6,
+          1,
+          99
+        ],
+        [
+          7,
+          1,
+          99
+        ],
+        [
+          6,
+          2,
+          99
+        ],
+        [
+          7,
+          2,
+          99
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        61440,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "d638d799f1d8e34e",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        3584,
+        3584,
+        3584,
+        3584
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          153
+        ],
+        [
+          6,
+          1,
+          153
+        ],
+        [
+          6,
+          2,
+          153
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "dace23c77353ee0d",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        31744,
+        32256,
+        7680,
+        3584
+      ],
+      "rear_colors": [
+        2,
+        2,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          55
+        ],
+        [
+          6,
+          1,
+          55
+        ],
+        [
+          6,
+          2,
+          55
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "de0e41877c5fdb61",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        32512,
+        65280,
+        0,
+        65280
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        32512,
+        65280,
+        0,
+        65280
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          253
+        ],
+        [
+          6,
+          1,
+          253
+        ],
+        [
+          6,
+          2,
+          253
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "df16b93a1a7fbb4c",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          72
+        ],
+        [
+          6,
+          0,
+          130
+        ],
+        [
+          7,
+          0,
+          130
+        ],
+        [
+          6,
+          1,
+          72
+        ],
+        [
+          6,
+          1,
+          130
+        ],
+        [
+          7,
+          1,
+          130
+        ],
+        [
+          6,
+          2,
+          72
+        ],
+        [
+          6,
+          2,
+          130
+        ],
+        [
+          7,
+          2,
+          130
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        57344,
+        57344
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "ea024ef5a32e9875",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        512,
+        1536,
+        512,
+        1536
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          86
+        ],
+        [
+          6,
+          1,
+          86
+        ],
+        [
+          6,
+          2,
+          86
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "ea9ec52f3b75ee84",
+      "role": "rear_decorative_foliage",
+      "solid_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_colors": [
+        56386,
+        56386,
+        56386,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          229
+        ],
+        [
+          6,
+          1,
+          229
+        ],
+        [
+          6,
+          2,
+          229
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "rear_reason": "Reviewed noncolliding side-hall decoration and its opaque black matte stay together on the rear plane. This material creates no structural or snow surface; transparent and native-high source handling remain unchanged."
+    },
+    {
+      "key": "ee2d93780d7c5105",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "rear_colors": [
+        128,
+        128,
+        128,
+        128
+      ],
+      "snow_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          7,
+          0,
+          151
+        ],
+        [
+          7,
+          1,
+          151
+        ],
+        [
+          7,
+          2,
+          151
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "ef65617c126ade98",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        61440,
+        0,
+        0
+      ],
+      "rear_colors": [
+        128,
+        128,
+        176,
+        128
+      ],
+      "snow_colors": [
+        61440,
+        61440,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          122
+        ],
+        [
+          7,
+          0,
+          122
+        ],
+        [
+          6,
+          1,
+          122
+        ],
+        [
+          7,
+          1,
+          122
+        ],
+        [
+          6,
+          2,
+          122
+        ],
+        [
+          7,
+          2,
+          122
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        61440,
+        0,
+        0
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "f143b2fec4e088ad",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "rear_colors": [
+        128,
+        128,
+        128,
+        128
+      ],
+      "snow_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          124
+        ],
+        [
+          7,
+          0,
+          124
+        ],
+        [
+          6,
+          1,
+          124
+        ],
+        [
+          7,
+          1,
+          124
+        ],
+        [
+          6,
+          2,
+          124
+        ],
+        [
+          7,
+          2,
+          124
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "f197900930926187",
+      "role": "bark_branch_body",
+      "solid_colors": [
+        3584,
+        7680,
+        32256,
+        31744
+      ],
+      "rear_colors": [
+        0,
+        0,
+        2,
+        2
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          88
+        ],
+        [
+          6,
+          1,
+          88
+        ],
+        [
+          6,
+          2,
+          88
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "f2bf3e50c5387e31",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        32768,
+        32768,
+        32768,
+        32768
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        32768,
+        32768,
+        32768,
+        32768
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          95
+        ],
+        [
+          7,
+          0,
+          95
+        ],
+        [
+          6,
+          1,
+          95
+        ],
+        [
+          7,
+          1,
+          95
+        ],
+        [
+          6,
+          2,
+          95
+        ],
+        [
+          7,
+          2,
+          95
+        ]
+      ],
+      "snow_face_colors": [
+        32768,
+        32768,
+        32768,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "f8dc2e8b14ef1a2a",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        57344,
+        32768,
+        57344,
+        32768
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        57344,
+        32768,
+        57344,
+        32768
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          159
+        ],
+        [
+          6,
+          1,
+          159
+        ],
+        [
+          6,
+          2,
+          159
+        ]
+      ],
+      "snow_face_colors": [
+        57344,
+        32768,
+        57344,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "fb3ad470370f0072",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        32768,
+        65024,
+        62976
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        61440,
+        32768,
+        65024,
+        62976
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          84
+        ],
+        [
+          6,
+          1,
+          84
+        ],
+        [
+          6,
+          2,
+          84
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        32768,
+        61440,
+        61440
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "fc27ebdfb6d0c588",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        61440,
+        61440,
+        32768,
+        32768
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        61440,
+        61440,
+        32768,
+        32768
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          150
+        ],
+        [
+          6,
+          1,
+          150
+        ],
+        [
+          6,
+          2,
+          150
+        ]
+      ],
+      "snow_face_colors": [
+        61440,
+        61440,
+        32768,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "fc85d519b9ca4341",
+      "role": "frozen_bark_course",
+      "solid_colors": [
+        15872,
+        15872,
+        65024,
+        48640
+      ],
+      "rear_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_colors": [
+        15872,
+        15872,
+        65024,
+        48640
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          56
+        ],
+        [
+          6,
+          1,
+          56
+        ],
+        [
+          6,
+          2,
+          56
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "fe070bcc5c87d8d7",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        65280,
+        65280,
+        32512,
+        32512
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        65280,
+        65280,
+        32512,
+        32512
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          248
+        ],
+        [
+          6,
+          1,
+          248
+        ],
+        [
+          6,
+          2,
+          248
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    },
+    {
+      "key": "fef8ee753cef5176",
+      "role": "snow_branch_body",
+      "solid_colors": [
+        0,
+        61440,
+        61440,
+        32768
+      ],
+      "rear_colors": [
+        128,
+        128,
+        128,
+        0
+      ],
+      "snow_colors": [
+        0,
+        61440,
+        61440,
+        32768
+      ],
+      "native_slope": true,
+      "origins": [
+        [
+          6,
+          0,
+          116
+        ],
+        [
+          6,
+          1,
+          116
+        ],
+        [
+          6,
+          2,
+          116
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        61440,
+        61440,
+        32768
+      ],
+      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+    },
+    {
+      "key": "ff2d5b4a7f1c1af4",
+      "role": "frozen_icicle_detail",
+      "solid_colors": [
+        65280,
+        65280,
+        65024,
+        32512
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "snow_colors": [
+        65280,
+        65280,
+        65024,
+        32512
+      ],
+      "native_slope": false,
+      "origins": [
+        [
+          6,
+          0,
+          250
+        ],
+        [
+          6,
+          1,
+          250
+        ],
+        [
+          6,
+          2,
+          250
+        ]
+      ],
+      "snow_face_colors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "snow_face_reason": "Blue frozen wood or icicle body: pale pixels are native highlights, not a snow coating. Preserve the reviewed bark/ice side material."
+    }
+  ],
+  "snow_face_contract": "Separate per-fingerprint/per-quarter native snow-coating masks. Frosted wood/icicle highlights do not qualify; a pale palette value alone is not a material contract."
+}

@@ -69,6 +69,7 @@ typedef struct ActionEffectGeometryWriter {
   unsigned light_receiver; /* Zero for visible atmospheric volume. */
   const ActionSceneEffectFrame *frame; /* Captured bodies and canopy transport for rolling mist. */
   bool atmosphere_unlit;
+  bool voxel_ground_cover_owned; /* Current authored bank: cap geometry owns its dense top and lip, not loose grains. */
   bool cloud_light_ready;
   DioramaCloudLight cloud_light;
   float sun_directions[3][4];

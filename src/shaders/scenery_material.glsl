@@ -1,6 +1,9 @@
 /* Shared material math for ordinary layers and shared-depth scenery. */
 layout(location = 0) in vec4 v_color;
 layout(location = 1) in vec2 v_uv;
+#ifdef AR_SCENERY_DEPTH_PASS
+layout(location = 3) in vec2 v_heat_world_xy;
+#endif
 layout(location = 0) out vec4 o_color;
 layout(set = 2, binding = 0) uniform sampler2D u_texture;
 layout(set = 2, binding = 1) uniform sampler2D u_illumination;
@@ -20,6 +23,7 @@ layout(set = 3, binding = 0) uniform Context {
     vec4 cloud_meta;
     vec4 cloud_regions[24];
     vec4 cloud_background_dim;
+    vec4 heat_owned; // native texel UV step XY, slot boundary mode, physical/native scale
 };
 
 #define CLOUD_REGIONS cloud_regions
@@ -29,8 +33,15 @@ layout(set = 3, binding = 0) uniform Context {
 // small plumes do not depend on the camera-relative tessellation of a plane.
 // Both priority bands sample the same displaced point; actors/HUD stay sharp.
 vec2 heat_art_uv(vec2 value) {
+#ifdef AR_SCENERY_DEPTH_PASS
+    bool owned = heat_owned.z > .5 && heat_owned.x > 0.0 && heat_owned.y > 0.0 && heat_owned.w > 0.0;
+    if (!owned && (heat_source.z <= 0.0 || heat_source.w <= 0.0)) return value;
+    vec2 world = owned ? v_heat_world_xy :
+        (value * heat_capture.zw + heat_capture.xy) * heat_source.zw + heat_source.xy;
+#else
     if (heat_source.z <= 0.0 || heat_source.w <= 0.0) return value;
     vec2 world = (value * heat_capture.zw + heat_capture.xy) * heat_source.zw + heat_source.xy;
+#endif
     float strength = 0.0, phase = 0.0;
     for (int i = 0; i < 4; ++i) {
         vec4 r = heat_bounds[i];
@@ -45,6 +56,18 @@ vec2 heat_art_uv(vec2 value) {
     vec2 offset = strength * vec2(
         sin(world.y*.12 + phase*3.0) + .4*sin(world.x*.08 - world.y*.05 + phase*2.0),
         .18*sin(world.x*.09 + world.y*.07 + phase*2.0));
+#ifdef AR_SCENERY_DEPTH_PASS
+    if (owned) {
+        // Material skins tile; finite native fronts retain their original
+        // edge. Both address only the slot selected before heat displacement.
+        vec2 span = 16.0 * heat_owned.xy;
+        vec2 origin = floor(value / span) * span;
+        vec2 local = value - origin + offset * heat_owned.xy;
+        if (heat_owned.z < 1.5) local = mod(local, span);
+        vec2 inset = .5 * heat_owned.xy / heat_owned.w;
+        return origin + clamp(local, inset, span-inset);
+    }
+#endif
     return clamp(value + offset / (heat_source.zw * heat_capture.zw), vec2(0), vec2(1));
 }
 

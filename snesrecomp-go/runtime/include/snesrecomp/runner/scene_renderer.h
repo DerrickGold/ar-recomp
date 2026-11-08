@@ -51,7 +51,17 @@ typedef struct SrSceneFrame {
     uint8_t native_page_mask; /* optional 256x256 canonical pages; no edits/classification */
     bool reference_renderer; /* correctness oracle; normal tools leave false */
     SrPpuBgPacket *background_packet; /* optional live capture export oracle */
+    /* Optional borrowed output requests using the same bounded native decoder
+     * as runner scanout. No rows are added to the primary surfaces. */
+    const SrPpuBackgroundGuardRequest *background_guards;
+    uint32_t background_guard_count;
+    const SrPpuBackgroundGuardBands *background_guard_bands[2];
 } SrSceneFrame;
+#define SR_SCENE_FRAME_BACKGROUND_GUARDS_SIZE                             \
+    ((uint32_t)offsetof(SrSceneFrame, background_guard_bands))
+#define SR_SCENE_FRAME_BACKGROUND_GUARD_BANDS_SIZE                         \
+    ((uint32_t)(offsetof(SrSceneFrame, background_guard_bands) +           \
+                sizeof(((SrSceneFrame *)0)->background_guard_bands)))
 typedef struct SrSceneSurfaces {
     const uint32_t *backdrop;
     const uint32_t *bands[2][3]; /* ordinary, high, far */
@@ -61,6 +71,7 @@ typedef struct SrSceneSurfaces {
     const uint32_t *background_view; /* tightly packed view_width x height */
     int view_width;
     const uint32_t *native_pages[2]; /* tightly packed; NULL if not requested/unsupported */
+    bool background_guards_ready; /* all requested strips succeeded */
 } SrSceneSurfaces;
 
 SrSceneRenderer *sr_scene_renderer_create(void);

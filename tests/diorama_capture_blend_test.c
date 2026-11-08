@@ -19,6 +19,8 @@ static int s_failures;
     }                                                                      \
   } while (0)
 
+#include "diorama_capture_hdma.inc"
+
 /* Bit order is shared by CGADSUB, TM/TS and kPpuOverlaySource_*. */
 enum {
   kBg1 = 1 << 0,
@@ -100,6 +102,36 @@ static void TestMeasuredMarahnaFullAddFrame(void) {
       0x12, 0x03, kBg2 | kBg3, kBg1 | kObj));
 }
 
+static void TestIndependentVoxelSources(void) {
+  CHECK(DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,0x03,
+      kBg2|kBg3,kBg1|kObj)==(kBg1|kObj));
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(false,0x02,0x03,
+      kBg2|kBg3,kBg1|kObj)); /* Off, ordinary, inactive or not ready. */
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,0x01,
+      kBg2|kBg3,kBg1|kObj));
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,0x02,
+      kBg2|kObj,kBg1)); /* A visible main source does not participate. */
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,0x12,
+      kBg2|kObj,kBg1)); /* Main OBJ still has per-palette math eligibility. */
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,0x02,
+      kBg1|kBg2,kObj)); /* Both main BGs must participate. */
+  CHECK(DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,0x03,
+      kBg1|kBg2,kObj)==kObj);
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,0x02,
+      kBg2,kBg1|kBg3)); /* HUD is not an independent world addend. */
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,0x03,
+      kBg2|8,kBg1|kObj));
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,0x03,
+      kBg2,kBg1|8));
+  const unsigned unsupported[]={0x43,0x83};
+  for(unsigned i=0;i<sizeof(unsupported)/sizeof(*unsupported);++i)
+    CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,unsupported[i],
+        kBg2|kBg3,kBg1|kObj));
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x12,0x03,kBg2,kBg1));
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x00,0x03,kBg2,kBg1));
+  CHECK(!DioramaCaptureBlend_IndependentSubscreenSources(true,0x02,0x03,kBg1|kBg2,kBg1));
+}
+
 static void TestSubscreenIdentityIsPerLayer(void) {
   /* With nothing on the subscreen, every math-enabled layer blends. */
   CHECK(DioramaCaptureBlend_LayerIsHalfAdded(kActCgwsel, kActCgadsub, 0x00,
@@ -141,6 +173,8 @@ static void TestMeasuredBloodpoolFixedColorSubtract(void) {
 }
 
 int main(void) {
+  TestIndependentSubscreenHdma();
+  TestIndependentVoxelSources();
   TestMeasuredFillmoreAct2Frame();
   TestFailsClosedOnUnreproducibleMath();
   TestMeasuredMarahnaFullAddFrame();

@@ -27,9 +27,25 @@ static void CameraPolicy(EditorRoomScene *room, const ActionSceneSnapshot *asset
       assert(EditorRoomScene_ResolveCamera(room, positions[i], 300, 37, 120, 64,
           &view, kDioramaSky_Only, &camera));
       const bool wide = outputs[v][0] * 10 > outputs[v][1] * 16;
+      const bool voxel=EditorRoomScene_3DMode(room)==kAction3D_Voxel &&
+          EditorRoomScene_Scene(room)->voxel_geometry;
       /* Fillmore BG2 has an explicit 128px extent, so it must not grow an
        * apron even when the ordinary live-world BG1 does. */
-      assert(camera.bg_apron_mask == (wide ? 1 : 0));
+      assert(camera.bg_apron_mask == (wide || voxel ? 1 : 0));
+      /* Resolve travel with the original camera policy. The additional Voxel
+       * pixels must be a capture-only change even at finite room edges. */
+      ActionBgPlan plan;assert(EditorRoomScene_BgPolicy(room,positions[i],300,37,false,&plan,NULL));
+      DioramaCapture old_capture=DioramaCameraPolicy_Capture(&plan,NULL,
+          positions[i],300,120,64,wide?1:0);
+      DioramaScene old_scene=*EditorRoomScene_Scene(room);
+      DioramaRenderOptions options=*old_scene.render;options.skybox=kDioramaSky_Only;old_scene.render=&options;
+      int lo,hi;
+      if(Diorama_ResolveCaptureCameraRange(&old_capture,&view,&old_scene,positions[i],&lo,&hi)) {
+        ActionCameraAxisBounds expected;
+        assert(ActionCameraAxisBounds_Resolve(EditorRoomScene_Width(room),256,
+            lo>0?lo:0,(int)EditorRoomScene_Width(room)-256-hi>0?(int)EditorRoomScene_Width(room)-256-hi:0,&expected));
+        assert(camera.travel.minimum==expected.minimum && camera.travel.maximum==expected.maximum);
+      }
       assert(EditorRoomScene_Render(room, camera.x, 300, 37, 120, 64, &camera));
       const DioramaCapture *capture = EditorRoomScene_Capture(room);
       const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(room);
@@ -43,13 +59,32 @@ static void CameraPolicy(EditorRoomScene *room, const ActionSceneSnapshot *asset
           capture->skybox->subpixel_x;
       assert(fabsf(actual - expected) < .001f);
       if (!wide) {
-        for (unsigned bg = 0; bg < 2; ++bg) for (unsigned band = 0; band < 3; ++band)
+        for (unsigned bg = voxel?1:0; bg < 2; ++bg) for (unsigned band = 0; band < 3; ++band)
           for (int y = 0; y < surface->height; ++y) for (int x = 0; x < 64; ++x) {
             assert(!surface->bands[bg][band][y * surface->pitch_pixels + x]);
             assert(!surface->bands[bg][band][y * surface->pitch_pixels + 64 + surface->width + x]);
           }
       }
     }
+  }
+  /* Toggle back to both shipped modes: the extra BG1 source exists only while
+   * compiled Voxel geometry is active, with no new raster work on yaw alone. */
+  for(unsigned mode=kAction3D_Off;mode<=kAction3D_Voxel;++mode) {
+    EditorRoomScene_Set3DMode(room,(Action3DMode)mode);
+    DioramaView view={.camera={.distance=3.25f},.distance_scale=1,.camera_framing_weight=0,
+        .visible_width=496,.viewport={0,0,960,600}};
+    EditorRoomCamera camera;assert(EditorRoomScene_ResolveCamera(room,960,300,37,120,64,&view,kDioramaSky_Only,&camera));
+    assert(camera.bg_apron_mask==(mode==kAction3D_Voxel?1:0));
+    assert(EditorRoomScene_Render(room,camera.x,300,37,120,64,&camera));
+    const SrSceneSurfaces *surfaces=EditorRoomScene_Surfaces(room);unsigned guards=0;
+    for(unsigned band=0;band<3;++band)for(int y=0;y<surfaces->height;++y)for(int x=0;x<64;++x)
+      guards+=(surfaces->bands[0][band][y*surfaces->pitch_pixels+x]>>24)!=0;
+    assert((guards!=0)==(mode==kAction3D_Voxel));
+    const unsigned scans=EditorRoomScene_RasterCount(room);
+    view.camera.tilt_y=.5f;
+    assert(EditorRoomScene_ResolveCamera(room,960,300,37,120,64,&view,kDioramaSky_Only,&camera));
+    assert(EditorRoomScene_Render(room,camera.x,300,37,120,64,&camera));
+    assert(EditorRoomScene_RasterCount(room)==scans);
   }
 }
 
@@ -418,6 +453,47 @@ int main(int argc, char **argv) {
     assert(EditorRoomScene_Configure(room, edits));
     assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
     assert(EditorRoomScene_Hash(room)==voxel_original);
+    /* A nonstamp pixel edit must not reactivate legacy Far classification in
+     * Voxel. Exercise the actual native capture callback and the environment
+     * adapter together, including ordinary Diorama's intentional Far route. */
+    for (unsigned mode = 0; mode < 2; ++mode) {
+      EditorRoomScene_Set3DMode(room, mode ? kAction3D_Voxel : kAction3D_Diorama);
+      for (unsigned erased = 0; erased < 2; ++erased) {
+        char combined[384];
+        snprintf(combined, sizeof(combined), "[layers:01:01]\n"
+            "bg1-virtual = cells:%d,%d-%d,%d band:0\n"
+            "bg1-pixels = cell:%d,%d %s:"
+            "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n",
+            cx, cy, cx, cy, cx, cy, erased ? "transparent" : "black");
+        assert(EditorRoomScene_Configure(room, combined));
+        assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
+        const ActionEnvironmentScene *environment = EditorRoomScene_Environment(room);
+        ActionEnvironmentTileEdit applied;
+        assert(environment->tile_edit(environment->tile_edit_context, 0,
+            (sx - 64) / 8, (400 + sy + 1) / 8, &applied));
+        const unsigned native_band = (applied.entry & 0x2000) ? 2 : 1;
+        if (applied.band != (mode ? native_band : 0))
+          fprintf(stderr, "nonstamp pixel priority cell=%d,%d mode=%u erase=%u word=%04x band=%u expected=%u\n",
+              cx, cy, mode, erased, applied.entry, applied.band, mode ? native_band : 0);
+        assert(applied.band == (mode ? native_band : 0));
+        assert(erased ? applied.transparent[0] == 255 : applied.black[0] == 255);
+        for (unsigned band = 0; band < 3; ++band) {
+          const unsigned kept = mode ? native_band - 1 : 2;
+          assert((surface->bands[0][band][at] != 0) == (!erased && band == kept));
+        }
+      }
+      /* The non-edit fallback used by effect/receiver queries follows the
+       * same policy; an unrelated tile edit must not change its band. */
+      snprintf(edits, sizeof(edits), "[layers:01:01]\nbg1-virtual = cells:%d,%d-%d,%d band:0\n",
+          cx, cy, cx, cy);
+      assert(EditorRoomScene_Configure(room, edits));
+      assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
+      const ActionEnvironmentScene *environment = EditorRoomScene_Environment(room);
+      ActionEnvironmentTileEdit applied;
+      assert(environment->tile_edit(environment->tile_edit_context, 0,
+          (sx - 64) / 8, (400 + sy + 1) / 8, &applied));
+      assert(applied.band == (mode ? ((applied.entry & 0x2000) ? 2 : 1) : 0));
+    }
     assert(EditorRoomScene_Configure(room, ""));
   }
   if (assets.scene.group == 2 && assets.scene.map == 1) {

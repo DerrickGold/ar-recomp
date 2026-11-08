@@ -32,7 +32,40 @@ bool TestRoomCapture_Render(SrSceneRenderer *renderer, const SrSceneFrame *frame
   input.background_packet = NULL;
   SrSceneSurfaces expected;
   assert(sr_scene_renderer_render(reference, &input, &expected));
+  static uint32_t guard_expected[2][4][640 * 64];
+  assert(input.background_guard_count <= 2);
+  for (unsigned i = 0; i < input.background_guard_count; ++i) {
+    const SrPpuBackgroundGuardRequest *guard = &input.background_guards[i];
+    assert(expected.background_guards_ready && guard->height == 64);
+    if (guard->pixels) {
+      assert(guard->pitch_bytes == 640 * 4);
+      memcpy(guard_expected[i][0], guard->pixels, sizeof(guard_expected[i][0]));
+    }
+    const SrPpuBackgroundGuardBands *bands = input.background_guard_bands[i];
+    if (bands) for (unsigned band = 0; band < 3; ++band) {
+      assert(bands->bands[band].pixels && bands->bands[band].pitch_bytes == 640 * 4);
+      memcpy(guard_expected[i][band + 1], bands->bands[band].pixels, sizeof(guard_expected[i][0]));
+    }
+  }
   input.reference_renderer = false;
+  if (input.background_guard_count && input.background_guard_bands[0]) {
+    /* Existing scene-frame callers do not own the appended band pointers.
+     * A short legacy request must ignore even a poisoned new tail. */
+    SrSceneFrame legacy = input;
+    legacy.struct_size = SR_SCENE_FRAME_BACKGROUND_GUARDS_SIZE;
+    legacy.background_guards = NULL;
+    legacy.background_guard_count = 0;
+    legacy.background_guard_bands[0] = legacy.background_guard_bands[1] =
+        (const SrPpuBackgroundGuardBands *)(uintptr_t)1;
+    assert(sr_scene_renderer_render(renderer, &legacy, out));
+    assert(!out->background_guards_ready);
+    for (unsigned bg = 0; bg < 2; ++bg) for (unsigned band = 0; band < 3; ++band)
+      for (unsigned y = 0; y < (unsigned)out->height; ++y)
+        for (unsigned x = 0; x < (unsigned)out->pitch_pixels; ++x) {
+          const size_t at = (size_t)y * out->pitch_pixels + x;
+          Equal(expected.bands[bg][band][at], out->bands[bg][band][at], 4, bg, band, x, y);
+        }
+  }
   const unsigned requests[] = {0, SR_PPU_BG_PACKET_TILES,
       SR_PPU_BG_PACKET_TILES | SR_PPU_BG_PACKET_FULL_ADD,
       SR_PPU_BG_PACKET_TILES | SR_PPU_BG_PACKET_FULL_ADD | SR_PPU_BG_PACKET_VALIDATE_TILES};
@@ -40,6 +73,14 @@ bool TestRoomCapture_Render(SrSceneRenderer *renderer, const SrSceneFrame *frame
     input.background_packet = mode ? packet : NULL;
     packet->request_flags = requests[mode];
     assert(sr_scene_renderer_render(renderer, &input, out));
+    assert(out->background_guards_ready == expected.background_guards_ready);
+    for (unsigned i = 0; i < input.background_guard_count; ++i) {
+      if (input.background_guards[i].pixels)
+        assert(!memcmp(guard_expected[i][0], input.background_guards[i].pixels, sizeof(guard_expected[i][0])));
+      const SrPpuBackgroundGuardBands *bands = input.background_guard_bands[i];
+      if (bands) for (unsigned band = 0; band < 3; ++band)
+        assert(!memcmp(guard_expected[i][band + 1], bands->bands[band].pixels, sizeof(guard_expected[i][0])));
+    }
     assert(out->width == expected.width && out->height == expected.height &&
            out->pitch_pixels == expected.pitch_pixels && out->view_width == expected.view_width);
     if (mode) assert(SrPpuBgPacket_Valid(packet));
@@ -234,6 +275,31 @@ static void VoxelPolicyModes(EditorRoomScene *room,unsigned group,unsigned map) 
     if(i==3)assert(first==EditorRoomScene_Hash(room));
   }
 }
+static void TrunkGuardModes(EditorRoomScene *scene) {
+  const int x = 392, y = (int)EditorRoomScene_Height(scene) / 2;
+  const Action3DMode modes[] = {kAction3D_Voxel, kAction3D_Diorama, kAction3D_Off, kAction3D_Voxel};
+  for (unsigned i = 0; i < 4; ++i) {
+    EditorRoomScene_Set3DMode(scene, modes[i]);
+    assert(EditorRoomScene_Render(scene, x, y, 16, 120, 64, NULL));
+    const DioramaTrunkGuardSource *guard = EditorRoomScene_TrunkGuard(scene);
+    assert(!!guard == (modes[i] == kAction3D_Voxel));
+    if (guard) {
+      assert(guard->pitch_pixels == 640 && guard->pixel_count == 640 * 128);
+      assert(guard->layout.strips[0].world_y + 64 == guard->layout.primary_y);
+      assert(guard->layout.strips[1].world_y == guard->layout.primary_y + guard->layout.primary_height);
+      const uint64_t generation = guard->capture_generation;
+      const unsigned rasters = EditorRoomScene_RasterCount(scene);
+      assert(EditorRoomScene_Render(scene, x, y, 16, 120, 64, NULL));
+      assert(EditorRoomScene_RasterCount(scene) == rasters);
+      assert(EditorRoomScene_TrunkGuard(scene)->capture_generation == generation);
+      assert(EditorRoomScene_Render(scene, x, y, 24, 120, 64, NULL));
+      assert(EditorRoomScene_TrunkGuard(scene)->capture_generation != generation);
+    }
+  }
+}
+
+#include "action_editor_voxel_guard.inc"
+
 int main(int argc, char **argv) {
   if (argc < 3) {
     fprintf(stderr, "usage: %s diorama-layers.ini room.arscene ...\n", argv[0]); return 2;
@@ -249,6 +315,12 @@ int main(int argc, char **argv) {
     assert(ActionSceneSnapshot_Decode((const uint8_t *)data, size, assets)); free(data);
     EditorRoomScene *scene = EditorRoomScene_Create(assets); assert(scene);
     const unsigned first_full = full_add_frames, first_owned = owned_frames, first_fallback = fallback_frames, first_frame=frames;
+    if (getenv("AR_EDITOR_VOXEL_GUARD_ONLY")) {
+      EditorVoxelGuardFixtures(scene, assets, ini);
+      if (assets->scene.group == 6 && (assets->scene.map == 6 || assets->scene.map == 7)) TrunkGuardModes(scene);
+      EditorRoomScene_Destroy(scene);
+      continue;
+    }
     for (current_config = 0; current_config < 2; ++current_config) {
       assert(EditorRoomScene_Configure(scene, current_config ? ini : ""));
       const int width = (int)EditorRoomScene_Width(scene), height = (int)EditorRoomScene_Height(scene);
@@ -283,6 +355,7 @@ int main(int argc, char **argv) {
       VoxelPolicyModes(scene,4,assets->scene.map);
     if(assets->scene.group==5 && assets->scene.map>=1 && assets->scene.map<=3)
       VoxelPolicyModes(scene,5,assets->scene.map);
+    if(assets->scene.group==6 && (assets->scene.map==6 || assets->scene.map==7)) TrunkGuardModes(scene);
     printf("%02x:%02x profile=%u captures=%u full-add=%u owned=%u fallback=%u\n", assets->scene.group,
         assets->scene.map, assets->terrain_profile, frames-first_frame, full_add_frames-first_full,
         owned_frames-first_owned, fallback_frames-first_fallback); fflush(stdout);

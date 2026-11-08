@@ -9,6 +9,8 @@
 #include "render/hud_icon_frame.h"
 #include "action/action_obj_apron.h"
 #include "action/action_bg_plan.h"
+#include "diorama/diorama_trunk_guard.h"
+#include "diorama/diorama_voxel_guard.h"
 #include "snesrecomp/game.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/runtime.h"
@@ -62,6 +64,9 @@ uint8_t ActRaiser_LiveScenerySection(void);
  * world_x is the canonical left edge resolved from that scanout request. */
 void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x,
                                float *world_x_fraction, bool *periodic);
+/* Complete native source strips belonging to the same selected frame. */
+void ActRaiser_LiveDioramaTrunkGuard(DioramaTrunkGuardSource *out);
+void ActRaiser_LiveDioramaVoxelGuard(DioramaVoxelGuardSource *out);
 const SrPpuBgPacket *ActRaiser_LiveBackgroundPacket(void);
 /* Scanout-owner only. A non-null target must live through frame consumption.
  * Reset before yielding ownership; this retains the last publication for

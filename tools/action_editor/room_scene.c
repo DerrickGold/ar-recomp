@@ -4,6 +4,7 @@
 /* Whole-room adapter. Pixel sampling, priority splitting, edit application and
  * margin scanout run through the native PPU, never a browser approximation. */
 #include "room_scene.h"
+#include "action/action_ground_cover_light.h"
 #include "action/action_bg_world.h"
 #include "action/action_effect_members.h"
 #include "action/action_lava_bubbles.h"
@@ -80,6 +81,11 @@ struct EditorRoomScene {
   ActionTrunkObserver trunk_observer;
   ActionWoodlandObserver woodland_observer;
   uint32_t *trunk_pixels[3];
+  uint32_t *trunk_guard_pixels;
+  DioramaTrunkGuardSource trunk_guard;
+  uint32_t *voxel_guard_pixels[3];
+  DioramaVoxelGuardSource voxel_guard;
+  uint64_t guard_generation;
   Action3DMode mode;
   ActionVoxelGeometry *voxel_geometry;
   const ActionVoxelGeometry *castle_phases[4];
@@ -567,7 +573,8 @@ static uint32_t Edit(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile
         ActionBgWorld_Lookup(l->world, x, y, &tile->entry) != kActionBgLookup_Tile ||
         !ActionBgWorld_LookupMetatile(l->world, x, y, &id)) return 0;
     cx = x / 2; cy = y / 2; metatile = id;
-    Band(l, x, y, tile->entry, &tile->band);
+    tile->band = (tile->entry & 0x2000) ? 2 : 1;
+    if (!l->native_priority) Band(l, x, y, tile->entry, &tile->band);
   }
   const bool bubble=!stamp && ActionLavaBubbles_Character(&l->bubbles,
       (unsigned)metatile,tile->entry,x,y,tile->character);
@@ -591,7 +598,7 @@ static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
     uint16_t word;
     if (!Lookup(l, x, y, &word)) return false;
     tile = (SrPpuCaptureTile){.entry = word, .band = (word & 0x2000) ? 2 : 1};
-    (void)Band(l, x, y, word, &tile.band);
+    if (!l->native_priority) (void)Band(l, x, y, word, &tile.band);
   }
   *out = (ActionEnvironmentTileEdit){.entry = tile.entry,
                                      .band = tile.band,
@@ -636,7 +643,7 @@ EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets) {
     .skybox = kDioramaSky_Only, .margin_fix = true, .depth_shade = 0.25f,
     .edge_aa = true, .depth_of_field = true, .rim_light = true,
     .stack_grouping = true, .skybox_prefilter = true, .priority_surface = true};
-  r->scene = (DioramaScene){.render = &r->options,
+  r->scene = (DioramaScene){.render = &r->options, .voxel_mode = true,
     .map_group = assets->scene.group, .map_number = assets->scene.map};
   const ActionRoomSceneFrameRequest request=assets->frame;
   if (!ActionRoomScene_BuildFrameState(&r->assets.scene,&request,&r->frame) ||
@@ -666,10 +673,13 @@ Action3DMode EditorRoomScene_3DMode(const EditorRoomScene *r) {
 void EditorRoomScene_Set3DMode(EditorRoomScene *r, Action3DMode mode) {
   if (!r || mode < kAction3D_Off || mode > kAction3D_Voxel || r->mode == mode) return;
   r->mode = mode;
+  r->scene.voxel_mode = mode == kAction3D_Voxel;
   r->scene.voxel_geometry = mode == kAction3D_Voxel && RoomVoxelAllowed(r) &&
       ActionVoxel_Active(r->voxel_geometry,r->assets.scene.group,r->assets.scene.map) ? r->voxel_geometry : NULL;
   r->scene.trunk_settings = DioramaTrunk_ResolveForMode(mode,r->assets.scene.group,r->assets.scene.map,&r->terrain);
   r->raster_valid = false;
+  r->trunk_guard = (DioramaTrunkGuardSource){0};
+  r->voxel_guard = (DioramaVoxelGuardSource){0};
 }
 void EditorRoomScene_Destroy(EditorRoomScene *r) {
   if (!r) return;
@@ -678,7 +688,11 @@ void EditorRoomScene_Destroy(EditorRoomScene *r) {
   for (unsigned bg = 0; bg < 2; ++bg) {
     ActionBgWorld_Destroy(r->layers[bg].world); free(r->layers[bg].bands);
   }
-  for(unsigned i=0;i<3;++i)free(r->trunk_pixels[i]);
+  for(unsigned i=0;i<3;++i) {
+    free(r->trunk_pixels[i]);
+    free(r->voxel_guard_pixels[i]);
+  }
+  free(r->trunk_guard_pixels);
   free(r->trunk);
   sr_scene_renderer_destroy(r->renderer);
   if (r->table) { DioramaLayerOrder_ClearTable(r->table); free(r->table); }
@@ -820,6 +834,8 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
         ActionVoxel_Active(r->voxel_geometry,r->assets.scene.group,r->assets.scene.map) ? r->voxel_geometry : NULL;
     r->scene.trunk_settings.enabled &= r->mode == kAction3D_Voxel;
     r->raster_valid = false;
+    r->trunk_guard = (DioramaTrunkGuardSource){0};
+    r->voxel_guard = (DioramaVoxelGuardSource){0};
   } else {
     if(!r->scenery_error[0])snprintf(r->scenery_error,sizeof(r->scenery_error),
         "Unable to prepare these scenery edits. Previous scene retained.");
@@ -942,6 +958,14 @@ bool EditorRoomScene_ResolveCamera(const EditorRoomScene *r, int x, int y,
   if (!ActionCameraAxisBounds_Resolve(EditorRoomScene_Width(r), 256, before, after, &out->travel))
     return false;
   out->x = ActionCameraAxisBounds_Clamp(&out->travel, x);
+  /* Match the native capture-only extension after preserving the existing
+   * travel range. Source guards are independent of the chosen orbit pose. */
+  for(unsigned bg=0;bg<2;++bg)
+    if(DioramaCameraPolicy_VoxelCaptureApron(
+        r->mode==kAction3D_Voxel && (r->scene.voxel_geometry ||
+          (r->trunk && r->scene.trunk_settings.enabled)),bg,
+        DioramaCameraPolicy_WorldApron(&plan.layer[bg])))
+      out->bg_apron_mask|=1u<<bg;
   return true;
 }
 bool EditorRoomScene_MeasureView(const EditorRoomScene *r, uint32_t frame,
@@ -1038,6 +1062,8 @@ bool EditorRoomScene_RenderFlat(EditorRoomScene *r, int x, int y, uint32_t clock
                                 int extra_x, EditorRoomCamera *out) {
   if (!r || x < 0 || y < 0 || x > 65535 || y > 65535 || extra_x < 0 || extra_x > 128)
     return false;
+  r->trunk_guard = (DioramaTrunkGuardSource){0};
+  r->voxel_guard = (DioramaVoxelGuardSource){0};
   const int width = (int)EditorRoomScene_Width(r), height = (int)EditorRoomScene_Height(r);
   EditorRoomCamera camera = {.x = Min(x, Max(0, width - 256)),
     .maximum_y = Max(0, height - 225)};
@@ -1109,10 +1135,92 @@ static bool TrunkSplit(EditorRoomScene *r,int ox,int oy,bool fresh) {
   return true;
 }
 
+static bool PrepareTrunkGuard(EditorRoomScene *r, SrSceneFrame *input,
+    const ActionBgLayerPlan *plan, SrPpuBackgroundGuardRequest guards[2]) {
+  r->trunk_guard = (DioramaTrunkGuardSource){0};
+  if (r->mode != kAction3D_Voxel || !r->trunk || !r->scene.trunk_settings.enabled ||
+      !DioramaCameraPolicy_WorldApron(plan)) return true;
+  DioramaTrunkGuardBounds bounds;
+  DioramaScenery_AxisExtent(&r->terrain, 0, plan->world_width, false, &bounds.x, &bounds.width);
+  DioramaScenery_AxisExtent(&r->terrain, 0, plan->world_height, true, &bounds.y, &bounds.height);
+  const int x = r->frame.layer_camera_x[0], y = r->frame.layer_camera_y[0];
+  if (!DioramaTrunkGuard_Resolve(x - input->extra_x - 64, y - input->top + 1,
+      256 + input->extra_x * 2 + 128, 224 + input->top + input->bottom,
+      bounds, &r->trunk_guard.layout)) return false;
+  if (!r->trunk_guard_pixels)
+    r->trunk_guard_pixels = calloc(kDioramaTrunkGuardPixels, sizeof(uint32_t));
+  if (!r->trunk_guard_pixels) return false;
+  r->trunk_guard.pixels = r->trunk_guard_pixels;
+  r->trunk_guard.pitch_pixels = kDioramaTrunkGuardWidth;
+  r->trunk_guard.pixel_count = kDioramaTrunkGuardPixels;
+  for (unsigned i = 0; i < 2; ++i) {
+    const DioramaTrunkGuardStrip *strip = &r->trunk_guard.layout.strips[i];
+    guards[i] = (SrPpuBackgroundGuardRequest){.struct_size = sizeof(*guards),
+      .layer = 0, .screen_x0 = strip->world_x - x, .screen_y0 = strip->world_y - y - 1,
+      .width = (unsigned)strip->width, .height = kDioramaTrunkGuardRows,
+      .source_x0 = bounds.x, .source_y0 = bounds.y,
+      .source_width = (unsigned)bounds.width, .source_height = (unsigned)bounds.height,
+      .pixels = r->trunk_guard_pixels + strip->atlas_y * kDioramaTrunkGuardWidth,
+      .pitch_bytes = kDioramaTrunkGuardWidth * sizeof(uint32_t),
+      .pixel_byte_size = kDioramaTrunkGuardWidth * kDioramaTrunkGuardRows * sizeof(uint32_t)};
+  }
+  input->background_guards = guards;
+  input->background_guard_count = 2;
+  return true;
+}
+
+static bool PrepareVoxelGuard(EditorRoomScene *r, SrSceneFrame *input,
+    const ActionBgLayerPlan *plan, SrPpuBackgroundGuardRequest guards[2],
+    SrPpuBackgroundGuardBands *bands) {
+  r->voxel_guard = (DioramaVoxelGuardSource){0};
+  if (r->mode != kAction3D_Voxel || !r->scene.voxel_geometry ||
+      r->scene.trunk_settings.enabled || input->background_guard_count ||
+      ActRaiserRoom_ProfileFor(r->assets.scene.group, r->assets.scene.map) !=
+          kActRaiserRoomProfile_AitosWaterfall ||
+      !DioramaCameraPolicy_WorldApron(plan) || plan->wrap_world_x) return true;
+  DioramaTrunkGuardBounds bounds;
+  DioramaScenery_AxisExtent(&r->terrain, 0, plan->world_width, false, &bounds.x, &bounds.width);
+  DioramaScenery_AxisExtent(&r->terrain, 0, plan->world_height, true, &bounds.y, &bounds.height);
+  const int x = r->frame.layer_camera_x[0], y = r->frame.layer_camera_y[0];
+  if (!DioramaVoxelGuard_Resolve(x - input->extra_x - 64, y - input->top + 1,
+      256 + input->extra_x * 2 + 128, 224 + input->top + input->bottom,
+      bounds, &r->voxel_guard.layout)) return false;
+  if (!r->voxel_guard.layout.lower.valid.width || !r->voxel_guard.layout.lower.valid.height) {
+    r->voxel_guard = (DioramaVoxelGuardSource){0};
+    return true;
+  }
+  *bands = (SrPpuBackgroundGuardBands){.struct_size = sizeof(*bands),
+    .flags = SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL};
+  for (unsigned i = 0; i < 3; ++i) {
+    if (!r->voxel_guard_pixels[i])
+      r->voxel_guard_pixels[i] = calloc(kDioramaVoxelGuardPixels, sizeof(uint32_t));
+    if (!r->voxel_guard_pixels[i]) return false;
+    r->voxel_guard.pixels[i] = r->voxel_guard_pixels[i];
+    bands->bands[i] = (SrPpuBackgroundGuardBandOutput){
+      .pixels = r->voxel_guard_pixels[i],
+      .pitch_bytes = kDioramaVoxelGuardWidth * sizeof(uint32_t),
+      .pixel_byte_size = kDioramaVoxelGuardPixels * sizeof(uint32_t)};
+  }
+  r->voxel_guard.pitch_pixels = kDioramaVoxelGuardWidth;
+  r->voxel_guard.pixel_count = kDioramaVoxelGuardPixels;
+  const DioramaTrunkGuardStrip *strip = &r->voxel_guard.layout.lower;
+  guards[0] = (SrPpuBackgroundGuardRequest){.struct_size = sizeof(*guards),
+    .layer = 0, .screen_x0 = strip->world_x - x, .screen_y0 = strip->world_y - y - 1,
+    .width = (unsigned)strip->width, .height = kDioramaVoxelGuardRows,
+    .source_x0 = bounds.x, .source_y0 = bounds.y,
+    .source_width = (unsigned)bounds.width, .source_height = (unsigned)bounds.height};
+  input->background_guards = guards;
+  input->background_guard_count = 1;
+  input->background_guard_bands[0] = bands;
+  return true;
+}
+
 bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
                             int extra_x, int budget, const EditorRoomCamera *camera) {
   if (!r || x < 0 || y < 0 || x > 65535 || y > 65535 || extra_x < 0 ||
       extra_x > 128 || budget < 0 || budget > 64) return false;
+  r->trunk_guard = (DioramaTrunkGuardSource){0};
+  r->voxel_guard = (DioramaVoxelGuardSource){0};
   EditorRoomCamera fallback;
   if (!camera) {
     if (!EditorRoomScene_ResolveCamera(r, x, y, frame, extra_x, budget, NULL, r->options.skybox, &fallback))
@@ -1186,6 +1294,9 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
     .cgwsel = f->cgwsel, .cgadsub = f->cgadsub, .fixed_color = f->fixed_color};
   uint8_t additive = DioramaCaptureBlend_FullAddSubscreenSources(
       input.cgwsel, input.cgadsub, input.main_screen, input.sub_screen);
+  const uint8_t independent=DioramaCaptureBlend_IndependentSubscreenSources(
+      r->mode==kAction3D_Voxel && r->scene.voxel_geometry,
+      f->cgwsel,f->cgadsub,f->screen_enabled[0],f->screen_enabled[1]);
   r->scene.additive_plane_mask = 0;
   for (unsigned bg = 0; bg < 2; ++bg) {
     SrSceneBackground *b = &input.backgrounds[bg];
@@ -1207,7 +1318,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
             f->cgwsel, f->cgadsub, f->fixed_color, 1u << bg))
       b->capture_flags |= SR_PPU_OVERLAY_APPLY_BG_FIXED_COLOR_SUBTRACT;
     if (additive & (1u << bg)) {
-      b->capture_flags |= SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN;
+      if(!(independent&(1u<<bg)))b->capture_flags |= SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN;
       r->scene.additive_plane_mask |= (1u << bg) | (1u << (bg ? kDioramaPlane_Bg2Hi : kDioramaPlane_Bg1Hi)) |
           (1u << (bg ? kDioramaPlane_Bg2Far : kDioramaPlane_Bg1Far));
     }
@@ -1233,6 +1344,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   effects_settings.enabled &= r->environmental_effects_enabled;
   ActionTrunk_Capture(&r->trunk_observer,&r->effects,r->trunk,effects_settings,r->environment.clock,true);
   r->scene.trunk_effects=r->environmental_effects_enabled?&r->effects:NULL;
+  r->scene.ground_cover_light=ActionGroundCover_LightSamples;
   r->scene.trunk_lighting=r->scene.trunk_particles=r->environmental_effects_enabled;
   r->scene.native_bloom_clock=(uint16_t)frame;
   if (ActRaiserRoom_ProfileFor(s->group, s->map) == kActRaiserRoomProfile_AitosWaterfall &&
@@ -1262,6 +1374,10 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
     }
   }
   ActionRoomSceneFrameState raster_frame;
+  SrPpuBackgroundGuardRequest guards[2];
+  SrPpuBackgroundGuardBands guard_bands;
+  if (!PrepareTrunkGuard(r, &input, &plan.layer[0], guards) ||
+      !PrepareVoxelGuard(r, &input, &plan.layer[0], guards, &guard_bands)) return false;
   memcpy(&raster_frame, f, sizeof(raster_frame));
   if (!r->layers[0].bubbles.characters || r->layers[0].bubbles.chance==0)
     raster_frame.game_frame = 0;
@@ -1275,6 +1391,14 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
     r->raster_section = r->scene.layer_section;
     r->raster_valid = true;
     ++r->raster_count;
+    if (!++r->guard_generation) ++r->guard_generation;
+  }
+  if (input.background_guard_count && r->surfaces.background_guards_ready) {
+    if (r->trunk_guard.pixels) r->trunk_guard.capture_generation = r->guard_generation;
+    if (r->voxel_guard.pixels[0]) r->voxel_guard.capture_generation = r->guard_generation;
+  } else {
+    r->trunk_guard = (DioramaTrunkGuardSource){0};
+    r->voxel_guard = (DioramaVoxelGuardSource){0};
   }
   memset(r->pixels, 0, sizeof(r->pixels));
   r->pixels[kDioramaPlane_Backdrop] = (const uint8_t *)r->surfaces.backdrop;
@@ -1330,6 +1454,12 @@ const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *r) { return
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *r) { return &r->scene; }
 const DioramaRoomOverride *EditorRoomScene_Terrain(const EditorRoomScene *r) { return r ? &r->terrain : NULL; }
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *r) { return &r->surfaces; }
+const DioramaTrunkGuardSource *EditorRoomScene_TrunkGuard(const EditorRoomScene *r) {
+  return r && r->trunk_guard.capture_generation ? &r->trunk_guard : NULL;
+}
+const DioramaVoxelGuardSource *EditorRoomScene_VoxelGuard(const EditorRoomScene *r) {
+  return r && r->voxel_guard.capture_generation ? &r->voxel_guard : NULL;
+}
 bool EditorRoomScene_ConfigureEffects(EditorRoomScene *r, const char *text, size_t size, unsigned *line) {
   if (!r) return false;
   float bubble_before[6]={0};

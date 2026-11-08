@@ -6,7 +6,11 @@
 struct DioramaRoomOverride;
 enum { kActionTrunkLeft=320, kActionTrunkWidth=384,
   kActionTrunkMaskPitch=48, kActionTrunkMaxHeight=2048,
-  kActionTrunkWallWidth=320, kActionTrunkWallHeight=64 };
+  kActionTrunkWallWidth=320, kActionTrunkWallHeight=64,
+  kActionTrunkSideWidth=1024, kActionTrunkSideMaskPitch=128 };
+enum { kActionTrunkSideSolid, kActionTrunkSideRear,
+  kActionTrunkSidePriority, kActionTrunkSideSnow, kActionTrunkSideSnowFace,
+  kActionTrunkSideMaskCount };
 
 /* Built from the loaded ROM and selected terrain, never compiled artwork.
  * Immutable after publication; the owner outlives all frames borrowing it. */
@@ -16,6 +20,13 @@ typedef struct ActionTrunkAssets {
   uint8_t masks[3][kActionTrunkMaxHeight*kActionTrunkMaskPitch]; /* rim, branch, removed backing */
   uint32_t wall[kActionTrunkWallWidth*kActionTrunkWallHeight];
   uint32_t bark[32*32];
+  /* Side passages have separate ownership; the established core masks,
+   * lattice and bark retain their exact layout and world coordinates. */
+  unsigned side_width;
+  uint8_t side_masks[kActionTrunkSideMaskCount]
+      [kActionTrunkMaxHeight*kActionTrunkSideMaskPitch];
+  uint32_t side_snow[16*16];
+  unsigned side_high_pixels;
 } ActionTrunkAssets;
 
 bool ActionTrunk_Build(ActionTrunkAssets *, const ActionRoomScene *,
@@ -26,6 +37,18 @@ static inline const uint8_t *ActionTrunk_MaskRow(const ActionTrunkAssets *a,int 
 static inline bool ActionTrunk_Solid(const ActionTrunkAssets *a,int x,int y,unsigned kind) {
   const uint8_t *row=ActionTrunk_MaskRow(a,y,kind);
   return row&&x>=320&&x<704&&(row[(x-320)/8]&(1u<<(x&7)));
+}
+static inline const uint8_t *ActionTrunk_SideMaskRow(const ActionTrunkAssets *a,
+    int y,unsigned kind) {
+  return a&&kind<kActionTrunkSideMaskCount&&y>=0&&(unsigned)y<a->height
+      ?a->side_masks[kind]+y*kActionTrunkSideMaskPitch:NULL;
+}
+static inline bool ActionTrunk_SideSolid(const ActionTrunkAssets *a,
+    int x,int y,unsigned kind) {
+  const uint8_t *row=ActionTrunk_SideMaskRow(a,y,kind);
+  return row&&x>=0&&(unsigned)x<a->side_width&&
+      (x<kActionTrunkLeft||x>=kActionTrunkLeft+kActionTrunkWidth)&&
+      (row[x/8]&(1u<<(x&7)));
 }
 static inline int ActionTrunk_BranchBottom(const ActionTrunkAssets *a,int x,int feet) {
   if(x<376||x>648||(x>484&&x<540))return -1;

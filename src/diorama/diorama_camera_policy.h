@@ -34,6 +34,15 @@ static inline bool DioramaCameraPolicy_NeedsBgApron(const DioramaRoomOverride *r
        (int64_t)aspect_x * 10 > (int64_t)aspect_y * 16));
 }
 
+/* Visual headroom only: a ready Voxel scene can fill the existing BG1 guards
+ * from its verified world source. Apply after travel planning, never to the
+ * native camera-margin policy; changing storage coverage must not move the
+ * gameplay camera stops. The fixed guard also preserves rotation-only reuse. */
+static inline bool DioramaCameraPolicy_VoxelCaptureApron(
+    bool voxel_ready, unsigned bg, bool world_available) {
+  return voxel_ready && bg == 0 && world_available;
+}
+
 static inline void DioramaCameraPolicy_HorizontalMargins(const ActionBgPlan *plan,
     const DioramaRoomOverride *room, int extra, int *before, int *after) {
   *before = *after = 0;

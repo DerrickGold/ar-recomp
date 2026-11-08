@@ -23,6 +23,15 @@ static bool DepthSubmit(void *userdata, ArRenderDevice *device,
     }
   }
   const DioramaSceneryLightEffectParams *lighting = draw->lighting;
+  if(lighting && lighting->heat_owned.mode>0) {
+    if(!draw->heat_world_xy||draw->native_actor||!draw->clip_w) {
+      s_depth_failed=true;return false;
+    }
+    for(int i=0;i<draw->vertex_count;++i)
+      if(!isfinite(draw->heat_world_xy[i].x)||!isfinite(draw->heat_world_xy[i].y)) {
+        s_depth_failed=true;return false;
+      }
+  }
   const bool lit = lighting && ArRenderTexture_IsValid(lighting->illumination);
   bool material = false, bound = true;
   if (lit) {
@@ -61,7 +70,7 @@ static bool DepthSubmit(void *userdata, ArRenderDevice *device,
       draw->blend == kArRenderBlendMode_Add ? kDioramaDepth_Read : kDioramaDepth_Write;
   const bool drawn = WebDepthGeometry((int)draw->texture.value, draw->vertices,
       draw->vertex_count, draw->indices, draw->index_count, draw->blend,
-      0, 0, -1, draw->depths, draw->clip_w, mode) != 0;
+      0, 0, -1, draw->depths, draw->clip_w, mode,draw->heat_world_xy) != 0;
   const bool restored = !material || DioramaEffectBackend_Unbind(device);
   s_depth_failed = !drawn || !restored;
   return !s_depth_failed;

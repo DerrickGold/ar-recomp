@@ -5,6 +5,7 @@
 /* Pure authoring kernels. All storage belongs to the caller's retained batch;
  * no native actor allocation, simulation state, texture or extra GPU resolve. */
 #include "action_effect_render_internal.h"
+#include "action_ground_cover_light.h"
 #include "action_authored_particles.h"
 #include "action_exposure.h"
 #include "action_effect_masks.h"
@@ -247,6 +248,27 @@ static void ReflectiveGrainTint(ActionEffectGeometryWriter *w,const ActionEffect
     tint->b+=(incoming.b/incoming.a-tint->b)*mix;
   }
   Twinkle(twinkle*lit,seed,age,envelope,tint);
+}
+
+bool ActionGroundCover_LightSamples(const ActionSceneEffectFrame *frame,
+    const ActionEffectInstance *effect,bool lighting,bool atmosphere_unlit,
+    ActionGroundCoverLightSample *samples,unsigned count) {
+  if(!effect || (count && !samples))return false;
+  for(unsigned i=0;i<count;++i) {
+    const ActionGroundCoverLightSample *s=&samples[i];
+    if(!isfinite(s->native_x) || !isfinite(s->native_floor_y) ||
+        !isfinite(s->height) || s->height<0)return false;
+  }
+  ActionEffectGeometryWriter writer={.frame=frame,
+      .atmosphere_unlit=atmosphere_unlit,.cloud_light_ready=!lighting};
+  for(unsigned i=0;i<count;++i) {
+    ActionGroundCoverLightSample *s=&samples[i];
+    const float x=s->native_x-effect->world_x;
+    const float y=s->native_floor_y-effect->world_y;
+    ReflectiveGrainTint(&writer,effect,x,y-s->height,0,0,1,&s->crest,lighting,false);
+    ReflectiveGrainTint(&writer,effect,x,y,0,0,1,&s->body,lighting,false);
+  }
+  return true;
 }
 
 static bool MaskQuad(ActionEffectGeometryWriter *,const ActionEffectInstance *,const ActionEffectLocalRect *,
@@ -935,7 +957,7 @@ static bool GroundCloud(ActionEffectGeometryWriter *w, const ActionEffectInstanc
   const float wind_density=ActionFieldMotion_Wind(e);
   const ActionFieldWakes wakes=ActionFieldMotion_Gather(w->frame,e,clip,true);
   if(s->ground_depth>0)
-    return GroundCover(w,e,s,clip,project,context,lighting)&&
+    return (w->voxel_ground_cover_owned||GroundCover(w,e,s,clip,project,context,lighting))&&
         (e->render_layer==kActionEffectRenderLayer_Bg1Mist||GroundGrains(w,e,clip,&wakes,project,context,lighting));
   struct { float centre, radius, weight; } gusts[24];
   for (unsigned i=0; i<s->strands; ++i) {

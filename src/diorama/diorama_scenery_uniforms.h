@@ -7,7 +7,7 @@
 /* Shared std140 packing for SDL's 2D and shared-depth material adapters.
  * Dimensions describe the target addressed by gl_FragCoord; light_uv selects
  * the matching portion of the resident illumination map. */
-enum { kDioramaSceneryUniformFloats = 176 };
+enum { kDioramaSceneryUniformFloats = 180 };
 typedef struct DioramaSceneryUniforms {
   float values[kDioramaSceneryUniformFloats];
 } DioramaSceneryUniforms;
@@ -33,6 +33,8 @@ static inline void DioramaSceneryUniforms_Init(DioramaSceneryUniforms *out,
   _Static_assert(sizeof(DioramaCloudLight)==108*sizeof(float), "scenery cloud std140 layout");
   memcpy(out->values+32, &params->heat, sizeof(params->heat));
   memcpy(out->values+68,&params->cloud_light,sizeof(params->cloud_light));
+  _Static_assert(sizeof(DioramaHeatOwned)==4*sizeof(float), "owned heat std140 layout");
+  memcpy(out->values+176,&params->heat_owned,sizeof(params->heat_owned));
 }
 
 typedef struct DioramaActorUniforms { float values[16]; } DioramaActorUniforms;

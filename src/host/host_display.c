@@ -177,6 +177,8 @@ static void RetainFrame(const FrameSlot *slot) {
     retained->sim_inputs = NULL;
     retained->hud_icon.surface = (SrPpuSurfaceView){0};
     retained->diorama_skybox_surface = (SrPpuSurfaceView){0};
+    retained->diorama_trunk_guard.pixels = NULL;
+    memset(retained->diorama_voxel_guard.pixels, 0, sizeof(retained->diorama_voxel_guard.pixels));
     retained->voxel_sprite_atlas = (SrPpuSurfaceView){0};
     s_retained_upload_complete = true;
   }

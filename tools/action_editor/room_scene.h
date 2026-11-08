@@ -5,6 +5,8 @@
 #include "action/action_effect_recipes.h"
 #include "action/action_effect_preview.h"
 #include "diorama/diorama.h"
+#include "diorama/diorama_trunk_guard.h"
+#include "diorama/diorama_voxel_guard.h"
 #include "snesrecomp/runner/scene_renderer.h"
 #include "action/action_camera_bounds.h"
 
@@ -66,6 +68,10 @@ const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *room);
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *room);
 const DioramaRoomOverride *EditorRoomScene_Terrain(const EditorRoomScene *room);
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *room);
+/* Same-frame native guard pixels; NULL outside supported Voxel tree rooms. */
+const DioramaTrunkGuardSource *EditorRoomScene_TrunkGuard(const EditorRoomScene *room);
+/* Independent native Low/High/Far below a finite generic Voxel capture. */
+const DioramaVoxelGuardSource *EditorRoomScene_VoxelGuard(const EditorRoomScene *room);
 /* Diagnostic count of PPU scanouts, excluding reused tile images. */
 unsigned EditorRoomScene_RasterCount(const EditorRoomScene *room);
 bool EditorRoomScene_ConfigureEffects(EditorRoomScene *room, const char *text, size_t size, unsigned *line);

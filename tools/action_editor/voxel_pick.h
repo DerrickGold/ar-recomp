@@ -2,6 +2,7 @@
 #define AR_EDITOR_VOXEL_PICK_H
 
 #include <stdbool.h>
+#include "render/render_types.h"
 
 struct DioramaVoxelPickFace;
 
@@ -15,5 +16,10 @@ typedef struct EditorVoxelPickHit {
  * A miss or malformed face leaves out_hit unchanged. */
 bool EditorVoxelPick_Hit(const struct DioramaVoxelPickFace *face,
     float screen_x, float screen_y, EditorVoxelPickHit *out_hit);
+
+/* Convex outline of finite projected points. Sorts points in place; out must
+ * be separate storage with room for twice count points. Exact orientation
+ * keeps support corners when segmented faces differ by one float ULP. */
+unsigned EditorVoxelPick_Hull(ArRenderPointF *points,unsigned count,ArRenderPointF *out);
 
 #endif /* AR_EDITOR_VOXEL_PICK_H */

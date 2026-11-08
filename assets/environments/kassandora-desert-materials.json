@@ -1,5 +1,5 @@
 {
-  "description": "Reviewed Kassandora Act 1 desert and floating ruins. Source IDs are provenance only; runtime matches displayed pixels, palette slots, collision and priority. Sand and rock islands span the walking path, bone spines and jaws join across the path and colliding ruin ledges retain complete native silhouettes, noncolliding ribs and rock pillars use slender relief, masonry walls sit behind the path, and cacti use crossed native profiles. Native black window interiors remain opaque.",
+  "description": "Reviewed Kassandora Act 1 desert and floating ruins. Source IDs are provenance only; runtime matches displayed pixels, palette slots, collision and priority. Sand and rock islands span the walking path. Complete skeleton silhouettes use one shallow extrusion at native actor contact, including their unchanged collision-bearing tops; mixed sand quadrants retain full ground depth. Colliding ruin ledges retain complete native silhouettes, noncolliding rock pillars retain native priority and share the full depth of their supporting caps, masonry walls sit behind the path, and cacti use crossed native profiles. Native black window interiors remain opaque. Reviewed continuous dunes retain one terrain depth across their noncolliding silhouette quadrants while preserving native collision and actor priority. The exit jamb and its header retain opaque black backing under their exact native high-priority footprint, without cloning masonry or covering authored openings.",
   "materials": [
     {
       "key": "01898f41e5cee69f",
@@ -9,7 +9,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -123,7 +123,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -209,7 +209,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -280,7 +280,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -323,8 +323,8 @@
         4,
         4
       ],
-      "flags": 0,
-      "role": "skeletal_relief",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -389,13 +389,13 @@
     {
       "key": "0b709c5c48f51746",
       "kinds": [
-        1,
-        1,
-        1,
+        4,
+        4,
+        4,
         1
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body_with_ground",
       "origins": [
         [
           1,
@@ -445,13 +445,13 @@
     {
       "key": "0f31804247dc610a",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -546,13 +546,13 @@
     {
       "key": "105491c5cd9107ea",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -579,7 +579,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -832,13 +832,13 @@
     {
       "key": "1a92cb1867298606",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -994,7 +994,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -1108,8 +1108,8 @@
         4,
         4
       ],
-      "flags": 0,
-      "role": "skeletal_relief",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -1250,7 +1250,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "animation_phase": 1,
       "review": "The alternate native sand phase retains exactly the reviewed dune opacity, collision and priority; only nonzero palette indices animate.",
@@ -1648,7 +1648,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -1673,11 +1673,11 @@
       "kinds": [
         4,
         4,
-        4,
+        1,
         4
       ],
-      "flags": 0,
-      "role": "skeletal_relief",
+      "flags": 268435456,
+      "role": "contact_skeletal_body_with_ground",
       "origins": [
         [
           1,
@@ -1732,7 +1732,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -1869,13 +1869,13 @@
     {
       "key": "3dce4f33d7e43685",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -1902,7 +1902,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -1930,7 +1930,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -2001,7 +2001,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -2128,7 +2128,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -2250,13 +2250,13 @@
     {
       "key": "46df83068f13739c",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -2283,7 +2283,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -2354,7 +2354,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -2425,7 +2425,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -2552,8 +2552,8 @@
         1,
         1
       ],
-      "flags": 4,
-      "role": "ruin_ledge",
+      "flags": 8388612,
+      "role": "opaque_portal_header",
       "origins": [
         [
           1,
@@ -2580,7 +2580,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -2646,13 +2646,13 @@
     {
       "key": "503acf3bd3c24bd6",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -2679,7 +2679,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -2788,13 +2788,13 @@
     {
       "key": "54514daec1abcef0",
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        1,
+        1,
+        1,
+        1
       ],
       "flags": 0,
-      "role": "slender_rock_support",
+      "role": "structural_rock_support",
       "origins": [
         [
           1,
@@ -2879,8 +2879,8 @@
         7,
         7
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 8388608,
+      "role": "opaque_portal_jamb",
       "origins": [
         [
           1,
@@ -2902,13 +2902,13 @@
     {
       "key": "582eeff452bc0b14",
       "kinds": [
-        1,
-        1,
+        4,
+        4,
         1,
         1
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body_with_ground",
       "origins": [
         [
           1,
@@ -2978,7 +2978,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -3016,13 +3016,13 @@
     {
       "key": "5b227ec6f324065c",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -3049,7 +3049,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -3135,7 +3135,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "animation_phase": 1,
       "review": "The alternate native sand phase retains exactly the reviewed dune opacity, collision and priority; only nonzero palette indices animate.",
@@ -3180,7 +3180,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -3208,7 +3208,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -3335,7 +3335,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -3391,7 +3391,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -3414,13 +3414,13 @@
     {
       "key": "6ae71370d75c016b",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -3447,7 +3447,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -3655,13 +3655,13 @@
     {
       "key": "72ef002baa5afaf0",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -3731,7 +3731,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -3911,13 +3911,13 @@
     {
       "key": "793ac33be538b55b",
       "kinds": [
+        4,
+        4,
         1,
-        1,
-        1,
-        1
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body_with_ground",
       "origins": [
         [
           1,
@@ -3944,7 +3944,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -4152,13 +4152,13 @@
     {
       "key": "8411c7075a7251e8",
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        1,
+        1,
+        1,
+        1
       ],
       "flags": 0,
-      "role": "slender_rock_support",
+      "role": "structural_rock_support",
       "origins": [
         [
           1,
@@ -4195,13 +4195,13 @@
     {
       "key": "8940f67e83a73597",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -4228,7 +4228,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -4271,7 +4271,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -4352,13 +4352,13 @@
     {
       "key": "8e17fa756b8d0f97",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -4385,7 +4385,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -4456,7 +4456,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -4542,8 +4542,8 @@
         4,
         4
       ],
-      "flags": 0,
-      "role": "skeletal_relief",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -4608,13 +4608,13 @@
     {
       "key": "9bc3bffa2b41a7dd",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -4636,13 +4636,13 @@
     {
       "key": "9ca1e99763117873",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -4664,13 +4664,13 @@
     {
       "key": "9d67541883d654d9",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -4697,7 +4697,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -4811,7 +4811,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -4862,13 +4862,13 @@
     {
       "key": "a26ae2a6969d18d0",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -4981,7 +4981,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5024,7 +5024,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5052,7 +5052,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5156,7 +5156,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5184,7 +5184,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5212,7 +5212,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "animation_phase": 1,
       "review": "The alternate native sand phase retains exactly the reviewed dune opacity, collision and priority; only nonzero palette indices animate.",
@@ -5295,13 +5295,13 @@
     {
       "key": "b5e5ed801cf90280",
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        1,
+        1,
+        1,
+        1
       ],
       "flags": 0,
-      "role": "slender_rock_support",
+      "role": "structural_rock_support",
       "origins": [
         [
           1,
@@ -5343,7 +5343,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5470,7 +5470,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5541,7 +5541,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5640,8 +5640,8 @@
         4,
         4
       ],
-      "flags": 0,
-      "role": "skeletal_relief",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -5668,7 +5668,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5711,7 +5711,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5739,8 +5739,8 @@
         7,
         7
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 8388608,
+      "role": "opaque_portal_jamb",
       "origins": [
         [
           1,
@@ -5795,7 +5795,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5838,7 +5838,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5866,7 +5866,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -5952,7 +5952,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "animation_phase": 1,
       "review": "The alternate native sand phase retains exactly the reviewed dune opacity, collision and priority; only nonzero palette indices animate.",
@@ -5997,7 +5997,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6048,13 +6048,13 @@
     {
       "key": "d07cc5443369fda6",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -6132,13 +6132,13 @@
     {
       "key": "d3283d7ea6236d75",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -6165,8 +6165,8 @@
         1,
         1
       ],
-      "flags": 4,
-      "role": "ruin_ledge",
+      "flags": 8388612,
+      "role": "opaque_portal_header",
       "origins": [
         [
           1,
@@ -6193,7 +6193,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6231,13 +6231,13 @@
     {
       "key": "d955e6efc1928dae",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -6264,7 +6264,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6292,7 +6292,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6335,7 +6335,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6378,7 +6378,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6530,13 +6530,13 @@
     {
       "key": "e6361d7c582a370d",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -6558,13 +6558,13 @@
     {
       "key": "e63cc5b4a7d7283c",
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        1,
+        1,
+        1,
+        1
       ],
       "flags": 0,
-      "role": "slender_rock_support",
+      "role": "structural_rock_support",
       "origins": [
         [
           1,
@@ -6606,7 +6606,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6639,7 +6639,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6667,7 +6667,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6695,7 +6695,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "animation_phase": 1,
       "review": "The alternate native sand phase retains exactly the reviewed dune opacity, collision and priority; only nonzero palette indices animate.",
@@ -6839,7 +6839,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6867,7 +6867,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -6966,7 +6966,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -7080,7 +7080,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -7108,7 +7108,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "animation_phase": 1,
       "review": "The alternate native sand phase retains exactly the reviewed dune opacity, collision and priority; only nonzero palette indices animate.",
@@ -7133,13 +7133,13 @@
     {
       "key": "fa64f0d578b2fcf3",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "bone_walkway",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -7252,7 +7252,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -7280,7 +7280,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "sand_dune",
       "origins": [
         [
@@ -7323,8 +7323,8 @@
         4,
         4
       ],
-      "flags": 0,
-      "role": "skeletal_relief",
+      "flags": 268435456,
+      "role": "contact_skeletal_body",
       "origins": [
         [
           1,
@@ -7341,6 +7341,1800 @@
           2,
           117
         ]
+      ]
+    }
+  ],
+  "native_surfaces": [
+    {
+      "key": "174ecbdc5b7ba29f",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          67
+        ],
+        [
+          1,
+          1,
+          67
+        ],
+        [
+          1,
+          2,
+          67
+        ],
+        [
+          2,
+          0,
+          67
+        ],
+        [
+          2,
+          1,
+          67
+        ],
+        [
+          2,
+          2,
+          67
+        ]
+      ]
+    },
+    {
+      "key": "1a169c9bb90ed43b",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          80
+        ],
+        [
+          1,
+          1,
+          80
+        ],
+        [
+          1,
+          2,
+          80
+        ],
+        [
+          2,
+          0,
+          80
+        ],
+        [
+          2,
+          1,
+          80
+        ],
+        [
+          2,
+          2,
+          80
+        ]
+      ]
+    },
+    {
+      "key": "1a84226941d44722",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          81
+        ],
+        [
+          1,
+          1,
+          81
+        ],
+        [
+          1,
+          2,
+          81
+        ],
+        [
+          2,
+          0,
+          81
+        ],
+        [
+          2,
+          1,
+          81
+        ],
+        [
+          2,
+          2,
+          81
+        ]
+      ]
+    },
+    {
+      "key": "47829ff63cf4bbef",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          41
+        ],
+        [
+          1,
+          1,
+          41
+        ],
+        [
+          1,
+          2,
+          41
+        ],
+        [
+          2,
+          0,
+          41
+        ],
+        [
+          2,
+          1,
+          41
+        ],
+        [
+          2,
+          2,
+          41
+        ]
+      ]
+    },
+    {
+      "key": "5889f056d47187e8",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          68
+        ],
+        [
+          1,
+          1,
+          68
+        ],
+        [
+          1,
+          2,
+          68
+        ],
+        [
+          2,
+          0,
+          68
+        ],
+        [
+          2,
+          1,
+          68
+        ],
+        [
+          2,
+          2,
+          68
+        ]
+      ]
+    },
+    {
+      "key": "5ef396ebf9a2f154",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          71
+        ],
+        [
+          1,
+          1,
+          71
+        ],
+        [
+          1,
+          2,
+          71
+        ],
+        [
+          2,
+          0,
+          71
+        ],
+        [
+          2,
+          1,
+          71
+        ],
+        [
+          2,
+          2,
+          71
+        ]
+      ]
+    },
+    {
+      "key": "82db750dd2d4e74c",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          55
+        ],
+        [
+          1,
+          1,
+          55
+        ],
+        [
+          1,
+          2,
+          55
+        ],
+        [
+          2,
+          0,
+          55
+        ],
+        [
+          2,
+          1,
+          55
+        ],
+        [
+          2,
+          2,
+          55
+        ]
+      ]
+    },
+    {
+      "key": "9ed09859d6c3e324",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          69
+        ],
+        [
+          1,
+          1,
+          69
+        ],
+        [
+          1,
+          2,
+          69
+        ],
+        [
+          2,
+          0,
+          69
+        ],
+        [
+          2,
+          1,
+          69
+        ],
+        [
+          2,
+          2,
+          69
+        ]
+      ]
+    },
+    {
+      "key": "a59b130aa9c13479",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          42
+        ],
+        [
+          1,
+          1,
+          42
+        ],
+        [
+          1,
+          2,
+          42
+        ],
+        [
+          2,
+          0,
+          42
+        ],
+        [
+          2,
+          1,
+          42
+        ],
+        [
+          2,
+          2,
+          42
+        ]
+      ]
+    },
+    {
+      "key": "c9c0dd215348c453",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          70
+        ],
+        [
+          1,
+          1,
+          70
+        ],
+        [
+          1,
+          2,
+          70
+        ],
+        [
+          2,
+          0,
+          70
+        ],
+        [
+          2,
+          1,
+          70
+        ],
+        [
+          2,
+          2,
+          70
+        ]
+      ]
+    },
+    {
+      "key": "f32433da1ac56c2a",
+      "family": "desert_rock",
+      "faces": [
+        "top"
+      ],
+      "origins": [
+        [
+          1,
+          0,
+          40
+        ],
+        [
+          1,
+          1,
+          40
+        ],
+        [
+          1,
+          2,
+          40
+        ],
+        [
+          2,
+          0,
+          40
+        ],
+        [
+          2,
+          1,
+          40
+        ],
+        [
+          2,
+          2,
+          40
+        ]
+      ]
+    },
+    {
+      "key": "01898f41e5cee69f",
+      "origins": [
+        [
+          1,
+          0,
+          29
+        ],
+        [
+          1,
+          1,
+          29
+        ],
+        [
+          1,
+          2,
+          29
+        ],
+        [
+          2,
+          0,
+          29
+        ],
+        [
+          2,
+          1,
+          29
+        ],
+        [
+          2,
+          2,
+          29
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "062c17ed8cf81295",
+      "origins": [
+        [
+          1,
+          0,
+          38
+        ],
+        [
+          1,
+          1,
+          38
+        ],
+        [
+          1,
+          2,
+          38
+        ],
+        [
+          2,
+          0,
+          38
+        ],
+        [
+          2,
+          1,
+          38
+        ],
+        [
+          2,
+          2,
+          38
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": []
+    },
+    {
+      "key": "0894b25a5fdc101d",
+      "origins": [
+        [
+          1,
+          0,
+          16
+        ],
+        [
+          1,
+          1,
+          16
+        ],
+        [
+          1,
+          2,
+          16
+        ],
+        [
+          2,
+          0,
+          16
+        ],
+        [
+          2,
+          1,
+          16
+        ],
+        [
+          2,
+          2,
+          16
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "25c615d84d7e2956",
+      "origins": [
+        [
+          2,
+          0,
+          225
+        ],
+        [
+          2,
+          1,
+          225
+        ],
+        [
+          2,
+          2,
+          225
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "396d8261503e0d7b",
+      "origins": [
+        [
+          1,
+          0,
+          26
+        ],
+        [
+          1,
+          1,
+          26
+        ],
+        [
+          1,
+          2,
+          26
+        ],
+        [
+          2,
+          0,
+          26
+        ],
+        [
+          2,
+          1,
+          26
+        ],
+        [
+          2,
+          2,
+          26
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": []
+    },
+    {
+      "key": "3e39523801ad5d32",
+      "origins": [
+        [
+          1,
+          0,
+          176
+        ],
+        [
+          1,
+          1,
+          176
+        ],
+        [
+          1,
+          2,
+          176
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": []
+    },
+    {
+      "key": "403623135f35ee81",
+      "origins": [
+        [
+          2,
+          0,
+          219
+        ],
+        [
+          2,
+          1,
+          219
+        ],
+        [
+          2,
+          2,
+          219
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "475053c6a568d5a5",
+      "origins": [
+        [
+          2,
+          0,
+          221
+        ],
+        [
+          2,
+          1,
+          221
+        ],
+        [
+          2,
+          2,
+          221
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "47a5353f912495d1",
+      "origins": [
+        [
+          1,
+          0,
+          177
+        ],
+        [
+          1,
+          1,
+          177
+        ],
+        [
+          1,
+          2,
+          177
+        ],
+        [
+          2,
+          0,
+          177
+        ],
+        [
+          2,
+          1,
+          177
+        ],
+        [
+          2,
+          2,
+          177
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": []
+    },
+    {
+      "key": "4a70cb6aa93ad755",
+      "origins": [
+        [
+          2,
+          0,
+          225
+        ],
+        [
+          2,
+          1,
+          225
+        ],
+        [
+          2,
+          2,
+          225
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "505808192096de31",
+      "origins": [
+        [
+          1,
+          0,
+          8
+        ],
+        [
+          1,
+          1,
+          8
+        ],
+        [
+          1,
+          2,
+          8
+        ],
+        [
+          2,
+          0,
+          8
+        ],
+        [
+          2,
+          1,
+          8
+        ],
+        [
+          2,
+          2,
+          8
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "59305b8f4b0cb4b6",
+      "origins": [
+        [
+          1,
+          0,
+          168
+        ],
+        [
+          1,
+          1,
+          168
+        ],
+        [
+          1,
+          2,
+          168
+        ],
+        [
+          2,
+          0,
+          168
+        ],
+        [
+          2,
+          1,
+          168
+        ],
+        [
+          2,
+          2,
+          168
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "5bd220bb026f3f8e",
+      "origins": [
+        [
+          1,
+          0,
+          19
+        ],
+        [
+          1,
+          1,
+          19
+        ],
+        [
+          1,
+          2,
+          19
+        ],
+        [
+          2,
+          0,
+          19
+        ],
+        [
+          2,
+          1,
+          19
+        ],
+        [
+          2,
+          2,
+          19
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": []
+    },
+    {
+      "key": "5f22f966a9ecdbfa",
+      "origins": [
+        [
+          1,
+          0,
+          2
+        ],
+        [
+          1,
+          1,
+          2
+        ],
+        [
+          1,
+          2,
+          2
+        ],
+        [
+          2,
+          0,
+          2
+        ],
+        [
+          2,
+          1,
+          2
+        ],
+        [
+          2,
+          2,
+          2
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "6a3a4d8e2a3c2126",
+      "origins": [
+        [
+          2,
+          0,
+          226
+        ],
+        [
+          2,
+          1,
+          226
+        ],
+        [
+          2,
+          2,
+          226
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "6bf30240f99967e9",
+      "origins": [
+        [
+          1,
+          0,
+          2
+        ],
+        [
+          1,
+          1,
+          2
+        ],
+        [
+          1,
+          2,
+          2
+        ],
+        [
+          2,
+          0,
+          2
+        ],
+        [
+          2,
+          1,
+          2
+        ],
+        [
+          2,
+          2,
+          2
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "89b7ba27078191f5",
+      "origins": [
+        [
+          1,
+          0,
+          17
+        ],
+        [
+          1,
+          1,
+          17
+        ],
+        [
+          1,
+          2,
+          17
+        ],
+        [
+          2,
+          0,
+          17
+        ],
+        [
+          2,
+          1,
+          17
+        ],
+        [
+          2,
+          2,
+          17
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "8a211c12c184da73",
+      "origins": [
+        [
+          1,
+          0,
+          169
+        ],
+        [
+          1,
+          1,
+          169
+        ],
+        [
+          1,
+          2,
+          169
+        ],
+        [
+          2,
+          0,
+          169
+        ],
+        [
+          2,
+          1,
+          169
+        ],
+        [
+          2,
+          2,
+          169
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "9840fae352203279",
+      "origins": [
+        [
+          1,
+          0,
+          1
+        ],
+        [
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          2,
+          1
+        ],
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "9e010c01961bd90d",
+      "origins": [
+        [
+          2,
+          0,
+          218
+        ],
+        [
+          2,
+          1,
+          218
+        ],
+        [
+          2,
+          2,
+          218
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "9ee08b5f010b27e2",
+      "origins": [
+        [
+          2,
+          0,
+          223
+        ],
+        [
+          2,
+          1,
+          223
+        ],
+        [
+          2,
+          2,
+          223
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "a80b839bd5c687ea",
+      "origins": [
+        [
+          2,
+          0,
+          222
+        ],
+        [
+          2,
+          1,
+          222
+        ],
+        [
+          2,
+          2,
+          222
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "a926d1f3ac4bc229",
+      "origins": [
+        [
+          1,
+          0,
+          20
+        ],
+        [
+          1,
+          1,
+          20
+        ],
+        [
+          1,
+          2,
+          20
+        ],
+        [
+          2,
+          1,
+          20
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "aee05001c36aa129",
+      "origins": [
+        [
+          2,
+          0,
+          28
+        ],
+        [
+          2,
+          1,
+          28
+        ],
+        [
+          2,
+          2,
+          28
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": []
+    },
+    {
+      "key": "aefcebd084f0d6f2",
+      "origins": [
+        [
+          2,
+          0,
+          227
+        ],
+        [
+          2,
+          1,
+          227
+        ],
+        [
+          2,
+          2,
+          227
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "aefeb9559fe42c5c",
+      "origins": [
+        [
+          1,
+          0,
+          3
+        ],
+        [
+          1,
+          1,
+          3
+        ],
+        [
+          1,
+          2,
+          3
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "b60dce56063da0b8",
+      "origins": [
+        [
+          2,
+          0,
+          220
+        ],
+        [
+          2,
+          1,
+          220
+        ],
+        [
+          2,
+          2,
+          220
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "bcce2bea9db07692",
+      "origins": [
+        [
+          1,
+          0,
+          3
+        ],
+        [
+          1,
+          1,
+          3
+        ],
+        [
+          1,
+          2,
+          3
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "c00b6edfd03aebc3",
+      "origins": [
+        [
+          1,
+          0,
+          24
+        ],
+        [
+          1,
+          1,
+          24
+        ],
+        [
+          1,
+          2,
+          24
+        ],
+        [
+          2,
+          0,
+          24
+        ],
+        [
+          2,
+          1,
+          24
+        ],
+        [
+          2,
+          2,
+          24
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "c26e929980578e99",
+      "origins": [
+        [
+          2,
+          0,
+          224
+        ],
+        [
+          2,
+          1,
+          224
+        ],
+        [
+          2,
+          2,
+          224
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "c4791b434bbc4a31",
+      "origins": [
+        [
+          1,
+          0,
+          9
+        ],
+        [
+          1,
+          1,
+          9
+        ],
+        [
+          1,
+          2,
+          9
+        ],
+        [
+          2,
+          0,
+          9
+        ],
+        [
+          2,
+          1,
+          9
+        ],
+        [
+          2,
+          2,
+          9
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": []
+    },
+    {
+      "key": "c4d081c3e90dba7e",
+      "origins": [
+        [
+          1,
+          0,
+          10
+        ],
+        [
+          1,
+          1,
+          10
+        ],
+        [
+          1,
+          2,
+          10
+        ],
+        [
+          2,
+          0,
+          10
+        ],
+        [
+          2,
+          1,
+          10
+        ],
+        [
+          2,
+          2,
+          10
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "cd50e7ee130c4ed5",
+      "origins": [
+        [
+          1,
+          0,
+          1
+        ],
+        [
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          2,
+          1
+        ],
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "ce733210fbc93f3f",
+      "origins": [
+        [
+          2,
+          0,
+          216
+        ],
+        [
+          2,
+          1,
+          216
+        ],
+        [
+          2,
+          2,
+          216
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "d6eb8d606a5fa7d4",
+      "origins": [
+        [
+          1,
+          0,
+          25
+        ],
+        [
+          1,
+          1,
+          25
+        ],
+        [
+          1,
+          2,
+          25
+        ],
+        [
+          2,
+          0,
+          25
+        ],
+        [
+          2,
+          1,
+          25
+        ],
+        [
+          2,
+          2,
+          25
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "da60ddc4ccfc2295",
+      "origins": [
+        [
+          2,
+          0,
+          217
+        ],
+        [
+          2,
+          1,
+          217
+        ],
+        [
+          2,
+          2,
+          217
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "dd1296c97b6ceb2e",
+      "origins": [
+        [
+          1,
+          0,
+          11
+        ],
+        [
+          1,
+          1,
+          11
+        ],
+        [
+          1,
+          2,
+          11
+        ],
+        [
+          2,
+          0,
+          11
+        ],
+        [
+          2,
+          1,
+          11
+        ],
+        [
+          2,
+          2,
+          11
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": []
+    },
+    {
+      "key": "e2600b31728ba6f8",
+      "origins": [
+        [
+          1,
+          0,
+          15
+        ],
+        [
+          1,
+          1,
+          15
+        ],
+        [
+          1,
+          2,
+          15
+        ],
+        [
+          2,
+          0,
+          15
+        ],
+        [
+          2,
+          1,
+          15
+        ],
+        [
+          2,
+          2,
+          15
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "e73f6775904bfa5d",
+      "origins": [
+        [
+          1,
+          0,
+          21
+        ],
+        [
+          1,
+          1,
+          21
+        ],
+        [
+          1,
+          2,
+          21
+        ],
+        [
+          2,
+          1,
+          21
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "e86425553ac603e5",
+      "origins": [
+        [
+          1,
+          0,
+          33
+        ],
+        [
+          1,
+          1,
+          33
+        ],
+        [
+          1,
+          2,
+          33
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": []
+    },
+    {
+      "key": "e8e19adb4ea998ec",
+      "origins": [
+        [
+          2,
+          0,
+          226
+        ],
+        [
+          2,
+          1,
+          226
+        ],
+        [
+          2,
+          2,
+          226
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "ec03ee03986a5fa5",
+      "origins": [
+        [
+          2,
+          0,
+          228
+        ],
+        [
+          2,
+          1,
+          228
+        ],
+        [
+          2,
+          2,
+          228
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "f219b8acf282faa8",
+      "origins": [
+        [
+          1,
+          0,
+          18
+        ],
+        [
+          1,
+          1,
+          18
+        ],
+        [
+          1,
+          2,
+          18
+        ],
+        [
+          2,
+          0,
+          18
+        ],
+        [
+          2,
+          1,
+          18
+        ],
+        [
+          2,
+          2,
+          18
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
+      ]
+    },
+    {
+      "key": "f9615dd4fc968495",
+      "origins": [
+        [
+          2,
+          0,
+          224
+        ],
+        [
+          2,
+          1,
+          224
+        ],
+        [
+          2,
+          2,
+          224
+        ]
+      ],
+      "family": "desert_sand_live",
+      "faces": [
+        "top"
       ]
     }
   ]

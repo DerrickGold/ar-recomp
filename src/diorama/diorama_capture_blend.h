@@ -81,6 +81,16 @@ uint8_t DioramaCaptureBlend_FullAddSubscreenSources(
     uint8_t cgwsel, uint8_t cgadsub,
     uint8_t screen_main, uint8_t screen_sub);
 
+/* Active, ready Voxel geometry needs complete independent TS source art:
+ * cropping BG1 against OBJ before their planes separate would bake sprite
+ * silhouettes into its front, sides and floor. Keep TS membership separate
+ * from that crop flag. Only opt in when every enabled main world source uses
+ * full-add math. Main BG3 is a separately drawn HUD; TS BG3/BG4 and main OBJ
+ * (whose math eligibility varies by palette) stay on the established path. */
+uint8_t DioramaCaptureBlend_IndependentSubscreenSources(bool voxel_ready,
+    uint8_t cgwsel, uint8_t cgadsub,
+    uint8_t screen_main, uint8_t screen_sub);
+
 /* True when a BG layer's colour math is an exact fixed-colour subtraction
  * that the capture pipeline can bake into the extracted pixels. This is the
  * palette-dimming state measured in Bloodpool act 2 map 4:

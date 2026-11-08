@@ -1862,7 +1862,8 @@
           2,
           116
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "3e35a3aeebaa36a0",
@@ -2482,7 +2483,8 @@
           2,
           115
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "52c0fc7b92402e36",
@@ -3963,7 +3965,8 @@
           2,
           10
         ]
-      ]
+      ],
+      "top_surface": "own16_donor"
     },
     {
       "key": "824f2578ce061d3a",
@@ -4369,7 +4372,8 @@
         32768,
         32768,
         32768
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "9224890ba211a004",
@@ -5076,7 +5080,8 @@
         32768,
         32768,
         32768
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "a359888d33fc8ee7",
@@ -5247,7 +5252,9 @@
         32768,
         32768,
         32768
-      ]
+      ],
+      "top_surface": "masonry_cap16",
+      "contour_surface": "stone_top16"
     },
     {
       "key": "a7611c2347cad13b",
@@ -5558,7 +5565,8 @@
           2,
           11
         ]
-      ]
+      ],
+      "top_surface": "own16_donor"
     },
     {
       "key": "ae6a8ae4a9820add",
@@ -6506,7 +6514,8 @@
         32768,
         32768,
         32768
-      ]
+      ],
+      "contour_surface": "stone_bottom16"
     },
     {
       "key": "cf60282831df36ff",
@@ -7389,7 +7398,8 @@
         32768,
         32768,
         32768
-      ]
+      ],
+      "contour_surface": "stone_bottom16"
     },
     {
       "key": "f0bf245766861e4e",
@@ -7453,7 +7463,9 @@
         32768,
         32768,
         32768
-      ]
+      ],
+      "top_surface": "masonry_cap16",
+      "contour_surface": "stone_top16"
     },
     {
       "key": "f0ed4aa0906b6d23",
@@ -8447,5 +8459,7 @@
         32768
       ]
     }
-  ]
+  ],
+  "tomb_stone_cap_contract": "Carved panel blocks retain their native ornamental top artwork. The two blue gem families are side inlays in ordinary stone blocks: only their tops use complete native plain stone0A/0B artwork within the existing8-cell material-safe donor bound. This alternates carved and plain walking tops while preserving native side inlays and block boundaries. Separate diagonal and corner stone contracts remain unchanged. Native priority, collision, geometry, palette4 portal corners and palette6 gold masks are preserved; explicit editor artwork wins.",
+  "tomb_contour_skin_contract": "Exactly four reviewed palette5 diagonal stone families share complete native0A/0B stone across their exposed upper or lower contour and its short closing risers. Native fronts, rear matte ink15, silhouettes, collision and priority are unchanged. Surface phase is anchored to16px worldX and full material depth; explicit face artwork/masks win."
 }

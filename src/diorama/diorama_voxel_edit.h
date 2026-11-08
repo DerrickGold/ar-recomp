@@ -144,6 +144,22 @@ typedef struct DioramaVoxelEdits {
   DioramaVoxelObject objects[kDioramaVoxelObjectMax];
 } DioramaVoxelEdits;
 
+/* Resolve whole-record ownership before using this mask. Explicit Auto
+ * artwork still resets an older record, but does not itself request a new
+ * authored surface or convert a native transform into a prism. */
+static inline uint32_t DioramaVoxelCell_EffectiveFields(const DioramaVoxelCell *c) {
+  if (!c) return 0;
+  uint32_t fields = c->fields;
+  const DioramaVoxelArt *art[] = {&c->backing_art, &c->top_art, &c->side_art,
+      &c->front_art, &c->left_art, &c->right_art, &c->bottom_art};
+  const uint32_t flags[] = {kDioramaVoxelCell_BackArt, kDioramaVoxelCell_TopArt,
+      kDioramaVoxelCell_SideArt, kDioramaVoxelCell_FrontArt, kDioramaVoxelCell_LeftArt,
+      kDioramaVoxelCell_RightArt, kDioramaVoxelCell_BottomArt};
+  for (unsigned i = 0; i < sizeof(flags) / sizeof(*flags); ++i)
+    if (!art[i]->set) fields &= ~flags[i];
+  return fields;
+}
+
 static inline unsigned DioramaVoxelCell_Width(const DioramaVoxelCell *c) {
   return c->w ? c->w : 1;
 }

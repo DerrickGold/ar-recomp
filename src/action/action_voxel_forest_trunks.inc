@@ -99,7 +99,7 @@ static bool BuildForestTrunkCurves(ActionVoxelGeometry *c,const ActionRoomScene 
     for(int i=0;i<count;++i)
       if(c->origin_y+(queue[i]/width+1)*8<=top_y || top_y>=base_y)c->trunk_cells[queue[i]]=0;
     if(top_y>=base_y) {--c->trunk_curve_count;continue;}
-    c->trunk_curves[owner-1]=(VoxelTrunkCurve){(short)top_y,(short)base_y};
+    c->trunk_curves[owner-1]=(VoxelTrunkCurve){.top_y=(short)top_y,.base_y=(short)base_y};
   }
   /* Carry only the empty filter footprint. Do not propagate through the halo
    * or assign a curve to an occupied branch, rope, stump, ground or canopy. */

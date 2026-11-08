@@ -437,10 +437,14 @@ bool Diorama_PlaneCaptureBounds(const DioramaProjection *projection,
    * Fusing uv * width - origin can turn the exact edge 64/640 back into a
    * small positive number and reject an effect at display x=0. The explicit
    * float stores keep this contract identical on native and WASM compilers. */
-  const volatile float left = fminf(plane->u0, plane->u1) * projection->texture_width;
-  const volatile float right = fmaxf(plane->u0, plane->u1) * projection->texture_width;
-  const volatile float top = fminf(plane->v0, plane->v1) * projection->texture_height;
-  const volatile float bottom = fmaxf(plane->v0, plane->v1) * projection->texture_height;
+  const float u0=plane->source_bounds_valid?plane->source_u0:plane->u0;
+  const float u1=plane->source_bounds_valid?plane->source_u1:plane->u1;
+  const float v0=plane->source_bounds_valid?plane->source_v0:plane->v0;
+  const float v1=plane->source_bounds_valid?plane->source_v1:plane->v1;
+  const volatile float left = fminf(u0, u1) * projection->texture_width;
+  const volatile float right = fmaxf(u0, u1) * projection->texture_width;
+  const volatile float top = fminf(v0, v1) * projection->texture_height;
+  const volatile float bottom = fmaxf(v0, v1) * projection->texture_height;
   *x0 = left -
       projection->texture_x_origin - plane->capture_offset.x - plane->capture_apron;
   *x1 = right -
@@ -450,6 +454,9 @@ bool Diorama_PlaneCaptureBounds(const DioramaProjection *projection,
   return isfinite(*x0) && isfinite(*y0) && isfinite(*x1) && isfinite(*y1) &&
       *x0 < *x1 && *y0 < *y1;
 }
+
+static bool ProjectSkyboxBandPoint(const DioramaProjection *,
+    const DioramaSkyboxBandProjection *,float,float,ArRenderPointF *,float *,float *);
 
 static bool ProjectCapturedPlanePoint(
     const DioramaProjection *projection, float capture_x, float capture_y,
@@ -462,6 +469,14 @@ static bool ProjectCapturedPlanePoint(
   float du = plane->u1 - plane->u0;
   float dv = plane->v1 - plane->v0;
   if (du == 0.0f || dv == 0.0f) return false;
+  if (plane->native_atmosphere) {
+    const DioramaSkyboxBandProjection band={
+      plane->u0*projection->texture_width-projection->texture_x_origin-plane->capture_offset.x,
+      plane->v0*projection->texture_height-plane->capture_offset.y,
+      plane->u1*projection->texture_width-projection->texture_x_origin-plane->capture_offset.x,
+      plane->v1*projection->texture_height-plane->capture_offset.y,0,1};
+    return ProjectSkyboxBandPoint(projection,&band,capture_x,capture_y,point,scale_x,scale_y);
+  }
 
   ArRenderPointF projected[3];
   int sample_count = (scale_x || scale_y) ? 3 : 1;

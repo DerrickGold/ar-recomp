@@ -7,6 +7,8 @@
 #include "constants.h"
 #include "replacements/hd_replacements.h"
 #include "diorama/diorama.h"
+#include "diorama/diorama_trunk_guard.h"
+#include "diorama/diorama_voxel_guard.h"
 #include "sim/sim3d/sim3d.h"
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
@@ -128,6 +130,9 @@ typedef struct FrameSlot {
   /* Fixed-width, world-clamped BG view, captured alongside the PPU without
    * rebinding the gameplay plane. Same synchronous-upload lifetime above. */
   SrPpuSurfaceView diorama_skybox_surface;
+  /* Optional native BG1 strips from this exact capture, never a newer tick. */
+  DioramaTrunkGuardSource diorama_trunk_guard;
+  DioramaVoxelGuardSource diorama_voxel_guard;
   int32_t diorama_skybox_world_x;
   /* Sub-texel part of the skybox view's world origin, 0..1. */
   float diorama_skybox_world_x_fraction;
@@ -197,6 +202,9 @@ typedef struct FrameSlot {
    * compositor draws this subset with saturated additive blending after the
    * ordinary main-screen world planes. */
   uint32_t diorama_plane_additive_mask;
+  /* Complete independent TS sources, with the same additive membership.
+   * A representation transition must not reuse a frame-generation pair. */
+  bool diorama_independent_subscreen;
   /* Immutable key for scoped diorama layer overrides. The section is derived
    * from positively identified captured scene art, never from present-time
    * live WRAM. */

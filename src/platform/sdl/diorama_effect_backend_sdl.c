@@ -365,7 +365,7 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *device,
     };
     SDL_GPURenderState *state = SDL_CreateGPURenderState(s_effects.renderer, &info);
     if (!state) return false;
-    const float warm[176] = {1,1,0,0, 1,1,0,0, 1,1,0,0, 1,1,1,0};
+    const float warm[kDioramaSceneryUniformFloats] = {1,1,0,0, 1,1,0,0, 1,1,0,0, 1,1,1,0};
     if (!WarmLightShader(device, state, warm, sizeof(warm), &s_effects.scenery_warmed)) {
       SDL_DestroyGPURenderState(state);
       return false;

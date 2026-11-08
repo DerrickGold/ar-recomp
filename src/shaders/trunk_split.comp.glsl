@@ -7,7 +7,7 @@ layout(std430,set=0,binding=3) readonly buffer Art {uint data[];} art;
 layout(rgba8,set=1,binding=0) writeonly uniform image2D lowOut;
 layout(rgba8,set=1,binding=1) writeonly uniform image2D highOut;
 layout(rgba8,set=1,binding=2) writeonly uniform image2D farOut;
-layout(std140,set=2,binding=0) uniform Context {ivec4 capture;ivec4 asset;vec4 fade;} settings;
+layout(std140,set=2,binding=0) uniform Context {ivec4 capture;ivec4 asset;vec4 fade;ivec4 side;} settings;
 uint byteAt(int base,int index) {return (art.data[base+(index>>2)]>>((index&3)*8))&255u;}
 void main() {
   ivec2 p=ivec2(gl_GlobalInvocationID.xy);
@@ -22,6 +22,12 @@ void main() {
       int at=y*48+((wx-320)>>3);uint bit=1u<<uint(wx&7);
       if((byteAt(settings.asset.z,at)&bit)!=0u){high=low;low=vec4(0);}
       if((byteAt(settings.asset.y,at)&bit)!=0u)low=high=vec4(0);
+    } else if(wx>=0&&wx<settings.side.x) {
+      int at=y*settings.side.z+(wx>>3);uint bit=1u<<uint(wx&7);
+      int base=settings.side.y,plane=settings.side.w;
+      if((byteAt(base+plane,at)&bit)!=0u){far=low;low=vec4(0);}
+      else if((byteAt(base,at)&bit)!=0u)far=low;
+      if((byteAt(base+2*plane,at)&bit)!=0u){high=low;low=vec4(0);}
     }
     int x=wx-352;
     if(x>=0&&x<320) {

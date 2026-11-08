@@ -263,6 +263,8 @@ static void PerspectiveChecks(ArSdlDioramaDepthSink *state,ArRenderDevice *devic
   }
 }
 
+#include "diorama_owned_heat_sink.inc"
+
 int main(int argc,char **argv) {
   hybrid=argc==2 && !strcmp(argv[1],"--hybrid");
   if(!SDL_Init(SDL_INIT_VIDEO))return 77;
@@ -413,6 +415,7 @@ int main(int argc,char **argv) {
         current->upload==prepared[i].upload && current->depth==prepared[i].depth);
     assert(!memcmp(current->pipelines,prepared[i].pipelines,sizeof(current->pipelines)));
   }
+  TestOwnedHeatQueue(&state,&device,target,white,black);
   ArSdlDioramaDepthSink_Reset(&state);
   assert(ArRenderDevice_SetRenderTarget(&device,ArRenderTexture_Invalid()));
   const ArRenderTexture resources[]={target,other,white,black};

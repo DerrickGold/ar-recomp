@@ -78,6 +78,12 @@ ActRaiser_PrepareSkyboxView(const SrPpuFrameTransactionContext *context,
                             const SnesRunnerApi *scanout_api,
                             bool scanout_ready, bool profile_diorama,
                             float *world_x_fraction);
+unsigned ActRaiser_PrepareTrunkGuard(const SnesRunnerApi *api,
+    bool scanout_ready, bool profile_diorama,
+    SrPpuBackgroundGuardRequest guards[2], DioramaTrunkGuardSource *source);
+unsigned ActRaiser_PrepareVoxelGuard(const SnesRunnerApi *api,
+    bool scanout_ready, bool profile_diorama, SrPpuBackgroundGuardRequest *guard,
+    SrPpuBackgroundGuardBands *bands, DioramaVoxelGuardSource *source);
 
 /* ---- defined in actraiser_frame_draw.c ---- */
 void ActRaiser_ReportSim3DCaptureContractFailure(void);

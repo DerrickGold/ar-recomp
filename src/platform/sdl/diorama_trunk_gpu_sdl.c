@@ -8,7 +8,16 @@
 #include "shaders/trunk_split_comp.h"
 #include <string.h>
 
-enum { kWidth=640,kHeight=352,kArtBytes=sizeof(((ActionTrunkAssets *)0)->masks)+sizeof(((ActionTrunkAssets *)0)->wall) };
+/* Keep the established core-mask and wall offsets unchanged. Only the first
+ * three side masks participate in splitting; side snow artwork is CPU mesh
+ * data and is not uploaded here. */
+enum { kWidth=640,kHeight=352,
+  kCoreArtBytes=sizeof(((ActionTrunkAssets *)0)->masks)+sizeof(((ActionTrunkAssets *)0)->wall),
+  kSideMaskBytes=kActionTrunkMaxHeight*kActionTrunkSideMaskPitch,
+  kSideArtBytes=(kActionTrunkSidePriority+1)*kSideMaskBytes,
+  kArtBytes=kCoreArtBytes+kSideArtBytes };
+_Static_assert(kActionTrunkSideSolid==0&&kActionTrunkSideRear==1&&
+    kActionTrunkSidePriority==2,"trunk split side mask order");
 static struct {
   SDL_GPUDevice *gpu;
   SDL_GPUComputePipeline *pipeline;
@@ -19,7 +28,7 @@ static struct {
   SDL_Texture *view[3];
   const ActionTrunkAssets *assets;
   uint32_t revision;
-  int last[8];
+  int last[12];
   unsigned brightness;
   bool valid;
 } s_trunk;
@@ -82,6 +91,7 @@ static bool UploadArt(const ActionTrunkAssets *assets) {
   if(!bytes)return false;
   memcpy(bytes,assets->masks,sizeof(assets->masks));
   memcpy(bytes+sizeof(assets->masks),assets->wall,sizeof(assets->wall));
+  memcpy(bytes+kCoreArtBytes,assets->side_masks,kSideArtBytes);
   SDL_UnmapGPUTransferBuffer(s_trunk.gpu,s_trunk.upload);
   SDL_GPUCommandBuffer *cmd=SDL_AcquireGPUCommandBuffer(s_trunk.gpu);
   SDL_GPUCopyPass *copy=cmd?SDL_BeginGPUCopyPass(cmd):NULL;
@@ -102,9 +112,10 @@ bool DioramaTrunkGpu_Upload(ArRenderDevice *device,const FrameSlot *slot,
   if(s_trunk.assets!=assets||s_trunk.revision!=assets->revision) {
     if(!ArSdlRenderBackend_SubmitPending(device)||!UploadArt(assets))return false;
   }
-  const int params[8]={kWidth,slot->snes_height+slot->ws_extra_top+slot->ws_extra_bottom,
+  const int params[12]={kWidth,slot->snes_height+slot->ws_extra_top+slot->ws_extra_bottom,
       slot->bg1_camera_x-slot->ws_extra-slot->obj_apron,slot->bg1_camera_y-slot->ws_extra_top+1,
-      (int)assets->height,2*kActionTrunkMaxHeight*kActionTrunkMaskPitch/4,0,(int)sizeof(assets->masks)/4};
+      (int)assets->height,2*kActionTrunkMaxHeight*kActionTrunkMaskPitch/4,0,(int)sizeof(assets->masks)/4,
+      (int)assets->side_width,kCoreArtBytes/4,kActionTrunkSideMaskPitch,kSideMaskBytes/4};
   const unsigned planes[3]={SR_PPU_OVERLAY_BG1,kDioramaPlane_Bg1Hi,kDioramaPlane_Bg1Far};
   const uint32_t mask=(1u<<planes[0])|(1u<<planes[1])|(1u<<planes[2]);
   const unsigned brightness=slot->inidisp&0x80?0:slot->inidisp&15;
@@ -122,9 +133,10 @@ bool DioramaTrunkGpu_Upload(ArRenderDevice *device,const FrameSlot *slot,
     for(unsigned i=0;i<3;++i)outputs[i].texture=s_trunk.native[i];
     SDL_GPUComputePass *pass=SDL_BeginGPUComputePass(cmd,outputs,3,NULL,0);
     if(!pass){SDL_CancelGPUCommandBuffer(cmd);return false;}
-    struct {int data[8];float fade[4];} uniforms;
-    memcpy(uniforms.data,params,sizeof(params));
+    struct {int data[8];float fade[4];int side[4];} uniforms;
+    memcpy(uniforms.data,params,sizeof(uniforms.data));
     uniforms.fade[0]=brightness/15.f;uniforms.fade[1]=uniforms.fade[2]=uniforms.fade[3]=0;
+    memcpy(uniforms.side,params+8,sizeof(uniforms.side));
     SDL_PushGPUComputeUniformData(cmd,0,&uniforms,sizeof(uniforms));
     SDL_BindGPUComputePipeline(pass,s_trunk.pipeline);
     SDL_BindGPUComputeSamplers(pass,0,samples,3);

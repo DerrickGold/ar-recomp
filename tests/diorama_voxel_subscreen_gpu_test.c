@@ -40,12 +40,14 @@ int main(void) {
   ArRenderTexture textures[kDioramaPlane_Count]={0};
   const uint8_t *present[kDioramaPlane_Count]={0};
   const unsigned planes[]={SR_PPU_OVERLAY_BG2,SR_PPU_OVERLAY_BG1,kDioramaPlane_Bg1Far,
-      kDioramaPlane_Obj2,kDioramaPlane_Bg1Hi,SR_PPU_OVERLAY_BG3};
-  const uint32_t colors[]={0xff080c10,0xff0a141e,0xff3c3228,0xff501e0a,0xff05465a,0xffaaa096};
+      kDioramaPlane_Obj2,kDioramaPlane_Bg1Hi,SR_PPU_OVERLAY_BG3,
+      SR_PPU_OVERLAY_OBJ,kDioramaPlane_Obj1,kDioramaPlane_Obj3,kDioramaPlane_Bg2Hi};
+  const uint32_t colors[]={0xff080c10,0xff0a141e,0xff3c3228,0xff501e0a,0xff05465a,0xffaaa096,
+      0xff221122,0xff112233,0xff352515,0xff040608};
   const ArRenderTextureDesc desc={.width=SR_PPU_SURFACE_MAX_WIDTH,.height=SR_PPU_SURFACE_MAX_HEIGHT,
       .format=kArRenderPixelFormat_Argb8888,.usage=kArRenderTextureUsage_Streaming,
       .filter=kArRenderFilter_Nearest,.blend=kArRenderBlendMode_Alpha};
-  for(unsigned i=0;i<6;++i)assert(ArRenderDevice_CreateTexture(&device,&desc,&textures[planes[i]]));
+  for(unsigned i=0;i<10;++i)assert(ArRenderDevice_CreateTexture(&device,&desc,&textures[planes[i]]));
   ActionVoxelGeometry *voxel=ActionVoxel_Create();assert(voxel);
   voxel->active_group=5;voxel->active_room=1;voxel->profile=kActionVoxelProfile_MarahnaJungle;
   voxel->settings=ActionVoxel_SettingsForRoom(5,1);voxel->width=256;voxel->height=224;voxel->ready=true;
@@ -58,17 +60,18 @@ int main(void) {
   ArSdlDioramaDepthSink depth={0};
   /* Opaque front, actor, high native tile, non-math HUD, half-alpha front,
    * half-alpha lone addend, and ordinary non-additive rendering. */
-  const unsigned expected[]={0x443e38,0x582a1a,0x0d526a,0xaaa096,0x2b2f33,0x0d161f,0x3c3228,0x2b2f33,0x443e38,0x0d161f};
+  const unsigned expected[]={0x443e38,0x582a1a,0x0d526a,0xaaa096,0x2b2f33,0x0d161f,0x3c3228,0x2b2f33,0x443e38,0x0d161f,
+      0x0e1a26,0x0e1a26,0x542412,0x392b1d,0x094c62,0xaaa096,0x542412,0x15283b};
   const DioramaResolvedLayer background={.plane=kDioramaPlane_Backdrop,.alpha=255,
       .source=DioramaLayerOrder_ActionBgSource(5,1,1)};
   for(unsigned shared=0;shared<3;++shared)
-  for(unsigned test=0;test<10;++test)for(unsigned repeat=0;repeat<2;++repeat) {
+  for(unsigned test=0;test<18;++test)for(unsigned repeat=0;repeat<2;++repeat) {
     options.skybox=kDioramaSky_Off;options.resolved_layers=NULL;options.resolved_layer_count=0;
     options.resolve_skybox=NULL;
     scene.depth_sink=shared==2?ArSdlDioramaDepthSink_BeginHybrid(&depth,&device):
         shared?ArSdlDioramaDepthSink_Begin(&depth,&device):NULL;
     assert(!shared || scene.depth_sink);
-    for(unsigned i=0;i<6;++i) {
+    for(unsigned i=0;i<10;++i) {
       Fill(&device,textures[planes[i]],colors[i]);
       present[planes[i]]=i<3 || (test>=1 && test<=3 && i<=test+2)?(const uint8_t *)pixels:NULL;
     }
@@ -83,6 +86,27 @@ int main(void) {
       options.skybox=kDioramaSky_Only;options.resolved_layers=&background;options.resolved_layer_count=1;
       options.resolve_skybox=test==9?NULL:Skybox;options.skybox_userdata=&textures[kDioramaPlane_Bg1Far];
       if(test==8)present[SR_PPU_OVERLAY_BG1]=NULL;
+    }
+    if(test>=10) {
+      /* Independent capture supplies complete native art underneath actors.
+       * Low actors must remain behind BG1, high actors/high tiles preserve
+       * their native priority, and the main-screen high water is added once.
+       * None of these sources carries a source-space actor-shaped hole. */
+      scene.additive_plane_mask|=(1u<<SR_PPU_OVERLAY_OBJ)|(1u<<kDioramaPlane_Obj1)|
+          (1u<<kDioramaPlane_Obj3);
+      present[kDioramaPlane_Bg2Hi]=(const uint8_t *)pixels;
+      present[SR_PPU_OVERLAY_OBJ]=(test==10 || test==15)?(const uint8_t *)pixels:NULL;
+      present[kDioramaPlane_Obj1]=(test==11 || test==15 || test==17)?(const uint8_t *)pixels:NULL;
+      present[kDioramaPlane_Obj2]=(test==12 || test==14 || test==15 || test==16)?(const uint8_t *)pixels:NULL;
+      present[kDioramaPlane_Obj3]=(test==13 || test==15)?(const uint8_t *)pixels:NULL;
+      present[kDioramaPlane_Bg1Hi]=(test==13 || test==14 || test==15)?(const uint8_t *)pixels:NULL;
+      present[SR_PPU_OVERLAY_BG3]=test==15?(const uint8_t *)pixels:NULL;
+      if(test==10 || test==11 || test==17)present[kDioramaPlane_Bg1Far]=NULL;
+      if(test==17)Fill(&device,textures[SR_PPU_OVERLAY_BG1],0);
+      if(test==16) {
+        options.skybox=kDioramaSky_Only;options.resolved_layers=&background;options.resolved_layer_count=1;
+        options.resolve_skybox=Skybox;options.skybox_userdata=&textures[kDioramaPlane_Bg1Far];
+      }
     }
     DioramaProjection projection;
     assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
@@ -109,7 +133,7 @@ int main(void) {
   assert(!depth.owner && final_projection.valid);
   Diorama_ResetCompositorResources(&device);ActionVoxel_Release(voxel);
   ArSdlDioramaDepthSink_Reset(&depth);
-  for(unsigned i=0;i<6;++i)ArRenderDevice_DestroyTexture(&device,textures[planes[i]]);
+  for(unsigned i=0;i<10;++i)ArRenderDevice_DestroyTexture(&device,textures[planes[i]]);
   ArSdlRenderBackend_Destroy(&device);SDL_DestroyWindow(window);SDL_Quit();
-  puts("Voxel subscreen: 60 pixel-checked renders, 24000 blended pixels; legacy/cutout/hybrid depth, actor/high priority, HUD, alpha, named/missing backdrop, offset viewport, finish failure and recovery passed");
+  puts("Voxel subscreen: 108 pixel-checked renders, 43200 blended pixels; legacy/cutout/hybrid depth, complete sources, all actor priorities, high water, HUD, alpha, named/missing backdrop, offset viewport, finish failure and recovery passed");
 }

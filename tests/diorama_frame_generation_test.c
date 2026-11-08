@@ -8,6 +8,7 @@
 #include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_gpu_policy.h"
 #include "action/action_voxel.h"
+#include "action/action_trunk.h"
 #include "action/action_voxel_internal.h"
 #include "platform/sdl/action_effect_source_sdl.h"
 #include "platform/sdl/render_sdl_internal.h"
@@ -1129,6 +1130,8 @@ static void TestExactMapTransitions(ArRenderDevice *device,SDL_Renderer *rendere
   puts("exact Voxel map transitions: missing/restored textures, partial/hidden masks, ordinary mode, editor section, reset and reseeding with BG2/actor controls");
 }
 
+#include "diorama_trunk_guard_framegen.inc"
+
 int main(void) {
   TestProductionPolicy();
   SDL_Window *window = NULL;
@@ -1427,6 +1430,25 @@ int main(void) {
   ActionVoxel_Release(castle_a);
   ActionVoxel_Release(castle_b);
 
+  /* Complete Voxel inputs and native winner-cropped inputs can have the same
+   * additive membership. Never morph old actor-shaped holes into the complete
+   * source when a readiness/policy transition changes that ownership mode. */
+  slot.diorama_plane_additive_mask=(1u<<SR_PPU_OVERLAY_BG1)|(1u<<kDioramaPlane_Obj2);
+  for(unsigned pass=0;pass<4;++pass) {
+    const uint8_t *endpoint=(const uint8_t *)(pass&1?current_pixels:previous_pixels);
+    planes[test_plane]=gpu_owned?NULL:endpoint;
+    DioramaFrameGeneration_FinishCapture();
+    CHECK(SDL_UpdateTexture(current,&source_rect,endpoint+kApron*sizeof(uint32_t),
+        kSurfaceWidth*sizeof(uint32_t)));
+    slot.timestamp_ns+=16666667;
+    slot.diorama_independent_subscreen=pass<2;
+    DioramaFrameGeneration_Capture(&render_device,&slot,sources,planes,
+        plane_pitches,1u<<test_plane);
+    CHECK(DioramaFrameGeneration_Prepare(&render_device,&slot,.5f,raw,
+        1u<<test_plane,resolved)==(pass&1?1u<<test_plane:0));
+  }
+  slot.diorama_plane_additive_mask=0;
+
   /* Shrinking and restoring the capture reallocates the compute atlas. Neither
    * its old field nor its old endpoint can survive the geometry change. */
   for (int pass = 0; pass < 3; ++pass) {
@@ -1619,6 +1641,8 @@ int main(void) {
     TestExactMapPlacement(&render_device,renderer,current,resident);
     TestExactMapTransitions(&render_device,renderer,current);
   }
+  TestTrunkGuardPlacement(&render_device,renderer,current);
+  TestVoxelGuardPlacement(&render_device,renderer,current);
 
   /* Teardown may happen immediately after dispatch, without Prepare ever
    * joining it. Repeated lifetimes must retire the borrow before destruction. */

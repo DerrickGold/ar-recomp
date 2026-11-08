@@ -4667,7 +4667,8 @@ static void native_merge_packed_span(
 typedef struct NativeOverlayLinePlan {
     uint32_t *primary;
     uint32_t *packet_row;
-    bool tile_packet, cpu_pixels;
+    bool tile_packet, cpu_pixels, guard;
+    uint8_t *tile_coverage;
     uint32_t *bands[3];
     uint8_t slot_for_rank[16];
     uint8_t slot_for_semantic[4];
@@ -4682,11 +4683,46 @@ typedef struct NativeOverlayLinePlan {
     int origin, screen_y;
 } NativeOverlayLinePlan;
 
+static void native_overlay_palette(Ppu *ppu, int source, NativeOverlayLinePlan *plan) {
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+    /* Share the current RGB palette for ordinary capture. Building a separate
+     * 256-entry ARGB table for every source on every scanline was more work
+     * than exporting the pixels. This remains line-local: CGRAM/brightness
+     * changes are handled by the existing RGB cache, and fixed-color math is
+     * still evaluated from this line's state. */
+    plan->colors = ppu->cgramRgb;
+    plan->color_or = 0xff000000u;
+    if (capture->flags == kPpuOverlayFlag_MarkMainScreenWinner ||
+        capture->flags == kPpuOverlayFlag_MarkVisibleMainWinner ||
+        capture->flags == kPpuOverlayFlag_MarkOwningScreenWinner) {
+        plan->color_or = 0xffffffffu;
+        return;
+    }
+    if (source < kPpuOverlaySource_Obj) {
+        if ((capture->flags & kPpuOverlayFlag_MarkBgHalfAdd) != 0u)
+            plan->color_or = 0x80000000u;
+        if ((capture->flags & kPpuOverlayFlag_ApplyBgFixedColorSubtract) != 0u) {
+            for (unsigned palette = 0; palette < kPpuCgramEntries; ++palette)
+                plan->custom_colors[palette] = color_rgb(ppu,
+                    color_math(ppu->cgram[palette], ppu->fixedColor, true, false));
+            plan->colors = plan->custom_colors;
+        }
+    } else if ((capture->flags & kPpuOverlayFlag_MarkObjColorMath) != 0u) {
+        for (unsigned palette = 0; palette < kPpuCgramEntries; ++palette)
+            plan->custom_colors[palette] = ppu->cgramRgb[palette] |
+                (((palette - 0x80u) >> 4) >= 4u ? 0x80000000u : 0xff000000u);
+        plan->colors = plan->custom_colors;
+        plan->color_or = 0u;
+    }
+}
+
 static void native_overlay_line_plan(Ppu *ppu, int source, int screen_y,
                                      NativeOverlayLinePlan *plan) {
     PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
     int row;
     plan->screen_y=screen_y;
+    plan->guard = false;
+    plan->tile_coverage = source < 2 ? ppu->captureTileCoverage[source] : NULL;
     plan->tile_packet = source < 2 && (ppu->backgroundTileSources & (1u << source));
     plan->cpu_pixels = !plan->tile_packet || (ppu->backgroundCpuSources & (1u << source));
     /* Leave scratch palette storage untouched; only captures with special
@@ -4746,35 +4782,7 @@ static void native_overlay_line_plan(Ppu *ppu, int source, int screen_y,
         capture->oamCount == 128 &&
         !(capture->flags & (kPpuOverlayFlag_MarkMainScreenWinner |
             kPpuOverlayFlag_MarkOwningScreenWinner | kPpuOverlayFlag_MarkVisibleMainWinner));
-    /* Share the current RGB palette for ordinary capture. Building a separate
-     * 256-entry ARGB table for every source on every scanline was more work
-     * than exporting the pixels. This remains line-local: CGRAM/brightness
-     * changes are handled by the existing RGB cache, and fixed-color math is
-     * still evaluated from this line's state. */
-    plan->colors = ppu->cgramRgb;
-    plan->color_or = 0xff000000u;
-    if (capture->flags == kPpuOverlayFlag_MarkMainScreenWinner ||
-        capture->flags == kPpuOverlayFlag_MarkVisibleMainWinner ||
-        capture->flags == kPpuOverlayFlag_MarkOwningScreenWinner) {
-        plan->color_or = 0xffffffffu;
-        return;
-    }
-    if (source < kPpuOverlaySource_Obj) {
-        if ((capture->flags & kPpuOverlayFlag_MarkBgHalfAdd) != 0u)
-            plan->color_or = 0x80000000u;
-        if ((capture->flags & kPpuOverlayFlag_ApplyBgFixedColorSubtract) != 0u) {
-            for (unsigned palette = 0; palette < kPpuCgramEntries; ++palette)
-                plan->custom_colors[palette] = color_rgb(ppu,
-                    color_math(ppu->cgram[palette], ppu->fixedColor, true, false));
-            plan->colors = plan->custom_colors;
-        }
-    } else if ((capture->flags & kPpuOverlayFlag_MarkObjColorMath) != 0u) {
-        for (unsigned palette = 0; palette < kPpuCgramEntries; ++palette)
-            plan->custom_colors[palette] = ppu->cgramRgb[palette] |
-                (((palette - 0x80u) >> 4) >= 4u ? 0x80000000u : 0xff000000u);
-        plan->colors = plan->custom_colors;
-        plan->color_or = 0u;
-    }
+    native_overlay_palette(ppu, source, plan);
 }
 
 static uint32_t native_overlay_color(const NativeOverlayLinePlan *plan,
@@ -4854,7 +4862,7 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
         const bool transparent = (tile->transparent_rows[fine_y] & (0x80u >> px)) != 0u;
         if (transparent) {
             if (packet_row) packet_row[column] = UINT32_C(0x80000000);
-            ppu->captureTileCoverage[layer][column] = kCaptureTileOwnedBands;
+            plan->tile_coverage[column] = kCaptureTileOwnedBands;
             plan->primary[column] = 0u;
             for (unsigned priority = 0; priority < 3; ++priority)
                 if (plan->bands[priority]) plan->bands[priority][column] = 0u;
@@ -4870,7 +4878,7 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
             }
             plan->primary[column] = backing;
             if (backing) {
-                ppu->overlayRenderContentMask[layer] |= 1u;
+                if (!plan->guard) ppu->overlayRenderContentMask[layer] |= 1u;
                 coverage |= kCaptureTileOpaque;
             }
         }
@@ -4880,14 +4888,14 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
             if (packet_row) background_packet_write(packet_row, (unsigned)column,
                 (unsigned)band, black ? 257u : palette + pixel + 1u);
             target[column] = black ? 0xff000000u : native_overlay_color(plan, palette + pixel);
-            ppu->overlayRenderContentMask[layer] |= (uint8_t)(1u << band);
+            if (!plan->guard) ppu->overlayRenderContentMask[layer] |= (uint8_t)(1u << band);
             /* An ordinary opaque backing ties with a far-band edit. High
              * priority wins over it; otherwise ordinary precedes far. */
             if (!(coverage & kCaptureTileOpaque) || band != 2)
                 coverage = (coverage & kCaptureTileOwnedBands) | kCaptureTileOpaque |
                     ((unsigned)band << kCaptureTileWinnerShift);
         }
-        ppu->captureTileCoverage[layer][column] = (uint8_t)coverage;
+        plan->tile_coverage[column] = (uint8_t)coverage;
     }
 }
 
@@ -6779,6 +6787,203 @@ bool PpuRenderBackgroundViewLine(Ppu *ppu,
                     ? native_overlay_color(&colors, ((entry >> 10) & 7u) * 16u + pixel) : fill;
             }
             x += run;
+        }
+    }
+    return true;
+}
+
+SrPpuBackgroundGuardBandOutput PpuBackgroundGuardOutput(
+        const SrPpuBackgroundGuardRequest *guard,
+        const SrPpuBackgroundGuardBands *bands, unsigned index) {
+    if (!guard || index > 3) return (SrPpuBackgroundGuardBandOutput){0};
+    if (index) return bands ? bands->bands[index - 1]
+                           : (SrPpuBackgroundGuardBandOutput){0};
+    return (SrPpuBackgroundGuardBandOutput){guard->pixels,
+        guard->pitch_bytes, guard->pixel_byte_size};
+}
+
+static bool guard_storage_overlaps(SrPpuBackgroundGuardBandOutput output,
+        unsigned height, const void *pixels, uint64_t bytes) {
+    if (!output.pixels || !pixels || !bytes) return false;
+    const uintptr_t begin = (uintptr_t)output.pixels, other = (uintptr_t)pixels;
+    return begin < other + bytes && other < begin + output.pitch_bytes * height;
+}
+
+bool PpuBackgroundGuardStorageValid(const Ppu *ppu,
+        const SrPpuBackgroundGuardRequest *guard,
+        const SrPpuBackgroundGuardBands *bands) {
+    if (!guard || guard->struct_size < sizeof(*guard) ||
+        guard->layer >= 2 || !guard->width || guard->width > kPpuSurfaceWidth ||
+        !guard->height || guard->height > 64 ||
+        (!guard->pixels && (!bands || guard->pitch_bytes || guard->pixel_byte_size)))
+        return false;
+    if (bands && ((uintptr_t)bands % _Alignof(SrPpuBackgroundGuardBands) ||
+        bands->struct_size < SR_PPU_BACKGROUND_GUARD_BANDS_V1_SIZE ||
+        (bands->flags & ~SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL)))
+        return false;
+    for (unsigned i = 0; i < 4; ++i) {
+        const SrPpuBackgroundGuardBandOutput output = PpuBackgroundGuardOutput(guard, bands, i);
+        if (!i && !output.pixels) continue;
+        if (i && !bands) break;
+        if (!output.pixels || (uintptr_t)output.pixels % _Alignof(uint32_t) ||
+            output.pitch_bytes < (uint64_t)guard->width * 4 ||
+            output.pitch_bytes > (uint64_t)kPpuSurfaceWidth * 4 ||
+            output.pitch_bytes % 4 ||
+            output.pixel_byte_size < output.pitch_bytes * guard->height ||
+            output.pitch_bytes * guard->height > UINTPTR_MAX - (uintptr_t)output.pixels)
+            return false;
+        for (unsigned j = 0; j < i; ++j) {
+            const SrPpuBackgroundGuardBandOutput prior = PpuBackgroundGuardOutput(guard, bands, j);
+            if (guard_storage_overlaps(output, guard->height, prior.pixels,
+                    prior.pitch_bytes * guard->height)) return false;
+        }
+        if (!ppu) continue;
+        if (guard_storage_overlaps(output, guard->height, ppu->renderBuffer,
+                (uint64_t)ppu->renderPitch * ppu->renderHeight) ||
+            guard_storage_overlaps(output, guard->height, ppu->authenticRenderBuffer,
+                (uint64_t)ppu->authenticRenderPitch * ppu->authenticRenderHeight) ||
+            guard_storage_overlaps(output, guard->height, ppu->objRangeCapture.pixels,
+                (uint64_t)ppu->objRangeCapture.pitch * ppu->objRangeCapture.y1) ||
+            guard_storage_overlaps(output, guard->height, ppu->objWinnerCapture.pixels,
+                (uint64_t)ppu->objWinnerCapture.pitch * ppu->objWinnerCapture.y1)) return false;
+        for (unsigned source = 0; source < kPpuOverlaySource_Count; ++source) {
+            const uint64_t bytes = (uint64_t)ppu->overlayRenderPitch[source] * ppu->overlayRenderHeight[source];
+            if (guard_storage_overlaps(output, guard->height, ppu->overlayRenderBuffer[source], bytes))
+                return false;
+            for (unsigned band = 0; band < 3; ++band)
+                if (guard_storage_overlaps(output, guard->height,
+                        ppu->overlayRenderBands[source][band], bytes)) return false;
+        }
+    }
+    return true;
+}
+
+bool PpuBackgroundGuardsStorageOverlap(const SrPpuBackgroundGuardRequest *a,
+        const SrPpuBackgroundGuardBands *ab, const SrPpuBackgroundGuardRequest *b,
+        const SrPpuBackgroundGuardBands *bb) {
+    for (unsigned i = 0; i < 4; ++i) for (unsigned j = 0; j < 4; ++j) {
+        const SrPpuBackgroundGuardBandOutput x = PpuBackgroundGuardOutput(a, ab, i);
+        const SrPpuBackgroundGuardBandOutput y = PpuBackgroundGuardOutput(b, bb, j);
+        if (guard_storage_overlaps(x, a->height, y.pixels, y.pitch_bytes * b->height)) return true;
+    }
+    return false;
+}
+
+void PpuClearBackgroundGuard(const SrPpuBackgroundGuardRequest *guard,
+        const SrPpuBackgroundGuardBands *bands) {
+    for (unsigned i = 0; i < 4; ++i) {
+        const SrPpuBackgroundGuardBandOutput output = PpuBackgroundGuardOutput(guard, bands, i);
+        if (output.pixels) for (unsigned y = 0; y < guard->height; ++y)
+            memset((uint8_t *)output.pixels + y * output.pitch_bytes, 0, guard->width * 4);
+    }
+}
+
+bool PpuRenderBackgroundGuard(Ppu *ppu, const SrPpuBackgroundGuardRequest *guard) {
+    return PpuRenderBackgroundGuardBands(ppu, guard, NULL);
+}
+
+bool PpuRenderBackgroundGuardBands(Ppu *ppu, const SrPpuBackgroundGuardRequest *guard,
+        const SrPpuBackgroundGuardBands *output_bands) {
+    if (!ppu || !PpuBackgroundGuardStorageValid(ppu, guard, output_bands)) return false;
+    PpuClearBackgroundGuard(guard, output_bands);
+    if (PPU_forcedBlank(ppu)) return true;
+    const unsigned layer = guard->layer;
+    const PpuVirtualTilemapBinding *world = &ppu->virtualTilemap[layer];
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[layer];
+    if (output_bands && (output_bands->flags & SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL) &&
+        (wrapped_delta10(ppu->hScroll[layer], world->hscroll_anchor) ||
+         wrapped_delta10(ppu->vScroll[layer], world->vscroll_anchor))) return false;
+    const unsigned supported_flags = kPpuOverlayFlag_RemoveFromGame |
+        kPpuOverlayFlag_MarkBgHalfAdd | kPpuOverlayFlag_ApplyBgFixedColorSubtract;
+    const bool sub = !(ppu->screenEnabled[0] & (1u << layer));
+    const int window = (ppu->screenWindowed[sub ? 1 : 0] & (1u << layer))
+        ? native_window_uniform(ppu, (int)layer) : 0;
+    if (PPU_mode(ppu) != 1 || PPU_bigTiles(ppu, layer) ||
+        (PPU_mosaicEnabled(ppu, layer) && PPU_mosaicSize(ppu) > 1) ||
+        !world->lookup || !(world->flags & kPpuVirtualTilemapFlag_IncludeAuthentic) ||
+        window < 0 || (capture->flags & ~supported_flags)) return false;
+    if (window || !(ppu->screenEnabled[sub ? 1 : 0] & (1u << layer))) return true;
+    /* Top guards run before the first ordinary margin/scanline, so the live
+     * frame's fade may not have refreshed the native colour tables yet. */
+    update_brightness(ppu);
+    if (!ppu->cgramRgbValid) rebuild_cgram_rgb(ppu);
+    const int64_t source_right = (int64_t)guard->source_x0 + guard->source_width;
+    const int64_t source_bottom = (int64_t)guard->source_y0 + guard->source_height;
+    const int64_t world_left = (int64_t)world->camera_x + guard->screen_x0 +
+        wrapped_delta10(ppu->hScroll[layer], world->hscroll_anchor);
+    const uint32_t fill = PpuOverlayTransparentFillColor(ppu, (PpuOverlaySource)layer);
+    uint32_t bands[3][kPpuSurfaceWidth];
+    uint8_t coverage[kPpuSurfaceWidth];
+    NativeOverlayLinePlan colors = {0};
+    colors.primary = bands[0]; colors.bands[0] = bands[1]; colors.bands[1] = bands[2];
+    colors.tile_coverage = coverage; colors.guard = true; colors.cpu_pixels = true;
+    native_overlay_palette(ppu, (int)layer, &colors);
+    for (unsigned y = 0; y < guard->height; ++y) {
+        const int sy = guard->screen_y0 + (int)y;
+        const PpuWidescreenLayerPolicy policy = PpuResolveWidescreenLayerPolicy(ppu, (uint8_t)layer, sy);
+        if (policy.fill != kPpuWidescreenBandFill_LiveWorld &&
+            policy.fill != kPpuWidescreenBandFill_RawWrap) return false;
+        const int64_t wy64 = (int64_t)world->camera_y + sy + 1 +
+            wrapped_delta10(ppu->vScroll[layer], world->vscroll_anchor);
+        if (wy64 < guard->source_y0 || wy64 >= source_bottom ||
+            wy64 < INT_MIN || wy64 > INT_MAX) continue;
+        const int wy = (int)wy64, ty = floor_div8(wy), fy = wy - ty * 8;
+        memset(bands, 0, sizeof(bands)); memset(coverage, 0, sizeof(coverage));
+        colors.screen_y = sy;
+        for (unsigned x = 0; x < guard->width;) {
+            const int64_t wx64 = world_left + x;
+            if (wx64 < guard->source_x0 || wx64 >= source_right ||
+                wx64 < INT_MIN || wx64 > INT_MAX) { ++x; continue; }
+            const int wx = (int)wx64, tx = floor_div8(wx), fx = wx - tx * 8;
+            unsigned run = 8u - (unsigned)fx;
+            if (run > guard->width - x) run = guard->width - x;
+            if ((int64_t)run > source_right - wx64) run = (unsigned)(source_right - wx64);
+            uint16_t entry = 0;
+            const PpuVirtualTilemapLookupResult found = world->lookup(world->context, tx, ty, &entry);
+            if (found == kPpuVirtualTilemapLookup_FallbackAuthentic) return false;
+            uint8_t semantic = (entry & 0x2000u) ? 2u : 1u;
+            if (found == kPpuVirtualTilemapLookup_Found && world->band_lookup)
+                (void)world->band_lookup(world->context, tx, ty, entry, &semantic);
+            if (semantic > 2) return false;
+            const unsigned band = semantic == 1 ? 0 : semantic == 2 ? 1 : 2;
+            const unsigned row = (entry & 0x8000u) ? 7u - (unsigned)fy : (unsigned)fy;
+            const uint32_t decoded = found == kPpuVirtualTilemapLookup_Found
+                ? decoded_4bpp_row(ppu, PPU_bgTileAdr(ppu, layer) + (entry & 1023u) * 16 + row) : 0;
+            for (unsigned i = 0; i < run; ++i) {
+                unsigned px = (unsigned)fx + i;
+                if (entry & 0x4000u) px = 7 - px;
+                const unsigned ink = (decoded >> (px * 4)) & 15u;
+                bands[0][x + i] = fill;
+                if (ink) bands[band][x + i] = native_overlay_color(&colors,
+                    ((entry >> 10) & 7u) * 16u + ink);
+            }
+            SrPpuCaptureTile tile;
+            if (native_capture_tile_lookup(ppu, layer, tx, ty, &tile) &&
+                (!(tile.flags & SR_PPU_CAPTURE_TILE_FOLLOW_POLICY) ||
+                 found == kPpuVirtualTilemapLookup_Found)) {
+                /* Ordinary scanout resolves replacements before exporting
+                 * the native source. Our scratch starts with that source,
+                 * so remove all its lanes before applying the same edit. */
+                if (tile.flags & SR_PPU_CAPTURE_TILE_REPLACE)
+                    for (unsigned b = 0; b < 3; ++b)
+                        memset(bands[b] + x, 0, run * sizeof(uint32_t));
+                native_capture_tile_run(ppu, (int)layer, (int)x, (int)run,
+                    fx, fy, 1, &tile, &colors, fill);
+            }
+            x += run;
+        }
+        if (output_bands) for (unsigned b = 0; b < 3; ++b) {
+            const SrPpuBackgroundGuardBandOutput *out = &output_bands->bands[b];
+            memcpy((uint8_t *)out->pixels + y * out->pitch_bytes, bands[b], guard->width * 4);
+        }
+        if (guard->pixels) {
+            uint32_t *out = (uint32_t *)((uint8_t *)guard->pixels + y * guard->pitch_bytes);
+            for (unsigned x = 0; x < guard->width; ++x) {
+                uint32_t pixel = bands[2][x];
+                if (bands[0][x] >> 24) pixel = bands[0][x];
+                if (bands[1][x] >> 24) pixel = bands[1][x];
+                out[x] = pixel;
+            }
         }
     }
     return true;

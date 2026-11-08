@@ -16,6 +16,15 @@ static int32_t s_live_diorama_skybox_world_x;
 static float s_live_diorama_skybox_world_x_fraction;
 static float s_pending_diorama_skybox_world_x_fraction;
 static bool s_live_diorama_skybox_periodic;
+static DioramaTrunkGuardSource s_live_diorama_trunk_guard;
+static DioramaVoxelGuardSource s_live_diorama_voxel_guard;
+
+void ActRaiser_LiveDioramaTrunkGuard(DioramaTrunkGuardSource *out) {
+  if (out) *out = s_live_diorama_trunk_guard;
+}
+void ActRaiser_LiveDioramaVoxelGuard(DioramaVoxelGuardSource *out) {
+  if (out) *out = s_live_diorama_voxel_guard;
+}
 static SrPpuBgPacket s_default_background_packet;
 static SrPpuBgPacket *s_background_packet = &s_default_background_packet;
 static const SrPpuBgPacket *s_live_background_packet;
@@ -564,6 +573,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   s_live_diorama_skybox_world_x = 0;
   s_live_diorama_skybox_world_x_fraction = 0.0f;
   s_live_diorama_skybox_periodic = false;
+  s_live_diorama_trunk_guard = (DioramaTrunkGuardSource){0};
+  s_live_diorama_voxel_guard = (DioramaVoxelGuardSource){0};
   PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_PpuSetup);
   ppu = &context->state;
   for (uint32_t source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++)
@@ -628,7 +639,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   if (g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_DeathHeim &&
       g_ram[kActRaiserWram_CurrentMap] == kActRaiserDeathHeimMap_Hub)
     s_background_packet->request_flags = 0;
-  const SrPpuScanoutRequest scanout_request = {
+  SrPpuScanoutRequest scanout_request = {
       .struct_size = sizeof(scanout_request),
       /* These dedicated, disjoint planes belong to scanout until it returns.
        * Host sprite synthesis writes them only afterward. Normal line observers
@@ -660,6 +671,23 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   SrPpuBackgroundViewRequest skybox_view = ActRaiser_PrepareSkyboxView(
       context, scanout_api, scanout_ready, profile_diorama,
       &s_pending_diorama_skybox_world_x_fraction);
+  SrPpuBackgroundGuardRequest trunk_guards[2];
+  DioramaTrunkGuardSource trunk_source;
+  const unsigned trunk_guard_count = ActRaiser_PrepareTrunkGuard(scanout_api,
+      scanout_ready, profile_diorama, trunk_guards, &trunk_source);
+  scanout_request.background_guards = trunk_guard_count ? trunk_guards : NULL;
+  scanout_request.background_guard_count = trunk_guard_count;
+  SrPpuBackgroundGuardRequest voxel_guard;
+  SrPpuBackgroundGuardBands voxel_guard_bands;
+  DioramaVoxelGuardSource voxel_source;
+  const unsigned voxel_guard_count = trunk_guard_count ? 0 :
+      ActRaiser_PrepareVoxelGuard(scanout_api, scanout_ready, profile_diorama,
+          &voxel_guard, &voxel_guard_bands, &voxel_source);
+  if (voxel_guard_count) {
+    scanout_request.background_guards = &voxel_guard;
+    scanout_request.background_guard_count = 1;
+    scanout_request.background_guard_bands[0] = &voxel_guard_bands;
+  }
 
   DioramaPerformance_End(producer_setup_performance);
   PerformanceMetrics_End(pipeline);
@@ -680,6 +708,12 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   ActRaiserChurchCapture_Complete(scanout_status, &scanout_result);
   ActRaiser_PublishScanout(scanout_status, &scanout_result, &skybox_view,
                            action);
+  if (trunk_guard_count && scanout_status == SR_RESULT_OK &&
+      (scanout_result.flags & SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY))
+    s_live_diorama_trunk_guard = trunk_source;
+  if (voxel_guard_count && scanout_status == SR_RESULT_OK &&
+      (scanout_result.flags & SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY))
+    s_live_diorama_voxel_guard = voxel_source;
   pipeline = PerformanceMetrics_Begin(kPerformance_PpuFinish);
   DioramaPerformanceScope producer_finish_performance = {0};
   if (profile_diorama)

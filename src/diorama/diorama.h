@@ -12,6 +12,7 @@
 #include "diorama_skybox_uv.h"
 #include "present/presentation_outcome.h"
 #include "render/render_device.h"
+#include "action/action_ground_cover_light.h"
 
 /* Decode deterministic named backdrop sources from immutable cart data. A
  * failed source remains unavailable and authored uses fall back to captured. */
@@ -134,6 +135,9 @@ enum { kDioramaObjectPriorityCount = 4 };
 
 typedef struct DioramaPlaneProjection {
   bool valid;
+  /* Final-arena native raster window uses viewport coordinates. Other planes
+   * retain the shared actor/world camera; this marker is Voxel07/08-only. */
+  bool native_atmosphere;
   /* Translation of current-capture pixels in a generated background texture. */
   ArRenderPointF capture_offset;
   /* Camera-space parallax correction; distinct from texture/clip coordinates. */
@@ -142,6 +146,12 @@ typedef struct DioramaPlaneProjection {
    * unchanged: widening its UVs would move/stretch attached effects. */
   int capture_apron;
   float u0, v0, u1, v1;
+  /* A scaled Voxel rear plane changes its coordinate mapping, not its
+   * captured artwork. Optional source UV bounds keep effect clipping at the
+   * actual drawn image edges. Other planes default to the mapping above;
+   * capture_apron and generated capture_offset still apply to these bounds. */
+  bool source_bounds_valid;
+  float source_u0, source_v0, source_u1, source_v1;
   float z_world;
   float rake;
   float bow;
@@ -195,6 +205,9 @@ typedef struct DioramaSkyboxProjection {
 typedef struct DioramaProjection {
   bool valid;
   bool voxel_scenery; /* Physical terrain/actor depths are published below. */
+  /* Per-authored-effect ownership of the widened snow top. Ready empty
+   * support still claims its bank; the WorldDust lip/grains stay independent. */
+  uint64_t voxel_ground_cover_claims[2];
   float auto_distance; /* Resolved fit before manual zoom; controls may observe it. */
   float camera_distance; /* Actual render distance after fit, zoom and clamping. */
   float matrix[16];
@@ -398,14 +411,22 @@ typedef struct DioramaView {
 struct SceneryShadingField;
 
 struct ActionTrunkAssets;
+struct DioramaTrunkGuardView;
+struct DioramaVoxelGuardView;
 struct ActionSceneEffectFrame;
 struct DioramaDepthSink;
 typedef struct DioramaScene {
   const DioramaRenderOptions *render; /* Required immutable policy for this draw. */
   uint8_t map_group, map_number, layer_section;
+  /* Presentation intent is independent of optional terrain contours. */
+  bool voxel_mode;
   const struct ActionTrunkAssets *trunk;
+  const struct DioramaTrunkGuardView *trunk_guard;
+  const struct DioramaVoxelGuardView *voxel_guard;
   DioramaTrunkSettings trunk_settings;
   const struct ActionSceneEffectFrame *trunk_effects;
+  /* Optional native snow lighting; omitted by geometry-only replay tools. */
+  ActionGroundCoverLightSamplesFn ground_cover_light;
   bool trunk_lighting, trunk_particles;
   uint32_t additive_plane_mask;
   /* 0 leaves authored color intact; 1 darkens BG1 low/high/far to black.

@@ -197,6 +197,11 @@ static bool PrepareVoxelAuthoredAtlas(ArRenderDevice *device,const DioramaCaptur
       EnsureVoxelAuthoredAtlas(device,geometry,capture->voxel_frame,visible);
 }
 static ArRenderTexture VoxelAuthoredAtlas(void) { return s_voxel_authored_atlas; }
+static DioramaHeatOwned VoxelOwnedHeat(unsigned crisp,bool finite) {
+  return (DioramaHeatOwned){1.f/kAuthoredAtlasWidth,
+      crisp?1.f/(s_voxel_crisp_rows[crisp-1]*16):1.f/kAuthoredAtlasHeight,
+      finite?2.f:1.f,crisp?4.f:1.f};
+}
 static bool VoxelOwnedArtReady(unsigned id) { return id<kVoxelAuthoredArtMax && s_voxel_authored_slot[id]>=0; }
 static ArRenderPointF VoxelOwnedArtUv(unsigned id,float u,float v) {
   const unsigned slot=s_voxel_authored_slot[id];
@@ -273,29 +278,44 @@ static void AuthoredBendOffsets(const VoxelAuthoredCell *a,float sx,float sy,
 }
 static bool SubmitVoxelAuthored(ArRenderDevice *device,const DioramaViewGeometry *g,
     const DioramaLayerDraw *layer,unsigned count) {
-  if(!count)return true;
-  SortVoxelSides(count);
+  if(!g->depth_sink&&s_ground_cover.face_count&&!GroundCoverShadeBatch())return false;
+  count=SortVoxelSides(g,count);
+  if(!count) {
+    const bool ok=!g->depth_sink||GroundCoverSubmitDepth(device,g,layer);
+    GroundCoverBeginBatch();return ok;
+  }
   for(unsigned first=0;first<count;) {
     const unsigned crisp=s_voxel_sides[s_voxel_order[first]].crisp_page;
-    unsigned end=first+1;while(end<count && s_voxel_sides[s_voxel_order[end]].crisp_page==crisp)++end;
+    const bool cover=s_voxel_sides[s_voxel_order[first]].ground_cover!=0;
+    const bool heat_owned=g->depth_sink && !cover && DioramaHeat_Active(&layer->lighting.heat);
+    const bool heat_finite=s_voxel_sides[s_voxel_order[first]].heat_finite;
+    unsigned end=first+1;while(end<count && s_voxel_sides[s_voxel_order[end]].crisp_page==crisp&&
+        (!heat_owned || s_voxel_sides[s_voxel_order[end]].heat_finite==heat_finite)&&
+        (s_voxel_sides[s_voxel_order[end]].ground_cover!=0)==cover)++end;
     for(unsigned i=first;i<end;++i) {
       const VoxelSide *s=&s_voxel_sides[s_voxel_order[i]];const unsigned at=(i-first)*4;
-      memcpy(s_voxel_vertices+at,s->v,sizeof(s->v));
-      memcpy(s_voxel_depths+at,s->depths,sizeof(s->depths));
-      memcpy(s_voxel_clip_w+at,s->clip_w,sizeof(s->clip_w));
+      if(cover)GroundCoverCopyFace(s->ground_cover-1,s_voxel_vertices+at,s_voxel_depths+at,s_voxel_clip_w+at);
+      else {
+        memcpy(s_voxel_vertices+at,s->v,sizeof(s->v));
+        memcpy(s_voxel_depths+at,s->depths,sizeof(s->depths));
+        memcpy(s_voxel_clip_w+at,s->clip_w,sizeof(s->clip_w));
+        if(heat_owned)memcpy(s_voxel_heat_world_xy+at,s->heat_world_xy,sizeof(s->heat_world_xy));
+      }
       if(crisp)for(unsigned j=0;j<4;++j)
         s_voxel_vertices[at+j].tex_coord.y=(s_voxel_vertices[at+j].tex_coord.y*kAuthoredAtlasHeight-(crisp-1)*512)/
             (s_voxel_crisp_rows[crisp-1]*16);
     }
     DioramaSceneryLightEffectParams lighting=layer->lighting;
     if(crisp){lighting.texel_width=1.f/2048;lighting.texel_height=1.f/(s_voxel_crisp_rows[crisp-1]*64);}
-    if(!RenderShadedDioramaDepthGeometryWithW(device,crisp?s_voxel_crisp_pages[crisp-1]:s_voxel_authored_atlas,
-        s_voxel_vertices,s_voxel_depths,s_voxel_clip_w,(end-first)*4,VoxelQuadIndices(),(end-first)*6,
-        layer->blend,NULL,(ArRenderRectF){0,0,1,1},&lighting,g->depth_sink,
+    lighting.heat_owned=heat_owned?VoxelOwnedHeat(crisp,heat_finite):(DioramaHeatOwned){0};
+    if(!RenderShadedDioramaDepthGeometryWithReceiver(device,cover?ArRenderTexture_Invalid():crisp?s_voxel_crisp_pages[crisp-1]:s_voxel_authored_atlas,
+        s_voxel_vertices,s_voxel_depths,s_voxel_clip_w,heat_owned?s_voxel_heat_world_xy:NULL,(end-first)*4,VoxelQuadIndices(),(end-first)*6,
+        cover?kArRenderBlendMode_Alpha:layer->blend,NULL,(ArRenderRectF){0,0,1,1},cover?NULL:&lighting,g->depth_sink,
         layer->description->plane,false))return false;
     first=end;
   }
-  return true;
+  const bool ok=!g->depth_sink||GroundCoverSubmitDepth(device,g,layer);
+  GroundCoverBeginBatch();return ok;
 }
 static bool AddVoxelAuthoredFace(ArRenderDevice *device,const DioramaCapture *capture,
     const DioramaViewGeometry *g,const DioramaLayerDraw *layer,const VoxelAuthoredCell *cell,
@@ -305,7 +325,7 @@ static bool AddVoxelAuthoredFace(ArRenderDevice *device,const DioramaCapture *ca
     if(!SubmitVoxelAuthored(device,g,layer,*count))return false;*count=0;
   }
   const int slot=s_voxel_authored_slot[cell->art_id[art]];if(slot<0)return false;
-  VoxelSide face={0};
+  VoxelSide face={.heat_finite=kind==kDioramaVoxelFace_Front || kind==kDioramaVoxelFace_Backing};
   const bool native_front=kind==kDioramaVoxelFace_Front && (cell->native_transform||cell->native_front_art);
   if(native_front) {
     const unsigned page=(unsigned)slot/kVoxelCrispPageTiles;
@@ -314,12 +334,46 @@ static bool AddVoxelAuthoredFace(ArRenderDevice *device,const DioramaCapture *ca
   }
   DioramaVoxelPickFace pick={.authored=true,.kind=kind,.priority=priority,.plane=layer->description->plane,
       .cell_x=cell->x/16,.cell_y=cell->y/16,.art_index=art};
+  const bool material_sample=cell->surface_sample_size[art]>1;
+  if(material_sample && !cell->surface_derived[art]) {
+    pick.art_source_x=cell->surface_sample_x[art];pick.art_source_y=cell->surface_sample_y[art];
+    pick.art_source_size=cell->surface_sample_size[art];
+  }
   const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
   const float oy=capture->camera_y-capture->authentic_y0+1;
+  const bool cover_top=s_ground_cover.active_count&&kind==kDioramaVoxelFace_Top;
+  DioramaGroundCoverCap cover={.actor_z=ActionVoxel_PlayRecess(layer->voxel_geometry),
+      .contact_radius=6*g->aspect_x/((g->u1-g->u0)*SR_PPU_SURFACE_MAX_WIDTH)};
+  if(cover_top&&cell->native_front_art&&((cell->automatic_art&(1u<<art))||material_sample)&&
+      ActionVoxel_Profile(layer->voxel_geometry)==kActionVoxelProfile_NorthwallSnow)
+    cover.receiver=VoxelSnowGroundReceiver;
+  if(cover_top&&!(cell->automatic_art&(1u<<art))&&!material_sample)cover.top_pixels=cell->pixels[art];
+  unsigned cover_quadrant=0;
   for(unsigned j=0;j<4;++j) {
     const float sx=cell->x+(xy[j*2]-cell->x-8-cell->offset_x)*16/cell->width+8;
     const float sy=xy[j*2+1];float dx,dy,dz;AuthoredBendOffsets(cell,sx,sy,&dx,&dy,&dz);
     float x,y,z;ActionVoxel_TransformPoint(&cell->transform,xy[j*2]+dx,sy+dy,depths[j]+dz,&x,&y,&z);
+    face.heat_world_xy[j]=(ArRenderPointF){x,y};
+    if(cover_top) {
+      if(j==0) {
+        cover.from=(ActionGroundCoverPoint){sx,sy};
+        const unsigned qx=(unsigned)fminf(1,fmaxf(0,floorf((sx-cell->x+.0001f)/8)));
+        const unsigned qy=(unsigned)fminf(1,fmaxf(0,floorf((sy-cell->y+.0001f)/8)));
+        cover_quadrant=qy*2+qx;
+      } else if(j==1)cover.to=(ActionGroundCoverPoint){sx,sy};
+      float lift_x,lift_y,lift_z;ActionVoxel_TransformPoint(&cell->transform,
+          xy[j*2]+dx,sy+dy-1,depths[j]+dz,&lift_x,&lift_y,&lift_z);
+      float near,far;ActionVoxel_AuthoredDepths(cell,cover_quadrant,sy,&near,&far);
+      /* Pressure belongs to the original receiving surface, not an actor or
+       * repeating-art slice that happens to be submitted in this pass. */
+      cover.pressure_quad=true;
+      ActionVoxel_TransformPoint(&cell->transform,xy[j*2]+dx,sy+dy,(j>=2?far:near)+dz,
+          &cover.pressure_xyz[j*3],&cover.pressure_xyz[j*3+1],&cover.pressure_xyz[j*3+2]);
+      cover.corners[j]=(DioramaGroundCoverCorner){.position={x,y,z},.lift={lift_x-x,lift_y-y,lift_z-z},
+          .depth_fraction=fmaxf(0,fminf(1,(depths[j]-near)/fmaxf(.000001f,far-near)))};
+      cover.top_uv[j*2]=fmaxf(.0001f,fminf(15.9999f,uv[j*2]));
+      cover.top_uv[j*2+1]=fmaxf(.0001f,fminf(15.9999f,uv[j*2+1]));
+    }
     const float u=(x-ox)/SR_PPU_SURFACE_MAX_WIDTH,v=(y-oy)/SR_PPU_SURFACE_MAX_HEIGHT;
     const float scale=1+z/fmaxf(1,g->camera.distance);
     if(!VoxelProjectWithW(g,((u-g->u0)/(g->u1-g->u0)-.5f)*g->aspect_x*scale,
@@ -333,7 +387,7 @@ static bool AddVoxelAuthoredFace(ArRenderDevice *device,const DioramaCapture *ca
     const float shade=(kind==kDioramaVoxelFace_Side || kind==kDioramaVoxelFace_Left ||
         kind==kDioramaVoxelFace_Right || kind==kDioramaVoxelFace_Bottom)?.82f:1;
     face.v[j].color.r*=shade;face.v[j].color.g*=shade;face.v[j].color.b*=shade;
-    if(native_front || kind==kDioramaVoxelFace_Backing) {
+    if(native_front || kind==kDioramaVoxelFace_Backing || material_sample) {
       const float source_u=(sx-ox)/SR_PPU_SURFACE_MAX_WIDTH,source_v=(sy-oy)/SR_PPU_SURFACE_MAX_HEIGHT;
       float light=1-SceneryDimming_Amount(layer->dimming,layer->dimming_ramp,source_u,source_v);
       if(layer->exposure && layer->exposure->sample)
@@ -344,7 +398,13 @@ static bool AddVoxelAuthoredFace(ArRenderDevice *device,const DioramaCapture *ca
     pick.world_xy[j*2]=sx;pick.world_xy[j*2+1]=sy;pick.depth[j]=face.depths[j];pick.clip_w[j]=face.clip_w[j];
   }
   if(g->options->voxel_observe_face)g->options->voxel_observe_face(g->options->voxel_observer_userdata,&pick);
-  s_voxel_sides[(*count)++]=face;return true;
+  s_voxel_sides[(*count)++]=face;
+  if(cover_top) {
+    int used=(int)*count;
+    if(!GatherVoxelGroundCover(capture,g,layer,&cover,1,&used))return false;
+    *count=(unsigned)used;
+  }
+  return true;
 }
 /* World-fixed subdivision plus profile endpoints keeps every adjacent face
  * on the same piecewise curve. Clipping and actor splits reuse these knots. */
@@ -407,6 +467,23 @@ static bool DrawVoxelNativeTransformedFront(ArRenderDevice *device,const Diorama
     const VoxelTrunkCurve *curve=ActionVoxel_TrunkCurveForCell(geometry,tx,ty);
     const bool column=!curve && ActionVoxel_ColumnCurveForCell(geometry,tx,ty);
     if(column)curve=ActionVoxel_ColumnCurveForCell(geometry,tx,ty);
+    if(column && curve->contact_count) {
+      for(unsigned col=0;col<4;++col) {
+        const float x0=a->x+x+col*2,x1=x0+2;
+        VoxelTrunkCurve section;ActionVoxel_ColumnSection(curve,x0+1,&section);
+        float ys[4];const unsigned ny=VoxelTrunkCuts(&section,a->y+y,a->y+y+8,0,false,ys);
+        for(unsigned row=0;row+1<ny;++row) {
+          const float z0=ActionVoxel_ColumnFrontDepth(geometry,&section,ys[row]);
+          const float z1=ActionVoxel_ColumnFrontDepth(geometry,&section,ys[row+1]);
+          const float xy[]={x0,ys[row],x1,ys[row],x1,ys[row+1],x0,ys[row+1]};
+          const float z[]={z0,z0,z1,z1};
+          const float uv[]={x0-a->x,ys[row]-a->y,x1-a->x,ys[row]-a->y,
+              x1-a->x,ys[row+1]-a->y,x0-a->x,ys[row+1]-a->y};
+          if(!AddVoxelAuthoredFace(device,capture,g,layer,a,0,kDioramaVoxelFace_Front,high,xy,z,uv,count))return false;
+        }
+      }
+      continue;
+    }
     float ys[16];unsigned ny=0;
     if(curve)ny=VoxelTrunkCuts(curve,a->y+y,a->y+y+8,0,true,ys);
     else if(mask){for(unsigned row=0;row<=8;++row)ys[ny++]=a->y+y+row;}
@@ -440,6 +517,7 @@ static bool DrawVoxelAuthored(ArRenderDevice *device,const DioramaCapture *captu
   const float unit=16*g->aspect_x/((g->u1-g->u0)*SR_PPU_SURFACE_MAX_WIDTH);
   if(!(unit>0))return false;
   unsigned count=0;
+  GroundCoverBeginBatch();
   for(unsigned i=0;i<visible;++i) {
     const VoxelAuthoredCell *a=s_voxel_authored_visible[i];
     if(a->native_transform) {
@@ -473,7 +551,11 @@ static bool DrawVoxelAuthored(ArRenderDevice *device,const DioramaCapture *captu
     for(unsigned e=0;e<contours;++e) {
       const VoxelAuthoredContour edge=edges[e];const unsigned side=edge.side,q=(edge.y/8)*2+edge.x/8;
       if(!(a->faces&masks[side]) || a->priority[q]!=high)continue;
+      const bool native_actor_priority=!high && a->native_actor_priority[q];
+      if(native_actor_priority && front_phase)continue;
       const bool automatic=(a->automatic_art&(1u<<arts[side]))!=0;
+      const unsigned sample_size=a->surface_sample_size[arts[side]];
+      const bool material_sample=sample_size>1;
       const float sx=a->x+edge.x+(side==1),sy=a->y+edge.y+(side==2);
       const unsigned axis=side&1?kDioramaVoxelBend_Y:kDioramaVoxelBend_X;
       const float start=side&1?sy:sx;
@@ -492,17 +574,22 @@ static bool DrawVoxelAuthored(ArRenderDevice *device,const DioramaCapture *captu
         /* Bound by the undeformed material interval. A tilted actor plane
          * can reveal an interior strip even when both endpoints collapse. */
         const float min_depth=fminf(raw_near[0],raw_near[1]),max_depth=fmaxf(raw_far[0],raw_far[1]);
-        const int first=automatic?0:(int)floorf(min_depth/unit);
-        const int last=automatic?1:(int)ceilf(max_depth/unit);
+        const bool single_depth=automatic || material_sample;
+        const int first=single_depth?0:(int)floorf(min_depth/unit);
+        const int last=single_depth?1:(int)ceilf(max_depth/unit);
         for(int tile=first;tile<last;++tile) {
-          const float z0=automatic?min_depth:tile*unit,z1=automatic?max_depth:(tile+1)*unit;
-          float tc[8];const unsigned nt=AuthoredCapCutsShifted(raw_near,raw_far,z0,z1,high,local_split,tc);
+          const float z0=single_depth?min_depth:tile*unit,z1=single_depth?max_depth:(tile+1)*unit;
+          /* Authored beam dimensions/art retain the native actor order. Only
+           * material tile boundaries may subdivide these complete caps. */
+          float tc[8];const unsigned nt=AuthoredCapCutsShifted(raw_near,raw_far,z0,z1,
+              high || native_actor_priority,local_split,tc);
           for(unsigned part=0;part+1<nt;++part) {
-            float zn[2],zf[2],px[2],py[2],u[2];
+            float zn[2],zf[2],px[2],py[2],u[2],material_near[2],material_far[2];
             for(unsigned end=0;end<2;++end) {
               const float t=tc[part+end];zn[end]=raw_near[0]+(raw_near[1]-raw_near[0])*t;
               zf[end]=raw_far[0]+(raw_far[1]-raw_far[0])*t;
-              AuthoredCapSpan(&zn[end],&zf[end],high,front_phase,
+              material_near[end]=zn[end];material_far[end]=zf[end];
+              if(!native_actor_priority)AuthoredCapSpan(&zn[end],&zf[end],high,front_phase,
                   local_split[0]+(local_split[1]-local_split[0])*t);
               zn[end]=fmaxf(z0,fminf(z1,zn[end]));zf[end]=fmaxf(z0,fminf(z1,zf[end]));
               px[end]=base_x[0]+(base_x[1]-base_x[0])*t;py[end]=base_y[0]+(base_y[1]-base_y[0])*t;
@@ -520,6 +607,21 @@ static bool DrawVoxelAuthored(ArRenderDevice *device,const DioramaCapture *captu
               const float along=fmaxf(.5f,fminf(edge.length-.5f,u[end]-(side&1?edge.y:edge.x)));
               uv[vertex*2]=edge.x+(side&1?.5f:along);
               uv[vertex*2+1]=edge.y+(side&1?along:.5f);
+            }
+            else if(material_sample)for(unsigned vertex=0;vertex<4;++vertex) {
+              /* Material skins keep vertical grain vertical. Their depth
+               * coordinate covers the original thickness even when an actor
+               * plane clips the face; explicit painted-art UVs stay as-is. */
+              const unsigned end=vertex==1 || vertex==2;
+              const float origin=floorf((side&1?edge.y:edge.x)/(float)sample_size)*sample_size;
+              const float along=fmaxf(0,fminf(1,(u[end]-origin)/sample_size));
+              float across=fmaxf(0,fminf(1,(z[vertex]-material_near[end])/
+                  fmaxf(.00001f,material_far[end]-material_near[end])));
+              if(side==1 || side==2)across=1-across;
+              uv[vertex*2]=.5f+((side&1)?15*across:(sample_size-1)*along);
+              uv[vertex*2+1]=.5f+((side&1)?(sample_size-1)*along:15*across);
+              if(a->surface_native_x[arts[side]])
+                uv[vertex*2]=fmaxf(.0001f,fminf(15.9999f,u[end]-origin));
             }
             if(!AddVoxelAuthoredFace(device,capture,g,layer,a,arts[side],kinds[side],high,xy,z,uv,&count))return false;
           }

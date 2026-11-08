@@ -24,6 +24,7 @@ typedef struct DioramaDepthVertex {
   float clip[4];
   ArRenderColorF color;
   ArRenderPointF uv;
+  ArRenderPointF heat_world_xy;
 } DioramaDepthVertex;
 
 typedef enum DioramaDepthMode {
@@ -81,6 +82,10 @@ typedef struct DioramaDepthSubmission {
    * compositor's affine mapping. Native actors always use NULL. Any clipping
    * before this boundary must also preserve the corresponding vertex W. */
   const float *clip_w;
+  /* Optional transformed native-world receiver XY, independent of sample UV.
+   * Owned artwork supplies this only with lighting.heat_owned enabled. NULL
+   * retains the existing capture/guard UV mapping. Borrowed for submit only. */
+  const ArRenderPointF *heat_world_xy;
 } DioramaDepthSubmission;
 
 typedef struct DioramaDepthSink {

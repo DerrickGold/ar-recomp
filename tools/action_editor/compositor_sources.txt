@@ -14,6 +14,8 @@ src/render/scene3d_math.c
 src/render/presentation_layout.c
 src/present/display_geometry.c
 src/action/action_voxel.c
+src/action/action_ground_cover.c
 src/diorama/diorama_capture_blend.c
 src/action/action_bg_plan.c
 src/action/action_camera_bounds.c
+src/diorama/diorama_trunk_guard_layout.c

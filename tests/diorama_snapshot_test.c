@@ -39,13 +39,16 @@ static bool NativeBatch(ArRenderDevice *device, bool begin) {
 int main(void) {
   const DioramaRenderOptions options={.visible_planes=1,.skybox=kDioramaSky_Off,
       .source_effect_batch=NativeBatch};
-  const DioramaScene scene={.render=&options,.map_group=1,.map_number=1};
+  const DioramaScene scene={.render=&options,.map_group=1,.map_number=1,
+      .voxel_guard=(const struct DioramaVoxelGuardView *)(uintptr_t)1,
+      .trunk_guard=(const struct DioramaTrunkGuardView *)(uintptr_t)1};
   const DioramaCapture capture={.width=360,.height=352,.authentic_y0=64,.obj_apron=32};
   const DioramaView view={.visible_width=360,.distance_scale=1,.camera_framing_weight=1,
       .viewport={0,0,960,600}};
   DioramaSnapshot snapshot, decoded;
   assert(DioramaSnapshot_Describe(&snapshot,&capture,&view,&scene,1,0,0));
   assert(!snapshot.options.source_effect_batch && !snapshot.options.draw_resident_skybox);
+  assert(!snapshot.scene.voxel_guard && !snapshot.scene.trunk_guard);
   DioramaScene host_scene=scene;
   host_scene.backdrop=HostBackdrop;
   memset(&decoded,0xa5,sizeof(decoded));

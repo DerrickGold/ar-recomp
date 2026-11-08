@@ -1,5 +1,13 @@
 /* Standalone preview/replay has no host profiler or clock. */
 #include "diorama/diorama_performance.h"
+#include "app/performance_metrics.h"
+#ifdef __EMSCRIPTEN__
+/* Native replay/benchmark targets link the shared metrics implementation. */
+void PerformanceMetrics_Add(PerformanceCount counter, uint64_t value) {
+  (void)counter;
+  (void)value;
+}
+#endif
 DioramaPerformanceScope DioramaPerformance_Begin(DioramaPerformanceStage stage) {
   return (DioramaPerformanceScope){.stage=stage};
 }

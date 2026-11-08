@@ -12,7 +12,7 @@ const shaderResult=spawnSync('python3',['-c',
 assert.equal(shaderResult.status,0,shaderResult.stderr);
 const sources=JSON.parse(shaderResult.stdout);
 function mockGl() {
-  const state={enabled:new Set(),boundBuffers:new Map(),textures:new Map(),programs:[],draws:[],active:1000};
+  const state={enabled:new Set(),boundBuffers:new Map(),textures:new Map(),programs:[],draws:[],clears:[],active:1000};
   let next=1;
   const methods={
     TEXTURE0:1000,TEXTURE1:1001,INVALID_INDEX:0xffffffff,NO_ERROR:0,
@@ -33,6 +33,7 @@ function mockGl() {
     checkFramebufferStatus:()=> 'FRAMEBUFFER_COMPLETE',getExtension:()=>({}),getError:()=>0,isContextLost:()=>false,
     enable:cap=>state.enabled.add(cap),disable:cap=>state.enabled.delete(cap),depthMask:v=>{state.depthMask=v;},
     depthFunc:v=>{state.depthFunc=v;},drawBuffers:v=>{state.outputs=v;},
+    clear:()=>state.clears.push({fbo:state.fbo,completedDraws:state.draws.length}),
     drawElements:()=>{
       const uniforms=state.program.uniforms;
       const sampled=['u_texture','u_illumination','u_attributes','u_enemy_light','opaque_depth','opaque_order'];
@@ -78,6 +79,26 @@ assert.equal(backend.depth_begin(),1);
 assert.equal(backend.depth_geometry(art,vertices,3,indices,3,1,0,0,-1,depths,clipW,0),1);
 const beforeAbort=state.draws.length;assert.equal(backend.depth_finish(0),1);assert.equal(state.draws.length,beforeAbort);
 assert.equal(backend.geometry(art,vertices,3,indices,3,1,0,0,-1),1);
+
+/* Top/bottom native guards reuse one compact AA target. A pending world draw
+ * must consume the previous strip before that target is cleared and rewritten. */
+const guardAA=backend.create(64,64,2,1,1);
+assert.ok(guardAA);
+assert.equal(backend.depth_begin(),1);
+assert.equal(backend.target(0),1);
+const beforeGuard=state.draws.length;
+assert.equal(backend.depth_geometry(guardAA,vertices,3,indices,3,1,0,0,-1,depths,clipW,0),1);
+assert.equal(state.draws.length,beforeGuard,'Guard draw remains queued before target reuse');
+assert.equal(backend.target(guardAA),1);
+assert.equal(backend.depthQueue.length,0,'Switching to the sampled guard target drains its pending use');
+assert.equal(state.draws.length,beforeGuard+2,'Opaque guard draw and blended tail both drain');
+for(const draw of state.draws.slice(beforeGuard))
+  assert.equal(draw.fbo,backend.depthCanvas.fbo,'Queued guard renders into its original world target');
+assert.equal(backend.clear(0,0,0,0),1);
+assert.equal(state.clears.at(-1).fbo,backend.textures[guardAA].fbo);
+assert.equal(state.clears.at(-1).completedDraws,beforeGuard+2,'Clear follows both consumers of the previous guard strip');
+assert.equal(backend.target(0),1);
+assert.equal(backend.depth_finish(1),1);
 
 /* Compile and link the actual generated ESSL, including all material wrappers
  * and the production alpha helper, without opening a window or using a GPU. */

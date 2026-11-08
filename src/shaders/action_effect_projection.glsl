@@ -93,6 +93,9 @@ vec4 effect_bounds(int plane, vec2 origin, uint flags, bool clipping) {
     vec2 motion=effect_motion(plane);
     vec4 bounds=p.sky.z!=0?sky_bounds(origin.y+motion.y+p.sky.y,(flags&2u)!=0u):p.bounds;
     if (p.sky.z == 1) bounds -= p.sky.xyxy;
+    // Only the cloud's lower capture clip yields to its finite authored clip.
+    // The primitive clip is intersected immediately by every caller.
+    if((flags&32u)!=0u)bounds.w=1e9;
     if(!clipping && p.sky.z==0 && p.fold.x!=0)bounds.w=1e9;
     return bounds-motion.xyxy-origin.xyxy;
 }

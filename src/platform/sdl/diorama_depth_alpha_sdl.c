@@ -14,7 +14,7 @@
 /* Pipelines: 0 opaque writers (color + order MRT, depth), 1 alpha tail, 2 additive tail. */
 enum { kAlphaPipelineCount = 3 };
 typedef struct AlphaVertex { DioramaDepthVertex vertex; float ordinal; } AlphaVertex;
-_Static_assert(sizeof(AlphaVertex)==44 && offsetof(AlphaVertex,ordinal)==40,
+_Static_assert(sizeof(AlphaVertex)==52 && offsetof(AlphaVertex,ordinal)==48,
     "fractional world vertex layout");
 typedef struct ArGpuDioramaDepthAlpha {
   SDL_GPUGraphicsPipeline *pipeline[3][kAlphaPipelineCount];
@@ -47,7 +47,8 @@ static SDL_GPUGraphicsPipeline *Pipeline(ArGpuDioramaDepthPass *p,
     {0,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,0},
     {1,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,16},
     {2,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,32},
-    {3,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,40}};
+    {3,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,48},
+    {4,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,40}};
   SDL_GPUColorTargetDescription colors[2]={{.format=p->color_format},{.format=p->alpha->order_format}};
   if(tail)colors[0].blend_state=(SDL_GPUColorTargetBlendState){.enable_blend=true,
     .src_color_blendfactor=SDL_GPU_BLENDFACTOR_SRC_ALPHA,
@@ -57,7 +58,7 @@ static SDL_GPUGraphicsPipeline *Pipeline(ArGpuDioramaDepthPass *p,
     .dst_alpha_blendfactor=kind==2?SDL_GPU_BLENDFACTOR_ONE:SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
     .alpha_blend_op=SDL_GPU_BLENDOP_ADD};
   const SDL_GPUGraphicsPipelineCreateInfo info={.vertex_shader=vs,.fragment_shader=fs,
-    .vertex_input_state=(SDL_GPUVertexInputState){&buffer,1,attributes,4},
+    .vertex_input_state=(SDL_GPUVertexInputState){&buffer,1,attributes,5},
     .primitive_type=SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
     .rasterizer_state={.fill_mode=SDL_GPU_FILLMODE_FILL,.cull_mode=SDL_GPU_CULLMODE_NONE,
       .front_face=SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,.enable_depth_clip=true},

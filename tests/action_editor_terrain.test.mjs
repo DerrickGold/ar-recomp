@@ -289,6 +289,56 @@ function fixture() {
   console.log('Voxel history: live artwork checkpoints, Cancel isolation, grouped choices, semantic no-ops, restored automatic faces, interrupted drags and immediate conversion callbacks passed.');
 }
 
+/* Rendered material donors follow preview refreshes, while explicit artwork
+ * and returning to Auto use the same undoable editing path. */
+{
+  const {run,elements}=editor(fixture());
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};
+    SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.focusVoxelSelection=()=>true;
+    $('#voxelMode').value='2';$('#sharedGl').width=960;$('#sharedGl').height=640;
+    const materialHit={kind:'tile',x:2,y:3,face:'left',priority:0,front:-.1,back:.3,width:16,offset:0,faces:63,
+      quad:[[20,20],[40,20],[40,40],[20,40]],sampleSource:{bg:0,x:4,y:4,size:8}};
+    let renderedMaterial={...materialHit,sampleSource:{bg:0,x:8,y:8,size:8}};
+    SharedRoomPreview.voxelTile=()=>({...renderedMaterial});SharedRoomPreview.voxelObjects=()=>[];
+    const actualFaceSampler=paletteSampleFaceArt;let sampledMaterialHit;
+    paletteSampleFaceArt=hit=>{sampledMaterialHit=hit;return actualFaceSampler(hit);};
+    setMode('shared');$('#voxelEdit').onclick();VoxelEditor.select(materialHit);
+    VoxelEditor.afterRender();VoxelEditor.sampleSettings();`);
+  assert.equal(run('JSON.stringify(sampledMaterialHit.sampleSource)'),'{"bg":0,"x":8,"y":8,"size":8}',
+    'refresh uses the current native material patch rather than the original pick');
+  run(`renderedMaterial={...materialHit,sampleSource:null,sampleSourceAmbiguous:true};
+    VoxelEditor.afterRender();VoxelEditor.sampleSettings();`);
+  assert.equal(run('sampledMaterialHit.sampleSource'),null,'an ambiguous render explicitly clears its former donor');
+  assert.equal(run('paletteSampleFaceArt(sampledMaterialHit)'),null,'refresh never chooses a random material band');
+  run(`renderedMaterial={...materialHit,face:'bottom'};delete renderedMaterial.sampleSource;
+    VoxelEditor.afterRender();VoxelEditor.sampleSettings();`);
+  assert.equal(run('sampledMaterialHit.face'),'bottom');
+  assert.equal(run('sampledMaterialHit.sampleSource'),null,'a face without donor metadata cannot inherit the old face donor');
+  assert.equal(run('sampledMaterialHit.sampleSourceAmbiguous'),false,'a later unambiguous face clears the ambiguity marker');
+  run(`VoxelEditor.select(materialHit);VoxelEditor.edit('width',12);VoxelEditor.edit('front',-.2);
+    VoxelEditor.edit('side-art','0,0001,0002,0003,0004,4,4,8');
+    VoxelEditor.edit('left-art','0,0004,0003,0002,0001,0,0,16');
+    const explicitMaterial=VoxelEditor.previewSection(room,roomSectionIni(room));
+    $('#voxelLeftAuto').onclick();VoxelEditor.sampleSettings();`);
+  assert.equal(run('paletteArtValue(paletteSampleFaceArt(sampledMaterialHit).art)'),
+    '0,0001,0002,0003,0004,4,4,8','directional Auto preserves an explicitly painted shared side');
+  run('undo()');assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),run('explicitMaterial'));
+  run(`redo();$('#voxelSideAuto').onclick();
+    renderedMaterial={...materialHit,sampleSource:{bg:0,x:8,y:8,size:8}};
+    VoxelEditor.afterRender();VoxelEditor.sampleSettings();`);
+  assert.equal(run('paletteArtValue(paletteSampleFaceArt(sampledMaterialHit).art)'),
+    run('paletteArtValue(paletteSourceArt(renderedMaterial.sampleSource))'),'resetting shared art returns to the current native Auto patch');
+  const automaticMaterial=run('VoxelEditor.previewSection(room,roomSectionIni(room))');
+  assert.match(automaticMaterial,/cell:2,3 front:-0.2 width:12/);
+  assert.match(automaticMaterial,/side-art:auto left-art:auto/,'Auto restores the automatic policy without touching geometry');
+  run('undo();redo();VoxelEditor.apply()');
+  const saved=run('mergeDioramaIni()');
+  assert.deepEqual(saved.split('\n').filter(Boolean),automaticMaterial.split('\n').filter(Boolean));
+  const reload=editor(fixture(),{ini:saved});assert.equal(reload.run('mergeDioramaIni()'),saved,'Auto policy survives Apply and reload');
+  assert.equal(elements.get('#voxelStatus').classList.contains('error'),false);
+  console.log('Voxel material artwork: exact donor refresh, ambiguous bands, face changes, explicit precedence, Auto reset, Undo/Redo and reload passed.');
+}
+
 /* Undo commits and ends live map/pixel strokes; a new stroke forks history
  * before Redo can replay an operation from the old branch. */
 {
@@ -722,6 +772,40 @@ function fixture() {
   assert.throws(()=>run('VoxelEditor.resetProperty()'),/Select the whole classified object/,'removing the last authored geometry fields must not create a partial native transform');
   assert.equal(run('VoxelEditor.pending()'),false);
   console.log('Native group preflight: complete component membership, shared canonical transform, authored subsets, copy/reset guards, no-op identity and cached queries passed.');
+}
+
+/* Art Auto tokens stay serialized reset instructions without turning a
+ * native transform into a prism or blocking its rear-copy ownership. */
+{
+  const autoArt='back-art:auto front-art:auto top-art:auto side-art:auto left-art:auto right-art:auto bottom-art:auto';
+  const {run}=editor(fixture(),{ini:`[layers:01:01]\nvoxel-cell = cell:2,3 size:2,2 ${autoArt}\n`});
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
+    SharedRoomPreview.voxelObjects=()=>[];SharedRoomPreview.voxelTransformHandles=()=>null;
+    SharedRoomPreview.voxelTile=(x,y)=>({kind:'tile',x,y,front:.1,back:.3,width:16,offset:0,
+      nativeGeometry:true,transformSupported:true});
+    SharedRoomPreview.voxelGroup=()=>({supported:true,status:'ok',label:'Stump',
+      cells:[[2,3],[3,3],[2,4],[3,4]],transformSupported:true});
+    const autoTransform={px:48,py:80,pz:.2,dx:8,dy:0,dz:0,sx:.5,sy:1,sz:1};
+    VoxelEditor.selectCells([[2,3]]);`);
+  assert.throws(()=>run('VoxelEditor.setTransform(autoTransform)'),/Select the whole classified object/,
+    'Auto surface tokens do not bypass native whole-object membership');
+  assert.equal(run('VoxelEditor.pending()'),false);
+  run('VoxelEditor.selectCells([[2,3],[3,3],[2,4],[3,4]]);VoxelEditor.setTransform(autoTransform)');
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/back-art:auto/,
+    'BackArt Auto is accepted without deleting its serialized reset token');
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/transform:48,80,0.2,8,0,0,0.5,1,1/);
+  assert.equal(run('VoxelEditor.apply()'),true);
+  const saved=run('mergeDioramaIni()');
+  assert.equal(editor(fixture(),{ini:saved}).run('mergeDioramaIni()'),saved,'Auto plus native transform round-trips');
+  for(const backing of ['backing:auto','backing:none','backing:fill','backing:replace',
+      'back-art:0,0010,0011,0012,0013,0,0,16']) {
+    const ini=`[layers:01:01]\nvoxel-cell = cell:2,3 size:2,2 ${backing}\n`;
+    run(`loadIniText(${JSON.stringify(ini)},'explicit-backing.ini');VoxelEditor.selectCells([[2,3],[3,3],[2,4],[3,4]])`);
+    assert.throws(()=>run('VoxelEditor.setTransform(autoTransform)'),/backing-only overrides/,
+      `${backing} remains an explicit backing instruction`);
+    assert.equal(run('VoxelEditor.pending()'),false);
+  }
+  console.log('Art Auto transforms: native group membership, rear-art reset allowance, serialization and explicit backing authority passed.');
 }
 
 /* Final-battle material uses the same project/undo path as scenery. */

@@ -122,6 +122,7 @@ static void SnapshotPpu(const Ppu *ppu, SrPpuStateSnapshot *state) {
       ? SR_PPU_RENDERER_AUTHENTIC_SURFACE_BOUND : 0u;
   for (unsigned layer = 0; layer < 4u; layer++) {
     state->background_tilemap_control[layer] = ppu->bgXsc[layer];
+    state->backgrounds[layer].tile_base_word = (uint16_t)PPU_bgTileAdr(ppu,layer);
     state->backgrounds[layer].h_scroll = ppu->hScroll[layer];
     state->backgrounds[layer].v_scroll = ppu->vScroll[layer];
     state->backgrounds[layer].tilemap_base_word =
@@ -2616,6 +2617,7 @@ static void TestLiveVoxelAuthoringCache(Ppu *ppu, const ActionRoomScene *scene) 
 }
 
 /* Optional stock-ROM integration oracle. The normal CTest run stays ROM-free. */
+#include "actraiser_jungle_water_cache.inc"
 static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t map_number) {
   fprintf(stderr,"[voxel-publication] %02x:%02x terrain=%u\n",group,map_number,voxel_terrain);
   FILE *file=fopen(path,"rb");CHECK(file);if(!file)return;
@@ -2653,6 +2655,11 @@ static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t ma
   BindFakePpu(ppu);
   ActRaiserActionBg_PrepareVoxel(true,NULL);
   const ActionVoxelGeometry *closed=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,map_number));CHECK(closed);
+  if(closed && group==5 && map_number<=3) {
+    TestJungleWaterColorCache(ppu,scene);
+    ActionVoxel_Release(closed);
+    closed=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,map_number));
+  }
   if (closed && (group==6 || group==7)) {
     /* New level profiles use the same immutable live publication contract.
      * Completion reuses 07:01 but owns its presentation independently. */
@@ -2757,6 +2764,19 @@ static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t ma
     ppu->cgram[1]^=1;
     ActRaiserActionBg_PrepareVoxel(true,NULL);
     CHECK(ActionVoxel_Revision(ActRaiserActionBg_VoxelGeometry(group,map_number))!=revision);
+    if(group==5 && map_number<=3) {
+      /* Jungle waves live in BG2 CHR100+, outside the native BG1 word mask.
+       * A real authored BG1 stamp can reference them; it must not reuse the
+       * water-only phase proof or freeze that newly owned front source. */
+      static DioramaRoomOverride animated;memset(&animated,0,sizeof(animated));
+      CHECK(DioramaLayerOrder_ParseLine(&animated,
+          "bg1-stamp = cell:0,0 metatile:00 words:0100,0100,0100,0100 bands:1,1,1,1",NULL));
+      revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,map_number,&animated);
+      CHECK(ActionRoomScene_BuildCharacters(scene,0,1,characters,sizeof(characters)));
+      for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
+      CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,map_number,&animated)!=revision);
+      DioramaLayerOrder_ClearRoom(&animated);
+    } else {
     /* A native collision change on a flame definition makes it structural.
      * Every subsequent changed phase must rebuild until that input is fixed. */
     g_ram[kActRaiserWram_Bg1MetatileDefinitions]=offset/32;
@@ -2767,6 +2787,7 @@ static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t ma
     for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
     ActRaiserActionBg_PrepareVoxel(true,NULL);
     CHECK(ActionVoxel_Revision(ActRaiserActionBg_VoxelGeometry(group,map_number))!=revision);
+    }
     ActionVoxel_Release(edited);ActionVoxel_Release(closed);
   }
   if(closed && group==2 && (map_number==3 || map_number==5)) {
@@ -2892,6 +2913,9 @@ int main(int argc, char **argv) {
   if(argc==3 && !strcmp(argv[2],"--snow-animation"))
     for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain)
       TestLiveVoxelPublication(argv[1],6,5);
+  if(argc==3 && !strcmp(argv[2],"--jungle-water"))
+    for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain)
+      for(unsigned room=1;room<=3;++room)TestLiveVoxelPublication(argv[1],5,room);
   if(argc==3 && !strcmp(argv[2],"--castle-animation"))
     for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain) {
       TestLiveVoxelPublication(argv[1],2,3);TestLiveVoxelPublication(argv[1],2,5);

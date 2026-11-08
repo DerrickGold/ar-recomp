@@ -1,6 +1,6 @@
 {
   "profile": "fillmore-temple",
-  "description": "Reviewed temple/tower masonry, walkable capitals, recessed columns and spike silhouettes. Native IDs record provenance only; runtime uses artwork, palette slots, collision and priority.",
+  "description": "Reviewed temple/tower masonry, walkable capitals, recessed columns and spike silhouettes. Native IDs record provenance only; runtime uses artwork, palette slots, collision and priority. Blue tower columns project slightly ahead of the purple arcade while retaining their original rear endpoint.",
   "materials": [
     {
       "key": "020ad5e554a6ba9a",
@@ -69,7 +69,8 @@
           2,
           87
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "04475f8a21e0b0b8",
@@ -96,7 +97,8 @@
           2,
           87
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "058faaf9171f1415",
@@ -680,7 +682,8 @@
           2,
           38
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "23e4631c17ee130a",
@@ -1785,7 +1788,7 @@
         4,
         4
       ],
-      "flags": 0,
+      "flags": 536870912,
       "origins": [
         [
           4,
@@ -2311,7 +2314,7 @@
         4,
         4
       ],
-      "flags": 0,
+      "flags": 536870912,
       "origins": [
         [
           4,
@@ -2538,7 +2541,8 @@
           2,
           37
         ]
-      ]
+      ],
+      "top_surface": "own16_donor"
     },
     {
       "key": "85abafb080ecacc8",
@@ -2814,7 +2818,8 @@
           2,
           218
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "9a1fd7f9a3603eac",
@@ -2967,7 +2972,8 @@
           2,
           92
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "a14254f3ab8dc065",
@@ -2994,7 +3000,8 @@
           2,
           92
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "a374835ae320c8dc",
@@ -3021,7 +3028,8 @@
           2,
           85
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "a374835ae320c8dc",
@@ -3048,7 +3056,8 @@
           2,
           85
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "b0e86963fa6946aa",
@@ -3159,7 +3168,8 @@
           2,
           93
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "bb65edae28537b93",
@@ -3186,7 +3196,8 @@
           2,
           93
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "bc093151dab91fe0",
@@ -3369,7 +3380,8 @@
           2,
           94
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "c15b1977df9451c3",
@@ -3396,7 +3408,8 @@
           2,
           94
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "c3104cd8db3780b5",
@@ -3783,7 +3796,8 @@
           2,
           84
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "d2cc45c28ddd8a78",
@@ -3810,7 +3824,8 @@
           2,
           84
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "d397a98411236205",
@@ -3847,7 +3862,7 @@
         4,
         4
       ],
-      "flags": 0,
+      "flags": 536870912,
       "origins": [
         [
           4,
@@ -3901,7 +3916,7 @@
         4,
         4
       ],
-      "flags": 0,
+      "flags": 536870912,
       "origins": [
         [
           4,
@@ -4266,7 +4281,8 @@
           2,
           217
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "f6da7d6ff5f93bc9",
@@ -4308,7 +4324,8 @@
           2,
           36
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "f82f56c29dda4771",
@@ -4431,7 +4448,8 @@
           2,
           86
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "fd4f9b2cd275ce68",
@@ -4458,7 +4476,8 @@
           2,
           86
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "fdd8a8edae06b0f5",
@@ -4527,7 +4546,8 @@
           2,
           95
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "ff8242cfa6d61b89",
@@ -4554,7 +4574,9 @@
           2,
           95
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     }
-  ]
+  ],
+  "top_surface_contract": "Complete16px brick motifs retain native mortar; sculpted capitals use the nearest reviewed opaque brick donor within8cells. Artwork policy does not change structural roles or priority."
 }

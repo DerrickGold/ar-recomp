@@ -36,8 +36,18 @@ static void ReferenceSplit(const ActionVoxelGeometry *c,int ox,int oy,int width,
         c->trunk_cells[(size_t)(my/8)*(c->width/8)+mx/8];
     const unsigned column=kind==kVoxelSolid && c->column_cells ?
         c->column_cells[(size_t)(my/8)*(c->width/8)+mx/8] : 0;
-    const bool rear_column=column && column<=c->column_curve_count &&
-        wy>=c->column_curves[column-1].base_y;
+    int column_base=0;
+    if(column && column<=c->column_curve_count) {
+      const VoxelTrunkCurve *curve=c->column_curves+column-1;
+      column_base=curve->base_y;
+      if(curve->contact_count==8) {
+        const int offset=wx-curve->contact_x;
+        int contact=offset<0?-((-offset+1)/2):offset/2;
+        if(contact<0)contact=0;else if(contact>7)contact=7;
+        column_base=curve->contact[contact]+16;
+      }
+    }
+    const bool rear_column=column && column<=c->column_curve_count && wy>=column_base;
     uint32_t r;
     if(branch || bark)r=0;
     else if(!castle)r=!(material&kVoxelRearCopy) &&
@@ -117,10 +127,13 @@ static void Synthetic(void) {
   const int views[][4]={{-8,16,16,16},{-13,11,27,27},{-8,17,16,15},{-30,16,11,16},
     {8,16,17,16},{-8,-1,16,12},{-8,32,16,12},{-9,15,1,1},{7,31,2,2}};
   ActionRoomSceneFrameState f={.brightness=15};
-  for(unsigned feature=0;feature<5;++feature) {
+  for(unsigned feature=0;feature<6;++feature) {
     c.branch_pixels=feature==1 ? branches : NULL;
     c.trunk_cells=feature==2 ? trunks : NULL;
-    c.column_cells=feature==3 ? columns : NULL;
+    c.column_cells=feature==3 || feature==5 ? columns : NULL;
+    c.column_curves[0].contact_count=feature==5?8:0;
+    c.column_curves[0].contact_x=-8;c.column_curves[0].linear=feature==5;
+    for(unsigned i=0;i<8;++i)c.column_curves[0].contact[i]=8+i;
     c.profile=feature==4 ? kActionVoxelProfile_Castle : kActionVoxelProfile_BloodpoolMarsh;
     for(unsigned v=0;v<sizeof(views)/sizeof(views[0]);++v) {
       const int *view=views[v];

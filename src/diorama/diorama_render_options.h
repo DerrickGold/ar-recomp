@@ -44,6 +44,19 @@ typedef struct DioramaVoxelPickFace {
 typedef void (*DioramaVoxelObserveFace)(void *userdata,
     const DioramaVoxelPickFace *face);
 
+/* Optional synchronous audit of dense cover support. Begin supplies the
+ * authored native path; Support supplies an actually covered native range;
+ * End reports ownership/counts for this draw. Borrow only during callback. */
+enum { kDioramaGroundCoverBegin,kDioramaGroundCoverSupport,kDioramaGroundCoverEnd };
+typedef struct DioramaGroundCoverObservation {
+  unsigned bank,event,claim;
+  unsigned point_count,caps,triangles,light_samples;
+  float path_xy[32],support_xy[4];
+  int plane;
+  bool dedicated,complete;
+} DioramaGroundCoverObservation;
+typedef void (*DioramaGroundCoverObserve)(void *userdata,const DioramaGroundCoverObservation *);
+
 /* Transient editor inspection only; zero preserves the production draw. */
 typedef enum DioramaVoxelInspection {
   kDioramaVoxelInspect_All,
@@ -74,6 +87,7 @@ typedef struct DioramaRenderOptions {
   DioramaSourceEffectBatch source_effect_batch;
   DioramaVoxelObserveFace voxel_observe_face;
   void *voxel_observer_userdata;
+  DioramaGroundCoverObserve voxel_observe_ground_cover;
   DioramaVoxelInspection voxel_inspection;
 } DioramaRenderOptions;
 

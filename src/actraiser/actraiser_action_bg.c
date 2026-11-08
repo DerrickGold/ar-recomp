@@ -9,6 +9,7 @@
 
 #include "actraiser_game.h"
 #include "action/action_room_scene.h"
+#include "action/action_bg_metatile.h"
 #include "action/action_trunk.h"
 #include "action/action_voxel.h"
 #include "action/action_environment_scene.h"
@@ -1340,9 +1341,12 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
   source->video_profile[4] = (source->video_profile[4] & ~1u) | priority;
   source->have_video_profile = true;
   bool changed = layout_changed;
-  if (ActionVoxel_BackgroundWater(ActionVoxel_ProfileForRoom(group,room))) {
-    /* Pool topology follows the live BG2 map, but its animation stays in the
-     * captured texture. An ordinary animation tick must not rebuild geometry. */
+  const bool jungle_water_color=ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_MarahnaJungle;
+  const bool water_source=ActionVoxel_BackgroundWater(ActionVoxel_ProfileForRoom(group,room)) || jungle_water_color;
+  if (water_source) {
+    /* Pool topology and the Jungle's reviewed solid-water color donor follow
+     * live BG2 source ownership. Native animation remains captured artwork;
+     * an ordinary known animation tick must not rebuild geometry. */
     ActRaiserActionBgLayerSnapshot water_live;
     ActionBgMapView water_map;
     if (!ActRaiserActionBg_CaptureLayer(g_ram,kActRaiserWramSize,1,ppu.background_tilemap_control[1],&water_live) ||
@@ -1351,28 +1355,35 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
         water_map.map_size > kActionRoomSceneMaxMapBytes ||
         !ActionVoxel_ValidBounds(0,0,water_live.decode.world_width,water_live.decode.world_height) ||
         water_live.decode.word_mask != kActionRoomSceneTileWordMask ||
-        (water_live.decode.attributes & ~0x20u) != kActionRoomSceneBg2AttributeByte) {
-      ResetVoxel(); return;
+        (water_live.decode.attributes & ~0x20u) != kActionRoomSceneBg2AttributeByte ||
+        (jungle_water_color && ppu.backgrounds[1].tile_base_word!=ppu.backgrounds[0].tile_base_word)) {
+      if (!jungle_water_color) { ResetVoxel(); return; }
+      /* This is an optional color source, not Jungle topology. Unsupported
+       * BG2 publication returns only its added cap to captured sampling. */
+      changed |= source->bg[1].have_map || source->bg[1].have_metatiles;
+      source->bg[1].have_map=source->bg[1].have_metatiles=false;
+    } else {
+      ActionRoomSceneBg *water = &source->bg[1];
+      changed |= !water->have_map || !water->have_metatiles ||
+          water->map_size != water_map.map_size || water->pages_wide != water_map.pages_wide ||
+          water->pages_high != water_live.decode.world_height/256;
+      water->map_size = water_map.map_size; water->pages_wide = water_map.pages_wide;
+      water->pages_high = water_live.decode.world_height/256;
+      water->have_map = water->have_metatiles = true;
+      changed |= VoxelCopy(water->map,water_map.map,water_map.map_size);
+      for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; ++i) {
+        const uint8_t byte = g_ram[water_live.decode.metatile_table+(i^1u)];
+        changed |= water->metatiles[i] != byte; water->metatiles[i] = byte;
+      }
+      const uint8_t high = (water_live.decode.attributes & 0x20u) ? 2 : 0;
+      changed |= (source->video_profile[4]&2u) != high;
+      source->video_profile[4] = (source->video_profile[4]&~2u)|high;
     }
-    ActionRoomSceneBg *water = &source->bg[1];
-    changed |= water->map_size != water_map.map_size || water->pages_wide != water_map.pages_wide ||
-        water->pages_high != water_live.decode.world_height/256;
-    water->map_size = water_map.map_size; water->pages_wide = water_map.pages_wide;
-    water->pages_high = water_live.decode.world_height/256;
-    water->have_map = water->have_metatiles = true;
-    changed |= VoxelCopy(water->map,water_map.map,water_map.map_size);
-    for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; ++i) {
-      const uint8_t byte = g_ram[water_live.decode.metatile_table+(i^1u)];
-      changed |= water->metatiles[i] != byte; water->metatiles[i] = byte;
-    }
-    const uint8_t high = (water_live.decode.attributes & 0x20u) ? 2 : 0;
-    changed |= (source->video_profile[4]&2u) != high;
-    source->video_profile[4] = (source->video_profile[4]&~2u)|high;
   }
   /* BG2 animation must not rebuild the castle. Capture only character slots
    * referenced by BG1 definitions or authored terrain, with bounds checks. */
   uint64_t key = UINT64_C(14695981039346656037);
-  const unsigned terrain_layers = ActionVoxel_BackgroundWater(ActionVoxel_ProfileForRoom(group,room)) ? 2 : 1;
+  const unsigned terrain_layers = water_source ? 2 : 1;
   if (terrain) for (unsigned layer = 0; layer < terrain_layers; ++layer) {
     const DioramaStampLayerOverride *stamps = &terrain->stamp_layers[layer];
     key = VoxelHash(key, &stamps->set_bounds, sizeof(stamps->set_bounds));
@@ -1431,9 +1442,22 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
     used[at/32] = true;
   for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; i += 2)
     used[bg->metatiles[i + 1]] = true;
-  if (terrain) for (size_t i = 0; i < terrain->stamp_layers[0].count; ++i)
+  /* The Jungle color donor lives in BG2's static CHR bank, outside the native
+   * animated wave window. Track its actual source addresses, including legal
+   * renumbering, so changing/removing that art invalidates the compiled tone.
+   * Other profiles keep their previous source dependency set. */
+  if (jungle_water_color && ActionRoomScene_HasBackground(source,2))
+    for (unsigned i=0;i<kActionRoomSceneMetatileBytes;i+=2) {
+      const uint8_t *d=source->bg[1].metatiles+i;
+      const unsigned word=ActionBg_ComposeTilemapWord((d[0]<<8)|d[1],
+          kActionRoomSceneTileWordMask,ActionRoomScene_BgAttributes(source,2));
+      const unsigned ch=word&1023;
+      if (ch<sizeof(used)/sizeof(*used)) used[ch]=true;
+    }
+  if (terrain) for(unsigned layer=0;layer<(jungle_water_color?2u:1u);++layer)
+    for (size_t i = 0; i < terrain->stamp_layers[layer].count; ++i)
     for (unsigned q = 0; q < 4; ++q) {
-      const unsigned character = terrain->stamp_layers[0].cells[i].words[q] & 1023;
+      const unsigned character = terrain->stamp_layers[layer].cells[i].words[q] & 1023;
       if (character < sizeof(used) / sizeof(*used)) used[character] = true;
     }
   if (terrain) for (unsigned i = 0; i < terrain->voxel.cell_count; ++i) {

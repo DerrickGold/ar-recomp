@@ -2,6 +2,7 @@
 #include "diorama/diorama_frame_generation.h"
 #include "app/performance_metrics.h"
 #include "action/action_voxel.h"
+#include "action/action_trunk.h"
 
 #include <SDL3/SDL.h>
 #include <stddef.h>
@@ -60,7 +61,12 @@ typedef struct DioramaFrameGenerationKey {
   uint8_t map_group;
   uint8_t map_number;
   uint8_t layer_section;
-  bool valid, voxel_map;
+  bool valid, voxel_map, independent_subscreen;
+  uint8_t native_guard; /* 1 tree union, 2 generic separate native bands. */
+  bool guard_map;
+  uint64_t guard_revision;
+  int guard_origin_y, guard_width;
+  DioramaTrunkGuardBounds guard_source;
 } DioramaFrameGenerationKey;
 
 enum { kFrameGenerationPlaneCount = kDioramaPlane_Count + 1 };
@@ -73,6 +79,7 @@ static uint64_t s_pair_timestamp_ns;
 static uint32_t s_pair_mask;
 static uint32_t s_generated_mask;
 static uint32_t s_voxel_map_pair_mask, s_voxel_map_present_mask;
+static uint32_t s_guard_map_pair_mask;
 static int s_voxel_map_dx, s_voxel_map_dy;
 static bool s_wait_trace;
 static uint64_t s_last_wait_ns;
@@ -950,6 +957,7 @@ void DioramaFrameGeneration_InvalidateHistory(void) {
   s_pair_mask = 0;
   s_generated_mask = 0;
   s_voxel_map_pair_mask = s_voxel_map_present_mask = 0;
+  s_guard_map_pair_mask = 0;
   s_voxel_map_dx = s_voxel_map_dy = 0;
   s_last_wait_ns = 0;
   s_index_blocks_x = -1;
@@ -1133,7 +1141,8 @@ static bool KeysAreContinuous(const DioramaFrameGenerationKey *previous,
       previous->map_number == current->map_number &&
       previous->layer_section == current->layer_section &&
       previous->voxel_revision == current->voxel_revision &&
-      previous->additive_plane_mask == current->additive_plane_mask;
+      previous->additive_plane_mask == current->additive_plane_mask &&
+      previous->independent_subscreen == current->independent_subscreen;
 }
 
 /* Fillmore's BG1 is a finite, uniform native map. Its immutable camera is the
@@ -1148,6 +1157,30 @@ static bool ExactVoxelMap(const FrameSlot *slot) {
       !map->wrap_world_x && !map->band_count && map->world_width && map->world_height &&
       !(slot->diorama_plane_additive_mask & kVoxelMapPlanes) && slot->background_packet &&
       (slot->background_packet->owned_sources & 1u) && !slot->background_packet->words[7];
+}
+
+/* Finite native guards and their primary map retain one native capture.
+ * Unlike the existing generic exact-map warp, this path deliberately keeps
+ * current 60Hz artwork/CHR poses and interpolates only the camera placement.
+ * It never changes actor interpolation or ordinary Diorama. */
+static bool TrunkGuardSource(const FrameSlot *slot) {
+  return slot->diorama_voxel_mode && slot->diorama_trunk &&
+      slot->diorama_trunk_settings.enabled && slot->diorama_trunk_guard.capture_generation;
+}
+static unsigned NativeGuardSource(const FrameSlot *slot) {
+  if (TrunkGuardSource(slot)) return 1;
+  return slot->diorama_voxel_mode && !slot->diorama_trunk &&
+      slot->diorama_voxel_guard.capture_generation &&
+      ActionVoxel_Active(slot->diorama_voxel, slot->diorama_map_group, slot->diorama_map_number) ? 2 : 0;
+}
+static bool ExactGuardMap(const FrameSlot *slot) {
+  const ActionBgLayerPlan *map = &slot->action_bg_plan.layer[0];
+  return NativeGuardSource(slot) && slot->action_bg_plan.valid && map->valid &&
+      map->role == kActionBgLayerRole_Playfield && map->source == kActionBgSource_WorldMap &&
+      map->default_edge == kActionBgEdge_LiveWorld && !map->wrap_world_x && !map->band_count &&
+      map->world_width && map->world_height && !(slot->diorama_plane_additive_mask & kVoxelMapPlanes) &&
+      slot->background_packet && (slot->background_packet->owned_sources & 1u) &&
+      !slot->background_packet->words[7];
 }
 
 static void CopySurfaceRegion(
@@ -1174,6 +1207,7 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   s_pair_timestamp_ns = 0;
   s_pair_mask = 0;
   s_voxel_map_pair_mask = s_voxel_map_present_mask = 0;
+  s_guard_map_pair_mask = 0;
   s_voxel_map_dx = s_voxel_map_dy = 0;
   s_gpu.mask = 0;
   s_gpu.skipped_map_analysis_mask = 0;
@@ -1221,6 +1255,7 @@ void DioramaFrameGeneration_CaptureWithSkybox(
     .voxel_revision = ActionVoxel_Revision(slot->diorama_voxel),
     .plane_mask = plane_mask,
     .additive_plane_mask = slot->diorama_plane_additive_mask,
+    .independent_subscreen = slot->diorama_independent_subscreen,
     .width = width,
     .height = height,
     .camera_x = {slot->bg1_camera_x, slot->bg2_camera_x},
@@ -1230,6 +1265,14 @@ void DioramaFrameGeneration_CaptureWithSkybox(
     .map_number = slot->diorama_map_number,
     .layer_section = slot->diorama_layer_section,
     .voxel_map = ExactVoxelMap(slot),
+    .native_guard = NativeGuardSource(slot), .guard_map = ExactGuardMap(slot),
+    .guard_revision = slot->diorama_trunk ? slot->diorama_trunk->revision : ActionVoxel_Revision(slot->diorama_voxel),
+    .guard_origin_y = (slot->diorama_trunk ? slot->diorama_trunk_guard.layout.primary_y
+        : slot->diorama_voxel_guard.layout.primary_y) - slot->bg1_camera_y,
+    .guard_width = slot->diorama_trunk ? slot->diorama_trunk_guard.layout.strips[0].width
+        : slot->diorama_voxel_guard.layout.lower.width,
+    .guard_source = slot->diorama_trunk ? slot->diorama_trunk_guard.layout.source
+        : slot->diorama_voxel_guard.layout.source,
     .valid = width > 0 &&
         width <= kFrameSlotLayerTextureWidth &&
         width <= kPresentationFrameGenerationMaximumWidth &&
@@ -1251,6 +1294,14 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   const bool exact_map_pair = own_gpu_analysis && NativeHandoff(false) && continuous && current.voxel_map &&
       s_last_key.voxel_map && abs(map_dx) <= kPresentationFrameGenerationSearchRadius &&
       abs(map_dy) <= kPresentationFrameGenerationSearchRadius;
+  const bool guard_map_pair = continuous && current.guard_map && s_last_key.guard_map &&
+      current.native_guard == s_last_key.native_guard &&
+      current.guard_revision == s_last_key.guard_revision &&
+      current.guard_origin_y == s_last_key.guard_origin_y &&
+      current.guard_width == s_last_key.guard_width &&
+      !memcmp(&current.guard_source, &s_last_key.guard_source, sizeof(current.guard_source)) &&
+      abs(map_dx) <= kPresentationFrameGenerationSearchRadius &&
+      abs(map_dy) <= kPresentationFrameGenerationSearchRadius;
   uint32_t exact_map_mask = 0;
   /* Endpoint copies bind their own render target. Capture the caller's once
    * and restore it after the loop so no plane's early exit can leave the
@@ -1260,6 +1311,14 @@ void DioramaFrameGeneration_CaptureWithSkybox(
        plane_index++) {
     DioramaFrameGenerationPlane *plane = &s_planes[plane_index];
     plane->pair_valid = false;
+    if (current.native_guard && plane_index < kDioramaPlane_Count &&
+        (kVoxelMapPlanes & (1u << plane_index))) {
+      /* This map uses the already synchronized current texture directly.
+       * Do not copy or analyze a redundant previous endpoint on either CPU
+       * or GPU; guard continuity is checked from immutable native metadata. */
+      plane->current_valid = false;
+      continue;
+    }
     const bool gpu_analysis = own_gpu_analysis && GpuMotionPlane(plane_index);
     if (plane->gpu_only != gpu_analysis) {
       plane->current_valid = false;
@@ -1427,6 +1486,16 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   /* Keep endpoint packing and synthesis eligible, but omit the unused global
    * search. The exact warp returns before reading any pixel-motion vectors. */
   analyzed_bg_mask &= ~exact_map_mask;
+  if (current.native_guard) {
+    /* A source guard cannot follow inferred/rejected GPU flow independently
+     * of its primary. Unsupported pairs stay current with zero translation. */
+    analyzed_bg_mask &= ~kVoxelMapPlanes;
+    s_pair_mask &= ~kVoxelMapPlanes;
+    if (guard_map_pair) {
+      s_guard_map_pair_mask = plane_mask & source_plane_mask & kVoxelMapPlanes;
+      s_pair_mask |= s_guard_map_pair_mask;
+    }
+  }
   s_voxel_map_pair_mask = exact_map_mask;
   s_gpu.skipped_map_analysis_mask = exact_map_mask;
   s_pair_mask |= exact_map_mask;
@@ -1662,11 +1731,24 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
   const uint32_t gpu_mask = RestoreMapAnalysis(device, map_mask) ? PrepareGpu(device, phase) : 0;
   s_gpu.phase = phase;
   s_voxel_map_present_mask = map_mask & gpu_mask;
+  uint32_t guard_mask = NativeGuardSource(slot)
+      ? s_guard_map_pair_mask & current_plane_mask : 0;
+  for (unsigned i = 0; i < 3; ++i)
+    if ((guard_mask & (1u << kGpuPlanes[i])) && !native_current_textures[kGpuPlanes[i]]) guard_mask = 0;
+  s_voxel_map_present_mask |= guard_mask;
   /* CPU-known placement is already in the plane projection. Never add the
    * GPU vector again in effects, illumination, shadows or sky attachments. */
   s_gpu.presented_mask = gpu_mask & ~(s_voxel_map_present_mask ? kVoxelMapPlanes : 0u);
   uint32_t generated_mask = 0;
   for (int plane = 0; plane < kFrameGenerationPlaneCount; plane++) {
+    if (NativeGuardSource(slot) && plane < kDioramaPlane_Count &&
+        (kVoxelMapPlanes & (1u << plane))) {
+      /* No texture warp: current source pixels, guard atlas and native CHR
+       * animation all share the queued generation on CPU and GPU backends. */
+      if (guard_mask & (1u << plane)) s_present_offsets[plane] = (ArRenderPointF){
+          s_voxel_map_dx * (1 - phase), s_voxel_map_dy * (1 - phase)};
+      continue;
+    }
     if (!((s_pair_mask & current_plane_mask) & (1u << plane)) ||
         !native_current_textures[plane])
       continue;

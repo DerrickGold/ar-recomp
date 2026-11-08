@@ -14,10 +14,13 @@
 #include "action/action_effect_source.h"
 #include "action/action_effect_mask_texture.h"
 #include "diorama/diorama_snapshot.h"
+#include "diorama/diorama_trunk_guard_upload.h"
+#include "diorama/diorama_voxel_guard_upload.h"
 #include "diorama/diorama_astral_rift.h"
 #ifndef __EMSCRIPTEN__
 #include "diorama/diorama_depth_gpu.h"
 #endif
+
 #include "diorama/diorama_rom_backdrop.h"
 #include "action/action_decoration_pass.h"
 #include "action/action_environment_exposure.h"
@@ -32,6 +35,36 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
+
+/* Explicit audit-only copy-out. Disabled during ordinary editing; no scene
+ * pointers survive the synchronous compositor callback. */
+enum { kGroundCoverAuditEvents=4096 };
+static DioramaGroundCoverObservation s_ground_cover_audit[kGroundCoverAuditEvents];
+static unsigned s_ground_cover_audit_count;
+static bool s_ground_cover_audit_enabled,s_ground_cover_audit_overflow;
+static DioramaTrunkGuardUpload s_trunk_guard;
+static DioramaVoxelGuardUpload s_voxel_guard;
+int RoomPreview_GroundCoverAuditEnable(int enabled) {
+  s_ground_cover_audit_enabled=enabled!=0;s_ground_cover_audit_count=0;s_ground_cover_audit_overflow=false;return 1;
+}
+unsigned RoomPreview_GroundCoverAuditCount(void) {return s_ground_cover_audit_count;}
+int RoomPreview_GroundCoverAuditComplete(void) {return s_ground_cover_audit_enabled&&!s_ground_cover_audit_overflow;}
+double RoomPreview_GroundCoverAuditValue(unsigned index,unsigned field) {
+  if(index>=s_ground_cover_audit_count)return 0;
+  const DioramaGroundCoverObservation *o=&s_ground_cover_audit[index];
+  switch(field) {
+    case 0:return o->bank;case 1:return o->event;case 2:return o->claim;
+    case 3:return o->point_count;case 4:return o->caps;case 5:return o->triangles;
+    case 6:return o->light_samples;case 7:return o->plane;case 8:return o->dedicated;case 9:return o->complete;
+    default:if(field<42)return o->path_xy[field-10];if(field<46)return o->support_xy[field-42];return 0;
+  }
+}
+static void ObserveGroundCover(void *unused,const DioramaGroundCoverObservation *observation) {
+  (void)unused;
+  if(s_ground_cover_audit_count==kGroundCoverAuditEvents){s_ground_cover_audit_overflow=true;return;}
+  s_ground_cover_audit[s_ground_cover_audit_count++]=*observation;
+  if(!observation->complete)s_ground_cover_audit_overflow=true;
+}
 
 ArRenderDevice *DioramaPreview_Device(void);
 uint8_t *DioramaPreview_Input(void);
@@ -418,6 +451,8 @@ unsigned RoomPreview_ObjectInfo(void) {
   memcpy(DioramaPreview_Input(),info,sizeof(info));return sizeof(info)/sizeof(*info);
 }
 void RoomPreview_Reset(void) {
+  DioramaTrunkGuardUpload_Reset(&s_trunk_guard, DioramaPreview_Device());
+  DioramaVoxelGuardUpload_Reset(&s_voxel_guard, DioramaPreview_Device());
   s_voxel_pick_valid=false;s_voxel_face_count=0;s_voxel_pick_overflow=false;
   ArRenderDevice *device = DioramaPreview_Device();
   EditorObjectPreview_Reset(&s_objects,device);
@@ -738,8 +773,26 @@ double RoomPreview_RayFieldMapScale(unsigned axis) {
 unsigned RoomPreview_ReachSupported(unsigned kind) { return ActionEffectRecipes_ReachSupported(kind); }
 static bool Upload(void) {
   ArRenderDevice *device = DioramaPreview_Device();
+  const DioramaScene *scene = EditorRoomScene_Scene(s_room);
+  if (!DioramaTrunkGuardUpload_Update(&s_trunk_guard, device, scene->trunk,
+      EditorRoomScene_TrunkGuard(s_room), 15)) return false;
   const DioramaCapture *capture = EditorRoomScene_Capture(s_room);
   const SrSceneSurfaces *surfaces = EditorRoomScene_Surfaces(s_room);
+  const DioramaVoxelGuardSource *guard = EditorRoomScene_VoxelGuard(s_room);
+  DioramaVoxelGuardPrefix prefix = {0};
+  if (guard && surfaces->height >= kDioramaVoxelGuardPrefixRows) {
+    static const int planes[3] = {SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi, kDioramaPlane_Bg1Far};
+    prefix.width = guard->layout.lower.width;
+    prefix.capture_generation = guard->capture_generation;
+    for (unsigned i = 0; i < 3; ++i) {
+      prefix.pitch_pixels[i] = surfaces->pitch_pixels;
+      if (capture->pixels[planes[i]])
+        prefix.pixels[i] = (const uint32_t *)capture->pixels[planes[i]] +
+            (size_t)(surfaces->height - kDioramaVoxelGuardPrefixRows) * surfaces->pitch_pixels;
+    }
+  }
+  if (!DioramaVoxelGuardUpload_Update(&s_voxel_guard, device, scene->voxel_geometry,
+      guard, capture->voxel_frame, &prefix)) return false;
   for (unsigned i = 0; i < sizeof(kPlanes) / sizeof(kPlanes[0]); ++i) {
     int plane = kPlanes[i];
     const uint8_t *source = capture->pixels[plane];
@@ -831,6 +884,7 @@ int RoomPreview_RenderFlat(int x, int y, uint32_t frame, int width, int height, 
 int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     int width, int height, float distance, float yaw, float pitch, int skybox, int pixel_aspect) {
   s_voxel_pick_valid=false;s_voxel_face_count=0;s_voxel_pick_overflow=false;
+  s_ground_cover_audit_count=0;s_ground_cover_audit_overflow=false;
   if (!s_room || !(distance >= 0.5f && distance <= 2.5f) || !(yaw >= -0.7f && yaw <= 0.7f) ||
       !(pitch >= -0.7f && pitch <= 0.7f) || skybox < 0 || skybox > 2 ||
       pixel_aspect < 0 || pixel_aspect > 1 || extra < 0 || extra > 128 ||
@@ -871,9 +925,12 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   if (skybox == kDioramaSky_Only && EditorRoomScene_Surfaces(s_room)->native_pages[1])
     capture.skybox = &page;
   DioramaScene scene = *EditorRoomScene_Scene(s_room);
+  scene.trunk_guard = s_trunk_guard.view.capture_generation ? &s_trunk_guard.view : NULL;
+  scene.voxel_guard = s_voxel_guard.view.capture_generation ? &s_voxel_guard.view : NULL;
   scene.native_bloom_clock = (uint16_t)frame;
   DioramaRenderOptions options = *scene.render;
   options.voxel_observe_face=ObserveVoxelFace;
+  options.voxel_observe_ground_cover=s_ground_cover_audit_enabled?ObserveGroundCover:NULL;
   options.voxel_observer_userdata=NULL;
   options.voxel_inspection=EditorRoomScene_3DMode(s_room)==kAction3D_Voxel
       ? s_voxel_inspection : kDioramaVoxelInspect_All;

@@ -21,7 +21,7 @@ UNIFORMS = (
     [('vec2', 'size'), ('float', 'high_band'), ('float', 'additive')],
     [('vec4', name) for name in ('filter_info', 'priority_info', 'light_info', 'shade', 'grade', 'grade_shadows', 'grade_highlights',
                                'heat_capture', 'heat_source', 'heat_bounds[4]', 'heat_motion[4]',
-                               'cloud_source', 'cloud_meta', 'cloud_regions[24]', 'cloud_background_dim')],
+                               'cloud_source', 'cloud_meta', 'cloud_regions[24]', 'cloud_background_dim', 'heat_owned')],
     [('vec4', name) for name in ('filter_info', 'light_info', 'attribute_info', 'bounds')],
     [('vec4', name) for name in ('filter_info', 'grade_info')],
 )
@@ -75,6 +75,9 @@ def build(output, compiler='emcc', scene=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     wasm = output.with_suffix('.wasm')
     sources = (ROOT / 'tools/action_editor/compositor_sources.txt').read_text().splitlines()
+    environment_sources = [source for source in
+        (ROOT / 'tools/action_editor/environment_sources.txt').read_text().splitlines()
+        if source not in sources]
     exports = ('Version', 'Init', 'Input', 'Capacity', 'Reset', 'Load', 'Render', 'Width', 'Height')
     command = [compiler, '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror',
                '-I', str(ROOT / 'src'), '-I', str(ROOT / 'snesrecomp-go/runtime/include'),
@@ -85,10 +88,13 @@ def build(output, compiler='emcc', scene=None):
                'tools/action_editor/room_preview.c', 'tools/action_editor/room_scene.c',
                'tools/action_editor/receiver_preview.c', 'tools/action_editor/voxel_pick.c',
                'tools/action_editor/object_preview.c', 'src/diorama/diorama_object_snapshot.c',
-                   *(ROOT / 'tools/action_editor/environment_sources.txt').read_text().splitlines(),
+                   *environment_sources,
                'src/action/action_scene_snapshot.c', 'src/action/action_room_scene.c',
                'src/action/action_bg_world.c',
                'src/diorama/diorama_rom_backdrop.c',
+               'src/diorama/diorama_trunk_guard_upload.c',
+               'src/diorama/diorama_voxel_guard_upload.c',
+               'src/present/presentation_upload_mirror.c',
                'snesrecomp-go/runtime/src/scene_renderer.c',
                'snesrecomp-go/runtime/src/snes/ppu.c',
                'tools/action_editor/compositor_profile_stub.c', 'src/diorama/diorama_snapshot.c',
@@ -100,6 +106,8 @@ def build(output, compiler='emcc', scene=None):
                *['-Wl,--export=DioramaPreview_' + x for x in exports],
                *['-Wl,--export=RoomPreview_' + x for x in ('LoadObjects', 'ClearObjects', 'ObjectInfo')],
                *['-Wl,--export=RoomPreview_' + x for x in ('VoxelPick', 'VoxelTile', 'VoxelGroup', 'VoxelTransformHandles', 'VoxelBendHandles', 'VoxelObjects', 'SetInspection', 'SceneryError')],
+               *['-Wl,--export=RoomPreview_' + x for x in ('GroundCoverAuditEnable', 'GroundCoverAuditCount', 'GroundCoverAuditComplete', 'GroundCoverAuditValue')],
+               *['-Wl,--export=RoomPreview_' + x for x in ('VoxelAuditCount', 'VoxelAuditComplete', 'VoxelAuditRead')],
                *['-Wl,--export=RoomPreview_' + x for x in
                  ('Load', 'Configure', 'CloudOpenings', 'Policy', 'Set3DMode', 'SetView', 'Measure', 'Render', 'Reset', 'Width', 'Height', 'CameraX', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'ShowBackdrop', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'RecipeError', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'LoadPlayer', 'ReceiverStyle', 'PickReceiver', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],
                '-o', str(wasm)]

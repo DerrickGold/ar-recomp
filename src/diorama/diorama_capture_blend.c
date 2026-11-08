@@ -40,3 +40,15 @@ bool DioramaCaptureBlend_LayerUsesFixedColorSubtract(
   return (cgadsub & (kCgadsubHalf | kCgadsubSubtract)) ==
       kCgadsubSubtract;
 }
+
+uint8_t DioramaCaptureBlend_IndependentSubscreenSources(bool voxel_ready,
+    uint8_t cgwsel, uint8_t cgadsub,
+    uint8_t screen_main, uint8_t screen_sub) {
+  if(!voxel_ready)return 0;
+  const uint8_t sources=DioramaCaptureBlend_FullAddSubscreenSources(
+      cgwsel,cgadsub,screen_main,screen_sub);
+  if(!sources || (sources&~0x13u) || (screen_main&0x18u))return 0;
+  const unsigned main_world=screen_main&0x03u;
+  if(!main_world || (main_world&cgadsub)!=main_world)return 0;
+  return sources;
+}

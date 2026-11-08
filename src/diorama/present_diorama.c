@@ -1,4 +1,6 @@
 #include "diorama/diorama_trunk_gpu.h"
+#include "diorama/diorama_trunk_guard_upload.h"
+#include "diorama/diorama_voxel_guard_upload.h"
 #include "action/action_trunk.h"
 #include "action/action_voxel.h"
 #include "action/action_cloud_light.h"
@@ -39,6 +41,8 @@ static ArRenderTexture s_plane_textures[kDioramaPlane_Count];
 static ArRenderTexture s_resolved_textures[kDioramaPlane_Count];
 static uint32_t *s_bg_fallback[kDioramaPlane_Count + 1];
 static uint32_t *s_trunk_fallback[3];
+static DioramaTrunkGuardUpload s_trunk_guard;
+static DioramaVoxelGuardUpload s_voxel_guard;
 static uint32_t *s_voxel_fallback[2];
 static DioramaVoxelSourceCache s_voxel_source_cache;
 /* Monotonic content identity for the retained split. Never derive this from
@@ -180,6 +184,8 @@ static int s_completion_art_width, s_completion_art_height;
 static DioramaCameraPresenter s_diorama_camera = DIORAMA_CAMERA_PRESENTER_INIT;
 
 void PresentDiorama_DestroyPlanes(ArRenderDevice *device) {
+  DioramaTrunkGuardUpload_Reset(&s_trunk_guard, device);
+  DioramaVoxelGuardUpload_Reset(&s_voxel_guard, device);
   DioramaVoxelSourceCache_Reset(&s_voxel_source_cache);
   DioramaDepthGpu_Reset(device);
   ResetVoxelSprites(device);
@@ -287,6 +293,65 @@ static void MaterializeBackgrounds(const SrPpuBgPacket *packet, uint32_t mask,
     }
     pixels[plane] = (const uint8_t *)s_bg_fallback[plane];
     pitches[plane] = packet->words[0] * sizeof(uint32_t);
+  }
+}
+
+static void UploadVoxelGuard(ArRenderDevice *device, const FrameSlot *slot,
+    const uint8_t *const pixels[kDioramaPlane_Count], const size_t pitches[kDioramaPlane_Count]) {
+  const DioramaVoxelGuardSource *source = &slot->diorama_voxel_guard;
+  if (!slot->diorama_voxel_mode || slot->diorama_trunk ||
+      !ActionVoxel_Active(slot->diorama_voxel, slot->diorama_map_group, slot->diorama_map_number) ||
+      !DioramaVoxelGuard_Valid(source)) {
+    (void)DioramaVoxelGuardUpload_Update(&s_voxel_guard, device, NULL, NULL, NULL, NULL);
+    return;
+  }
+  const int height = slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom;
+  const int first = height - kDioramaVoxelGuardPrefixRows;
+  const int width = slot->snes_width + slot->obj_apron * 2;
+  const int world_x = slot->bg1_camera_x - slot->ws_extra - slot->obj_apron;
+  const int world_y = slot->bg1_camera_y - slot->ws_extra_top + 1;
+  if (first < 0 || width != source->layout.lower.width || height != source->layout.primary_height ||
+      world_x != source->layout.lower.world_x || world_y != source->layout.primary_y) {
+    (void)DioramaVoxelGuardUpload_Update(&s_voxel_guard, device, NULL, NULL, NULL, NULL);
+    return;
+  }
+  DioramaVoxelGuardPrefix prefix = {.width = width, .capture_generation = source->capture_generation};
+  const unsigned planes[] = {SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi, kDioramaPlane_Bg1Far};
+  static uint32_t high_prefix[kDioramaVoxelGuardWidth * kDioramaVoxelGuardPrefixRows];
+  for (unsigned i = 0; i < 3; ++i) {
+    const unsigned plane = planes[i];
+    if (pixels[plane]) {
+      prefix.pixels[i] = (const uint32_t *)(pixels[plane] + (size_t)first * pitches[plane]);
+      prefix.pitch_pixels[i] = pitches[plane] / sizeof(uint32_t);
+    } else if (i == 1 && (DioramaPlanes_GpuOwnedMask(slot->background_packet) & (1u << plane))) {
+      /* Only the overlap needs CPU High pixels. Decode these 16 immutable
+       * packet rows, not an extra full capture or a GPU readback. */
+      const SrPpuBgPacket *packet = slot->background_packet;
+      if (!packet || packet->words[0] < (unsigned)width || packet->words[1] < (unsigned)height) {
+        (void)DioramaVoxelGuardUpload_Update(&s_voxel_guard, device, NULL, NULL, NULL, NULL);
+        return;
+      }
+      for (unsigned y = 0; y < kDioramaVoxelGuardPrefixRows; ++y)
+        DioramaBgDecode_Row(packet, 0, 1, (unsigned)first + y, (unsigned)width,
+            high_prefix + y * kDioramaVoxelGuardWidth);
+      prefix.pixels[i] = high_prefix;
+      prefix.pitch_pixels[i] = kDioramaVoxelGuardWidth;
+    }
+  }
+  const ActionRoomSceneFrameState frame = {
+    .brightness = (slot->inidisp & 0x80) ? 0 : slot->inidisp & 15,
+    .cgwsel = slot->diorama_voxel_cgwsel, .cgadsub = slot->diorama_voxel_cgadsub,
+    .fixed_color = slot->diorama_voxel_fixed_color};
+  const uint64_t previous = s_voxel_guard.view.capture_generation;
+  if (DioramaVoxelGuardUpload_Update(&s_voxel_guard, device, slot->diorama_voxel,
+      source, &frame, &prefix) && !previous) {
+    fprintf(stderr, "[voxel-guard] ready map=%02x/%02x source=%d,%d size=%dx%d finite=%d,%d,%d,%d generation=%llu\n",
+        slot->diorama_map_group, slot->diorama_map_number,
+        source->layout.lower.world_x, source->layout.lower.world_y,
+        source->layout.lower.width, kDioramaVoxelGuardRows,
+        source->layout.lower.valid.x, source->layout.lower.valid.y,
+        source->layout.lower.valid.width, source->layout.lower.valid.height,
+        (unsigned long long)source->capture_generation);
   }
 }
 
@@ -659,6 +724,12 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     SessionFatal_Request("Trunk enclosure split failed: %s",ArRenderDevice_LastError(device));return;
   }
   if(slot->diorama_trunk) s_diorama_uploaded_plane_mask|=(1u<<SR_PPU_OVERLAY_BG1)|(1u<<kDioramaPlane_Bg1Hi)|(1u<<kDioramaPlane_Bg1Far);
+  if (!DioramaTrunkGuardUpload_Update(&s_trunk_guard, device,
+      trunk ? slot->diorama_trunk : NULL, trunk ? &slot->diorama_trunk_guard : NULL,
+      (slot->inidisp & 0x80) ? 0 : slot->inidisp & 15)) {
+    SessionFatal_Request("Cannot upload native tree source guards"); return;
+  }
+  UploadVoxelGuard(device, slot, pixels, pitch_bytes);
   if(gpu_trunk&&(needs_cpu_analysis||needs_cpu_diagnostic)&&!MaterializeTrunk(slot,pixels,pitch_bytes)) {
     SessionFatal_Request("Cannot allocate trunk enclosure snapshot");return;
   }
@@ -1071,11 +1142,21 @@ retry_projection:;
   }
   DioramaScene scene = {
       .render = &render,
+      .voxel_mode=slot->diorama_voxel_mode,
       .voxel_geometry=slot->diorama_voxel,
+      .voxel_guard=s_voxel_guard.view.capture_generation &&
+          s_voxel_guard.view.capture_generation==slot->diorama_voxel_guard.capture_generation &&
+          s_voxel_guard.view.source_revision==ActionVoxel_Revision(slot->diorama_voxel)
+          ? &s_voxel_guard.view : NULL,
       .voxel_sprites=&voxel_sprites,
       .voxel_sprite_atlas=s_voxel_sprite_atlas,
       .trunk=slot->diorama_trunk,.trunk_settings=slot->diorama_trunk_settings,
+      .trunk_guard = s_trunk_guard.view.capture_generation &&
+          s_trunk_guard.view.capture_generation == slot->diorama_trunk_guard.capture_generation &&
+          slot->diorama_trunk && s_trunk_guard.view.source_revision == slot->diorama_trunk->revision
+          ? &s_trunk_guard.view : NULL,
       .trunk_effects=slot->action_environmental_effects?&slot->action_scene_effects:NULL,
+      .ground_cover_light=ActionGroundCover_LightSamples,
       .trunk_lighting=slot->action_effect_lighting,.trunk_particles=slot->action_effect_particles,
       .map_group = slot->diorama_map_group,
       .map_number = slot->diorama_map_number,
@@ -1211,6 +1292,8 @@ retry_projection:;
 }
 
 void PresentDiorama_Reset(ArRenderDevice *device) {
+  DioramaTrunkGuardUpload_Reset(&s_trunk_guard, device);
+  DioramaVoxelGuardUpload_Reset(&s_voxel_guard, device);
   DioramaVoxelSourceCache_Reset(&s_voxel_source_cache);
   DioramaDepthGpu_Reset(device);
   ResetVoxelSprites(device);

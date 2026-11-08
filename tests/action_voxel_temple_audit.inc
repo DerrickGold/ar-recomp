@@ -1,5 +1,90 @@
 /* Reviewed native temple matte contract. Numeric IDs below locate fixture art
  * only; the production classification continues to use displayed-art keys. */
+typedef struct TempleAuditEdgePixel {
+  int x,y;
+  const VoxelEdge *edge;
+} TempleAuditEdgePixel;
+static int TempleAuditEdgeOrder(const void *aa,const void *bb) {
+  const TempleAuditEdgePixel *a=aa,*b=bb;
+  if(a->y!=b->y)return a->y<b->y?-1:1;
+  if(a->x!=b->x)return a->x<b->x?-1:1;
+  return (int)a->edge->side-(int)b->edge->side;
+}
+static TempleAuditEdgePixel *TempleAuditEdgePixels(const ActionVoxelGeometry *g,unsigned *count) {
+  unsigned n;const VoxelEdge *edges=ActionVoxel_Edges(g,&n);*count=0;
+  for(unsigned i=0;i<n;++i){assert(edges[i].length>0);*count+=(unsigned)edges[i].length;}
+  TempleAuditEdgePixel *pixels=malloc((size_t)*count*sizeof(*pixels));assert(pixels);
+  unsigned at=0;
+  for(unsigned i=0;i<n;++i)for(int j=0;j<edges[i].length;++j)
+    pixels[at++]=(TempleAuditEdgePixel){edges[i].x+((edges[i].side&1)?0:j),
+        edges[i].y+((edges[i].side&1)?j:0),&edges[i]};
+  assert(at==*count);qsort(pixels,*count,sizeof(*pixels),TempleAuditEdgeOrder);
+  for(unsigned i=1;i<*count;++i)assert(TempleAuditEdgeOrder(&pixels[i-1],&pixels[i])<0);
+  return pixels;
+}
+static bool TempleAuditRaisedAt(const ActionRoomScene *source,int x,int y) {
+  uint16_t word;uint8_t id;
+  if(x<0 || y<0 || !ActionRoomScene_LookupTile(source,1,x/8,y/8,&word,&id))return false;
+  return id==0x42 || id==0x43 || id==0x73 || id==0x74;
+}
+static void TempleAuditContours(const ActionVoxelGeometry *fixed,
+    const ActionVoxelGeometry *tower,const ActionRoomScene *source) {
+  /* The Tower reference now deliberately raises four column materials. Its
+   * contour merges and column/arch boundaries therefore differ, but no old
+   * contour may disappear and no unrelated geometry may change. Compare
+   * native-pixel segments instead of requiring identical merged arrays. */
+  unsigned a_count,b_count;
+  TempleAuditEdgePixel *a=TempleAuditEdgePixels(fixed,&a_count),
+      *b=TempleAuditEdgePixels(tower,&b_count);
+  const int dx[]={0,1,0,-1},dy[]={-1,0,1,0};
+  const float depth=ActionVoxel_Depth(fixed),lift=depth*.125f;
+  unsigned ai=0,bi=0,shared=0,added=0;
+  while(ai<a_count || bi<b_count) {
+    assert(bi<b_count); /* No original contour may be removed. */
+    const TempleAuditEdgePixel *bp=&b[bi];const VoxelEdge *be=bp->edge;
+    const bool owner=TempleAuditRaisedAt(source,bp->x,bp->y),
+        neighbor=TempleAuditRaisedAt(source,bp->x+dx[be->side],bp->y+dy[be->side]);
+    assert(be->raised_scenery==(owner && be->far_rank==1));
+    assert(be->neighbor_raised_scenery==(neighbor && be->near_rank==1));
+    const int order=ai<a_count?TempleAuditEdgeOrder(&a[ai],bp):1;
+    assert(order>=0);
+    if(order>0) {
+      /* The only additional wall is the .03 lip where a raised column
+       * projects in front of ordinary rear architecture. */
+      assert(be->raised_scenery && !be->neighbor_raised_scenery &&
+          be->far_rank==1 && be->near_rank==1 && !be->colliding && !be->high_priority);
+      VoxelEdgeSpan span;
+      assert(ActionVoxel_ResolveEdgeSpan(tower,be,kVoxelEdgeNative,0,depth,&span));
+      assert(fabsf(span.near_depth-depth*.625f)<.00001f &&
+          fabsf(span.far_depth-depth*.75f)<.00001f);
+      ++added;++bi;continue;
+    }
+    const VoxelEdge *ae=a[ai].edge;assert(!ae->raised_scenery && !ae->neighbor_raised_scenery);
+    VoxelEdgeSpan before,after;
+    const bool have_before=ActionVoxel_ResolveEdgeSpan(fixed,ae,kVoxelEdgeNative,0,depth,&before),
+        have_after=ActionVoxel_ResolveEdgeSpan(tower,be,kVoxelEdgeNative,0,depth,&after);
+    assert(have_before==have_after);
+    if(have_before) {
+      const float near=before.near_depth-(be->raised_scenery?lift:0),
+          far=be->neighbor_raised_scenery && be->far_rank>=2?
+              fminf(before.far_depth,depth*.625f):before.far_depth;
+      assert(fabsf(after.near_depth-near)<.00001f && fabsf(after.far_depth-far)<.00001f);
+    }
+    VoxelEdge ac=*ae,bc=*be;
+    ac.x=bc.x=(short)bp->x;ac.y=bc.y=(short)bp->y;ac.length=bc.length=1;
+    /* Cached mount flags now express the same physical plane explicitly;
+     * resolved spans above check their semantics. New owned-art indices may
+     * shift after the additional boundaries, so compare their pixels. */
+    ac.rear_mounted=bc.rear_mounted=ac.neighbor_rear_mounted=bc.neighbor_rear_mounted=0;
+    ac.raised_scenery=bc.raised_scenery=ac.neighbor_raised_scenery=bc.neighbor_raised_scenery=0;
+    assert(!!ac.top_owned_art==!!bc.top_owned_art);
+    if(ac.top_owned_art)assert(!memcmp(ActionVoxel_AuthoredArt(fixed,ac.top_owned_art-1),
+        ActionVoxel_AuthoredArt(tower,bc.top_owned_art-1),256*sizeof(uint16_t)));
+    ac.top_owned_art=bc.top_owned_art=0;
+    assert(!memcmp(&ac,&bc,sizeof(ac)));++shared;++ai;++bi;
+  }
+  assert(shared==a_count && shared+added==b_count);free(a);free(b);
+}
 static void TempleAuditFixtures(const char *directory) {
   static ActionSceneSnapshot fixture;
   static ActionRoomScene tower_reference;
@@ -15,13 +100,13 @@ static void TempleAuditFixtures(const char *directory) {
     ActionVoxelGeometry *fixed=ActionVoxel_Create(),*reference=ActionVoxel_Create(),*edited=ActionVoxel_Create();
     assert(fixed&&reference&&edited);
     assert(ActionVoxel_Build(fixed,source,NULL,settings));
-    /* Same original room assets under the unchanged Tower material scope give
-     * the previous contour masks. Only indoor0103 owns this backing role. */
+    /* Tower still supplies the previous matte masks. Its four raised column
+     * materials are independently accounted for in the contour comparison;
+     * only indoor0103 owns the repaired backing role. */
     tower_reference=*source;tower_reference.map=4;
     assert(ActionVoxel_Build(reference,&tower_reference,NULL,settings));
     unsigned a,b;
-    const VoxelEdge *ea=ActionVoxel_Edges(fixed,&a),*eb=ActionVoxel_Edges(reference,&b);
-    assert(a==b && !memcmp(ea,eb,a*sizeof(*ea)));
+    TempleAuditContours(fixed,reference,source);
     const VoxelPatch *pa=ActionVoxel_Patches(fixed,&a),*pb=ActionVoxel_Patches(reference,&b);
     assert(a==b && !memcmp(pa,pb,a*sizeof(*pa)));
     unsigned checked=0;
@@ -95,7 +180,7 @@ static void TempleAuditFixtures(const char *directory) {
       }
     }
     assert(checked && spike_masks);
-    printf("temple matte terrain %u: %u native rear pixels, unchanged contours/front art/spikes\n",region,checked);
+    printf("temple matte terrain %u: %u native rear pixels, preserved contours/front art/spikes, tower relief accounted\n",region,checked);
     ActionVoxel_Release(fixed);ActionVoxel_Release(reference);ActionVoxel_Release(edited);
   }
 }

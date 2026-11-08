@@ -1578,10 +1578,107 @@ static void DetachedFireballSmokeComposition(void) {
   PresentActionEffects_Reset(&device);
 }
 
+static void GroundCoverSourceOwnership(void) {
+  Backend b;ArRenderDevice device;Init(&b,&device);LavaFrame();
+  frame.diorama_active=true;
+  frame.action_effects=(ActionEffectFrame){0};
+  frame.action_scene_effects=(ActionSceneEffectFrame){.authored_count=66};
+  const ActionEffectInstance bank={.world_x=128,.world_y=112,.kind=kActionEffect_AuthoredCloud,
+      .flags=kActionEffectFlag_Visible,.render_layer=kActionEffectRenderLayer_WorldDust,
+      .projection_plane=kActionEffectProjectionPlane_Bg1,
+      .tuning={.intensity=2,.color=0xd8e6f6,.active=1},.particle_lifetime=240,
+      .particle_style=ActionAuthoredParticles_Default(64,93),
+      .field_style={.placement=2,.strands=2,.ground_depth=4,.ground_width=8,
+          .point_count=2,.points={{-96,0},{96,0}}},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-96,-32,96,32}}};
+  frame.action_scene_effects.authored[0]=frame.action_scene_effects.authored[65]=bank;
+  DioramaProjection projection={.valid=true,.voxel_scenery=true,.bg1_plane={.valid=true}};
+  PresentActionPlaneEffectContext context={&device,&frame,viewport,InspectSourcePacket};
+#define DRAW_COVER_PACKET() do { source_count=0; \
+  PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG1,&projection); } while(0)
+  PresentActionEffects_InvalidateSourcePackets();
+  DRAW_COVER_PACKET();const unsigned both=source_count;assert(both>0);
+  const uint64_t both_revision=source_revision;
+  projection.voxel_ground_cover_claims[1]=UINT64_C(1)<<1;
+  DRAW_COVER_PACKET();assert(source_count*2==both&&source_revision!=both_revision);
+  const uint32_t one_hash=source_hash;
+  const uint64_t one_revision=source_revision;
+  projection.matrix[0]=.8f;projection.matrix[8]=.2f;
+  DRAW_COVER_PACKET();assert(source_revision==one_revision&&source_hash==one_hash);
+  /* Eager staging retains ownership without a camera. Mutating an unclaimed
+   * bank afterwards detects an unwanted second build on the draw deadline. */
+  ++frame.timestamp_ns;PresentActionEffects_PrepareSourcePackets(&frame);
+  frame.action_scene_effects.authored[0].world_x+=17;
+  DRAW_COVER_PACKET();assert(source_count*2==both&&source_hash==one_hash);
+  projection.voxel_ground_cover_claims[0]=1;
+  DRAW_COVER_PACKET();assert(!source_count);
+  /* Turning the mode off restores both tops in this same immutable capture. */
+  projection.voxel_scenery=false;
+  memset(projection.voxel_ground_cover_claims,0,sizeof(projection.voxel_ground_cover_claims));
+  DRAW_COVER_PACKET();assert(source_count==both&&source_hash!=one_hash);
+  PresentActionEffects_Reset(&device);
+#undef DRAW_COVER_PACKET
+}
+
+static void GroundCoverLipSourceOwnership(void) {
+  Backend b;ArRenderDevice device;Init(&b,&device);LavaFrame();
+  frame.diorama_active=true;
+  frame.action_effects=(ActionEffectFrame){0};
+  frame.action_scene_effects=(ActionSceneEffectFrame){.authored_count=66};
+  const ActionEffectInstance bank={.world_x=128,.world_y=112,.kind=kActionEffect_AuthoredCloud,
+      .flags=kActionEffectFlag_Visible,.render_layer=kActionEffectRenderLayer_WorldDust,
+      .projection_plane=kActionEffectProjectionPlane_Bg1,
+      .tuning={.intensity=2,.color=0xd8e6f6,.active=1},.particle_lifetime=240,
+      .particle_style=ActionAuthoredParticles_Default(64,93),
+      .field_style={.placement=2,.strands=2,.ground_depth=4,.ground_width=8,
+          .point_count=2,.points={{-96,0},{96,0}}},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-96,-32,96,32}}};
+  /* No loose grains: this packet contains only the legacy dense front lips.
+   * Index1 remains unclaimed immediately after a claimed bank. */
+  frame.action_scene_effects.authored[0]=frame.action_scene_effects.authored[1]=
+      frame.action_scene_effects.authored[65]=bank;
+  DioramaProjection projection={.valid=true,.voxel_scenery=true,.bg1_plane={.valid=true}};
+#define DRAW_LIP_PACKET() do { source_count=0; \
+  PresentActionEffects_DrawWithSource(&device,&frame,viewport,&projection,InspectSourcePacket); } while(0)
+  PresentActionEffects_InvalidateSourcePackets();
+  DRAW_LIP_PACKET();const unsigned all=source_count;assert(all>0&&all%3==0);
+  const uint64_t all_revision=source_revision;
+  projection.voxel_ground_cover_claims[1]=UINT64_C(1)<<1;
+  DRAW_LIP_PACKET();assert(source_count==all/3*2&&source_revision!=all_revision);
+  const uint64_t two_revision=source_revision;
+  projection.voxel_ground_cover_claims[0]=1;
+  DRAW_LIP_PACKET();assert(source_count==all/3&&source_revision!=two_revision);
+  const uint32_t one_hash=source_hash;
+  const uint64_t one_revision=source_revision;
+  projection.matrix[0]=.8f;projection.matrix[8]=.2f;
+  DRAW_LIP_PACKET();assert(source_count==all/3&&source_revision==one_revision&&source_hash==one_hash);
+  /* Both claim words must survive camera-free eager staging. A later source
+   * mutation detects an unwanted rebuild at the presentation deadline. */
+  ++frame.timestamp_ns;PresentActionEffects_PrepareSourcePackets(&frame);
+  frame.action_scene_effects.authored[1].world_x+=17;
+  DRAW_LIP_PACKET();assert(source_count==all/3&&source_hash==one_hash);
+  const uint64_t staged_revision=source_revision;
+  DRAW_LIP_PACKET();assert(source_revision==staged_revision&&source_hash==one_hash);
+  projection.voxel_ground_cover_claims[1]=0;
+  DRAW_LIP_PACKET();assert(source_count==all/3*2&&source_revision!=staged_revision);
+  const uint64_t restored_second_revision=source_revision;
+  projection.voxel_ground_cover_claims[0]=0;
+  DRAW_LIP_PACKET();assert(source_count==all&&source_revision!=restored_second_revision);
+  projection.voxel_scenery=false;
+  DRAW_LIP_PACKET();assert(source_count==all);
+  source_count=0;
+  PresentActionEffects_DrawWithSource(&device,&frame,viewport,NULL,InspectSourcePacket);
+  assert(source_count==all);
+  PresentActionEffects_Reset(&device);
+#undef DRAW_LIP_PACKET
+}
+
 int main(void) {
   DetachedFireballSmokeComposition();
   AutoExpandedMask();
   SourcePacketCaptureLifetime();
+  GroundCoverSourceOwnership();
+  GroundCoverLipSourceOwnership();
   /* Particle visibility must work across the old 32-bit mask boundaries and
    * through the last authored slot, without rebuilding for pure reprojection. */
   const unsigned particle_slots[]={0,31,32,63,64,kActionAuthoredMaxInstances-1};

@@ -239,6 +239,21 @@ static void IntersectClipRect(ActionEffectLocalRect *a, const ActionEffectLocalR
   a->y1 = fminf(a->y1, b->y1);
 }
 
+bool ActionEffectProjection_AuthoredCloudExtent(const ActionEffectProjectionContext *context,
+    const ActionEffectInstance *effect) {
+  if (!context || !effect || context->scenery_lighting_only || context->light_receiver)
+    return false;
+  const bool voxel = context->diorama_projection
+      ? context->diorama_projection->voxel_scenery : context->staged_voxel_scenery;
+  return voxel && effect->kind == kActionEffect_AuthoredCloud &&
+      effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
+      effect->geometry.kind == kActionEffectGeometry_Rect &&
+      ClipRectIsValid(&effect->geometry.data.rect) && effect->field_style.textured &&
+      (effect->field_style.placement == 0 || effect->field_style.placement == 2) &&
+      !effect->field_style.point_count &&
+      effect->field_style.ground_depth == 0;
+}
+
 bool ActionEffectProjection_ViewBounds(const ActionEffectProjectionContext *context,
     const ActionEffectInstance *effect, ActionEffectLocalRect *bounds) {
   if (!context || !effect || !bounds) return false;
@@ -284,6 +299,11 @@ bool ActionEffectProjection_ViewBounds(const ActionEffectProjectionContext *cont
       IntersectClipRect(&visible, &capture);
     }
   }
+  /* A mist bank has its own finite source envelope. The native cliff may
+   * end while the existing mist continues over the waterfall; only its lower
+   * clip changes, never the projection, side/top limits or terrain source. */
+  if (ActionEffectProjection_AuthoredCloudExtent(context, effect))
+    visible.y1 = fmaxf(visible.y1, effect->geometry.data.rect.y1);
   if (!ClipRectIsValid(&visible)) return false;
   *bounds = visible;
   return true;
@@ -353,8 +373,13 @@ static bool ProjectPoint(
     if (!billboard && !(effect->flags & kActionEffectFlag_ClippedMesh) &&
         !PointIsOnPublishedDioramaPlane(
             context->diorama_projection, effect, capture_x, texture_y,
-            origin.y))
-      return false;
+            origin.y)) {
+      ActionEffectLocalRect extent;
+      if (!ActionEffectProjection_AuthoredCloudExtent(context, effect) ||
+          !ActionEffectProjection_ClipBounds((void *)context, effect, &extent) ||
+          local_x < extent.x0 || local_x > extent.x1 ||
+          local_y < extent.y0 || local_y > extent.y1) return false;
+    }
     ArRenderPointF projected;
     bool valid;
     if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)

@@ -151,7 +151,8 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaCapture *captur
     }
   }
   if (!count) return true;
-  SortVoxelSides(count);
+  count=SortVoxelSides(g,count);
+  if(!count)return true;
   for (unsigned i=0;i<count;++i) {
     const VoxelSide *face=&s_voxel_sides[s_voxel_order[i]];
     memcpy(s_voxel_vertices+i*4,face->v,sizeof(face->v));

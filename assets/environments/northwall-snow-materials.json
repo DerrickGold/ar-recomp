@@ -9,8 +9,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -120,8 +120,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -410,8 +410,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -437,7 +437,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope_foot": true
     },
     {
       "key": "0badc95bcf4a3b3b",
@@ -561,8 +562,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -622,7 +623,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "0fcfe07a0d497eeb",
@@ -694,8 +696,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -867,8 +869,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -944,8 +946,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -1188,8 +1190,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -1434,7 +1436,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "contour_surface": "native_snow_body"
     },
     {
       "key": "2c1411aa789389b1",
@@ -1559,7 +1562,7 @@
         1
       ],
       "flags": 20484,
-      "role": "solid_snow_bank",
+      "role": "native_collision_snow_ramp",
       "origins": [
         [
           1,
@@ -1579,7 +1582,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "326aae6fc0398652",
@@ -1691,8 +1695,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -1729,7 +1733,7 @@
         1
       ],
       "flags": 20484,
-      "role": "solid_snow_bank",
+      "role": "native_collision_snow_ramp",
       "origins": [
         [
           1,
@@ -1749,7 +1753,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "375a90dcaa84662d",
@@ -1799,8 +1804,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -1922,7 +1927,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "3d0a549ada2e26d6",
@@ -2058,7 +2064,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "4190e92a110de0f7",
@@ -2068,8 +2075,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -2210,8 +2217,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -2268,7 +2275,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "48351eb47de5a12a",
@@ -2313,7 +2321,7 @@
         1
       ],
       "flags": 20484,
-      "role": "solid_snow_bank",
+      "role": "native_collision_snow_ramp",
       "origins": [
         [
           1,
@@ -2333,7 +2341,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "4c8f05e5eedbd924",
@@ -2432,7 +2441,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "4e2c4f9e60b2f74e",
@@ -2506,7 +2516,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "50c04f18f29f0723",
@@ -2540,7 +2551,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "50c9cee4a7c7b5d7",
@@ -2591,7 +2603,7 @@
         1
       ],
       "flags": 20484,
-      "role": "solid_snow_bank",
+      "role": "native_collision_snow_ramp",
       "origins": [
         [
           1,
@@ -2611,7 +2623,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "532e29928e1a95a5",
@@ -2642,7 +2655,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "contour_surface": "native_snow_body"
     },
     {
       "key": "543d4e41d3dc6dda",
@@ -2692,8 +2706,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -3025,7 +3039,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "670d1803ad0d806e",
@@ -3035,8 +3050,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -3073,7 +3088,7 @@
         1
       ],
       "flags": 20484,
-      "role": "solid_snow_bank",
+      "role": "native_collision_snow_ramp",
       "origins": [
         [
           1,
@@ -3093,7 +3108,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "695b32ce7a83760a",
@@ -3103,8 +3119,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -3161,7 +3177,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "6b7eff52db2c7d7d",
@@ -3295,8 +3312,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -3363,8 +3380,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -3475,7 +3492,7 @@
         1
       ],
       "flags": 20484,
-      "role": "solid_snow_bank",
+      "role": "native_collision_snow_ramp",
       "origins": [
         [
           1,
@@ -3495,7 +3512,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "81b669d57cf30312",
@@ -3651,13 +3669,13 @@
     {
       "key": "85920776068fedbf",
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        1,
+        1,
+        1,
+        1
       ],
-      "flags": 32776,
-      "role": "rear_tree_bark",
+      "flags": 4,
+      "role": "noncolliding_tree_boundary",
       "origins": [
         [
           5,
@@ -3674,12 +3692,6 @@
           2,
           145
         ]
-      ],
-      "rear_colors": [
-        2,
-        2,
-        2,
-        2
       ],
       "animation_phases": [
         0,
@@ -3790,13 +3802,13 @@
     {
       "key": "89abd5f93a95388e",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        3,
+        3,
+        3,
+        3
       ],
-      "flags": 20484,
-      "role": "solid_snow_bank",
+      "flags": 512,
+      "role": "snow_cleft_spikes",
       "origins": [
         [
           1,
@@ -3806,6 +3818,12 @@
       ],
       "animation_phases": [
         0
+      ],
+      "rear_colors": [
+        2,
+        2,
+        2,
+        2
       ]
     },
     {
@@ -3979,7 +3997,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "8b7c89f79de2be0f",
@@ -4010,7 +4029,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "8cccc502282c81fa",
@@ -4020,8 +4040,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -4283,7 +4303,7 @@
         1
       ],
       "flags": 20484,
-      "role": "solid_snow_bank",
+      "role": "native_collision_snow_ramp",
       "origins": [
         [
           1,
@@ -4303,7 +4323,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "97419f593a34891a",
@@ -4549,7 +4570,7 @@
         1
       ],
       "flags": 20484,
-      "role": "solid_snow_bank",
+      "role": "native_collision_snow_ramp",
       "origins": [
         [
           1,
@@ -4569,7 +4590,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "a548bf0a30b31865",
@@ -4579,8 +4601,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -4650,8 +4672,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -4677,7 +4699,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope_foot": true
     },
     {
       "key": "a5f6cd86034eab05",
@@ -4963,7 +4986,7 @@
         1
       ],
       "flags": 20484,
-      "role": "solid_snow_bank",
+      "role": "native_collision_snow_ramp",
       "origins": [
         [
           1,
@@ -4983,7 +5006,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "b75901c4634ce29e",
@@ -4993,8 +5017,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -5051,7 +5075,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "contour_surface": "native_snow_body"
     },
     {
       "key": "b8e0383c11fababe",
@@ -5195,8 +5220,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -5330,7 +5355,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "c1fe0cdec993323e",
@@ -5340,8 +5366,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -5526,7 +5552,7 @@
         1
       ],
       "flags": 20484,
-      "role": "solid_snow_bank",
+      "role": "native_collision_snow_ramp",
       "origins": [
         [
           1,
@@ -5546,7 +5572,8 @@
       ],
       "animation_phases": [
         0
-      ]
+      ],
+      "native_slope": true
     },
     {
       "key": "c937fbb2a945f2de",
@@ -5859,8 +5886,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -5896,8 +5923,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -6035,8 +6062,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -6103,8 +6130,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -6140,8 +6167,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -6257,8 +6284,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -6451,8 +6478,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -6590,8 +6617,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,
@@ -6797,8 +6824,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip_or_boulder",
+      "flags": 49160,
+      "role": "rear_snow_bank_detail",
       "origins": [
         [
           1,

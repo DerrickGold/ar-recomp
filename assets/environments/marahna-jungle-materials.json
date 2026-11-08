@@ -559,7 +559,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 24,
       "role": "front_ornament",
       "origins": [
         [
@@ -933,7 +933,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 24,
       "role": "front_ornament",
       "origins": [
         [
@@ -1987,7 +1987,9 @@
           2,
           179
         ]
-      ]
+      ],
+      "top_surface": "family_donor16",
+      "surface_family": "jungle_stone"
     },
     {
       "key": "2d817766e0293bbd",
@@ -2729,13 +2731,13 @@
     {
       "key": "4737a35169ae984c",
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        1,
+        1,
+        1,
+        1
       ],
-      "flags": 32776,
-      "role": "rear_masonry",
+      "flags": 4100,
+      "role": "noncolliding_stone_course",
       "origins": [
         [
           1,
@@ -3077,13 +3079,13 @@
     {
       "key": "4e50d0752fb2eba7",
       "kinds": [
-        4,
-        4,
+        1,
+        1,
         7,
         7
       ],
-      "flags": 106504,
-      "role": "shoreline_column",
+      "flags": 77828,
+      "role": "shoreline_stone_course",
       "origins": [
         [
           1,
@@ -4367,7 +4369,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 24,
       "role": "front_ornament",
       "origins": [
         [
@@ -4675,7 +4677,9 @@
           2,
           38
         ]
-      ]
+      ],
+      "top_surface": "family_donor16",
+      "surface_family": "jungle_stone"
     },
     {
       "key": "6eb8a173dcfb90e7",
@@ -4955,13 +4959,13 @@
     {
       "key": "78002a09bf691f8c",
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        7,
+        7,
+        7,
+        7
       ],
-      "flags": 32776,
-      "role": "rear_masonry",
+      "flags": 0,
+      "role": "rear_column_base",
       "origins": [
         [
           1,
@@ -5018,7 +5022,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 24,
       "role": "front_ornament",
       "origins": [
         [
@@ -5291,7 +5295,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 24,
       "role": "front_ornament",
       "origins": [
         [
@@ -5351,6 +5355,7 @@
       ],
       "flags": 32776,
       "role": "rear_masonry",
+      "rear_backing_donor": true,
       "origins": [
         [
           1,
@@ -6742,13 +6747,13 @@
     {
       "key": "ba141a501ad9d2ff",
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        7,
+        7,
+        7,
+        7
       ],
-      "flags": 32776,
-      "role": "rear_masonry",
+      "flags": 0,
+      "role": "rear_column_vine",
       "origins": [
         [
           1,
@@ -8007,7 +8012,9 @@
           2,
           12
         ]
-      ]
+      ],
+      "top_surface": "family_donor16",
+      "surface_family": "jungle_stone"
     },
     {
       "key": "dd157300a249c7c3",
@@ -8204,7 +8211,7 @@
         1,
         1
       ],
-      "flags": 4,
+      "flags": 20,
       "role": "solid_ruin",
       "origins": [
         [
@@ -8694,8 +8701,8 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_masonry",
+      "flags": 1073774600,
+      "role": "rear_masonry_post_shadow",
       "origins": [
         [
           1,
@@ -8740,7 +8747,9 @@
           2,
           178
         ]
-      ]
+      ],
+      "top_surface": "family_donor16",
+      "surface_family": "jungle_stone"
     },
     {
       "key": "f43e1bd20ec9ae58",
@@ -9176,5 +9185,6 @@
         ]
       ]
     }
-  ]
+  ],
+  "top_surface_contract": "Reviewed plain and moss-weathered ruin bodies retain their own complete native16px top art. The carved medallion blocks keep the native cap sampling path so their original divisions and ornament continue across exposed depth. No borrowed plain-body top substitution is applied to those two ornamental families; structural roles, side art, collision and priority remain unchanged."
 }

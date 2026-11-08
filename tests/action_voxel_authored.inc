@@ -79,7 +79,18 @@ static void AuthoredContracts(void) {
   native_identity.transform=identity;native_identity.transform.sx=nextafterf(1,2);
   assert(!ActionVoxel_CellKeepsNativeIdentity(&native_identity) && ActionVoxel_CellOwnsArtwork(&native_identity));
   native_identity.transform=identity;native_identity.fields|=kDioramaVoxelCell_TopArt;
+  assert(ActionVoxel_CellKeepsNativeIdentity(&native_identity) && !ActionVoxel_CellOwnsArtwork(&native_identity));
+  native_identity.top_art.set=true;
   assert(!ActionVoxel_CellKeepsNativeIdentity(&native_identity) && ActionVoxel_CellOwnsArtwork(&native_identity));
+  const unsigned auto_art_fields=kDioramaVoxelCell_FrontArt|kDioramaVoxelCell_TopArt|
+      kDioramaVoxelCell_SideArt|kDioramaVoxelCell_BackArt|kDioramaVoxelCell_LeftArt|
+      kDioramaVoxelCell_RightArt|kDioramaVoxelCell_BottomArt;
+  DioramaVoxelCell automatic_art={.fields=auto_art_fields};
+  assert(!DioramaVoxelCell_EffectiveFields(&automatic_art));
+  assert(!ActionVoxel_CellOwnsArtwork(&automatic_art));
+  automatic_art.fields|=kDioramaVoxelCell_Width;automatic_art.width=8;
+  assert(DioramaVoxelCell_EffectiveFields(&automatic_art)==kDioramaVoxelCell_Width);
+  assert(ActionVoxel_CellOwnsArtwork(&automatic_art));
   DioramaVoxelTransform invalid=transform;invalid.sx=0;assert(!ActionVoxel_TransformValid(&invalid));
   invalid=transform;invalid.dz=NAN;assert(!ActionVoxel_TransformValid(&invalid));
   static DioramaVoxelEdits edits;memset(&edits,0,sizeof(edits));edits.cell_count=3;
@@ -161,7 +172,7 @@ static void AuthoredVisibilityFixture(const char *path) {
     edit->faces=kDioramaVoxelFaceMask_All;assert(ActionVoxel_Build(edited,scene,&terrain,settings));
     assert(!ActionVoxel_AuthoredCellAt(edited,x,y));SameGeometry(base,edited);
     assert(!ActionVoxel_HasHiddenNativeFronts(edited));
-    assert(!ActionVoxel_AuthoredArtCount(edited));
+    assert(ActionVoxel_AuthoredArtCount(edited)==ActionVoxel_AuthoredArtCount(base));
     assert(ActionVoxel_Split(edited,x*16,y*16,32,64,32,&frame,source,32,rear,front));
     assert(!memcmp(rear,base_rear,sizeof(rear)) && !memcmp(front,base_front,sizeof(front)));
   }
@@ -172,7 +183,22 @@ static void AuthoredVisibilityFixture(const char *path) {
   terrain.voxel.cells[1]=(DioramaVoxelCell){.x=x,.y=y,.w=2,.h=4,
       .fields=kDioramaVoxelCell_Faces,.faces=kDioramaVoxelFaceMask_All};
   terrain.voxel.cell_count=2;assert(ActionVoxel_Build(edited,scene,&terrain,settings));
-  SameGeometry(base,edited);assert(!ActionVoxel_AuthoredArtCount(edited));
+  SameGeometry(base,edited);assert(ActionVoxel_AuthoredArtCount(edited)==ActionVoxel_AuthoredArtCount(base));
+  /* Auto artwork is a semantic reset after newest-record ownership resolves;
+   * it must preserve the real stump contour, split, and patch geometry. */
+  const unsigned art_fields[]={kDioramaVoxelCell_FrontArt,kDioramaVoxelCell_TopArt,
+      kDioramaVoxelCell_SideArt,kDioramaVoxelCell_BackArt,kDioramaVoxelCell_LeftArt,
+      kDioramaVoxelCell_RightArt,kDioramaVoxelCell_BottomArt};
+  unsigned all_art=0;for(unsigned i=0;i<7;++i)all_art|=art_fields[i];
+  for(unsigned i=0;i<8;++i) {
+    terrain.voxel.cells[1]=(DioramaVoxelCell){.x=x,.y=y,.w=2,.h=4,
+        .fields=i<7?art_fields[i]:all_art};
+    assert(ActionVoxel_Build(edited,scene,&terrain,settings));
+    SameGeometry(base,edited);assert(!ActionVoxel_AuthoredCellAt(edited,x,y));
+    assert(ActionVoxel_AuthoredArtCount(edited)==ActionVoxel_AuthoredArtCount(base));
+    assert(ActionVoxel_Split(edited,x*16,y*16,32,64,32,&frame,source,32,rear,front));
+    assert(!memcmp(rear,base_rear,sizeof(rear)) && !memcmp(front,base_front,sizeof(front)));
+  }
   /* Adding all-visible to a backing-only edit cannot promote its front. */
   terrain.voxel.cell_count=1;terrain.voxel.cells[0]=(DioramaVoxelCell){.x=x,.y=y,
       .fields=kDioramaVoxelCell_Backing|kDioramaVoxelCell_Faces,
@@ -238,7 +264,8 @@ static void AuthoredStumpIdentity(const ActionRoomScene *scene,const ActionVoxel
     assert(ActionVoxel_Build(edited,scene,terrain,settings));SameGeometry(base,edited);
     assert(!ActionVoxel_HasNativeTransforms(edited) && !ActionVoxel_HasTransformedBacks(edited));
     assert(ActionVoxel_HasHiddenNativeFronts(edited)==(mode==2));
-    unsigned caps;ActionVoxel_AuthoredCapArt(edited,&caps);assert(!caps);
+    unsigned caps,base_caps;ActionVoxel_AuthoredCapArt(edited,&caps);ActionVoxel_AuthoredCapArt(base,&base_caps);
+    assert(caps==base_caps);
     VoxelGroupCell cells[kVoxelSemanticGroupMaxCells];VoxelSemanticGroup group;
     assert(ActionVoxel_SemanticGroup(edited,x,y,&group,cells,kVoxelSemanticGroupMaxCells)==kActionVoxelGroup_Complete);
     assert(group.count==8);
@@ -271,6 +298,46 @@ static void AuthoredStumpIdentity(const ActionRoomScene *scene,const ActionVoxel
   a=ActionVoxel_AuthoredCellAt(edited,x,y);
   assert(a && a->native_transform_requested && a->native_transform && a->transform.dx==16);
   assert(ActionVoxel_HasNativeTransforms(edited) && ActionVoxel_HasTransformedBacks(edited));
+  /* BackArt Auto changes no native transform ownership, including the rear
+   * copies that must leave the old position and move with the same stump. */
+  ActionVoxelGeometry *without_auto=ActionVoxel_Create();assert(without_auto);
+  assert(ActionVoxel_Build(without_auto,scene,terrain,settings));
+  edit->fields|=kDioramaVoxelCell_BackArt;edit->backing_art=(DioramaVoxelArt){0};
+  assert(ActionVoxel_Build(edited,scene,terrain,settings));SameGeometry(without_auto,edited);
+  assert(ActionVoxel_HasNativeTransforms(edited) && ActionVoxel_HasTransformedBacks(edited));
+  unsigned owned_rows=0;
+  for(unsigned cy=0;cy<4;++cy)for(unsigned cx=0;cx<2;++cx) {
+    const VoxelAuthoredCell *before=ActionVoxel_AuthoredCellAt(without_auto,x+cx,y+cy);
+    const VoxelAuthoredCell *after=ActionVoxel_AuthoredCellAt(edited,x+cx,y+cy);
+    assert(before && after && after->native_transform && !after->surface);
+    assert(!memcmp(before->native_rear_rows,after->native_rear_rows,sizeof(before->native_rear_rows)));
+    assert(!memcmp(&before->transform,&after->transform,sizeof(before->transform)));
+    assert(!memcmp(before->priority,after->priority,sizeof(before->priority)));
+    for(unsigned row=0;row<16;++row)owned_rows+=before->native_rear_rows[row]!=0;
+    for(unsigned face=0;face<7;++face)
+      assert(!memcmp(before->pixels[face],after->pixels[face],256*sizeof(uint16_t)));
+  }
+  assert(owned_rows);
+  for(unsigned fade=0;fade<2;++fade) {
+    const ActionRoomSceneFrameState frame={.brightness=fade?7:15};
+    assert(ActionVoxel_Split(without_auto,(x-1)*16,(y-1)*16,64,96,64,&frame,source,64,base_rear,base_front));
+    assert(ActionVoxel_Split(edited,(x-1)*16,(y-1)*16,64,96,64,&frame,source,64,rear,front));
+    assert(!memcmp(front,base_front,sizeof(front)) && !memcmp(rear,base_rear,sizeof(rear)));
+  }
+  /* An explicit backing mode (including backing:auto) is still a distinct
+   * authored instruction. The existing native-transform restriction remains. */
+  const uint64_t valid_revision=ActionVoxel_Revision(edited);
+  edit->fields|=kDioramaVoxelCell_Backing;
+  for(unsigned mode=kDioramaVoxelBacking_Auto;mode<=kDioramaVoxelBacking_Replace;++mode) {
+    edit->backing=mode;assert(!ActionVoxel_Build(edited,scene,terrain,settings));
+    assert(strstr(ActionVoxel_BuildError(edited),"backing-only"));
+    assert(ActionVoxel_Revision(edited)==valid_revision);
+  }
+  edit->fields&=~kDioramaVoxelCell_Backing;edit->backing_art=AuthoredTestArt(512);
+  assert(!ActionVoxel_Build(edited,scene,terrain,settings));
+  assert(strstr(ActionVoxel_BuildError(edited),"backing-only"));
+  assert(ActionVoxel_Revision(edited)==valid_revision);
+  ActionVoxel_Release(without_auto);
 }
 static void AuthoredStumpFixture(const char *path) {
   if(!path)return;
@@ -319,6 +386,13 @@ static void AuthoredStumpFixture(const char *path) {
       assert(ActionVoxel_CellGeometry(base,neighbour,sy/16,&right_before));
       assert(ActionVoxel_CellGeometry(edited,neighbour,sy/16,&right_after));
       assert(!memcmp(&right_before,&right_after,sizeof(right_before)));
+      if(kind==1) {
+        /* Explicit Auto returns this donor cell to the native path; it must
+         * not erase the source and then rescue it through an owned atlas. */
+        assert(!ActionVoxel_AuthoredCellAt(edited,sx/16,sy/16));SameGeometry(base,edited);
+        assert(ActionVoxel_AuthoredArtCount(edited)==ActionVoxel_AuthoredArtCount(base));
+        continue;
+      }
       if(kind==6) {
         /* A visibility-only front hide retains native semantic side/cap
          * geometry and its source texture; no donor rescue is necessary. */
@@ -411,7 +485,8 @@ static void AuthoredStumpFixture(const char *path) {
       assert(matched);
     }
     terrain.voxel.cells[0].fields=0;assert(ActionVoxel_Build(edited,&scene,&terrain,settings));
-    unsigned owned;ActionVoxel_AuthoredCapArt(edited,&owned);assert(!owned);SameGeometry(base,edited);
+    unsigned owned,native_owned;ActionVoxel_AuthoredCapArt(edited,&owned);ActionVoxel_AuthoredCapArt(base,&native_owned);
+    assert(owned==native_owned);SameGeometry(base,edited);
     /* Shift the same native 2x4-cell profile across both negative axes. The
      * donor straddles Y=-1/0, so truncation toward zero picks the wrong stamp. */
     DioramaTileStamp stamps[24];memset(stamps,0,sizeof(stamps));unsigned stamp_count=0;
@@ -430,7 +505,7 @@ static void AuthoredStumpFixture(const char *path) {
         .fields=kDioramaVoxelCell_TopArt,.top_art=AuthoredTestArt(512)};
     assert(ActionVoxel_Build(edited,&scene,&terrain,settings));
     unsigned negative_edges,negative_caps=0;const VoxelEdge *negative=ActionVoxel_Edges(edited,&negative_edges);
-    for(unsigned i=0;i<negative_edges;++i)if(negative[i].top_owned_art) {
+    for(unsigned i=0;i<negative_edges;++i)if(negative[i].top_owned_art && !negative[i].surface_texture) {
       assert(negative[i].top_sample_x==-7 && negative[i].top_sample_y==-1);
       const uint16_t *art=ActionVoxel_AuthoredArt(edited,negative[i].top_owned_art-1);
       for(int yy=0;yy<4;++yy)for(int xx=0;xx<4;++xx) {
@@ -502,7 +577,11 @@ static void AuthoredFixture(const char *path) {
       !memcmp(before.back,after.back,sizeof(before.back)) && after.width==16 && after.offset_x==0);
   unsigned a_count,b_count;
   const VoxelEdge *a_edges=ActionVoxel_Edges(base,&a_count),*b_edges=ActionVoxel_Edges(edited,&b_count);
-  assert(a_count==b_count && !memcmp(a_edges,b_edges,a_count*sizeof(*a_edges)));
+  assert(a_count==b_count);
+  for(unsigned i=0;i<a_count;++i) {
+    VoxelEdge a_edge=a_edges[i],b_edge=b_edges[i];a_edge.top_owned_art=b_edge.top_owned_art=0;
+    assert(!memcmp(&a_edge,&b_edge,sizeof(a_edge)));
+  }
   size_t animation_offset,animation_bytes;
   if(ActionVoxel_AnimationMatches(s,s->characters,&animation_offset,&animation_bytes)) {
     edit->fields|=kDioramaVoxelCell_TopArt;
@@ -528,7 +607,10 @@ static void AuthoredFixture(const char *path) {
       .left_art=AuthoredTestArt(513),.bottom_art=AuthoredTestArt(512)};
   assert(ActionVoxel_Build(edited,s,&terrain,settings));
   cells=ActionVoxel_AuthoredCells(edited,&count);assert(count==64);
-  assert(ActionVoxel_AuthoredArtCount(edited)==4); /* RGB donors plus transparent rear. */
+  /* Three explicit RGB donors and a transparent rear stay interned once,
+   * independently of the automatic art used by surviving native geometry. */
+  for(unsigned i=0;i<count;++i)for(unsigned face=0;face<7;++face)
+    assert(cells[i].art_id[face]<4);
   const VoxelAuthoredCell *upper=ActionVoxel_AuthoredCellAt(edited,0,0),*lower=ActionVoxel_AuthoredCellAt(edited,0,1);
   assert(upper && lower && !ActionVoxel_AuthoredCellAt(edited,8,0));
   assert(!upper->native_front_art && !lower->native_front_art); /* Explicit donors retain authored filtering. */

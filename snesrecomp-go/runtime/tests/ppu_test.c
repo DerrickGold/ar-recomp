@@ -2983,7 +2983,15 @@ static void test_bulk_obj_clear(void) {
     }
 }
 
+#include "ppu_background_guards.inc"
+
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--background-guards")) {
+        test_background_guards();
+        if (failures) return 1;
+        puts("native background guard parity: pass");
+        return 0;
+    }
     if (argc == 2 && !strcmp(argv[1], "--bulk-obj-clear")) {
         test_bulk_obj_clear();
         return failures ? 1 : 0;
@@ -3037,6 +3045,7 @@ int main(int argc, char **argv) {
         test_native_vram_margin_path_parity();
         test_clamped_background_view();
         test_native_background_view();
+        test_background_guards();
         ppu_free(ppu);
     }
     if (failures != 0) {

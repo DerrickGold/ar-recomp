@@ -3,7 +3,8 @@ static uint16_t NativeAffineColor(int x,int y) {
 }
 static void NativeAffineObserve(void *context,const DioramaVoxelPickFace *face) {
   NativeAffineProbe *probe=context;
-  if(!face->authored && face->kind!=kDioramaVoxelFace_Top && face->kind!=kDioramaVoxelFace_Side)return;
+  if(!face->authored && face->kind!=kDioramaVoxelFace_Top &&
+      face->kind!=kDioramaVoxelFace_Side && face->kind!=kDioramaVoxelFace_Bottom)return;
   float x=0,y=0;for(unsigned i=0;i<4;++i){x+=face->world_xy[i*2]*.25f;y+=face->world_xy[i*2+1]*.25f;}
   if(x<79+probe->source_shift || x>113+probe->source_shift || y<95 || y>161)return;
   assert(probe->count<512);probe->faces[probe->count++]=*face;

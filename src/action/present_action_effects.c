@@ -510,6 +510,7 @@ typedef struct ActionSourcePacketCache {
   uint64_t revision;
   bool valid, failed, requested, lighting, particles, scenery_exposure_in_mesh, scenery_lighting_in_material, atmosphere_unlit, weather_only;
   bool voxel_scenery;
+  uint64_t ground_cover_claims[2];
   unsigned particle_count;
   uint8_t particle_indices[kActionAuthoredMaxInstances];
   ActionEffectLocalRect particle_bounds[kActionAuthoredMaxInstances];
@@ -589,7 +590,15 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
       projection->light_receiver == kActionReceiver_Enemies ? 3 : projection->scenery_lighting_only ? 1 : 0;
   const unsigned packet_slot = pass + category * kActionSourceCompositePacketSlots;
   ActionSourcePacketCache *cache = &s_source_packets[packet_slot];
-  const bool voxel_scenery=projection->diorama_projection && projection->diorama_projection->voxel_scenery;
+  const bool voxel_scenery=projection->diorama_projection
+      ?projection->diorama_projection->voxel_scenery:projection->staged_voxel_scenery;
+  const uint64_t *published_claims=projection->diorama_projection
+      ?projection->diorama_projection->voxel_ground_cover_claims:projection->staged_ground_cover_claims;
+  const bool ground_cover_pass=pass==kActionEffectRenderLayer_Bg1Mist ||
+      pass==kActionEffectRenderLayer_WorldDust;
+  const uint64_t ground_cover_claims[2]={
+      ground_cover_pass?published_claims[0]:0,
+      ground_cover_pass?published_claims[1]:0};
   if (!cache->valid) {
     cache->particle_count = 0;
     if (pass < kActionEffectRenderLayer_Count)
@@ -606,6 +615,7 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
     cache->valid = false;
   if (!cache->valid || cache->lighting != lighting || cache->particles != particles ||
       cache->voxel_scenery != voxel_scenery ||
+      memcmp(cache->ground_cover_claims,ground_cover_claims,sizeof(ground_cover_claims)) ||
       cache->atmosphere_unlit != projection->atmosphere_unlit ||
       cache->scenery_exposure_in_mesh != projection->scenery_exposure_in_mesh ||
       cache->scenery_lighting_in_material != projection->scenery_lighting_in_material) {
@@ -628,6 +638,7 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
     cache->scenery_lighting_in_material=projection->scenery_lighting_in_material;
     cache->atmosphere_unlit=projection->atmosphere_unlit;
     cache->voxel_scenery=voxel_scenery;
+    memcpy(cache->ground_cover_claims,ground_cover_claims,sizeof(ground_cover_claims));
     cache->lighting = lighting;
     cache->particles = particles;
     cache->valid = true;
@@ -886,6 +897,8 @@ void PresentActionEffects_PrepareSourcePackets(const FrameSlot *slot) {
       }
     if (!view_dependent) {
       ActionEffectProjectionContext context = DecorationProjection(slot, (ArRenderRectI){0}, NULL);
+      memcpy(context.staged_ground_cover_claims,cache->ground_cover_claims,sizeof(cache->ground_cover_claims));
+      context.staged_voxel_scenery=cache->voxel_scenery;
       context.scenery_exposure_in_mesh = cache->scenery_exposure_in_mesh;
       context.scenery_lighting_in_material = cache->scenery_lighting_in_material;
       context.scenery_lighting_only = category != 0;

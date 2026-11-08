@@ -31,6 +31,32 @@ static void VoxelJsonAdd(VoxelJson *out, const char *format, ...) {
 }
 static unsigned VoxelJsonDone(const VoxelJson *out) { return out->failed ? 0 : (unsigned)out->length; }
 
+/* Audit copy-out of the complete observed draw, independent of selection
+ * limits. A caller must reject overflow rather than count a truncated view
+ * as inspected. This reads the existing editor observer; it changes no draw. */
+unsigned RoomPreview_VoxelAuditCount(void) { return s_voxel_face_count; }
+int RoomPreview_VoxelAuditComplete(void) { return s_voxel_pick_valid&&!s_voxel_pick_overflow; }
+unsigned RoomPreview_VoxelAuditRead(unsigned first,unsigned maximum) {
+  if(!RoomPreview_VoxelAuditComplete() || first>s_voxel_face_count || !maximum)return 0;
+  if(maximum>512)maximum=512;
+  const unsigned end=first+maximum<s_voxel_face_count?first+maximum:s_voxel_face_count;
+  VoxelJson out={0};
+  VoxelJsonAdd(&out,"{\"total\":%u,\"first\":%u,\"complete\":true,\"fields\":[\"kind\",\"priority\",\"plane\",\"cell_x\",\"cell_y\",\"owner\",\"authored\",\"art_index\",\"art_source_x\",\"art_source_y\",\"art_source_size\",\"sample_alpha\",\"world_xy\",\"depth\",\"screen_xy\",\"clip_w\",\"art_uv\"],\"faces\":[",s_voxel_face_count,first);
+  for(unsigned i=first;i<end;++i) {
+    const DioramaVoxelPickFace *f=s_voxel_faces+i;
+    VoxelJsonAdd(&out,"%s[%d,%d,%d,%d,%d,%u,%u,%u,%d,%d,%u,%u",i==first?"":",",f->kind,f->priority,f->plane,f->cell_x,f->cell_y,f->owner,f->authored,f->art_index,f->art_source_x,f->art_source_y,f->art_source_size,f->sample_alpha);
+    const float *values[]={f->world_xy,f->depth,f->screen_xy,f->clip_w,f->art_uv};
+    const unsigned sizes[]={8,4,8,4,8};
+    for(unsigned a=0;a<5;++a) {
+      VoxelJsonAdd(&out,",[");
+      for(unsigned j=0;j<sizes[a];++j)VoxelJsonAdd(&out,"%s%.7g",j?",":"",values[a][j]);
+      VoxelJsonAdd(&out,"]");
+    }
+    VoxelJsonAdd(&out,"]");
+  }
+  VoxelJsonAdd(&out,"]}");return VoxelJsonDone(&out);
+}
+
 /* Clip in native source space, retaining homogeneous projected coordinates.
  * This outlines the selected cell, rather than an entire large backing mesh. */
 typedef struct VoxelPickVertex { float x,y,xw,yw,w; } VoxelPickVertex;
@@ -61,32 +87,76 @@ static unsigned VoxelClipCell(const DioramaVoxelPickFace *f,int x,int y,
   }
   return count;
 }
-static float VoxelCross(ArRenderPointF a,ArRenderPointF b,ArRenderPointF c) {
-  return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+typedef struct VoxelOutline {
+  ArRenderPointF *points;
+  unsigned count,capacity;
+} VoxelOutline;
+static bool VoxelOutlineAppend(VoxelOutline *out,const ArRenderPointF *points,unsigned count) {
+  /* Each observed quad clips to at most twelve vertices. Reserve enough for
+   * every observation and the hull workspace; never discard later patches. */
+  const unsigned limit=kEditorVoxelFaces*12,wanted=out->count+count;
+  if(wanted>limit)return false;
+  if(wanted>out->capacity) {
+    unsigned capacity=out->capacity?out->capacity:128;
+    while(capacity<wanted)capacity=capacity>limit/2?limit:capacity*2;
+    void *next=realloc(out->points,(size_t)capacity*3*sizeof(*out->points));
+    if(!next)return false;
+    out->points=next;out->capacity=capacity;
+  }
+  memcpy(out->points+out->count,points,count*sizeof(*points));out->count=wanted;return true;
 }
-static int VoxelPointOrder(const void *a,const void *b) {
-  const ArRenderPointF *p=a,*q=b;
-  return p->x<q->x?-1:p->x>q->x?1:p->y<q->y?-1:p->y>q->y?1:0;
+/* Keep the historical generic Side coordinate query as an aggregate.
+ * Direct underside picks use Bottom, so sampling cannot repaint lateral art. */
+static bool VoxelObservedKindMatches(const DioramaVoxelPickFace *face,int kind) {
+  return face->kind==kind || (kind==kDioramaVoxelFace_Side && !face->authored &&
+      face->kind==kDioramaVoxelFace_Bottom);
 }
-static unsigned VoxelHull(ArRenderPointF *p,unsigned count,ArRenderPointF *out) {
-  if(count<3){memcpy(out,p,count*sizeof(*p));return count;}
-  qsort(p,count,sizeof(*p),VoxelPointOrder);unsigned n=0;
-  for(unsigned i=0;i<count;++i){while(n>1&&VoxelCross(out[n-2],out[n-1],p[i])<=.001f)--n;out[n++]=p[i];}
-  const unsigned lower=n;
-  for(unsigned i=count-1;i-- >0;){while(n>lower&&VoxelCross(out[n-2],out[n-1],p[i])<=.001f)--n;out[n++]=p[i];}
-  return n>1?n-1:n;
-}
-static unsigned VoxelTileOutline(int x,int y,int kind,ArRenderPointF *out,int *priority) {
-  ArRenderPointF points[128];unsigned count=0;
-  for(unsigned i=0;i<s_voxel_face_count && count<116;++i) {
+static bool VoxelTileOutline(int x,int y,int kind,VoxelOutline *out,int *priority) {
+  for(unsigned i=0;i<s_voxel_face_count;++i) {
     const DioramaVoxelPickFace *f=&s_voxel_faces[i];
-    if(f->kind!=kind || ((f->authored||f->cell_x>=0)&&(f->cell_x!=x||f->cell_y!=y)))continue;
+    if(!VoxelObservedKindMatches(f,kind) || ((f->authored||f->cell_x>=0)&&(f->cell_x!=x||f->cell_y!=y)))continue;
     ArRenderPointF clipped[12];const unsigned n=VoxelClipCell(f,x,y,clipped);
     if(n<3)continue;
-    for(unsigned j=0;j<n;++j)points[count++]=clipped[j];
+    if(!VoxelOutlineAppend(out,clipped,n))return false;
     *priority=f->priority;
   }
-  return VoxelHull(points,count,out);
+  if(out->count) {
+    ArRenderPointF *hull=out->points+out->capacity;
+    out->count=EditorVoxelPick_Hull(out->points,out->count,hull);
+    memmove(out->points,hull,out->count*sizeof(*hull));
+  }
+  return true;
+}
+/* A direct pick identifies one rendered patch. Coordinate selections may cover
+ * several material bands, so only expose a native donor when every visible
+ * patch agrees. A refresh must also explicitly clear a former donor. */
+static void VoxelJsonSampleSource(VoxelJson *json,int x,int y,int kind,
+    const VoxelAuthoredCell *authored,const DioramaVoxelPickFace *picked,bool observed) {
+  int source_x=0,source_y=0;unsigned size=0;bool ambiguous=false;
+  if(picked) {
+    source_x=picked->art_source_x;source_y=picked->art_source_y;size=picked->art_source_size;
+  } else if(authored&&authored->surface) {
+    static const int art_indices[]={0,1,2,3,-1,4,5,6};
+    const int art=art_indices[kind];
+    if(art>=0) {
+      source_x=authored->surface_sample_x[art];source_y=authored->surface_sample_y[art];
+      size=authored->surface_sample_size[art];
+    }
+  } else if(observed) {
+    bool found=false;
+    for(unsigned i=0;i<s_voxel_face_count;++i) {
+      const DioramaVoxelPickFace *f=&s_voxel_faces[i];
+      if(!VoxelObservedKindMatches(f,kind) || ((f->authored||f->cell_x>=0)&&(f->cell_x!=x||f->cell_y!=y)))continue;
+      ArRenderPointF clipped[12];if(VoxelClipCell(f,x,y,clipped)<3)continue;
+      if(found&&(size!=f->art_source_size || (size&&
+          (source_x!=f->art_source_x||source_y!=f->art_source_y)))) {ambiguous=true;break;}
+      found=true;source_x=f->art_source_x;source_y=f->art_source_y;size=f->art_source_size;
+    }
+  }
+  if(size&&!ambiguous)VoxelJsonAdd(json,
+      ",\"sampleSource\":{\"x\":%d,\"y\":%d,\"size\":%u,\"bg\":0}",source_x,source_y,size);
+  else VoxelJsonAdd(json,",\"sampleSource\":null");
+  VoxelJsonAdd(json,",\"sampleSourceAmbiguous\":%s",ambiguous?"true":"false");
 }
 static bool VoxelFaceInk(const DioramaVoxelPickFace *face,const EditorVoxelPickHit *hit,
     float screen_x,float screen_y) {
@@ -205,16 +275,18 @@ static unsigned VoxelTileJson(int x,int y,int kind,const DioramaVoxelPickFace *p
   static const char *const shapes[]={"box","taper","curve"};
   const bool metadata_only=kind<0;
   if(metadata_only)kind=kDioramaVoxelFace_Front;
-  ArRenderPointF points[256];int priority=0;
-  unsigned count=metadata_only?0:VoxelTileOutline(x,y,kind,points,&priority);
+  VoxelOutline outline={0};ArRenderPointF coordinate[4];int priority=0;
+  if(!metadata_only&&!VoxelTileOutline(x,y,kind,&outline,&priority)){free(outline.points);return 0;}
+  ArRenderPointF *points=outline.points;unsigned count=outline.count;
   const bool visible=count>0;
-  if(!metadata_only&&!count)count=VoxelCoordinateOutline(x,y,&cell,authored,kind,points);
+  if(!metadata_only&&!count){points=coordinate;count=VoxelCoordinateOutline(x,y,&cell,authored,kind,points);}
   VoxelJson json={0};
   VoxelJsonAdd(&json,"{\"kind\":\"tile\",\"x\":%d,\"y\":%d,\"face\":\"%s\",\"priority\":%d,\"front\":%.6f,\"back\":%.6f,\"width\":%.4f,\"offset\":%.4f,\"edited\":%s,\"backing\":\"%s\",\"visible\":%s,\"faces\":%u,\"shape\":\"%s\",\"frontEnd\":%.6f,\"backEnd\":%.6f,\"shapeY\":%d,\"shapeH\":%u,",
       x,y,names[kind],priority,cell.front[0],cell.back[0],cell.width,cell.offset_x,edit&&edit->fields?"true":"false",
       backing[edit&&(edit->fields&kDioramaVoxelCell_Backing)?edit->backing:0],visible?"true":"false",
       cell.faces,shapes[cell.shape<=kDioramaVoxelShape_Curve?cell.shape:0],cell.front_end,cell.back_end,cell.shape_y,cell.shape_h);
   VoxelJsonPolygon(&json,points,count);
+  free(outline.points);
   if(!metadata_only) {
     VoxelDepthHandle(&json,x,y,&cell,authored,edit,false);
     VoxelDepthHandle(&json,x,y,&cell,authored,edit,true);
@@ -241,9 +313,7 @@ static unsigned VoxelTileJson(int x,int y,int kind,const DioramaVoxelPickFace *p
   VoxelJsonArt(&json,"leftArt",edit?&edit->left_art:NULL);
   VoxelJsonArt(&json,"rightArt",edit?&edit->right_art:NULL);
   VoxelJsonArt(&json,"bottomArt",edit?&edit->bottom_art:NULL);
-  if(picked&&picked->art_source_size)VoxelJsonAdd(&json,
-      ",\"sampleSource\":{\"x\":%d,\"y\":%d,\"size\":%u,\"bg\":0}",
-      picked->art_source_x,picked->art_source_y,picked->art_source_size);
+  VoxelJsonSampleSource(&json,x,y,kind,authored,picked,!metadata_only);
   VoxelJsonAdd(&json,"}");return VoxelJsonDone(&json);
 }
 
@@ -274,7 +344,7 @@ static void VoxelObjectJson(VoxelJson *json,const EditorObjectPreviewItem *item)
   DioramaVoxelPickFace face;
   if(!count&&s_voxel_inspection!=kDioramaVoxelInspect_Backing&&item->visible&&VoxelObjectQuad(item,&face))for(int j=0;j<4;++j)
     points[count++]=(ArRenderPointF){face.screen_xy[j*2],face.screen_xy[j*2+1]};
-  count=VoxelHull(points,count,hull);
+  count=EditorVoxelPick_Hull(points,count,hull);
   static const char *const modes[]={"auto","flat","extruded"};
   const DioramaObjectSnapshotView *v=&s_objects.snapshot.view;
   VoxelJsonAdd(json,"{\"kind\":\"object\",\"index\":%u,\"source\":%u,\"parent\":%u,\"animation\":%u,\"priority\":%u,\"label\":\"%s\",\"x\":%.3f,\"y\":%.3f,\"width\":%.3f,\"height\":%.3f,\"mode\":\"%s\",\"offset\":%.6f,\"thickness\":%.6f,\"widthScale\":%.5f,\"canExtrude\":%s,\"captured\":true,",

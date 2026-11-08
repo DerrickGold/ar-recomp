@@ -10,6 +10,10 @@
 static const uint8_t kPrimarySources[] = {
   SR_PPU_OVERLAY_BG1, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_BG3, SR_PPU_OVERLAY_OBJ,
 };
+static uint8_t s_independent_subscreen_sources;
+void DioramaCapture_SetIndependentSubscreenSources(uint8_t sources) {
+  s_independent_subscreen_sources=sources&0x13u;
+}
 
 static uint32_t PlaneBit(unsigned plane) { return 1u << plane; }
 
@@ -48,12 +52,15 @@ void DioramaCapture_CaptureFrame(FrameSlot *frame, const SrPpuFrameSnapshot *ppu
   frame->diorama_plane_request_mask = 0;
   frame->diorama_plane_content_mask = 0;
   frame->diorama_plane_additive_mask = 0;
+  frame->diorama_independent_subscreen = false;
   if (!frame->diorama_active) return;
   frame->diorama_plane_request_mask = RequestedPlanes();
   if(frame->diorama_voxel || (frame->diorama_trunk && frame->diorama_trunk_settings.enabled)) {
     frame->diorama_plane_request_mask|=SourcePlanes(SR_PPU_OVERLAY_BG1)|SourcePlanes(SR_PPU_OVERLAY_BG2);
   }
   if (!ppu) return;
+  const uint8_t independent=frame->diorama_voxel?s_independent_subscreen_sources:0;
+  frame->diorama_independent_subscreen=independent!=0;
 
   /* Backdrop uses the residual composited frame. BG4 has no diorama plane;
    * every other primary and split must have positively captured content. */
@@ -62,7 +69,8 @@ void DioramaCapture_CaptureFrame(FrameSlot *frame, const SrPpuFrameSnapshot *ppu
     const unsigned source = kPrimarySources[i];
     if (ppu->overlays[source].content_band_mask & 1u)
       content |= PlaneBit(source);
-    if (ppu->overlays[source].flags & SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
+    if ((independent&(1u<<source)) ||
+        (ppu->overlays[source].flags & SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN))
       additive |= SourcePlanes(source);
   }
   size_t band_count;

@@ -2136,7 +2136,8 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
      * GPU primitives, so ceiling drops and contact dust cannot lag behind on
      * the recessed cave wall. Reflected wall illumination keeps its receiver. */
     ActionEffectInstance contact;
-    if(projection && projection->diorama_projection && projection->diorama_projection->voxel_scenery &&
+    if(projection && (projection->diorama_projection?projection->diorama_projection->voxel_scenery:
+        projection->staged_voxel_scenery) &&
         ((effect->projection_plane==kActionEffectProjectionPlane_Bg1 &&
           (effect->kind==kActionEffect_CaveDrips || effect->kind==kActionEffect_LandingDust ||
            effect->kind==kActionEffect_TempleGroundMist)) ||
@@ -2440,15 +2441,27 @@ bool ActionSceneDecorationRender_Build(
   bool shadow_prepared = false;
   for (unsigned i=0;i<frame->authored_count;++i) {
     const ActionEffectInstance *e=&frame->authored[i];
-    ActionEffectInstance ground_top;
-    if(render_layer==kActionEffectRenderLayer_Bg1Mist&&e->kind==kActionEffect_AuthoredCloud&&
-        e->render_layer==kActionEffectRenderLayer_WorldDust&&e->field_style.ground_depth>0&&e->field_style.ground_width>0) {
-      /* The broad top face is scenery; only its shallow front lip and loose
-       * powder overlap the characters. Both use the same captured contact. */
-      ground_top=*e;ground_top.render_layer=render_layer;e=&ground_top;
-    }
     const ActionEffectProjectionContext *projection=writer.source?&writer.source->context:
         project_point==ActionEffectProjection_ProjectPoint?project_userdata:NULL;
+    const bool ground_cover=e->kind==kActionEffect_AuthoredCloud&&
+        e->render_layer==kActionEffectRenderLayer_WorldDust&&
+        e->field_style.ground_depth>0&&e->field_style.ground_width>0;
+    writer.voxel_ground_cover_owned=false;
+    _Static_assert(kActionAuthoredMaxInstances<=128,"ground-cover claim capacity");
+    if(ground_cover&&projection) {
+      const uint64_t *claims=projection->diorama_projection
+          ?projection->diorama_projection->voxel_ground_cover_claims
+          :projection->staged_ground_cover_claims;
+      writer.voxel_ground_cover_owned=(claims[i/64] & (UINT64_C(1)<<(i%64)))!=0;
+    }
+    ActionEffectInstance ground_top;
+    if(render_layer==kActionEffectRenderLayer_Bg1Mist&&ground_cover) {
+      /* Native scenery gets a broad top separately from its front lip and
+       * powder. Voxel receivers own both dense faces at their actual depth;
+       * loose grains still follow the unchanged WorldDust route. */
+      if(writer.voxel_ground_cover_owned)continue;
+      ground_top=*e;ground_top.render_layer=render_layer;e=&ground_top;
+    }
     writer.atmosphere_unlit=projection&&projection->atmosphere_unlit;
     writer.light_receiver=frame->light_receiver?frame->light_receiver:
         projection&&projection->light_receiver?projection->light_receiver:

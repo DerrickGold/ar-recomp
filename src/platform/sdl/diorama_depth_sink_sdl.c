@@ -219,6 +219,11 @@ static bool Submit(void *context,ArRenderDevice *device,const DioramaDepthSubmis
   if (art && !SDL_GetTextureScaleMode(art,&filter)) return false;
   DioramaSceneryLightEffectParams params=draw->lighting?*draw->lighting:
       (DioramaSceneryLightEffectParams){.shade={1,1,1,1}};
+  if(params.heat_owned.mode>0) {
+    if(!draw->heat_world_xy||draw->native_actor||!draw->clip_w)return false;
+    for(int i=0;i<draw->vertex_count;++i)
+      if(!isfinite(draw->heat_world_xy[i].x)||!isfinite(draw->heat_world_xy[i].y))return false;
+  }
   const bool lit=ArRenderTexture_IsValid(params.illumination);
   ArGpuDioramaDepthMaterial material={
       .actor=source && draw->native_actor && (!lit || ArRenderTexture_IsValid(params.attributes))};
@@ -251,7 +256,8 @@ static bool Submit(void *context,ArRenderDevice *device,const DioramaDepthSubmis
     s->vertices[s->vertex_count+(unsigned)i]=(DioramaDepthVertex){
         .clip={(2*(v->position.x+viewport.x)/width-1)*w,
             (1-2*(v->position.y+viewport.y)/height)*w,draw->depths[i]*w,w},
-        .color=v->color,.uv=v->tex_coord};
+        .color=v->color,.uv=v->tex_coord,
+        .heat_world_xy=draw->heat_world_xy?draw->heat_world_xy[i]:(ArRenderPointF){0}};
   }
   memcpy(s->indices+s->index_count,draw->indices,(size_t)draw->index_count*sizeof(*s->indices));
   batch->draws[s->count]=(DioramaDepthDraw){

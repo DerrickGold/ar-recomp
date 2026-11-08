@@ -30,7 +30,7 @@ enum {
 typedef struct ActionEffectSourcePrimitive {
   uint32_t meta[4]; /* kind, projection plane, object priority, shadow enabled */
   float origin[4];  /* capture XY; flags: atmosphere=1, static=2, clipped=4, grid=8,
-                    * camera-rate=16; W holds the optional playfield camera rate. */
+                    * camera-rate=16, finite authored cloud lower extent=32; W holds camera rate. */
   float clip[4];    /* effect-local authored bounds, before motion */
   float points[6][4]; /* Grid: points[5] = world X, cell X, spacing; glow: coefficient extent. */
   float colors[3][4];

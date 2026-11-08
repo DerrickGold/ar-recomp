@@ -12,11 +12,18 @@
 static void SameGeometry(const ActionVoxelGeometry *a, const ActionVoxelGeometry *b) {
   unsigned na, nb;
   const VoxelEdge *ea=ActionVoxel_Edges(a,&na), *eb=ActionVoxel_Edges(b,&nb);
-  assert(na==nb && !memcmp(ea,eb,na*sizeof(*ea)));
+  assert(na==nb);
+  for(unsigned i=0;i<na;++i) {
+    VoxelEdge a_edge=ea[i],b_edge=eb[i];
+    /* Owned image indices may deduplicate differently under a palette fade
+     * or when an authored image precedes the same automatic material. */
+    a_edge.top_owned_art=b_edge.top_owned_art=0;
+    assert(!memcmp(&a_edge,&b_edge,sizeof(a_edge)));
+  }
   if(ActionVoxel_Profile(a)!=kActionVoxelProfile_FillmoreForest &&
      ActionVoxel_Profile(a)!=kActionVoxelProfile_BloodpoolMarsh)
     for(unsigned i=0;i<na;++i)assert(!ea[i].rear_fold_top && !ea[i].rear_fold_bottom &&
-        !ea[i].top_sample_size && !ea[i].top_sample_x && !ea[i].top_sample_y);
+        (ea[i].surface_texture || (!ea[i].top_sample_size && !ea[i].top_sample_x && !ea[i].top_sample_y)));
   const VoxelGate *ga=ActionVoxel_Gates(a,&na), *gb=ActionVoxel_Gates(b,&nb);
   assert(na==nb && !memcmp(ga,gb,na*sizeof(*ga)));
   const VoxelRearTrim *ra=ActionVoxel_RearTrims(a,&na), *rb=ActionVoxel_RearTrims(b,&nb);
@@ -47,23 +54,30 @@ static void SameGeometry(const ActionVoxelGeometry *a, const ActionVoxelGeometry
 }
 static void Renumber(ActionRoomScene *s) {
   uint8_t definitions[sizeof(s->bg[0].metatiles)], characters[sizeof(s->characters)];
-  memcpy(definitions,s->bg[0].metatiles,sizeof(definitions));
+  unsigned remap[256];
+  const unsigned stride=ActionRoomScene_HasCharacterAnimation(s)
+      ? ActionRoomScene_CharacterAnimationStride(s)/32 : 0;
+  const unsigned animated=stride*ActionRoomScene_CharacterAnimationPhaseCount(s);
+  /* Native animation targets are bank origins, not arbitrary CHR addresses.
+   * Apply the same permutation within every phase, then rotate static art
+   * separately. A global +37 shift would leave stale animation metadata and
+   * falsely advertise animated sand as a safe static surface donor. */
+  for(unsigned i=0;i<256;++i)
+    remap[i]=i<animated ? i/stride*stride+(i+37)%stride
+        : animated+(i-animated+37)%(256-animated);
   memcpy(characters,s->characters,sizeof(characters));
-  for (unsigned i=0;i<256;++i) {
-    const unsigned id=(i+73)&255;
-    memcpy(s->bg[0].metatiles+id*8,definitions+i*8,8);
-    for (unsigned q=0;q<4;++q) s->bg[0].metatiles[id*8+q*2+1]=(definitions[i*8+q*2+1]+37)&255;
-    for (unsigned bank=0;bank<2;++bank)
-      memcpy(s->characters+(bank*256+((i+37)&255))*32,characters+(bank*256+i)*32,32);
+  for(unsigned bank=0;bank<2;++bank)for(unsigned i=0;i<256;++i)
+    memcpy(s->characters+(bank*256+remap[i])*32,characters+(bank*256+i)*32,32);
+  for(unsigned layer=0;layer<2;++layer) {
+    memcpy(definitions,s->bg[layer].metatiles,sizeof(definitions));
+    for(unsigned i=0;i<256;++i) {
+      const unsigned id=(i+73)&255;
+      memcpy(s->bg[layer].metatiles+id*8,definitions+i*8,8);
+      for(unsigned q=0;q<4;++q)
+        s->bg[layer].metatiles[id*8+q*2+1]=remap[definitions[i*8+q*2+1]];
+    }
+    for(size_t i=0;i<s->bg[layer].map_size;++i)s->bg[layer].map[i]=(s->bg[layer].map[i]+73)&255;
   }
-  for (size_t i=0;i<s->bg[0].map_size;++i) s->bg[0].map[i]=(s->bg[0].map[i]+73)&255;
-  memcpy(definitions,s->bg[1].metatiles,sizeof(definitions));
-  for(unsigned i=0;i<256;++i) {
-    const unsigned id=(i+73)&255;
-    memcpy(s->bg[1].metatiles+id*8,definitions+i*8,8);
-    for(unsigned q=0;q<4;++q)s->bg[1].metatiles[id*8+q*2+1]=(definitions[i*8+q*2+1]+37)&255;
-  }
-  for(size_t i=0;i<s->bg[1].map_size;++i)s->bg[1].map[i]=(s->bg[1].map[i]+73)&255;
 }
 static void Lifecycle(void) {
   /* The walking plane stays fixed; only the back half of a folded deck rises. */
@@ -320,7 +334,7 @@ static void ForestStumpCapSamples(const ActionRoomScene *source,const ActionRoom
         const VoxelEdge *e=&edges[j];
         if(!EdgeInPatch(e,p))continue;
         assert(!e->trunk_curve && !e->rear_fold_top && !e->rear_fold_bottom);
-        if(!StumpOuterTop(scene,e,p)) {assert(!e->top_sample_size);continue;}
+        if(!StumpOuterTop(scene,e,p)) {assert(e->surface_texture || !e->top_sample_size);continue;}
         assert(e->top_sample_x==p->x+9 && e->top_sample_y==p->y+7 && e->top_sample_size==4);
         assert(e->far_rank==2 && e->high_priority==p->high_priority);
         uint16_t word;uint8_t material;
@@ -357,7 +371,7 @@ static void ForestStumpCapSamples(const ActionRoomScene *source,const ActionRoom
       assert(ActionVoxel_Split(geometry,p->x,p->y,32,56,32,&frame,native,32,rear,front));
       for(unsigned j=0;j<32*56;++j)assert(front[j]==native[j] && rear[j]==native[j]);
     }
-    for(unsigned j=0;j<ne;++j)if(edges[j].top_sample_size) {
+    for(unsigned j=0;j<ne;++j)if(edges[j].top_sample_size && !edges[j].surface_texture) {
       unsigned owners=0;
       for(unsigned i=0;i<np;++i)owners+=patches[i].kind==kVoxelPatch_SideProfile &&
           EdgeInPatch(&edges[j],&patches[i]);
@@ -394,13 +408,35 @@ static void ForestStumpCapSamples(const ActionRoomScene *source,const ActionRoom
     for(unsigned i=0;i<ne;++i) {
       const VoxelEdge *e=&edges[i];
       if(EdgeInPatch(e,&target)) {
-        assert(!e->top_sample_size && !e->top_sample_x && !e->top_sample_y);
+        assert(e->surface_texture || (!e->top_sample_size && !e->top_sample_x && !e->top_sample_y));
         local_caps+=e->side==0;
       } else other_samples+=e->top_sample_size!=0;
     }
     assert(profiles==1 && local_caps && other_samples);ActionVoxel_Release(edited);
   }
   puts("forest stump samples: transparent source and shortened profile keep ordinary cap sampling");
+}
+static uint32_t ForestNativeColor(const ActionRoomScene *s,int x,int y,const ActionRoomSceneFrameState *frame) {
+  uint16_t word;assert(ActionRoomScene_LookupTile(s,1,x/8,y/8,&word,NULL));
+  const unsigned pixel=FixturePixel(s,x,y);if(!pixel)return 0;
+  const unsigned index=(((word>>10)&7)*16+pixel)*2;
+  const unsigned color=s->palette[index]|((unsigned)s->palette[index+1]<<8);
+  const unsigned subtract=frame->fixed_color && !frame->cgwsel && (frame->cgadsub&0xc1)==0x81?frame->fixed_color:0;
+  uint32_t rgb=0xff000000u;
+  for(unsigned ch=0;ch<3;++ch) {
+    int value=((color>>(ch*5))&31)-((subtract>>(ch*5))&31);if(value<0)value=0;
+    rgb|=(uint32_t)((value*8+(value>>2))*frame->brightness/15)<<(16-ch*8);
+  }
+  return rgb;
+}
+static void ForestJoinColumns(const ActionVoxelGeometry *g,int x,int y,int joins[16]) {
+  unsigned count;const VoxelEdge *edges=ActionVoxel_Edges(g,&count);
+  memset(joins,0,16*sizeof(*joins));
+  for(unsigned i=0;i<count;++i) {
+    const VoxelEdge *e=&edges[i];
+    if(e->side || !e->flat_rear_join || e->y/16!=y/16+1)continue;
+    for(int j=0;j<16;++j)if(x+j>=e->x && x+j<e->x+e->length)joins[j]=e->y;
+  }
 }
 static void ForestRearGrassTransitions(const ActionRoomScene *source,
                              const ActionVoxelGeometry *original,
@@ -477,6 +513,7 @@ static void ForestGroundFolds(const ActionRoomScene *source,const ActionRoomScen
       assert((!e->rear_fold_top || e->rear_fold_top==7) &&
              (!e->rear_fold_bottom || e->rear_fold_bottom==7));
       const bool folded=e->rear_fold_top || e->rear_fold_bottom;
+      assert(!!e->flat_rear_join==folded);
       if(folded)assert(e->far_rank==2 && e->colliding && !e->high_priority && e->side!=2);
       if(e->far_rank==3) {assert(!folded);++branches;}
       /* These IDs identify reviewed fixture specimens, not runtime policy. */
@@ -495,8 +532,10 @@ static void ForestGroundFolds(const ActionRoomScene *source,const ActionRoomScen
         micro+=(e->y&15)!=0;grass+=e->textured_top!=0;dirt+=e->textured_top==0;
       } else {
         const int x=e->x+(e->side==1);
-        if(e->rear_fold_top)assert(ForestFoldJoin(edges,count,x,e->y));
-        if(e->rear_fold_bottom)assert(ForestFoldJoin(edges,count,x,e->y+e->length));
+        const int fold_y=e->fold_length?e->fold_origin_y:e->y;
+        const int fold_length=e->fold_length?e->fold_length:e->length;
+        if(e->rear_fold_top)assert(ForestFoldJoin(edges,count,x,fold_y));
+        if(e->rear_fold_bottom)assert(ForestFoldJoin(edges,count,x,fold_y+fold_length));
         ++sides;
       }
     }
@@ -551,6 +590,7 @@ static void ForestGroundFolds(const ActionRoomScene *source,const ActionRoomScen
   assert(high_banks);ActionVoxel_Release(high_geometry);
   puts("forest ground fold: authored micro-corner and native-high exclusion passed");
 }
+#include "action_voxel_forest_join.inc"
 #include "action_voxel_forest_trunks.inc"
 static unsigned ForestFixtures(const char *directory) {
   static ActionSceneSnapshot fixture;
@@ -593,8 +633,9 @@ static unsigned ForestFixtures(const char *directory) {
         for(unsigned i=0;i<width*height;++i)low[i]=0xff11aa33;
         for(unsigned row=0;row<2;++row) {
           assert(ActionVoxel_Split(a,x*8,(y+row*2)*8,16,16,width,&frame,low,width,rear,front));
-          for(unsigned yy=0;yy<16;++yy)for(unsigned xx=0;xx<16;++xx)
+          for(unsigned yy=0;yy<16;++yy)for(unsigned xx=0;xx<16;++xx) {
             assert(rear[yy*width+xx]==low[yy*width+xx] && front[yy*width+xx]==0);
+          }
         }
         assert(ActionVoxel_Split(a,x*8,(y+4)*8,16,16,width,&frame,low,width,rear,front));
         unsigned front_pixels=0;
@@ -648,6 +689,7 @@ static unsigned ForestFixtures(const char *directory) {
     ForestStumpCapSamples(source,&remapped,a,b);
     ForestRearGrassTransitions(source,a,b);
     ForestGroundFolds(source,&remapped,a,b);
+    ForestNativeRearRows(source,a);
     ForestTrunkCurves(source,a,b);
     printf("forest terrain %u: %u merged contours\n",region,edges);
     ActionVoxel_Release(a);ActionVoxel_Release(b);
@@ -856,19 +898,23 @@ static unsigned TempleFixtures(const char *directory) {
     for(unsigned i=0;i<count;++i) {
       const VoxelEdge *edge=&edges[i];VoxelEdgeSpan span;
       if(edge->near_rank==1 && edge->far_rank==2) {
+        const float column_front=ActionVoxel_SceneryRecess(a)-
+            (edge->neighbor_raised_scenery?settings.depth*.125f:0);
         assert(ActionVoxel_ResolveEdgeSpan(a,edge,kVoxelEdgeNative,0,settings.depth,&span));
-        assert(span.near_depth==0 && span.far_depth==ActionVoxel_SceneryRecess(a));++caps;
+        assert(span.near_depth==0 && fabsf(span.far_depth-column_front)<.00001f);++caps;
         if(!edge->side && edge->colliding) {
           VoxelEdge high=*edge;high.high_priority=true;
           assert(ActionVoxel_ResolveEdgeSpan(a,&high,kVoxelEdgeNative,0,settings.depth,&span));
           const float join=span.far_depth;
           assert(ActionVoxel_ResolveEdgeSpan(a,&high,kVoxelEdgeHighDeckBehind,0,settings.depth,&span));
-          assert(join==span.near_depth && span.far_depth==ActionVoxel_SceneryRecess(a));
+          assert(join==span.near_depth && fabsf(span.far_depth-column_front)<.00001f);
         }
       }
       if(edge->far_rank==1 && !edge->near_rank) {
         assert(ActionVoxel_ResolveEdgeSpan(a,edge,kVoxelEdgeNative,0,settings.depth,&span));
-        assert(fabsf(span.near_depth-ActionVoxel_SceneryRecess(a))<.00001f);
+        const float column_front=ActionVoxel_SceneryRecess(a)-
+            (edge->raised_scenery?settings.depth*.125f:0);
+        assert(fabsf(span.near_depth-column_front)<.00001f);
         assert(fabsf(span.far_depth-settings.depth)<.00001f);++relief;
       }
     }
@@ -1236,6 +1282,7 @@ static void DesertAnimation(const ActionRoomScene *source,ActionVoxelGeometry *a
   DesertAnimationContract(source,source->map==1?0x72:0x5c,&live,&reference);
   assert(!ActionVoxel_AnimationIsPresentationOnly(&live,&reference,NULL,NULL,0));
 }
+#include "action_voxel_skeleton.inc"
 static unsigned DesertFixtures(const char *directory) {
   static ActionSceneSnapshot fixture;
   static ActionRoomScene variant;
@@ -1258,10 +1305,9 @@ static unsigned DesertFixtures(const char *directory) {
     assert(ActionVoxel_Build(b,&variant,NULL,settings));SameGeometry(a,b);
     DesertMaterial(a,source,0x08,kVoxelSolid);
     if(room==1) {
-      DesertMaterial(a,source,0x63,kVoxelSolid);
-      DesertMaterial(a,source,0x6d,kVoxelSolid);
-      DesertMaterial(a,source,0x69,kVoxelSolid);
-      DesertMaterial(a,source,0x72,kVoxelForeground);
+      DesertSkeletonBody(a,source);
+      DesertMaterial(a,source,0x6d,kVoxelForeground);
+      DesertMaterial(a,source,0x69,kVoxelForeground);
       DesertMaterial(a,source,0x5e,kVoxelFoliage);
     } else {
       DesertMaterial(a,source,0x80,kVoxelRearOnly);
@@ -1706,9 +1752,119 @@ static unsigned MarahnaTempleFixtures(const char *directory) {
 #include "action_voxel_temple_audit.inc"
 #include "action_voxel_authored.inc"
 #include "action_voxel_groups.inc"
+#include "action_voxel_surfaces.inc"
+#include "action_voxel_surface_roles.inc"
+#include "action_voxel_raised_scenery.inc"
+#include "action_voxel_colored_caps.inc"
+#include "action_voxel_ice_matte.inc"
+#include "action_voxel_rock_surfaces.inc"
+#include "action_voxel_snow_trunk.inc"
+#include "action_voxel_snow_floor.inc"
+#include "action_voxel_jungle_backing.inc"
+#include "action_voxel_jungle_pillars.inc"
+#include "action_voxel_jungle_course.inc"
+#include "action_voxel_bamboo_backing.inc"
+#include "action_voxel_mountain_slopes.inc"
+#include "action_voxel_regional_spikes.inc"
+#include "action_trunk_side_fixtures.inc"
+#include "action_trunk_detail_backing.inc"
+#include "action_voxel_root_backing.inc"
+#include "action_voxel_aitos_cliff_foot.inc"
+#include "action_voxel_jungle_exit_backing.inc"
+#include "action_voxel_tomb_caps.inc"
+#include "action_voxel_castle_terminal_matte.inc"
+#include "action_voxel_castle_purple_band.inc"
+#include "action_voxel_castle_backing.inc"
+#include "action_voxel_castle_wolf_relief.inc"
+#include "action_voxel_tomb_contours.inc"
+#include "action_voxel_summit_crest.inc"
+#include "action_voxel_castle_cap_finish.inc"
+#include "action_voxel_castle_post_join.inc"
+#include "action_voxel_snow_slopes.inc"
+#include "diorama_trunk_guard.inc"
+#include "action_voxel_jungle_water.inc"
+#include "action_voxel_jungle_terminal.inc"
+#include "action_voxel_wet_crown_risers.inc"
+#include "action_voxel_desert_surfaces.inc"
+#include "action_voxel_cavern_surfaces.inc"
+#include "action_voxel_aitos_surface_findings.inc"
+#include "action_voxel_temple_native_surfaces.inc"
+#include "action_voxel_ice_inward.inc"
+#include "action_voxel_ice_tips.inc"
+#include "action_voxel_marsh_rock_surfaces.inc"
+#include "action_voxel_marsh_actor_bands.inc"
+#include "action_voxel_surface_budget.inc"
+#include "action_voxel_marsh_beam_tops.inc"
+#include "action_voxel_bloodpool_surface_findings.inc"
+#include "action_voxel_head_crown.inc"
+#include "action_voxel_hub_surfaces.inc"
+#include "action_voxel_sand_live.inc"
+#include "action_voxel_sand_transitions.inc"
+#include "action_voxel_desert_pillars.inc"
+#include "action_voxel_desert_audit_joins.inc"
+#include "action_voxel_snow_cap_phase.inc"
+#include "action_voxel_snow_closing_risers.inc"
 int main(int argc,char **argv) {
+  if(argc>1 && !strcmp(argv[1],"--surface-inventory"))return SurfaceFixtureInventory(argc,argv);
+  SummitCrestFixtures(getenv("AR_VOXEL_SUMMIT_CREST_FIXTURES"));
   Lifecycle();
+  TrunkGuardFixtures();
+  JungleWaterColorFixtures(getenv("AR_VOXEL_JUNGLE_WATER_FIXTURES"));
+  JungleTerminalFixtures(getenv("AR_VOXEL_JUNGLE_TERMINAL_FIXTURES"));
   AuthoredContracts();
+  RaisedSceneryFixtures(getenv("AR_VOXEL_RAISED_FIXTURES"));
+  ColoredCapFixtures(getenv("AR_VOXEL_COLORED_CAP_FIXTURES"));
+  IceMatteFixtures(getenv("AR_VOXEL_ICE_MATTE_FIXTURES"));
+  RockSurfaceFixtures(getenv("AR_VOXEL_ROCK_FIXTURES"));
+  WetCrownRiserFixtures(getenv("AR_VOXEL_WET_CROWN_FIXTURES"));
+  DesertSurfaceFixtures(getenv("AR_VOXEL_DESERT_SURFACE_FIXTURES"));
+  CavernNativeSurfaceFixtures(getenv("AR_VOXEL_CAVERN_NATIVE_FIXTURES"));
+  AitosSurfaceFindingsFixtures(getenv("AR_VOXEL_AITOS_SURFACE_FINDINGS_FIXTURES"));
+  TempleNativeSurfaceFixtures(getenv("AR_VOXEL_TEMPLE_NATIVE_SURFACE_FIXTURES"));
+  if(getenv("AR_VOXEL_ICE_INWARD_BASELINE"))
+    IceInwardFixtures(getenv("AR_VOXEL_ICE_INWARD_FIXTURES"));
+  else IceTipFixtures(getenv("AR_VOXEL_ICE_INWARD_FIXTURES"));
+  IceTipFixtures(getenv("AR_VOXEL_ICE_TIP_FIXTURES"));
+  MarshRockSurfaceFixtures(getenv("AR_VOXEL_MARSH_ROCK_FIXTURES"));
+  MarshActorBandFixtures(getenv("AR_VOXEL_MARSH_ACTOR_FIXTURES"));
+  SurfaceBudgetFixtures(getenv("AR_VOXEL_SURFACE_BUDGET_FIXTURES"));
+  MarshBeamTopFixtures(getenv("AR_VOXEL_MARSH_BEAM_FIXTURES"));
+  BloodpoolSurfaceFindingFixtures(getenv("AR_VOXEL_BLOODPOOL_FINDING_FIXTURES"));
+  if(getenv("AR_VOXEL_HEAD_CROWN_FIXTURES")) HeadCrownFixtures(getenv("AR_VOXEL_HEAD_CROWN_FIXTURES"),getenv("AR_VOXEL_HEAD_CROWN_BASELINE")==NULL);
+  HubSurfaceFixtures(getenv("AR_VOXEL_HUB_SURFACE_FIXTURES"));
+  if(getenv("AR_SAND_SCENES")) SandLiveFixtures();
+  if(getenv("AR_SAND_TRANSITION_SCENES")) SandTransitionFixtures();
+  if(getenv("AR_DESERT_PILLAR_SCENES")) DesertPillarFixtures();
+  DesertAuditJoinFixtures(getenv("AR_VOXEL_DESERT_AUDIT_FIXTURES"));
+  SnowCapPhaseFixtures(getenv("AR_VOXEL_SNOW_CAP_PHASE_FIXTURES"));
+  SnowClosingRiserFixtures(getenv("AR_VOXEL_SNOW_CLOSING_RISER_FIXTURES"));
+  SnowTrunkFixtures(getenv("AR_VOXEL_SNOW_TRUNK_FIXTURES"));
+  SnowFloorFixtures(getenv("AR_VOXEL_SNOW_FLOOR_FIXTURES"));
+  JungleBackingFixtures(getenv("AR_VOXEL_JUNGLE_BACKING_FIXTURES"));
+  JungleForegroundPillarFixtures(getenv("AR_VOXEL_JUNGLE_PILLAR_FIXTURES"));
+  JungleCourseFixtures(getenv("AR_VOXEL_JUNGLE_COURSE_FIXTURES"));
+  BambooBackingFixtures(getenv("AR_VOXEL_BAMBOO_FIXTURES"));
+  MountainSlopeFixtures(getenv("AR_VOXEL_MOUNTAIN_SLOPE_FIXTURES"));
+  RegionalSpikeFixtures(getenv("AR_VOXEL_REGIONAL_SPIKE_FIXTURES"));
+  TrunkSideFixtures(getenv("AR_TRUNK_SIDE_FIXTURES"));
+  TrunkDetailBackingFixtures(getenv("AR_TRUNK_SIDE_FIXTURES"));
+  ForestRootBackingFixtures(getenv("AR_VOXEL_ROOT_BACKING_FIXTURES"));
+  AitosCliffFootFixtures(getenv("AR_VOXEL_AITOS_CLIFF_FOOT_FIXTURES"));
+  JungleExitBackingFixtures(getenv("AR_VOXEL_JUNGLE_EXIT_BACKING_FIXTURES"));
+  TombCapFixtures(getenv("AR_VOXEL_TOMB_CAP_FIXTURES"));
+  CastleTerminalMatteFixtures(getenv("AR_VOXEL_CASTLE_TERMINAL_MATTE_FIXTURES"));
+  CastlePurpleBandFixtures(getenv("AR_VOXEL_CASTLE_PURPLE_BAND_FIXTURES"));
+  CastleBackingFixtures(getenv("AR_VOXEL_CASTLE_BACKING_FIXTURES"));
+  CastleWolfReliefFixtures(getenv("AR_VOXEL_CASTLE_WOLF_FIXTURES"));
+  TombContourSkinFixtures(getenv("AR_VOXEL_TOMB_CONTOUR_FIXTURES"));
+  CastleCapFinishFixtures(getenv("AR_VOXEL_CASTLE_CAP_FIXTURES"));
+  CastlePostJoinFixtures(getenv("AR_VOXEL_CASTLE_POST_JOIN_FIXTURES"));
+  SnowAct2SlopeFixtures(getenv("AR_VOXEL_SNOW_SLOPE_FIXTURES"));
+  DesertSkeletonFixtures(getenv("AR_VOXEL_SKELETON_FIXTURES"));
+  SurfaceFixtureEdits(getenv("AR_VOXEL_SURFACE_FIXTURE"));
+  SurfaceRoleFixtures(getenv("AR_VOXEL_SURFACE_ROLE_FIXTURES"));
+  SurfaceFlatRimFixture(getenv("AR_VOXEL_RIM_FIXTURE"));
+  SurfaceTopMaterialFixtures(getenv("AR_VOXEL_TOP_FIXTURES"));
   SemanticGroupFixture(getenv("AR_VOXEL_GROUP_FIXTURE"));
   AuthoredVisibilityFixture(getenv("AR_VOXEL_VISIBILITY_FIXTURE"));
   AuthoredFixture(getenv("AR_VOXEL_AUTHORED_FIXTURE"));
@@ -1721,7 +1877,8 @@ int main(int argc,char **argv) {
   const unsigned forest=forest_directory?ForestFixtures(forest_directory):0;
   const unsigned caves=argc>2?CaveFixtures(argv[2]):0;
   const unsigned temples=argc>2?TempleFixtures(argv[2]):0;
-  if(argc>2)TempleAuditFixtures(argv[2]);
+  const char *temple_audit_directory=argc>2?argv[2]:getenv("AR_VOXEL_TEMPLE_AUDIT_FIXTURES");
+  if(temple_audit_directory)TempleAuditFixtures(temple_audit_directory);
   const unsigned marsh=argc>3?MarshFixtures(argv[3]):0;
   if(argc>3)MarshAuditFixtures(argv[3]);
   const char *desert_directory=argc>4?argv[4]:getenv("AR_VOXEL_DESERT_FIXTURES");

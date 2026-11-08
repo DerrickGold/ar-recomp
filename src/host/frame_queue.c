@@ -41,6 +41,8 @@ void HostFrameQueue_Destroy(HostFrameQueue *q) {
     ActionVoxel_Release(q->packets[i].voxel_storage);
     free(q->packets[i].pixels);
     free(q->packets[i].background_storage);
+    free(q->packets[i].trunk_guard_storage);
+    free(q->packets[i].voxel_guard_storage);
     free(q->packets[i].sim_storage);
   }
   free(q);
@@ -153,10 +155,57 @@ static bool OwnSimPixels(HostFramePacket *p) {
   f->ppu_surfaces.authentic = (SrPpuSurfaceView){0};
   f->ppu_surfaces.mode7 = (SrPpuSurfaceView){0};
   f->diorama_skybox_surface = (SrPpuSurfaceView){0};
+  f->diorama_trunk_guard = (DioramaTrunkGuardSource){0};
+  f->diorama_voxel_guard = (DioramaVoxelGuardSource){0};
   f->background_packet = NULL;
   f->authentic_frame_serial = 0;
   p->copied_bytes += sizeof(*p->sim_storage);
   return true;
+}
+
+static bool OwnTrunkGuard(HostFramePacket *packet) {
+  DioramaTrunkGuardSource *guard = &packet->frame.diorama_trunk_guard;
+  if (!guard->pixels) {
+    *guard = (DioramaTrunkGuardSource){0};
+    return true;
+  }
+  DioramaTrunkGuardLayout expected;
+  if (guard->pitch_pixels != kDioramaTrunkGuardWidth ||
+      guard->pixel_count < kDioramaTrunkGuardPixels ||
+      !DioramaTrunkGuard_Resolve(guard->layout.strips[0].world_x,
+          guard->layout.primary_y, guard->layout.strips[0].width,
+          guard->layout.primary_height, guard->layout.source, &expected) ||
+      memcmp(&expected, &guard->layout, sizeof(expected))) return false;
+  const size_t bytes = kDioramaTrunkGuardPixels * sizeof(uint32_t);
+  if (!packet->trunk_guard_storage) packet->trunk_guard_storage = malloc(bytes);
+  if (!packet->trunk_guard_storage) return false;
+  if (packet->trunk_guard_storage != guard->pixels)
+    memcpy(packet->trunk_guard_storage, guard->pixels, bytes);
+  guard->pixels = packet->trunk_guard_storage;
+  guard->pixel_count = kDioramaTrunkGuardPixels;
+  packet->copied_bytes += bytes;
+  return true;
+}
+
+static void OwnVoxelGuard(HostFramePacket *packet) {
+  DioramaVoxelGuardSource *source = &packet->frame.diorama_voxel_guard;
+  if (!DioramaVoxelGuard_Valid(source)) {
+    *source = (DioramaVoxelGuardSource){0};
+    return;
+  }
+  const size_t band_bytes = kDioramaVoxelGuardPixels * sizeof(uint32_t);
+  if (!packet->voxel_guard_storage) packet->voxel_guard_storage = malloc(3 * band_bytes);
+  if (!packet->voxel_guard_storage) {
+    *source = (DioramaVoxelGuardSource){0};
+    return; /* Optional source failure must not drop the primary frame. */
+  }
+  for (unsigned band = 0; band < 3; ++band) {
+    uint32_t *owned = packet->voxel_guard_storage + band * kDioramaVoxelGuardPixels;
+    if (owned != source->pixels[band]) memcpy(owned, source->pixels[band], band_bytes);
+    source->pixels[band] = owned;
+  }
+  source->pixel_count = kDioramaVoxelGuardPixels;
+  packet->copied_bytes += 3 * band_bytes;
 }
 
 bool HostFramePacket_OwnPixels(HostFramePacket *p) {
@@ -207,5 +256,7 @@ bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   f->authentic_frame_serial = 0;
   memset(&f->sim3d_output_surfaces, 0, sizeof(f->sim3d_output_surfaces));
   p->copied_bytes += background_copied;
+  if (!OwnTrunkGuard(p)) return false;
+  OwnVoxelGuard(p);
   return true;
 }

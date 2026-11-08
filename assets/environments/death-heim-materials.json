@@ -179,7 +179,8 @@
           2,
           34
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "096537792b91795a",
@@ -451,7 +452,8 @@
           2,
           95
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "112d589cd4ef9711",
@@ -1043,7 +1045,8 @@
           2,
           38
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "20917e128810c057",
@@ -1861,7 +1864,8 @@
           2,
           236
         ]
-      ]
+      ],
+      "contour_surface": "native_snow_body"
     },
     {
       "key": "2c5a2df2e6cda57a",
@@ -2119,7 +2123,8 @@
           2,
           42
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "352541e4325b6ca3",
@@ -2423,7 +2428,8 @@
           2,
           37
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "3f1e6b08b11ae4bf",
@@ -2519,7 +2525,8 @@
           2,
           235
         ]
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "43ad167f6a0d70bc",
@@ -2739,7 +2746,8 @@
           2,
           237
         ]
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "47ef530b937d4ae7",
@@ -2965,7 +2973,8 @@
           2,
           240
         ]
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "4dce889b782c6d44",
@@ -3139,7 +3148,8 @@
           2,
           243
         ]
-      ]
+      ],
+      "contour_surface": "native_snow_body"
     },
     {
       "key": "53d230a09e11937b",
@@ -3647,7 +3657,8 @@
           2,
           9
         ]
-      ]
+      ],
+      "top_surface": "own16_donor"
     },
     {
       "key": "63e1e4a2a299f0d2",
@@ -3781,7 +3792,7 @@
         4,
         4
       ],
-      "flags": 32768,
+      "flags": 536903680,
       "role": "reviewed_boss_arena_material",
       "origins": [
         [
@@ -4137,7 +4148,8 @@
           2,
           242
         ]
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "6b2934b7c55a65a5",
@@ -4541,7 +4553,8 @@
           2,
           24
         ]
-      ]
+      ],
+      "top_surface": "masonry_cap16"
     },
     {
       "key": "771b974a513ca12e",
@@ -4569,7 +4582,8 @@
           2,
           8
         ]
-      ]
+      ],
+      "top_surface": "own16_donor"
     },
     {
       "key": "77d356e08281b07e",
@@ -4731,7 +4745,7 @@
         4,
         4
       ],
-      "flags": 32768,
+      "flags": 536903680,
       "role": "reviewed_boss_arena_material",
       "origins": [
         [
@@ -5013,7 +5027,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "top_surface": "own16_donor"
     },
     {
       "key": "81a1d356656d0103",
@@ -5143,7 +5158,8 @@
           2,
           37
         ]
-      ]
+      ],
+      "top_surface": "own16_donor"
     },
     {
       "key": "85e8f2f40b268fdf",
@@ -5317,7 +5333,8 @@
           2,
           241
         ]
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "8b0a48fda6513649",
@@ -5407,7 +5424,8 @@
           2,
           245
         ]
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "8cd2d2e6161380b0",
@@ -6390,7 +6408,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "top_surface": "own16_donor"
     },
     {
       "key": "adc67310bf3422e6",
@@ -6554,7 +6573,8 @@
           2,
           244
         ]
-      ]
+      ],
+      "contour_surface": "native_snow_body"
     },
     {
       "key": "b7b5cca9b70e86ba",
@@ -6924,7 +6944,8 @@
           2,
           234
         ]
-      ]
+      ],
+      "contour_surface": "native_snow_crest16"
     },
     {
       "key": "c13e9f05c5493553",
@@ -7606,7 +7627,7 @@
         4,
         4
       ],
-      "flags": 32768,
+      "flags": 536903680,
       "role": "reviewed_boss_arena_material",
       "origins": [
         [
@@ -7680,7 +7701,8 @@
           2,
           45
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "d54c19354150f729",
@@ -7882,7 +7904,7 @@
         4,
         4
       ],
-      "flags": 32768,
+      "flags": 536903680,
       "role": "reviewed_boss_arena_material",
       "origins": [
         [
@@ -8126,7 +8148,8 @@
           2,
           55
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "e0d5aada0fd7164b",
@@ -8656,7 +8679,8 @@
           2,
           54
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "ede31899e7c448b5",
@@ -8750,7 +8774,8 @@
           2,
           119
         ]
-      ]
+      ],
+      "top_surface": "own16_donor"
     },
     {
       "key": "f0ed4aa0906b6d23",
@@ -8976,7 +9001,8 @@
           2,
           36
         ]
-      ]
+      ],
+      "top_surface": "own16"
     },
     {
       "key": "f81dc70626fdd4df",
@@ -9344,5 +9370,880 @@
         ]
       ]
     }
-  ]
+  ],
+  "top_surface_contract": "Reused boss architecture inherits the reviewed complete native brick and stone top motifs. Carved gray walking rims retain their native front bevel while nearby compatible stone bodies supply the top interior. Depth, native collision and priority are unchanged by artwork contracts.",
+  "tomb_stone_cap_contract": "Reviewed palette5 walking tops use complete native plain stone0A/0B artwork within the existing8-cell material-safe donor bound. Original carved fronts, blue inlays, side artwork, native priority, collision and geometry remain unchanged. Palette4 portal corners and palette6 gold masks are separate materials and retain their existing behavior; explicit editor artwork wins.",
+  "native_surfaces": [
+    {
+      "key": "1de4a147b01d1cc0",
+      "origins": [
+        [
+          5,
+          0,
+          19
+        ],
+        [
+          5,
+          1,
+          19
+        ],
+        [
+          5,
+          2,
+          19
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "47ef530b937d4ae7",
+      "origins": [
+        [
+          5,
+          0,
+          77
+        ],
+        [
+          5,
+          1,
+          77
+        ],
+        [
+          5,
+          2,
+          77
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "4e4ae74bc24990a4",
+      "origins": [
+        [
+          5,
+          0,
+          62
+        ],
+        [
+          5,
+          1,
+          62
+        ],
+        [
+          5,
+          2,
+          62
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "5d717f944333c447",
+      "origins": [
+        [
+          5,
+          0,
+          24
+        ],
+        [
+          5,
+          1,
+          24
+        ],
+        [
+          5,
+          2,
+          24
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "6b2934b7c55a65a5",
+      "origins": [
+        [
+          5,
+          0,
+          6
+        ],
+        [
+          5,
+          1,
+          6
+        ],
+        [
+          5,
+          2,
+          6
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": []
+    },
+    {
+      "key": "8aedb7100ab8674e",
+      "origins": [
+        [
+          5,
+          0,
+          55
+        ],
+        [
+          5,
+          1,
+          55
+        ],
+        [
+          5,
+          2,
+          55
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "8f134be1674185f9",
+      "origins": [
+        [
+          5,
+          0,
+          63
+        ],
+        [
+          5,
+          1,
+          63
+        ],
+        [
+          5,
+          2,
+          63
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "9f079cd56fa27071",
+      "origins": [
+        [
+          5,
+          0,
+          20
+        ],
+        [
+          5,
+          1,
+          20
+        ],
+        [
+          5,
+          2,
+          20
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "d69d93c4d810eb36",
+      "origins": [
+        [
+          5,
+          0,
+          54
+        ],
+        [
+          5,
+          1,
+          54
+        ],
+        [
+          5,
+          2,
+          54
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "096537792b91795a",
+      "origins": [
+        [
+          1,
+          0,
+          98
+        ],
+        [
+          1,
+          1,
+          98
+        ],
+        [
+          1,
+          2,
+          98
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "14867122f2fffd7d",
+      "origins": [
+        [
+          1,
+          0,
+          194
+        ],
+        [
+          1,
+          1,
+          194
+        ],
+        [
+          1,
+          2,
+          194
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "21b643d7d448d145",
+      "origins": [
+        [
+          1,
+          0,
+          186
+        ],
+        [
+          1,
+          1,
+          186
+        ],
+        [
+          1,
+          2,
+          186
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "25d7f55990f792ac",
+      "origins": [
+        [
+          1,
+          0,
+          106
+        ],
+        [
+          1,
+          0,
+          107
+        ],
+        [
+          1,
+          1,
+          106
+        ],
+        [
+          1,
+          1,
+          107
+        ],
+        [
+          1,
+          2,
+          106
+        ],
+        [
+          1,
+          2,
+          107
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "2f61085e9a568aa0",
+      "origins": [
+        [
+          1,
+          0,
+          115
+        ],
+        [
+          1,
+          1,
+          115
+        ],
+        [
+          1,
+          2,
+          115
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "2fdb380c2b4b3cd3",
+      "origins": [
+        [
+          1,
+          0,
+          91
+        ],
+        [
+          1,
+          1,
+          91
+        ],
+        [
+          1,
+          2,
+          91
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "34523e6f1e67503f",
+      "origins": [
+        [
+          1,
+          0,
+          116
+        ],
+        [
+          1,
+          1,
+          116
+        ],
+        [
+          1,
+          2,
+          116
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "365c9c719308edb6",
+      "origins": [
+        [
+          1,
+          0,
+          114
+        ],
+        [
+          1,
+          1,
+          114
+        ],
+        [
+          1,
+          2,
+          114
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "3f1e6b08b11ae4bf",
+      "origins": [
+        [
+          1,
+          0,
+          195
+        ],
+        [
+          1,
+          1,
+          195
+        ],
+        [
+          1,
+          2,
+          195
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "43ad167f6a0d70bc",
+      "origins": [
+        [
+          1,
+          0,
+          180
+        ],
+        [
+          1,
+          1,
+          180
+        ],
+        [
+          1,
+          2,
+          180
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "64d967b8452bf308",
+      "origins": [
+        [
+          1,
+          0,
+          113
+        ],
+        [
+          1,
+          1,
+          113
+        ],
+        [
+          1,
+          2,
+          113
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "732abfe0f4e0192b",
+      "origins": [
+        [
+          1,
+          0,
+          90
+        ],
+        [
+          1,
+          1,
+          90
+        ],
+        [
+          1,
+          2,
+          90
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "892a8c7c971509be",
+      "origins": [
+        [
+          1,
+          0,
+          196
+        ],
+        [
+          1,
+          1,
+          196
+        ],
+        [
+          1,
+          2,
+          196
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "8cd2d2e6161380b0",
+      "origins": [
+        [
+          1,
+          0,
+          99
+        ],
+        [
+          1,
+          1,
+          99
+        ],
+        [
+          1,
+          2,
+          99
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "b89d8de77679f90d",
+      "origins": [
+        [
+          1,
+          0,
+          189
+        ],
+        [
+          1,
+          1,
+          189
+        ],
+        [
+          1,
+          2,
+          189
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "c12333187eea0417",
+      "origins": [
+        [
+          1,
+          0,
+          178
+        ],
+        [
+          1,
+          1,
+          178
+        ],
+        [
+          1,
+          2,
+          178
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "d27723c1908e8f88",
+      "origins": [
+        [
+          1,
+          0,
+          179
+        ],
+        [
+          1,
+          1,
+          179
+        ],
+        [
+          1,
+          2,
+          179
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "d3a08159a9294e32",
+      "origins": [
+        [
+          1,
+          0,
+          187
+        ],
+        [
+          1,
+          1,
+          187
+        ],
+        [
+          1,
+          2,
+          187
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "e967ab6d797c481d",
+      "origins": [
+        [
+          1,
+          0,
+          197
+        ],
+        [
+          1,
+          1,
+          197
+        ],
+        [
+          1,
+          2,
+          197
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "eb43237bc476b95e",
+      "origins": [
+        [
+          1,
+          0,
+          188
+        ],
+        [
+          1,
+          1,
+          188
+        ],
+        [
+          1,
+          2,
+          188
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "f4f8c243eee85625",
+      "origins": [
+        [
+          1,
+          0,
+          181
+        ],
+        [
+          1,
+          1,
+          181
+        ],
+        [
+          1,
+          2,
+          181
+        ]
+      ],
+      "family": "osseous_stone",
+      "faces": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ]
+    },
+    {
+      "key": "1dfca2cdbf743810",
+      "origins": [
+        [
+          5,
+          0,
+          84
+        ],
+        [
+          5,
+          1,
+          84
+        ],
+        [
+          5,
+          2,
+          84
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": [
+        "bottom"
+      ]
+    },
+    {
+      "key": "4c7fc75f685114e3",
+      "origins": [
+        [
+          5,
+          0,
+          86
+        ],
+        [
+          5,
+          1,
+          86
+        ],
+        [
+          5,
+          2,
+          86
+        ]
+      ],
+      "family": "cavern_rock",
+      "faces": [
+        "bottom"
+      ]
+    }
+  ],
+  "native_surface_contract": "Exact natural brown cavern strata and the closed gray osseous hub-body family only. Generated faces continue inward from each original native boundary, retaining the source grain, palette, priority and terminal shading. Osseous rib/skull trim, invisible collision, the completion scene and unknown/authored sources are excluded. Body-only dark cavern interior may terminate the native profile. No geometry, collision, silhouette or actor-priority changes.",
+  "hub_surface_contract": "All twenty-one reviewed osseous island-body materials form one native stone family. Exposed top, side and underside faces traverse their own original boundary pixels inward, stopping at true native alpha, priority, palette or family boundaries. The sixteen separate thin rib/skull ornaments are not receivers or donors. Explicit editor artwork and erasures retain authority; material identity uses artwork/collision hashes, not native tile addresses.",
+  "cavern_cap_underside_contract": "The two reviewed 07/05 rock-ledge perimeter materials extend their exact bottom boundary pixels inward using cavern_rock. Existing top/side maps and dark center material fcd63670ed8a0a20 remain authoritative. Native underside shade and alpha termination are preserved; no foreign brighter top stone is substituted."
 }

@@ -81,6 +81,7 @@ typedef struct DioramaSceneryLightEffectParams {
   ArRenderRectF light_uv; /* Region of the full-output map; zero means all. */
   DioramaCloudLight cloud_light;
   DioramaHeat heat; /* Optional world-space UV distortion before art filtering. */
+  DioramaHeatOwned heat_owned; /* Optional independent receiver coordinates for owned art. */
   unsigned mode; /* 0: ordinary texture, 1: DOF, 2: priority pair */
 } DioramaSceneryLightEffectParams;
 bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *device,

@@ -43,13 +43,48 @@ SrSceneRenderer *sr_scene_renderer_create(void) {
 void sr_scene_renderer_destroy(SrSceneRenderer *r) {
     if (r) { ppu_free(r->ppu); free(r); }
 }
+static const SrPpuBackgroundGuardBands *GuardBands(const SrSceneFrame *f, unsigned i) {
+    return f->struct_size >= SR_SCENE_FRAME_BACKGROUND_GUARD_BANDS_SIZE
+        ? f->background_guard_bands[i] : NULL;
+}
 static bool Valid(const SrSceneFrame *f) {
-    if (!f || f->struct_size != sizeof(*f) || !f->vram || !f->cgram ||
+    if (!f || (f->struct_size != SR_SCENE_FRAME_BACKGROUND_GUARDS_SIZE &&
+        f->struct_size < SR_SCENE_FRAME_BACKGROUND_GUARD_BANDS_SIZE) || !f->vram || !f->cgram ||
         !f->mosaic || f->extra_x > 128 || f->top + f->bottom > 128 ||
         (f->main_screen | f->sub_screen | f->native_page_mask) & ~3u || (f->cgwsel & 1)) return false;
     if (f->background_view.width && (f->background_view.width > 512 ||
         f->background_view.width > f->background_view.world_width ||
         !f->background_view.world_height || f->background_view.layer > 1)) return false;
+    if (f->background_guard_count > 2 ||
+        (!!f->background_guard_count != !!f->background_guards) ||
+        (f->background_guards && (uintptr_t)f->background_guards %
+            _Alignof(SrPpuBackgroundGuardRequest))) return false;
+    for (unsigned i = f->background_guard_count; i < 2; ++i)
+        if (GuardBands(f, i)) return false;
+    for (unsigned i = 0; i < f->background_guard_count; ++i) {
+        const SrPpuBackgroundGuardRequest *g = &f->background_guards[i];
+        const SrPpuBackgroundGuardBands *bands = GuardBands(f, i);
+        const int64_t bottom = (int64_t)g->screen_y0 + g->height;
+        const int64_t source_right = (int64_t)g->source_x0 + g->source_width;
+        const int64_t source_bottom = (int64_t)g->source_y0 + g->source_height;
+        if (!PpuBackgroundGuardStorageValid(NULL, g, bands) ||
+            !g->source_width || g->source_width > UINT16_MAX ||
+            !g->source_height || g->source_height > UINT16_MAX ||
+            source_right > INT32_MAX || source_bottom > INT32_MAX ||
+            g->screen_x0 < -640 || (int64_t)g->screen_x0 + g->width > 256 + 640 ||
+            !((g->screen_y0 >= -(int)f->top - 64 && bottom <= -(int)f->top) ||
+              (g->screen_y0 >= 224 + f->bottom && bottom <= 224 + f->bottom + 64))) return false;
+        for (unsigned j = 0; j < i; ++j) {
+            const SrPpuBackgroundGuardRequest *a = &f->background_guards[j];
+            if (PpuBackgroundGuardsStorageOverlap(g, bands, a, GuardBands(f, j)))
+                return false;
+            if (g->layer == a->layer &&
+                (int64_t)g->screen_y0 < (int64_t)a->screen_y0 + a->height &&
+                (int64_t)a->screen_y0 < (int64_t)g->screen_y0 + g->height &&
+                (int64_t)g->screen_x0 < (int64_t)a->screen_x0 + a->width &&
+                (int64_t)a->screen_x0 < (int64_t)g->screen_x0 + g->width) return false;
+        }
+    }
     for (unsigned bg = 0; bg < 2; ++bg) {
         const SrSceneBackground *b = &f->backgrounds[bg];
         if (!b->rows || !b->hscroll || !b->vscroll || !b->tiles.lookup ||
@@ -72,6 +107,15 @@ static bool Valid(const SrSceneFrame *f) {
 bool sr_scene_renderer_render(SrSceneRenderer *r, const SrSceneFrame *f,
                                SrSceneSurfaces *out) {
     if (!r || !out || !Valid(f)) return false;
+    for (unsigned i = 0; i < f->background_guard_count; ++i) {
+        const SrPpuBackgroundGuardRequest *g = &f->background_guards[i];
+        for (unsigned b = 0; b < 4; ++b) {
+            const SrPpuBackgroundGuardBandOutput output =
+                PpuBackgroundGuardOutput(g, GuardBands(f, i), b);
+            if (output.pixels && (uintptr_t)output.pixels < (uintptr_t)r + sizeof(*r) &&
+                (uintptr_t)r < (uintptr_t)output.pixels + output.pitch_bytes * g->height) return false;
+        }
+    }
     Ppu *p = r->ppu;
     const int width = 256 + f->extra_x * 2, height = 224 + f->top + f->bottom;
     const int pitch = width + 128;
@@ -148,6 +192,16 @@ bool sr_scene_renderer_render(SrSceneRenderer *r, const SrSceneFrame *f,
     if (p->backgroundPacket)
         SrPpuBgPacket_Begin(p->backgroundPacket, (unsigned)pitch, (unsigned)height);
     ppu_runLine(p, 0);
+    p->mosaic = f->mosaic[0];
+    for (unsigned bg = 0; bg < 2; ++bg) {
+        p->hScroll[bg] = f->backgrounds[bg].hscroll[0];
+        p->vScroll[bg] = f->backgrounds[bg].vscroll[0];
+    }
+    bool guards_ready = f->background_guard_count != 0;
+    for (unsigned i = 0; i < f->background_guard_count; ++i)
+        if (f->background_guards[i].screen_y0 < 0)
+            guards_ready &= PpuRenderBackgroundGuardBands(p, &f->background_guards[i],
+                GuardBands(f, i));
     for (int y = -(int)f->top; y < 224 + f->bottom; ++y) {
         int row = y < 0 ? 0 : y > 223 ? 223 : y;
         p->mosaic = f->mosaic[row];
@@ -159,12 +213,21 @@ bool sr_scene_renderer_render(SrSceneRenderer *r, const SrSceneFrame *f,
         else ppu_runLine(p, y + 1);
         if (view_valid) view_valid = PpuRenderBackgroundViewLine(p, &view, y);
     }
+    for (unsigned i = 0; i < f->background_guard_count; ++i)
+        if (f->background_guards[i].screen_y0 >= 224)
+            guards_ready &= PpuRenderBackgroundGuardBands(p, &f->background_guards[i],
+                GuardBands(f, i));
+    if (!guards_ready)
+        for (unsigned i = 0; i < f->background_guard_count; ++i) {
+            PpuClearBackgroundGuard(&f->background_guards[i], GuardBands(f, i));
+        }
     if (!view_valid && p->backgroundPacket) {
         p->backgroundPacket->words[2] &= ~4u;
         p->backgroundPacket->owned_sources &= ~4u;
     }
     *out = (SrSceneSurfaces){.backdrop = r->pixels[0], .width = width,
         .height = height, .pitch_pixels = pitch,
+        .background_guards_ready = guards_ready,
         .background_view = view_valid ? r->view : NULL, .view_width = (int)view.width};
     p->backgroundPacket = NULL;
     for (unsigned bg = 0; bg < 2; ++bg) {

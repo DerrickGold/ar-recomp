@@ -104,6 +104,8 @@ static void Reject(ArGpuDioramaDepthPass *pass,SDL_GPUTexture *target,
   assert(SDL_CancelGPUCommandBuffer(cmd));
 }
 
+#include "diorama_owned_heat_gpu.inc"
+
 int main(int argc,char **argv) {
   const bool hybrid=argc>1&&strcmp(argv[1],"--hybrid")==0;
   setvbuf(stdout,NULL,_IONBF,0);
@@ -129,7 +131,7 @@ int main(int argc,char **argv) {
       const float u=scenario==2 || scenario==5 || (actor && scenario==3)
           ? (right?1.125f:-.125f) : right;
       vertices[i]=(ArRenderVertex2D){{x,y},color,{u,bottom}};
-      projected[i]=(DioramaDepthVertex){{2*x/W-1,1-2*y/H,.35f,1},color,{u,bottom}};
+      projected[i]=(DioramaDepthVertex){{2*x/W-1,1-2*y/H,.35f,1},color,{u,bottom},{0}};
       background[i]=projected[i];background[i].clip[2]=.8f;
       background[i].color=(ArRenderColorF){.08f,.12f,.04f,1};
     }
@@ -187,6 +189,7 @@ int main(int argc,char **argv) {
     if(!actor && scenario==0 && !linear && !fade)Reject(&pass,GpuTexture(target),draws[0],sources[0],GpuTexture(light));
   }
   if(!hybrid)assert(covered>10000 && holes>10000);
+  TestOwnedHeatMaterials(&device,&pass,target,black,hybrid);
   printf("Shared-depth materials%s: %u renders, %u pixels; ordinary scenery/actor lighting, rim/DOF/priority/grade/heat/cloud parity passed%s\n",
       hybrid?" (bounded hybrid)":"",renders,pixels_checked,
       hybrid?"":"; final-alpha cutout depth, failure and reuse also passed");

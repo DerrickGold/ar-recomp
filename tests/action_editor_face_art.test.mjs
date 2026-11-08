@@ -125,6 +125,30 @@ assert.equal(run('paletteArtValue(voxelFacePalette.art)'),'0,0001,0002,0003,0004
 context.picked={kind:'tile',x:3,y:4,face:'top',topArt:'auto',sampleSource:{bg:0,x:116,y:148,size:8}};
 run('pickupVoxelFaceArt(picked)');
 assert.equal(run('paletteArtValue(voxelFacePalette.art)'),'0,0401,4802,8C03,D004,4,4,8','automatic cap donor can differ from the selected cell');
+for(const face of ['side','left','right','bottom']) {
+  context.picked={kind:'tile',x:3,y:4,face,[face+'Art']:'auto',sideArt:'auto',
+    sampleSource:{bg:0,x:116,y:148,size:8}};
+  run('pickupVoxelFaceArt(picked)');
+  assert.equal(run('paletteArtValue(voxelFacePalette.art)'),'0,0401,4802,8C03,D004,4,4,8',
+    `automatic ${face} picks its displayed material patch instead of the selected cell's front`);
+}
+context.picked={kind:'tile',x:3,y:4,face:'bottom',bottomArt:'1,0004,0003,0002,0001,0,0,16',
+  sideArt:'0,0001,0002,0003,0004,4,4,8',sampleSource:{bg:0,x:116,y:148,size:8}};
+run('pickupVoxelFaceArt(picked)');
+assert.equal(run('paletteArtValue(voxelFacePalette.art)'),'1,0004,0003,0002,0001,0,0,16',
+  'explicit directional artwork wins over shared artwork and automatic donor provenance');
+context.picked.bottomArt='auto';run('pickupVoxelFaceArt(picked)');
+assert.equal(run('paletteArtValue(voxelFacePalette.art)'),'0,0001,0002,0003,0004,4,4,8',
+  'directional Auto still inherits an explicitly painted shared side');
+context.picked.sampleSourceAmbiguous=true;
+assert.equal(run('paletteArtValue(paletteSampleFaceArt(picked).art)'),'0,0001,0002,0003,0004,4,4,8',
+  'explicit shared art remains authoritative over ambiguous automatic geometry');
+context.picked.sideArt='auto';
+assert.equal(run('paletteSampleFaceArt(picked)'),null,
+  'a coordinate selection spanning multiple native materials cannot invent one donor');
+context.picked.bottomArt='1,0004,0003,0002,0001,0,0,16';
+assert.equal(run('paletteArtValue(paletteSampleFaceArt(picked).art)'),'1,0004,0003,0002,0001,0,0,16',
+  'explicit directional artwork remains sampleable on a multi-patch cell');
 assert.equal(run('paletteSourceArt({x:116,y:148,size:16,bg:0})'),null,'unrepresentable donor does not silently change the crop');
 run(`const baseDisplayedCell=displayedCell;displayedCell=(_r,_bg,_l,x,y)=>({words:[x*16+y,x*16+y+1,x*16+y+2,x*16+y+3]});`);
 assert.deepEqual(json('paletteSourceArt({x:14,y:14,size:8,bg:0})'),{bg:0,words:[3,18,2,17],x:6,y:6,size:8},'an exact native donor may cross four metatiles');
@@ -236,6 +260,25 @@ assert.equal(run('settingsSampler.values().faces'),'none','explicit face visibil
 run(`sampledDonor.words[0]=1;settingsSampler.sampleSettings({...artSource,face:'top',sampleSource:{x:116,y:148,size:8,bg:0}});`);
 assert.equal(run('settingsSampler.values()["top-art"]'),'0,0001,0002,0003,0004,4,4,8','automatic cap uses the exact displayed donor crop');
 assert.equal(run('settingsSampler.values()["front-art"]'),'auto','only the clicked native face is frozen');
+for(const face of ['side','left','right','bottom']) {
+  run(`settingsSampler.sampleSettings({...artSource,face:${JSON.stringify(face)},sampleSource:{x:116,y:148,size:8,bg:0}});`);
+  assert.equal(run(`settingsSampler.values()[${JSON.stringify(face+'-art')}]`),'0,0001,0002,0003,0004,4,4,8',
+    `Copy Art freezes the automatic ${face} material patch`);
+  assert.equal(run('settingsSampler.values()["front-art"]'),'auto','sampling a skin never replaces front artwork');
+}
+run(`settingsSampler.sampleSettings({...artSource,face:'bottom',sampleSource:{x:116,y:148,size:8,bg:0}});
+  settingsSampler.applySample([artTarget]);`);
+assert.equal(run('artTarget.record["bottom-art"]'),'0,0001,0002,0003,0004,4,4,8',
+  'a native underside donor is frozen into BottomArt');
+assert.equal(run('artTarget.record["side-art"]'),'auto','underside sampling does not freeze its donor into shared SideArt');
+assert.equal(run('artTarget.record["front-art"]'),'auto','underside sampling does not freeze its donor onto the front');
+assert.equal(run('JSON.stringify(Object.fromEntries(Object.entries(artTarget.record).filter(([key])=>!key.endsWith("-art"))))'),
+  run('targetNonArt'),'underside Copy Art retains geometry, placement, backing and visibility');
+run(`const oldDonorWord=sampledDonor.words[0];sampledDonor.words[0]=0xC123;
+  settingsSampler.sampleSettings({...artSource,face:'right',sampleSource:{x:112,y:144,size:16,bg:0}});
+  sampledDonor.words[0]=oldDonorWord;`);
+assert.equal(run('settingsSampler.values()["right-art"]'),'0,C123,0002,0003,0004,0,0,16',
+  'a donor freezes the currently displayed stamped words, including palette/flip bits, before a later map change');
 run(`settingsSampler.sampleSettings({...artSource,face:'top',topArt:'auto',record:{'top-art':'1,0401,4802,8C03,D004,2,3,8'},sampleSource:{x:116,y:148,size:8,bg:0}});`);
 assert.equal(run('settingsSampler.values()["top-art"]'),'1,0401,4802,8C03,D004,2,3,8','current custom artwork wins over automatic cap metadata');
 run(`settingsSampler.sampleSettings({...artSource,face:'left',leftArt:'auto',sideArt:'0,0004,0003,0002,0001,0,0,16'});`);

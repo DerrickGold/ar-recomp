@@ -145,6 +145,29 @@ authored artwork, depth, width and bend settings.
 Face artwork selections retain native palette and flip bits. They do not modify
 the normal tile-stamp clipboard. **BG1** / **BG2** selects which current-room
 palette supplies the artwork; voxel geometry selection itself targets BG1 cells.
+Automatic exposed structural faces use opaque native artwork from the same
+material band, across every Voxel room profile. This replaces stretched edge
+strips where a safe full patch exists, preserving grass above wood, vertical
+grain, native silhouettes and priority. A compatible neighboring repeat can
+supply missing artwork; transparent or animated donors retain the existing
+contour treatment. Reviewed architectural tops retain complete 16px brick or
+stone motifs, including matching masonry reused in the cave and Death Heim.
+Mixed-cell background plants, foam fringes and gate ink cannot become automatic
+structural donors. Carved temple capitals and castle walking rims can borrow a
+compatible complete stone tile within eight cells, while preserving their
+native front lip. Other rims keep their existing top treatment. Grass tops
+retain the original left/right artwork instead of repeating one center crop.
+Fillmore's walking surfaces use reviewed horizontal turf and clean soil bands,
+separately from the hanging grass on cliff fronts. The deck stays flat, with
+local rear vegetation artwork closing its joins. Kassandora's skeleton keeps
+its complete silhouette in one shallow extrusion at the player contact plane;
+its sand joins retain ordinary ground depth.
+The blue columns in the tower and its Death Heim rematch project slightly ahead
+of their arches while keeping their original rear attachment and native
+priority. These reviewed material defaults also follow matching tile stamps;
+explicit depth edits continue to take precedence.
+The choice is cached with room geometry, independent of the camera. Explicit
+face artwork takes precedence; **Auto** restores this policy.
 Changing a numeric field sets it for every selected tile; dragging the depth
 handle preserves their relative depths. Depth, backing and face-art overrides
 are saved together in `diorama-layers.ini` as `voxel-cell` records. A record may
@@ -159,7 +182,9 @@ picker so you can click visible artwork without changing the destination.
 four native pieces. Crop offsets are in native pixels. Whole-art flips preserve
 native palette/flip attributes and mirror the crop; assembled pieces can also
 be flipped individually. Sampling the map temporarily changes views and returns
-to the selected surface. Sampled native cap donors retain their actual crop.
+to the selected surface. Sampled native cap and side donors retain their actual
+crop. Pick the visible 3D face to capture its exact material band when a tile
+contains several different patches.
 **Cancel** restores the draft and history from before opening the picker. Clicking
 another editing control finishes the artwork edit first, keeping later edits
 independent. Undo finishes the picker and reverses the artwork edit. The ordinary
@@ -351,6 +376,33 @@ trunk = enabled:1 depth:0.38 recess:0.24 wrap:1 gust:1 frost:1 bark:1
 Apply, reset, undo/redo and project save/load use the same shared renderer in
 the editor and game. Assets derive from the loaded ROM and chosen terrain.
 Game scenery files load when the session starts; restart after exporting art edits.
+
+In Voxel mode, the outer snow passages in `06:06–07` retain their native front
+contact plane and extend behind it. Their depth opens over two native cells at
+the central shaft, so the established curved enclosure stays intact. Reviewed
+snow and bark families own the generated caps; short snow-ramp risers share the
+snow cap texture. Tall snowbank sides follow the pale native outline and retain
+two-dimensional snow texture, while blue wood and undersides retain bark.
+Opaque native interiors remain backing and clear sky stays
+open. Native high-priority stamps keep their actor slot, including unrecognized
+artwork. The ordinary Diorama and Off modes retain their existing paths.
+
+These dedicated-room contracts live in
+`assets/environments/northwall-tree-side-materials.json`; regenerate with
+`python3 tools/generate_trunk_side_materials.py` and verify with `--check`.
+The optional regional regression uses exported `0606.arscene` and `0607.arscene`
+under each `0`, `1`, and `2` terrain directory:
+
+```sh
+AR_TRUNK_SIDE_FIXTURES=runs/sweep-assets build-tests/actraiser_action_voxel_test
+```
+
+It checks the legacy central enclosure, source preservation, native contacts,
+reflected/remapped art and editor isolation. Compositor checks separately cover
+actual projected endpoints, cap materials, native priority and cache reuse;
+`actraiser_diorama_trunk_gpu_test` checks CPU/GPU split parity. These are separate
+from live traversal and Steam Deck performance acceptance. The generic Voxel
+cell/depth queries do not describe this dedicated curved renderer.
 
 Death Heim room 1 has separate **1 A — faces** and **1 B — completion scenery**
 selections. Each displays only its own 256×256 background pages. Tile edits,
@@ -1790,6 +1842,132 @@ readable by the comparison tools. PNG pixel comparison requires Pillow; encoding
 uses the already-required SDL 3.4+ API and introduces no new runtime library.
 Capture readback/compression runs only when requested, never in ordinary rendering
 or the measured room-sweep frames.
+
+### Headless Voxel depth-pattern audit
+
+`tools/voxel_depth_audit.py` inspects compiled BG1 geometry without starting the
+game or a graphics device. It uses the production Voxel compiler and scenery
+INI parser, including regional stamps, pixel masks, negative map bounds and
+saved editor overrides. Python only analyzes the resulting depths; it does not
+maintain a second material policy.
+
+Build the diagnostic target in an existing test build, then pass portable room
+snapshots or a directory containing them:
+
+```sh
+cmake --build build-tests --target actraiser_voxel_depth_audit --parallel 1
+python3 tools/voxel_depth_audit.py runs/sweep-assets --output runs/depth-audit.json
+python3 tools/voxel_depth_audit.py runs/sweep-assets --ini /path/to/edited/diorama-layers.ini --output runs/edited-depth-audit.json
+```
+
+The default INI is the checkout's `diorama-layers.ini`; `--ini` replaces it with
+an editor export. `--no-ini` audits original room assets. Export each terrain
+profile with `export_gpu_rooms.mjs` as shown below; a parent directory containing
+profiles0,1,2 covers all150 room/region snapshots, including the separate ending.
+The JSON report records input/INI/compiler hashes, complete candidate cells,
+native/effective collision and priority, exact displayed-art hashes, depth
+values and authored provenance. No original tile pixels are embedded in reports.
+
+High-confidence candidates require repeated connected A/B/A depth returns and
+an identical-art reference on the surrounding plane within eight cells.
+Physical border contact, native priority and a shared rear attachment must also
+agree. Collision is recorded independently: it must not hide identical artwork
+that was accidentally assigned different visual planes. Isolated depth returns
+or artwork reused on different planes remain review clues. The tool never edits
+the level or automatically changes classification.
+
+The short terminal summary is capped; the deterministic JSON retains all
+findings. Candidates return exit0; invalid snapshots, INIs, paths or compiler
+failures return nonzero. Output files cannot alias inputs. `--raw-output` can
+retain complete per-cell diagnostic JSONL for `--from-export` analysis later.
+
+Explicit voxel overrides, mixed quadrant roles, animated sources and specialized
+curves/objects are counted as exclusions. Northwall's separately curved interiors
+and Death Heim's completion scene are explicitly skipped rather than declared
+clean. Frame/animation metadata identifies the snapshot basis; this does not
+certify every animation phase, gameplay, sprites, all camera angles, or Steam
+Deck performance. A uniformly wrong plane with no contrasting pattern may not
+be detected.
+
+The small historical Northwall regression contains only hashed artwork and
+scalar geometry. To additionally test all three current native trunk fixtures:
+
+```sh
+python3 tests/test_voxel_depth_audit_adversarial.py
+AR_VOXEL_DEPTH_FIXTURES=runs/sweep-assets python3 tests/test_voxel_depth_audit_native.py
+```
+
+### Visual acceptance against native artwork
+
+The depth-pattern report is a review aid, not a visual acceptance gate. The
+November8 screenshot review found defects despite passing metadata checks:
+a baked black half-shadow beside an otherwise repaired pillar, duplicate rear
+copies of thin posts, missing walking caps, and decorations on the wrong plane.
+A wide room image alone did not expose all of these reliably.
+
+For each changed structural family, record room/region, exact cells, intended
+native relationship, build/input hashes, and **verified / defective / unresolved**
+results separately for the following checks:
+
+| Feature | Required comparison |
+| --- | --- |
+| Walking surfaces and ramps | Native collision contour versus actual emitted cap/front edges; check continuity in both slope directions and at landings. Decorative noncolliding lips must not suppress the walking surface. |
+| Hazards and openings | Explicitly inspect every affected pit footprint. Caps must not bridge spike openings; a legitimate floor below the spikes is distinct from a roof across the pit. |
+| Forward scenery and backing | Account for the vacated source footprint, adjacent baked shadows and rear duplicates. Presence of a rear-fill record alone is insufficient. Preserve genuine windows, open sky and authored voids. |
+| Attached detail and artwork | Compare neighboring shafts, vines, column bases and platform courses. Verify submitted depths and native palette/pattern continuity, including top/side texture selection, tiling and stretch. |
+| Live objects and priority | Use the same captured frame/actors where available; retain a separate live-game check for motion, occlusion and contacts. Scenery-only sweeps do not establish these. |
+| World-attached effects | Inspect snow cover, ground mist/dust, water edges, spray, wet contours, torch light and shadows against the actual Voxel receiving surfaces. Check depth coverage, camera-stable placement, joins, actor priority and offscreen source bounds. Ground cover must follow widened caps without bridging pits or floating over missing support. A wider 2D strip alone does not establish 3D coverage. |
+
+Effect ownership is part of each level's audit. Compare effects on/off at matched
+neutral and oblique views, then check movement and camera reset in the live game.
+Separate world-attached effects from intentional screen-space presentation such
+as final color grading or bloom; do not convert every postprocess into geometry.
+Preserve Off and ordinary Diorama behavior, authored effect placement, and each
+region's intended mood. Northwall's restrained Act1 aurora and brighter summit
+remain distinct. Any additional Voxel coverage needs bounded geometry, cache
+reuse for static support and an actual Steam Deck performance check.
+
+Northwall's authored snow-bank cover is a specific open follow-up: its
+`ground-width` currently offsets a flat BG1 path in source Y. The widened Voxel
+floor needs a surface-aware depth span, preserving the shallow front lip,
+foot compression and powder while keeping pit openings clear. Increasing the
+saved width for every mode would not meet this contract.
+
+Keep native low/high/composited artwork beside matched neutral and both-oblique
+views, with a close-up of the actual defect and a wider context view. Use the
+same camera, source frame and authored INI for comparisons. Account explicitly
+for intended changes to baked shadows or face artwork; indiscriminate pixel
+equality against the original composite would reject necessary3D repairs.
+Check the requested camera extremes and regional/editor variants for materially
+changed families. Preserve a failing historical fixture when adding a regression.
+
+Workflow assertions, compiler metadata and observed renderer geometry are
+different evidence. Inspect the final pixels even when all automated checks
+pass, and amend the receipt if a later screenshot disproves its visual claim.
+Record physical presentation, native source cadence and full-level gameplay
+acceptance separately. A90Hz refresh count does not excuse missing source ticks.
+Untested features remain unresolved; an initial all-room sweep is not signoff.
+
+For an all-room audit, also compare material decisions for identical displayed
+native art and priority across regions; native collision differences alone must
+not silently turn spike artwork into a solid deck. Audit dedicated curved-room
+and completion render paths separately from generic Voxel compiler output.
+Include authored extensions and opaque black artwork in the inventory: a
+nonblack-pixel sweep can miss meaningful black backing. Record whether each
+selected source footprint actually appears in a rendered view; an outline in
+frame or a clamped camera request does not establish visible coverage. Keep
+unreachable exterior construction and occluded faces explicitly unverified.
+
+The optional native regression for the reviewed Cave/Ice regional spike bases is:
+
+```sh
+AR_VOXEL_REGIONAL_SPIKE_FIXTURES=runs/sweep-assets build-tests/actraiser_action_voxel_test
+```
+
+Its fixture root contains `0`, `1`, and `2` terrain directories with `0102.arscene`,
+`0602.arscene`, and `0603.arscene`. It checks native source/collision preservation,
+actual split and emitted-edge ownership, region parity, remapping, and authored
+edit precedence. Passing it does not replace live hazard or sprite checks.
 
 ### Standalone native room sweeps
 

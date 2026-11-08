@@ -1,5 +1,6 @@
 #include "host/frame_queue.h"
 #include "action/action_voxel.h"
+#include "action/action_trunk.h"
 #include "host/frame_producer.h"
 #include "sim/sim_frame_capture.h"
 #include "diorama/diorama_planes.h"
@@ -8,6 +9,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Packet ownership validates guard layout but must never split geometry.
+ * Keep the full action compiler outside this focused queue executable. */
+void ActionTrunk_Split(const ActionTrunkAssets *assets, int origin_x, int origin_y,
+    int width, int height, int pitch, const uint32_t *const input[3],
+    const size_t input_pitch[3], uint32_t *const output[3], unsigned brightness) {
+  (void)assets; (void)origin_x; (void)origin_y; (void)width; (void)height;
+  (void)pitch; (void)input; (void)input_pitch; (void)output; (void)brightness;
+  assert(!"Queue ownership must not invoke ActionTrunk_Split");
+  abort();
+}
 
 static SrPpuSurfaceView View(uint32_t *pixels) {
   return (SrPpuSurfaceView){.data = (const uint8_t *)pixels,
@@ -320,7 +332,159 @@ static void TestMaintenanceWithFutureFrames(HostFrameQueue *queue) {
   HostFrameProducer_Shutdown();
 }
 
+static void TestTrunkGuardOwnership(void) {
+  HostFrameQueue *q = HostFrameQueue_Create(); assert(q);
+  uint32_t *pixels = calloc(kDioramaTrunkGuardPixels, sizeof(uint32_t)); assert(pixels);
+  DioramaTrunkGuardSource source = {.pixels = pixels, .pitch_pixels = 640,
+      .pixel_count = kDioramaTrunkGuardPixels};
+  assert(DioramaTrunkGuard_Resolve(208, 1696, 624, 352,
+      (DioramaTrunkGuardBounds){0, 0, 1024, 2048}, &source.layout));
+  for (unsigned frame = 0; frame < 2; ++frame) {
+    HostFramePacket *packet = HostFrameQueue_BeginWrite(q); assert(packet);
+    pixels[0] = 0xff123400u + frame;
+    pixels[kDioramaTrunkGuardPixels - 1] = frame + 17;
+    source.capture_generation = frame + 100;
+    packet->frame = (FrameSlot){.diorama_active = true, .diorama_trunk_guard = source};
+    assert(HostFramePacket_OwnPixels(packet));
+    assert(packet->frame.diorama_trunk_guard.pixels == packet->trunk_guard_storage);
+    assert(packet->copied_bytes == kDioramaTrunkGuardPixels * sizeof(uint32_t));
+    HostFrameQueue_Publish(q);
+  }
+  memset(pixels, 0, kDioramaTrunkGuardPixels * sizeof(uint32_t));
+  for (unsigned frame = 0; frame < 2; ++frame) {
+    const HostFramePacket *packet = HostFrameQueue_Peek(q, frame); assert(packet);
+    const DioramaTrunkGuardSource *held = &packet->frame.diorama_trunk_guard;
+    assert(held->pixels != pixels && held->pixels[0] == 0xff123400u + frame &&
+        held->pixels[kDioramaTrunkGuardPixels - 1] == frame + 17 &&
+        held->capture_generation == frame + 100);
+    assert(!memcmp(&held->layout, &source.layout, sizeof(source.layout)));
+  }
+  HostFramePacket *packet = HostFrameQueue_BeginWrite(q); assert(packet);
+  packet->frame = (FrameSlot){.diorama_active = true, .diorama_trunk_guard = source};
+  packet->frame.diorama_trunk_guard.pixel_count = 1;
+  assert(!HostFramePacket_OwnPixels(packet));
+  packet->frame.diorama_trunk_guard = source;
+  packet->frame.diorama_trunk_guard.pitch_pixels = kDioramaTrunkGuardWidth - 1;
+  assert(!HostFramePacket_OwnPixels(packet));
+  packet->frame.diorama_trunk_guard = source;
+  packet->frame.diorama_trunk_guard.layout.strips[1].atlas_y = 0;
+  assert(!HostFramePacket_OwnPixels(packet));
+  packet->frame.diorama_trunk_guard = source;
+  packet->frame.diorama_trunk_guard.pixels = NULL;
+  assert(HostFramePacket_OwnPixels(packet));
+  assert(!packet->frame.diorama_trunk_guard.capture_generation && !packet->trunk_guard_storage);
+  /* The same clearing contract applies after this slot has owned a guard.
+   * Retaining its lazy allocation must not publish stale metadata or pixels. */
+  packet->frame.diorama_trunk_guard = source;
+  assert(HostFramePacket_OwnPixels(packet));
+  uint32_t *storage = packet->trunk_guard_storage; assert(storage);
+  packet->frame.diorama_trunk_guard.pixels = NULL;
+  assert(HostFramePacket_OwnPixels(packet));
+  const DioramaTrunkGuardSource empty = {0};
+  assert(!memcmp(&packet->frame.diorama_trunk_guard, &empty, sizeof(empty)));
+  assert(packet->trunk_guard_storage == storage && packet->copied_bytes == 0);
+  HostFrameQueue_Destroy(q); free(pixels);
+}
+
+static uint32_t VoxelGuardPixel(unsigned frame, unsigned band, unsigned pixel) {
+  if (pixel % 29 == 0) return 0;
+  if (pixel % 31 == 0) return UINT32_C(0xff000000);
+  return UINT32_C(0xff000000) | ((frame + 1) << 20) | ((band + 1) << 16) | pixel;
+}
+
+static void TestVoxelGuardOwnership(void) {
+  HostFrameQueue *q = HostFrameQueue_Create(); assert(q);
+  const size_t lane_bytes = kDioramaVoxelGuardPixels * sizeof(uint32_t);
+  uint32_t *input = malloc(3 * lane_bytes); assert(input);
+  uint32_t primary[4];
+  DioramaVoxelGuardSource source = {.pitch_pixels = kDioramaVoxelGuardWidth,
+      .pixel_count = kDioramaVoxelGuardPixels};
+  assert(DioramaVoxelGuard_Resolve(-16, 384, 624, 352,
+      (DioramaTrunkGuardBounds){0, 0, 1024, 1024}, &source.layout));
+  for (unsigned band = 0; band < 3; ++band)
+    source.pixels[band] = input + band * kDioramaVoxelGuardPixels;
+  for (unsigned frame = 0; frame < 2; ++frame) {
+    HostFramePacket *packet = HostFrameQueue_BeginWrite(q); assert(packet);
+    for (unsigned band = 0; band < 3; ++band)
+      for (unsigned pixel = 0; pixel < kDioramaVoxelGuardPixels; ++pixel)
+        input[band * kDioramaVoxelGuardPixels + pixel] = VoxelGuardPixel(frame, band, pixel);
+    for (unsigned pixel = 0; pixel < 4; ++pixel) primary[pixel] = 100 * (frame + 1) + pixel;
+    source.capture_generation = frame + 700;
+    packet->frame = (FrameSlot){.diorama_active = true, .diorama_voxel_guard = source,
+        .diorama_plane_request_mask = 1u << SR_PPU_OVERLAY_BG1,
+        .diorama_plane_content_mask = 1u << SR_PPU_OVERLAY_BG1};
+    packet->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0] = View(primary);
+    assert(HostFramePacket_OwnPixels(packet));
+    assert(packet->copied_bytes == sizeof(primary) + 3 * lane_bytes);
+    for (unsigned band = 0; band < 3; ++band) {
+      assert(packet->frame.diorama_voxel_guard.pixels[band] ==
+          packet->voxel_guard_storage + band * kDioramaVoxelGuardPixels);
+      assert(packet->frame.diorama_voxel_guard.pixels[band] != source.pixels[band]);
+    }
+    HostFrameQueue_Publish(q);
+  }
+  /* Reusing every producer byte may not alter either queued generation, nor
+   * collapse native Far into the overlapping Low/High source lanes. */
+  memset(input, 0xa5, 3 * lane_bytes); memset(primary, 0, sizeof(primary));
+  const HostFramePacket *first = HostFrameQueue_Peek(q, 0);
+  const HostFramePacket *second = HostFrameQueue_Peek(q, 1);
+  assert(first && second && first->voxel_guard_storage != second->voxel_guard_storage);
+  for (unsigned frame = 0; frame < 2; ++frame) {
+    const HostFramePacket *packet = HostFrameQueue_Peek(q, frame); assert(packet);
+    const DioramaVoxelGuardSource *held = &packet->frame.diorama_voxel_guard;
+    assert(DioramaVoxelGuard_Valid(held));
+    assert(held->capture_generation == frame + 700 && held->pixel_count == kDioramaVoxelGuardPixels);
+    assert(!memcmp(&held->layout, &source.layout, sizeof(source.layout)));
+    for (unsigned band = 0; band < 3; ++band)
+      for (unsigned pixel = 0; pixel < kDioramaVoxelGuardPixels; ++pixel)
+        assert(held->pixels[band][pixel] == VoxelGuardPixel(frame, band, pixel));
+    const uint32_t *owned_primary = (const uint32_t *)packet->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0].data;
+    assert(owned_primary != primary);
+    for (unsigned pixel = 0; pixel < 4; ++pixel) assert(owned_primary[pixel] == 100 * (frame + 1) + pixel);
+  }
+
+  HostFramePacket *packet = HostFrameQueue_BeginWrite(q); assert(packet);
+  packet->frame = (FrameSlot){.diorama_active = true, .diorama_voxel_guard = source};
+  assert(HostFramePacket_OwnPixels(packet));
+  uint32_t *storage = packet->voxel_guard_storage; assert(storage);
+  const DioramaVoxelGuardSource empty = {0};
+  for (unsigned invalid = 0; invalid < 11; ++invalid) {
+    packet->frame = (FrameSlot){.diorama_active = true, .diorama_voxel_guard = source,
+        .diorama_plane_request_mask = 1u << SR_PPU_OVERLAY_BG1,
+        .diorama_plane_content_mask = 1u << SR_PPU_OVERLAY_BG1};
+    primary[0] = invalid + 900;
+    packet->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0] = View(primary);
+    DioramaVoxelGuardSource *bad = &packet->frame.diorama_voxel_guard;
+    switch (invalid) {
+      case 0: case 1: case 2: bad->pixels[invalid] = NULL; break;
+      case 3: bad->capture_generation = 0; break;
+      case 4: --bad->pitch_pixels; break;
+      case 5: --bad->pixel_count; break;
+      case 6: ++bad->layout.lower.world_y; break;
+      case 7: ++bad->layout.lower.atlas_y; break;
+      case 8: --bad->layout.lower.valid.width; break;
+      case 9: bad->layout.lower.width = kDioramaVoxelGuardWidth + 1; break;
+      case 10: bad->layout.primary_height = 0; break;
+    }
+    assert(!DioramaVoxelGuard_Valid(bad));
+    assert(HostFramePacket_OwnPixels(packet)); /* Optional failure preserves primary. */
+    assert(!memcmp(&packet->frame.diorama_voxel_guard, &empty, sizeof(empty)));
+    assert(packet->voxel_guard_storage == storage && packet->copied_bytes == sizeof(primary));
+    const uint32_t *owned = (const uint32_t *)packet->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0].data;
+    primary[0] = 0;
+    assert(owned != primary && owned[0] == invalid + 900);
+  }
+  /* Recovery reuses the allocation without leaking a prior invalid descriptor. */
+  packet->frame.diorama_voxel_guard = source;
+  assert(HostFramePacket_OwnPixels(packet));
+  assert(packet->voxel_guard_storage == storage && DioramaVoxelGuard_Valid(&packet->frame.diorama_voxel_guard));
+  assert(packet->copied_bytes == sizeof(primary) + 3 * lane_bytes);
+  HostFrameQueue_Destroy(q); free(input);
+}
+
 int main(void) {
+  TestTrunkGuardOwnership();
+  TestVoxelGuardOwnership();
   TestCastleOwnership();
   HostFrameQueue *q = HostFrameQueue_Create();
   assert(q && !HostFrameQueue_Read(q));

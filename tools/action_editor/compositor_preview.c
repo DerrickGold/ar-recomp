@@ -26,7 +26,7 @@ IMPORT(depth_finish) extern int WebDepthFinish(int success);
 IMPORT(depth_geometry) extern int WebDepthGeometry(int texture, const void *vertices,
     int vertex_count, const void *indices, int index_count, int blend,
     int address_u, int address_v, int filter, const float *depths,
-    const float *clip_w, int mode);
+    const float *clip_w, int mode, const ArRenderPointF *heat_world_xy);
 
 static uint8_t s_input[kDioramaSnapshotCapacity];
 static uint8_t *s_packet;
@@ -187,7 +187,7 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *d, const DioramaScene
     return WebEffect(5,a,19)!=0;
   }
   const ArRenderRectF source=p->attributes_uv.w>0?p->attributes_uv:(ArRenderRectF){0,0,1,1};
-  float a[177]={p->texel_width,p->texel_height,p->blur_radius,p->lower_content_v_max,
+  float a[181]={p->texel_width,p->texel_height,p->blur_radius,p->lower_content_v_max,
       p->priority.width,p->priority.height,p->priority.high_band,p->priority.additive,
       uv.w/w,uv.h/h,uv.x,1-uv.y-uv.h,p->shade.r,p->shade.g,p->shade.b,p->mode,
       p->grade.strength,p->grade.saturation,0,0,
@@ -197,8 +197,9 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *d, const DioramaScene
   _Static_assert(sizeof(DioramaHeat)==36*sizeof(float), "scenery heat std140 layout");
   memcpy(a+32,&p->heat,sizeof(p->heat));
   memcpy(a+68,&p->cloud_light,sizeof(p->cloud_light));
-  a[176]=(float)p->illumination.value;
-  return WebEffect(4,a,177) != 0;
+  memcpy(a+176,&p->heat_owned,sizeof(p->heat_owned));
+  a[180]=(float)p->illumination.value;
+  return WebEffect(4,a,181) != 0;
 }
 bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *d) { (void)d; return WebAvailable(4) != 0; }
 bool DioramaEffectBackend_Unbind(ArRenderDevice *d) { (void)d; return WebEffect(-1,NULL,0) != 0; }

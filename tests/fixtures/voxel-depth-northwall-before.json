@@ -1,0 +1,371 @@
+{
+  "schema": 1,
+  "room": "0605",
+  "terrain": 0,
+  "section": "room",
+  "status": "ok",
+  "depth": 0.2,
+  "cells": [
+    {
+      "x": 43,
+      "y": 9,
+      "native_id": 202,
+      "id": 202,
+      "native_collision": 15,
+      "collision": 15,
+      "priority": 0,
+      "art": "d1cc19dd6ee3c653",
+      "material_key": "4789dfe2410e5f3f",
+      "opaque": 256,
+      "borders": [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      "front": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "back": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "semantic": 4,
+      "flags": [],
+      "authored_fields": 0,
+      "stamp": false,
+      "pixel_edit": false
+    },
+    {
+      "x": 43,
+      "y": 10,
+      "native_id": 194,
+      "id": 194,
+      "native_collision": 15,
+      "collision": 15,
+      "priority": 0,
+      "art": "af4435aa8dce7878",
+      "material_key": "1515793fe212801a",
+      "opaque": 256,
+      "borders": [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      "front": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "back": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "semantic": 4,
+      "flags": [],
+      "authored_fields": 0,
+      "stamp": false,
+      "pixel_edit": false
+    },
+    {
+      "x": 43,
+      "y": 11,
+      "native_id": 145,
+      "id": 145,
+      "native_collision": 0,
+      "collision": 0,
+      "priority": 0,
+      "art": "d1cc19dd6ee3c653",
+      "material_key": "85920776068fedbf",
+      "opaque": 256,
+      "borders": [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      "front": [
+        0.15,
+        0.15,
+        0.15,
+        0.15
+      ],
+      "back": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "semantic": 3,
+      "flags": [],
+      "authored_fields": 0,
+      "stamp": false,
+      "pixel_edit": false
+    },
+    {
+      "x": 43,
+      "y": 12,
+      "native_id": 194,
+      "id": 194,
+      "native_collision": 15,
+      "collision": 15,
+      "priority": 0,
+      "art": "af4435aa8dce7878",
+      "material_key": "1515793fe212801a",
+      "opaque": 256,
+      "borders": [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      "front": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "back": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "semantic": 4,
+      "flags": [],
+      "authored_fields": 0,
+      "stamp": false,
+      "pixel_edit": false
+    },
+    {
+      "x": 43,
+      "y": 13,
+      "native_id": 145,
+      "id": 145,
+      "native_collision": 0,
+      "collision": 0,
+      "priority": 0,
+      "art": "d1cc19dd6ee3c653",
+      "material_key": "85920776068fedbf",
+      "opaque": 256,
+      "borders": [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      "front": [
+        0.15,
+        0.15,
+        0.15,
+        0.15
+      ],
+      "back": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "semantic": 3,
+      "flags": [],
+      "authored_fields": 0,
+      "stamp": false,
+      "pixel_edit": false
+    },
+    {
+      "x": 43,
+      "y": 14,
+      "native_id": 194,
+      "id": 194,
+      "native_collision": 15,
+      "collision": 15,
+      "priority": 0,
+      "art": "af4435aa8dce7878",
+      "material_key": "1515793fe212801a",
+      "opaque": 256,
+      "borders": [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      "front": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "back": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "semantic": 4,
+      "flags": [],
+      "authored_fields": 0,
+      "stamp": false,
+      "pixel_edit": false
+    },
+    {
+      "x": 43,
+      "y": 15,
+      "native_id": 145,
+      "id": 145,
+      "native_collision": 0,
+      "collision": 0,
+      "priority": 0,
+      "art": "d1cc19dd6ee3c653",
+      "material_key": "85920776068fedbf",
+      "opaque": 256,
+      "borders": [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      "front": [
+        0.15,
+        0.15,
+        0.15,
+        0.15
+      ],
+      "back": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "semantic": 3,
+      "flags": [],
+      "authored_fields": 0,
+      "stamp": false,
+      "pixel_edit": false
+    },
+    {
+      "x": 43,
+      "y": 16,
+      "native_id": 194,
+      "id": 194,
+      "native_collision": 15,
+      "collision": 15,
+      "priority": 0,
+      "art": "af4435aa8dce7878",
+      "material_key": "1515793fe212801a",
+      "opaque": 256,
+      "borders": [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      "front": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "back": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "semantic": 4,
+      "flags": [],
+      "authored_fields": 0,
+      "stamp": false,
+      "pixel_edit": false
+    },
+    {
+      "x": 43,
+      "y": 17,
+      "native_id": 145,
+      "id": 145,
+      "native_collision": 0,
+      "collision": 0,
+      "priority": 0,
+      "art": "d1cc19dd6ee3c653",
+      "material_key": "85920776068fedbf",
+      "opaque": 256,
+      "borders": [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      "front": [
+        0.15,
+        0.15,
+        0.15,
+        0.15
+      ],
+      "back": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "semantic": 3,
+      "flags": [],
+      "authored_fields": 0,
+      "stamp": false,
+      "pixel_edit": false
+    },
+    {
+      "x": 43,
+      "y": 18,
+      "native_id": 194,
+      "id": 194,
+      "native_collision": 15,
+      "collision": 15,
+      "priority": 0,
+      "art": "af4435aa8dce7878",
+      "material_key": "1515793fe212801a",
+      "opaque": 256,
+      "borders": [
+        65535,
+        65535,
+        65535,
+        65535
+      ],
+      "front": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "back": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "semantic": 4,
+      "flags": [],
+      "authored_fields": 0,
+      "stamp": false,
+      "pixel_edit": false
+    }
+  ],
+  "provenance": {
+    "description": "Scalar diagnostic witness from the actual pre-fix Northwall entrance trunk export. Contains no tile pixels, palette or ROM data. The ten cells have fully opaque native front borders, with no cutout masks.",
+    "native_export": "runs/voxel-all-room-audit-20261108/native/0605.arscene.json",
+    "native_export_sha256": "d1de4731d8bdcc62453c30e198dfa4190489def80f15773bc9b68305a33ede9c",
+    "scene": "runs/voxel-face-materials-20261108/scenes/0/0605.arscene",
+    "scene_sha256": "ceb3cb706917c169a863de804109fb60592bcf15e16bb0272325b35115fe1c92",
+    "exporter_source_sha256": "4e484d3ec1ad8edc78a7da6ae7a2d3391792c6251766f5d368ee3ac3548b9c36",
+    "compiler_binary_sha256": null,
+    "compiler_binary_note": "The original audit did not retain a binary hash; do not infer it from a later build. The immutable native export and snapshot hashes identify this historical witness.",
+    "positions": "43,9..18; wrong rows11/13/15/17 are native91; same visual artwork nativeCA has front0."
+  }
+}

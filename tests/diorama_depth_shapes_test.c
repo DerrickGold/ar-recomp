@@ -192,6 +192,24 @@ static void TestOverflowFold(void) {
   }
 }
 
+static void TestCoplanarOverflow(void) {
+  /* A background waterfall must remain behind solid terrain for the entire
+   * native repeat, including zero/full overlap and nonuniform mesh rows. */
+  const float overlaps[] = {0, 16.0f / 224, 48.0f / 224, 80.0f / 224, 1};
+  const float depths[] = {.05f - .5f, .20f - .5f, .21f - .5f};
+  for (unsigned o = 0; o < sizeof(overlaps) / sizeof(*overlaps); ++o)
+    for (unsigned d = 0; d < sizeof(depths) / sizeof(*depths); ++d)
+      for (int row = 0; row <= 7; ++row) {
+        const float t = DioramaOverflowFoldRowT(row, 7, overlaps[o]);
+        float y, z;
+        DioramaOverflowFoldPoint(t, -.5f, depths[d], depths[d], 1,
+            overlaps[o], depths[d], 1 - overlaps[o], &y, &z);
+        CHECK(Near(y, -.5f - t));
+        CHECK(z == depths[d]);
+        CHECK(z < 0); /* It cannot become a foreground deck. */
+      }
+}
+
 static void TestTilt(void) {
   const float base = 0.21f;
   const float amount = 0.29f;
@@ -230,6 +248,7 @@ int main(void) {
   TestStackAndVoxel();
   TestVerticalRepeat();
   TestOverflowFold();
+  TestCoplanarOverflow();
   TestTilt();
   if (failures != 0) {
     fprintf(stderr, "%d failure(s)\n", failures);

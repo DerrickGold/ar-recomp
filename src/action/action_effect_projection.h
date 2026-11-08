@@ -28,6 +28,11 @@ typedef struct ActionEffectProjectionContext {
   int capture_height; /* 0 retains legacy full-canvas clipping. */
   ArRenderRectI viewport;
   const DioramaProjection *diorama_projection;
+  /* Upload staging has no camera projection. Retain the last draw's surface
+   * ownership so stable snow tops are not built twice for each capture. A
+   * supplied live projection always overrides these staging-only claims. */
+  uint64_t staged_ground_cover_claims[2];
+  bool staged_voxel_scenery;
   bool scenery_exposure_in_mesh; /* no duplicate alpha/light overlay */
   bool scenery_lighting_in_material;
   bool atmosphere_unlit; /* Global lighting switch; cloud matter remains visible. */
@@ -83,6 +88,12 @@ bool ActionEffectProjection_BillboardBounds(const ActionEffectProjectionContext 
 /* Source origin before presentation transforms. Midpoint parallax retains
  * half pixels; truncating it produces a second staircase during scrolling. */
 ArRenderPointF ActionEffectProjection_CaptureOrigin(const ActionEffectProjectionContext *,
+    const ActionEffectInstance *);
+
+/* Free textured Voxel cloud banks own a finite authored lower envelope.
+ * They keep their BG1 transform/painter slot, but are not cut at the terrain
+ * capture bottom. Ground paths, light receivers and ordinary modes are excluded. */
+bool ActionEffectProjection_AuthoredCloudExtent(const ActionEffectProjectionContext *,
     const ActionEffectInstance *);
 
 /* Finite source view in effect-local space, before intersecting the effect's

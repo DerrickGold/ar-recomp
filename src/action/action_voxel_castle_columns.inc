@@ -46,7 +46,7 @@ static bool BuildCastleColumns(ActionVoxelGeometry *c,const ActionRoomScene *s,
     /* One native metatile forms the underside transition. The clamped curve
      * keeps all later shaft cells exactly at rear depth, without a second
      * bulge above the next platform or a disconnected vertical face. */
-    const VoxelTrunkCurve curve={(short)(top*16),(short)((top+1)*16)};
+    const VoxelTrunkCurve curve={.top_y=(short)(top*16),.base_y=(short)((top+1)*16)};
     unsigned owner=0;
     while(owner<c->column_curve_count &&
         (c->column_curves[owner].top_y!=curve.top_y ||

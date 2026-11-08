@@ -1072,6 +1072,52 @@ typedef void (*SrPpuScanoutLineCallback)(
     void *user_data, const SrPpuScanoutLineContext *context);
 typedef void (*SrPpuScanoutIrqCallback)(void *user_data, uint32_t line);
 
+/** Optional finite native BG source beyond the primary vertical capture.
+ * At most two nonoverlapping strips, each no larger than 640x64. A strip is
+ * wholly above or below the primary margin rectangle and extends it by at
+ * most 64 rows. It observes the held first/last scanout state, without extra
+ * line callbacks, HDMA, IRQs or native output rows. Pixels include all native
+ * BG priority bands and presentation-only capture edits, merged high/low/far.
+ * Main/authentic surfaces and the primary BG packet remain unchanged.
+ * Caller-owned outputs must not alias any bound output or each other. */
+typedef struct SrPpuBackgroundGuardRequest {
+    uint32_t struct_size;
+    uint32_t layer;
+    int32_t screen_x0, screen_y0;
+    uint32_t width, height;
+    int32_t source_x0, source_y0;
+    uint32_t source_width, source_height;
+    void *pixels;
+    uint64_t pitch_bytes, pixel_byte_size;
+} SrPpuBackgroundGuardRequest;
+
+/** Optional independent native lanes for one existing guard request.
+ * These are capture sources, not resolved 3D planes: Low, High, Far. They
+ * preserve real overlapping capture edits before the legacy union reduction.
+ * All three outputs are required and must be disjoint from the union output,
+ * every other guard output and every bound scanout surface. When supplied,
+ * the request's union pixels may be NULL (with zero pitch/capacity). */
+typedef struct SrPpuBackgroundGuardBandOutput {
+    void *pixels;
+    uint64_t pitch_bytes, pixel_byte_size;
+} SrPpuBackgroundGuardBandOutput;
+
+typedef struct SrPpuBackgroundGuardBands {
+    uint32_t struct_size;
+    uint32_t flags;
+    SrPpuBackgroundGuardBandOutput bands[3];
+} SrPpuBackgroundGuardBands;
+
+/* Geometry consumers may require the held boundary scroll to match the
+ * virtual provider's camera anchor. Otherwise capture remains valid native
+ * source but is offset from the declared world rectangle. A mismatch makes
+ * this guard unavailable, without changing ordinary scanout. */
+#define SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL UINT32_C(0x00000001)
+
+#define SR_PPU_BACKGROUND_GUARD_BANDS_V1_SIZE                             \
+    ((uint32_t)(offsetof(SrPpuBackgroundGuardBands, bands) +             \
+                sizeof(((SrPpuBackgroundGuardBands *)0)->bands)))
+
 typedef struct SrPpuScanoutRequest {
     uint32_t struct_size;
     /* Set SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST only on frames that need
@@ -1089,8 +1135,25 @@ typedef struct SrPpuScanoutRequest {
      * CPU outputs. Explicit tile ownership may omit supported CPU captures;
      * validation preserves them. See SrPpuBgPacket.request_flags. */
     SrPpuBgPacket *background_packet;
+    /* Optional tail, gated by struct_size and BACKGROUND_GUARDS capability.
+     * READY is all-or-nothing; unavailable guards never publish partial art.
+     * The ordinary scanout and independent BG2 view still complete. */
+    const SrPpuBackgroundGuardRequest *background_guards;
+    uint32_t background_guard_count;
+    uint32_t background_guard_reserved;
+    /* Optional tail, gated by BACKGROUND_GUARD_BANDS capability. A pointer
+     * corresponds to guard[i]; unused pointers must be NULL. Keeping this
+     * outside the guard array preserves its original element stride. READY
+     * covers every requested union and band output together. */
+    const SrPpuBackgroundGuardBands *background_guard_bands[2];
 } SrPpuScanoutRequest;
 
+#define SR_PPU_SCANOUT_REQUEST_BACKGROUND_GUARDS_SIZE                     \
+    ((uint32_t)(offsetof(SrPpuScanoutRequest, background_guard_reserved) + \
+                sizeof(((SrPpuScanoutRequest *)0)->background_guard_reserved)))
+#define SR_PPU_SCANOUT_REQUEST_BACKGROUND_GUARD_BANDS_SIZE                \
+    ((uint32_t)(offsetof(SrPpuScanoutRequest, background_guard_bands) +    \
+                sizeof(((SrPpuScanoutRequest *)0)->background_guard_bands)))
 #define SR_PPU_SCANOUT_REQUEST_BG_PACKET_SIZE                             \
     ((uint32_t)(offsetof(SrPpuScanoutRequest, background_packet) +       \
                 sizeof(((SrPpuScanoutRequest *)0)->background_packet)))
@@ -1104,6 +1167,7 @@ typedef struct SrPpuScanoutRequest {
 #define SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG2 UINT32_C(0x00000004)
 #define SR_PPU_SCANOUT_PRESENTATION_DIGEST_VALID UINT32_C(0x00000008)
 #define SR_PPU_SCANOUT_BACKGROUND_VIEW_READY UINT32_C(0x00000010)
+#define SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY UINT32_C(0x00000020)
 
 /** Optional independent Mode-1 background view. By default this is a
  * horizontally bounded virtual BG view; the NATIVE_PAGE flag instead requests

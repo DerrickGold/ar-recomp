@@ -1,5 +1,5 @@
 {
-  "description": "Reviewed Aitos Act 1 cliff bodies, waterfall rock platforms, face-only foam and foreground clouds, native gate states, distant bamboo and molten surfaces. Foreground cloud artwork shares one face across native priority bands, including cloud ink at cliff joins. Runtime identity is displayed art, palette slot, collision and priority; source IDs remain provenance only.",
+  "description": "Reviewed Aitos Act 1 cliff bodies, waterfall rock platforms, face-only foam and foreground clouds, native gate states, distant bamboo and molten surfaces. Foreground cloud artwork shares one face across native priority bands, including cloud ink at cliff joins. Runtime identity is displayed art, palette slot, collision and priority; source IDs remain provenance only. Reviewed high-priority bamboo stalk/root footprints retain an opaque black grove backing beneath their native art; transparent grove boundaries remain open.",
   "materials": [
     {
       "key": "00849a2223e5f8bd",
@@ -240,7 +240,7 @@
         1
       ],
       "flags": 16388,
-      "role": "solid_cliff",
+      "role": "native_collision_rock_ramp",
       "origins": [
         [
           1,
@@ -257,7 +257,10 @@
           2,
           137
         ]
-      ]
+      ],
+      "native_slope": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "05dcdc068b43b37b",
@@ -267,7 +270,7 @@
         7,
         7
       ],
-      "flags": 0,
+      "flags": 8388608,
       "role": "rear_bamboo",
       "origins": [
         [
@@ -285,7 +288,11 @@
           2,
           203
         ]
-      ]
+      ],
+      "opaque_rear_ink": {
+        "palette": 4,
+        "index": 9
+      }
     },
     {
       "key": "0607cc220d8d7571",
@@ -498,7 +505,7 @@
         7
       ],
       "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "role": "rear_rock_with_bounded_native_ramp_support",
       "origins": [
         [
           1,
@@ -515,7 +522,10 @@
           2,
           96
         ]
-      ]
+      ],
+      "native_slope_support": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "0b57cda01acbd665",
@@ -854,8 +864,9 @@
         7,
         7
       ],
-      "flags": 65536,
+      "flags": 196608,
       "role": "lava_surface",
+      "surface_review": "The entire owning16x16 source is opaque molten-body texture. Its fringe/lip is in separate native cells above. Reuse the existing full-surface live-capture sampling path; do not stretch only bottom4rows across the generated depth.",
       "origins": [
         [
           1,
@@ -1182,7 +1193,7 @@
         7
       ],
       "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "role": "rear_rock_with_native_ramp_endpoint",
       "origins": [
         [
           1,
@@ -1199,7 +1210,10 @@
           2,
           49
         ]
-      ]
+      ],
+      "native_slope_foot": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "20276386088b9d25",
@@ -1395,7 +1409,7 @@
         7
       ],
       "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "role": "rear_rock_with_native_ramp_endpoint",
       "origins": [
         [
           1,
@@ -1427,7 +1441,10 @@
           2,
           106
         ]
-      ]
+      ],
+      "native_slope_foot": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "26406579a6feb35d",
@@ -1461,7 +1478,9 @@
         512,
         512,
         512
-      ]
+      ],
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "2758c0a9c88d753e",
@@ -1510,7 +1529,9 @@
         128,
         128,
         128
-      ]
+      ],
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "2a7a2cd1a59ca4af",
@@ -1783,7 +1804,7 @@
         7
       ],
       "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "role": "rear_rock_with_bounded_native_ramp_support",
       "origins": [
         [
           1,
@@ -1800,7 +1821,10 @@
           2,
           107
         ]
-      ]
+      ],
+      "native_slope_support": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "3696a52f0ee6375d",
@@ -1828,7 +1852,9 @@
           2,
           34
         ]
-      ]
+      ],
+      "top_surface": "family_donor16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "36d2192b57d57b53",
@@ -1905,7 +1931,9 @@
         128,
         128,
         128
-      ]
+      ],
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "3c44920ad970ed1a",
@@ -2993,7 +3021,9 @@
           2,
           33
         ]
-      ]
+      ],
+      "top_surface": "family_donor16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "6370882a4dc539c6",
@@ -3004,7 +3034,7 @@
         7
       ],
       "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "role": "rear_rock_with_bounded_native_ramp_support",
       "origins": [
         [
           1,
@@ -3021,7 +3051,10 @@
           2,
           99
         ]
-      ]
+      ],
+      "native_slope_support": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "63857d38d325f6b9",
@@ -3418,7 +3451,9 @@
         512,
         512,
         512
-      ]
+      ],
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "6b4b4d4dacb5ccf5",
@@ -3538,7 +3573,9 @@
         128,
         128,
         128
-      ]
+      ],
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "6fac45c9e76a7f66",
@@ -3787,7 +3824,9 @@
         512,
         512,
         512
-      ]
+      ],
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "7201ad2f0ba7bcc5",
@@ -3892,7 +3931,9 @@
         128,
         128,
         128
-      ]
+      ],
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "7616376a189c2dcd",
@@ -4263,7 +4304,7 @@
         7,
         7
       ],
-      "flags": 0,
+      "flags": 8388608,
       "role": "rear_bamboo",
       "origins": [
         [
@@ -4281,7 +4322,11 @@
           2,
           211
         ]
-      ]
+      ],
+      "opaque_rear_ink": {
+        "palette": 4,
+        "index": 9
+      }
     },
     {
       "key": "85b46143938db23a",
@@ -4426,7 +4471,7 @@
         7,
         7
       ],
-      "flags": 0,
+      "flags": 8388608,
       "role": "rear_bamboo",
       "origins": [
         [
@@ -4444,7 +4489,11 @@
           2,
           209
         ]
-      ]
+      ],
+      "opaque_rear_ink": {
+        "palette": 4,
+        "index": 9
+      }
     },
     {
       "key": "8af429da16ff6e27",
@@ -4455,7 +4504,7 @@
         7
       ],
       "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "role": "rear_rock_with_native_ramp_endpoint",
       "origins": [
         [
           1,
@@ -4472,7 +4521,10 @@
           2,
           121
         ]
-      ]
+      ],
+      "native_slope_foot": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "8c4c0092eb069e63",
@@ -4612,7 +4664,7 @@
         1
       ],
       "flags": 16388,
-      "role": "solid_cliff",
+      "role": "native_collision_rock_ramp",
       "origins": [
         [
           1,
@@ -4644,7 +4696,10 @@
           2,
           75
         ]
-      ]
+      ],
+      "native_slope": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "92f9d7caa58f62c7",
@@ -4967,7 +5022,7 @@
         7
       ],
       "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "role": "rear_rock_with_native_ramp_endpoint",
       "origins": [
         [
           1,
@@ -4984,7 +5039,10 @@
           2,
           136
         ]
-      ]
+      ],
+      "native_slope_foot": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "9f5e918873efd1d1",
@@ -5109,7 +5167,7 @@
         1
       ],
       "flags": 16388,
-      "role": "solid_cliff",
+      "role": "native_collision_rock_ramp",
       "origins": [
         [
           1,
@@ -5126,7 +5184,10 @@
           2,
           128
         ]
-      ]
+      ],
+      "native_slope": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "a467854d9cea40b1",
@@ -5367,7 +5428,7 @@
         1
       ],
       "flags": 16388,
-      "role": "solid_cliff",
+      "role": "native_collision_rock_ramp",
       "origins": [
         [
           1,
@@ -5384,7 +5445,10 @@
           2,
           88
         ]
-      ]
+      ],
+      "native_slope": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "ae9d30b10bc92d09",
@@ -5543,7 +5607,9 @@
           2,
           37
         ]
-      ]
+      ],
+      "top_surface": "family_donor16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "b0ecd276873f5f15",
@@ -5780,7 +5846,7 @@
         1
       ],
       "flags": 16388,
-      "role": "solid_cliff",
+      "role": "native_collision_rock_ramp",
       "origins": [
         [
           1,
@@ -5797,7 +5863,10 @@
           2,
           50
         ]
-      ]
+      ],
+      "native_slope": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "bf7baff0fa68bec8",
@@ -5884,7 +5953,7 @@
         7,
         7
       ],
-      "flags": 0,
+      "flags": 8388608,
       "role": "rear_bamboo",
       "origins": [
         [
@@ -5902,7 +5971,11 @@
           2,
           204
         ]
-      ]
+      ],
+      "opaque_rear_ink": {
+        "palette": 4,
+        "index": 9
+      }
     },
     {
       "key": "c12938c78acd55c6",
@@ -5979,7 +6052,9 @@
         512,
         512,
         512
-      ]
+      ],
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "c41db42593d1f590",
@@ -6105,7 +6180,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 8404996,
       "role": "bamboo_root_and_cliff",
       "origins": [
         [
@@ -6129,7 +6204,11 @@
         0,
         65152,
         65152
-      ]
+      ],
+      "opaque_rear_ink": {
+        "palette": 4,
+        "index": 9
+      }
     },
     {
       "key": "c8ef89789b97f90a",
@@ -6273,7 +6352,7 @@
         1
       ],
       "flags": 16388,
-      "role": "solid_cliff",
+      "role": "native_collision_rock_ramp",
       "origins": [
         [
           1,
@@ -6290,7 +6369,10 @@
           2,
           138
         ]
-      ]
+      ],
+      "native_slope": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "ce280f834f4658a8",
@@ -6414,7 +6496,7 @@
         7,
         7
       ],
-      "flags": 0,
+      "flags": 8388608,
       "role": "rear_bamboo",
       "origins": [
         [
@@ -6432,7 +6514,11 @@
           2,
           202
         ]
-      ]
+      ],
+      "opaque_rear_ink": {
+        "palette": 4,
+        "index": 9
+      }
     },
     {
       "key": "d1b5b505c583b076",
@@ -6481,7 +6567,9 @@
         128,
         128,
         128
-      ]
+      ],
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "d1c194d390947039",
@@ -6880,7 +6968,7 @@
         7
       ],
       "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "role": "rear_rock_with_bounded_native_ramp_support",
       "origins": [
         [
           1,
@@ -6897,7 +6985,10 @@
           2,
           120
         ]
-      ]
+      ],
+      "native_slope_support": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "e18a4f0957910d59",
@@ -7127,7 +7218,9 @@
         128,
         128,
         128
-      ]
+      ],
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "ea4310027840cde1",
@@ -7196,7 +7289,7 @@
         1
       ],
       "flags": 16388,
-      "role": "solid_cliff",
+      "role": "native_collision_rock_ramp",
       "origins": [
         [
           1,
@@ -7228,7 +7321,10 @@
           2,
           113
         ]
-      ]
+      ],
+      "native_slope": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "ed05b6e5f6012ecd",
@@ -7270,7 +7366,20 @@
           2,
           2,
           131
-        ],
+        ]
+      ]
+    },
+    {
+      "key": "ed05b6e5f6012ecd",
+      "kinds": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "flags": 0,
+      "role": "rear_cliff_foot",
+      "origins": [
         [
           3,
           0,
@@ -7415,7 +7524,9 @@
           2,
           36
         ]
-      ]
+      ],
+      "top_surface": "family_donor16",
+      "surface_family": "mountain_rock"
     },
     {
       "key": "f46f40c057ba5329",
@@ -7903,7 +8014,7 @@
         7
       ],
       "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "role": "rear_rock_with_native_ramp_endpoint",
       "origins": [
         [
           1,
@@ -7920,7 +8031,33 @@
           2,
           97
         ]
-      ]
+      ],
+      "native_slope_foot": true,
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock"
     }
-  ]
+  ],
+  "top_surfaces": [
+    {
+      "key": "aff945b74fb849d8",
+      "top_surface": "family_donor16",
+      "surface_family": "mountain_rock",
+      "role": "shipped_waterfall_entry_stamp_clean_rock",
+      "origins": [
+        [
+          3,
+          0,
+          37
+        ],
+        [
+          3,
+          1,
+          37
+        ]
+      ],
+      "note": "The shipped US/JP entry stamp replaces the sole native donor with this already-reviewed reflected horizontal rock. Art-only eligibility preserves its native collision and structural fallback."
+    }
+  ],
+  "ramp_surface_contract": "Native collision ramps and their bounded rock supports use the existing reviewed horizontal mountain-rock donor family for exposed top/underside and short risers. Sampling stays anchored to the native world grid; native artwork, collision and priority remain unchanged. Only compiled solid contacts and supports receive art. Missing, edited, animated or palette/priority-incompatible donors fail closed.",
+  "ramp_geometry_contract": "Native collision ramps retain their exact2px walking contour. Reviewed opaque rear-rock support cells immediately below an unedited ramp continue its body to16px below that contour, removing metatile-boundary wedges. Complete bands retain a4px native front lip, then return linearly to the original back plane by contact+16. Each2px column follows its own native contact; unrelated rock, source collision, priority, native artwork and authored edits remain unchanged."
 }

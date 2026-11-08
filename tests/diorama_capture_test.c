@@ -125,6 +125,28 @@ int main(void) {
   prop_attributes=false;Capture(&ppu);assert(!slot.diorama_obj_owner_tags);
   g_settings.diorama_layer_obj=false;Capture(&ppu);
   assert(!slot.diorama_obj_attributes[2].data);
+  /* Independent capture has no winner flags, but retains the complete native
+   * TS membership, including every BG1 virtual and OBJ priority band. */
+  memset(&ppu,0,sizeof(ppu));
+  slot.diorama_voxel=(const struct ActionVoxelGeometry *)(uintptr_t)1;
+  DioramaCapture_SetIndependentSubscreenSources((1u<<SR_PPU_OVERLAY_BG1)|(1u<<SR_PPU_OVERLAY_OBJ));
+  Capture(&ppu);
+  const uint32_t independent=Bit(SR_PPU_OVERLAY_BG1)|Bit(kDioramaPlane_Bg1Hi)|Bit(kDioramaPlane_Bg1Far)|
+      Bit(SR_PPU_OVERLAY_OBJ)|Bit(kDioramaPlane_Obj1)|Bit(kDioramaPlane_Obj2)|Bit(kDioramaPlane_Obj3);
+  assert(slot.diorama_independent_subscreen && slot.diorama_plane_additive_mask==independent);
+  const bool captured_mode=slot.diorama_independent_subscreen;
+  const uint32_t captured_membership=slot.diorama_plane_additive_mask;
+  DioramaCapture_SetIndependentSubscreenSources(0);Capture(&ppu);
+  assert(!slot.diorama_independent_subscreen && !slot.diorama_plane_additive_mask);
+  assert(captured_mode && captured_membership==independent);
+  DioramaCapture_SetIndependentSubscreenSources(0x11);
+  slot.diorama_voxel=NULL;Capture(&ppu);
+  assert(!slot.diorama_independent_subscreen && !slot.diorama_plane_additive_mask);
+  slot.diorama_voxel=(const struct ActionVoxelGeometry *)(uintptr_t)1;
+  Capture(NULL);assert(!slot.diorama_independent_subscreen && !slot.diorama_plane_additive_mask);
+  g_diorama_frame_active=false;Capture(&ppu);
+  assert(!slot.diorama_independent_subscreen && !slot.diorama_plane_additive_mask);
+  DioramaCapture_SetIndependentSubscreenSources(0);slot.diorama_voxel=NULL;
   puts("Diorama capture: shared band mapping, source masks and missing-view gates passed");
   return 0;
 }

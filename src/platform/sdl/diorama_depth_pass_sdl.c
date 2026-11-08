@@ -2,6 +2,7 @@
 #include "diorama_depth_alpha_sdl.h"
 #include "gpu_shader_blob.h"
 #include "shaders/sim3d_depth_vert.h"
+#include "shaders/diorama_depth_vert.h"
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/scenery_depth_frag.h"
 #include "shaders/actor_depth_frag.h"
@@ -11,9 +12,10 @@
 #include <stddef.h>
 #include <string.h>
 
-_Static_assert(sizeof(DioramaDepthVertex) == 40 &&
+_Static_assert(sizeof(DioramaDepthVertex) == 48 &&
     offsetof(DioramaDepthVertex, color) == 16 &&
-    offsetof(DioramaDepthVertex, uv) == 32, "depth shader vertex layout");
+    offsetof(DioramaDepthVertex, uv) == 32 &&
+    offsetof(DioramaDepthVertex, heat_world_xy) == 40, "depth shader vertex layout");
 
 static int BlendIndex(ArRenderBlendMode blend) {
   switch (blend) {
@@ -76,8 +78,11 @@ static bool CreateSolid(ArGpuDioramaDepthPass *p, SDL_GPUTexture **texture, uint
 
 static bool CreatePipelines(ArGpuDioramaDepthPass *p, unsigned material) {
   SDL_GPUDevice *device = p->device;
-  const GpuShaderBlobs vb = {kSim3dDepthVertMSL, kSim3dDepthVertMSLSize,
-      kSim3dDepthVertSPV, kSim3dDepthVertSPVSize, kSim3dDepthVertDXIL, kSim3dDepthVertDXILSize};
+  const GpuShaderBlobs vb = material==1
+      ? (GpuShaderBlobs){kDioramaDepthVertMSL,kDioramaDepthVertMSLSize,
+          kDioramaDepthVertSPV,kDioramaDepthVertSPVSize,kDioramaDepthVertDXIL,kDioramaDepthVertDXILSize}
+      : (GpuShaderBlobs){kSim3dDepthVertMSL, kSim3dDepthVertMSLSize,
+          kSim3dDepthVertSPV, kSim3dDepthVertSPVSize, kSim3dDepthVertDXIL, kSim3dDepthVertDXILSize};
   const GpuShaderBlobs fb = material == 2 ? (GpuShaderBlobs){
       kActorDepthFragMSL, kActorDepthFragMSLSize, kActorDepthFragSPV,
       kActorDepthFragSPVSize, kActorDepthFragDXIL, kActorDepthFragDXILSize}
@@ -93,7 +98,8 @@ static bool CreatePipelines(ArGpuDioramaDepthPass *p, unsigned material) {
   const SDL_GPUVertexAttribute attributes[] = {
       {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
       {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 16},
-      {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, 32}};
+      {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, 32},
+      {3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, 40}};
   bool ok = vs && fs;
   for (unsigned d = 0; ok && d < kDioramaDepth_Count; ++d) for (unsigned b = 0; ok && b < 3; ++b) {
     if (d == kDioramaDepth_Write && b == 2) continue;
@@ -107,7 +113,7 @@ static bool CreatePipelines(ArGpuDioramaDepthPass *p, unsigned material) {
         .alpha_blend_op = SDL_GPU_BLENDOP_ADD}};
     const SDL_GPUGraphicsPipelineCreateInfo info = {
       .vertex_shader = vs, .fragment_shader = fs,
-      .vertex_input_state = {&buffer, 1, attributes, 3},
+      .vertex_input_state = {&buffer, 1, attributes, material==1?4:3},
       .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
       .rasterizer_state = {.fill_mode = SDL_GPU_FILLMODE_FILL, .cull_mode = SDL_GPU_CULLMODE_NONE,
           .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE, .enable_depth_clip = true},

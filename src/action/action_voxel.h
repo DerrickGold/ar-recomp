@@ -13,6 +13,7 @@ const DioramaVoxelObject *ActionVoxel_ObjectEdit(const ActionVoxelGeometry *geom
 typedef struct VoxelAuthoredCell {
   int16_t x, y; /* Native pixel origin, not cell coordinates. */
   uint8_t priority[4];
+  uint8_t native_actor_priority[4]; /* Reviewed beams retain native actor order on every contour. */
   bool surface;
   bool native_front_hidden; /* Visibility-only edit keeps semantic caps/art. */
   bool native_transform; /* Affine-only record keeps compiled semantic faces. */
@@ -31,6 +32,12 @@ typedef struct VoxelAuthoredCell {
    * Pointers are frozen after compilation; IDs identify bounded atlas slots. */
   uint32_t art_id[7];
   const uint16_t *pixels[7];
+  /* Verified automatic full-patch donors. Zero keeps explicit artwork or the
+   * native contour fallback; coordinates always name the original map art. */
+  int16_t surface_sample_x[7], surface_sample_y[7];
+  uint8_t surface_sample_size[7];
+  uint8_t surface_derived[7]; /* Native band resampling has no square crop provenance. */
+  uint8_t surface_native_x[7]; /* Keep native source columns when a reviewed band contains cutout gaps. */
   uint32_t contour_start;
   uint16_t contour_count;
 } VoxelAuthoredCell;
@@ -53,6 +60,14 @@ const VoxelAuthoredCell *ActionVoxel_AuthoredCells(const ActionVoxelGeometry *, 
 const VoxelAuthoredCell *ActionVoxel_AuthoredCellAt(const ActionVoxelGeometry *, int x16, int y16);
 const uint16_t *ActionVoxel_AuthoredArt(const ActionVoxelGeometry *, unsigned id);
 unsigned ActionVoxel_AuthoredArtCount(const ActionVoxelGeometry *);
+/* Publication-time diagnostics for conservative native surface matching. */
+typedef struct VoxelSurfaceStats {
+  unsigned native_bands, native_textured_bands, authored_faces, authored_textured_faces;
+  unsigned semantic_fallbacks, unsafe_source_fallbacks, opaque_fallbacks;
+  unsigned art_budget_fallbacks, edge_budget_fallbacks;
+  unsigned edges_before, edges_after, unique_patches;
+} VoxelSurfaceStats;
+const VoxelSurfaceStats *ActionVoxel_SurfaceStats(const ActionVoxelGeometry *);
 const uint16_t *ActionVoxel_AuthoredCapArt(const ActionVoxelGeometry *,unsigned *count);
 const VoxelAuthoredContour *ActionVoxel_AuthoredContours(const ActionVoxelGeometry *,
     const VoxelAuthoredCell *,unsigned *count);
@@ -75,6 +90,10 @@ void ActionVoxel_TransformPoint(const DioramaVoxelTransform *, float x, float y,
     float z, float *out_x, float *out_y, float *out_z);
 const char *ActionVoxel_BuildError(const ActionVoxelGeometry *);
 bool ActionVoxel_CellGeometry(const ActionVoxelGeometry *, int x16, int y16, VoxelCellGeometry *);
+/* Reviewed native Snow receiver ownership for decorative ground-cover paths.
+ * Starts on actual structural ink, stops at an ink/priority gap, the native
+ * cell boundary or eight rows. No geometry or authored artwork is generated. */
+bool ActionVoxel_SnowReceiverRun(const ActionVoxelGeometry *,int world_x,int world_y,int *bottom);
 bool ActionVoxel_AuthoredSurfaceAt(const ActionVoxelGeometry *, int world_x, int world_y);
 bool ActionVoxel_HasHiddenNativeFronts(const ActionVoxelGeometry *);
 bool ActionVoxel_HasNativeTransforms(const ActionVoxelGeometry *);
@@ -136,6 +155,28 @@ typedef enum ActionVoxelProfile {
 } ActionVoxelProfile;
 ActionVoxelProfile ActionVoxel_ProfileForRoom(unsigned group, unsigned room);
 ActionVoxelProfile ActionVoxel_Profile(const ActionVoxelGeometry *geometry);
+/* Reviewed native opaque-black terminal void; zero source coverage is not a
+ * matte. These are existing source bounds, never gameplay/collision bounds. */
+typedef struct VoxelTerminalMatte {
+  int world_right,world_bottom,bottom_start,right_start;
+  bool bottom_opaque_black,right_opaque_black;
+} VoxelTerminalMatte;
+const VoxelTerminalMatte *ActionVoxel_TerminalMatte(const ActionVoxelGeometry *geometry);
+/* Marahna03 finite native atmospheric ink. No source is represented by an
+ * absent run; opaque native RGB black retains bit15 and stays distinct. */
+enum { kVoxelMaxJungleTerminalRuns=128 };
+typedef struct VoxelJungleTerminalRun {
+  int start,end;
+  uint16_t color; /* Native RGB555 plus opaque bit15. */
+  uint8_t palette_index,edge; /* edge1 right,2 bottom,3 left. */
+  bool high_priority;
+} VoxelJungleTerminalRun;
+typedef struct VoxelJungleTerminal {
+  int left,top,right,bottom;
+  unsigned count;
+  VoxelJungleTerminalRun runs[kVoxelMaxJungleTerminalRuns];
+} VoxelJungleTerminal;
+const VoxelJungleTerminal *ActionVoxel_JungleTerminal(const ActionVoxelGeometry *geometry);
 /* The hub's BG2 is two distinct scene objects: faces/eyes are promoted to
  * the skybox far band while the scrolling water remains on its own plane.
  * Modeling BG1's skull island must preserve that reviewed source partition. */
@@ -212,21 +253,38 @@ enum {
   kVoxelFlatParapet = 6,
   kVoxelRearOnly = 7 /* Border vegetation stays behind the open walking deck. */
 };
+/* Artwork/normal convention only; these never change native edge geometry. */
+enum { kVoxelContourSkinNone, kVoxelContourSkinTop, kVoxelContourSkinBottom,
+       kVoxelContourSkinSnowCrest, kVoxelContourSkinSnowBody };
+enum { kVoxelSurfaceTextureNone=0, kVoxelSurfaceTexturePatch=1,
+       kVoxelSurfaceTextureNativeInward=2, kVoxelSurfaceTextureLiveInward=3 };
 typedef struct VoxelEdge {
   short x, y, length;
   unsigned char side, near_rank, far_rank, high_priority, rear_trim, colliding, textured_top;
   unsigned char soft_surface;
+  /* Reviewed beam contours, including walking tops, keep native actor order.
+   * Their native-low artwork must not obscure actors passing through them. */
+  unsigned char native_actor_priority;
   unsigned char rear_mounted, neighbor_rear_mounted;
   unsigned char thin_trim, neighbor_thin_trim;
+  unsigned char raised_scenery, neighbor_raised_scenery; /* Extra relief with an unchanged rear attachment. */
   /* Native-pixel rise of the rear fold: the complete top edge for side0,
    * or the native top/bottom endpoints for a vertical side. Contact remains
-   * fixed; only the surface behind it rises to the rear vegetation border. */
+   * fixed. flat_rear_join retains only the band size and suppresses the rise. */
   unsigned char rear_fold_top, rear_fold_bottom;
-  /* Optional opaque native-art square tiled over an existing top cap.
-   * World coordinates select the source only; zero size keeps edge sampling. */
+  unsigned char flat_rear_join; /* Flat native-height deck; rear vegetation closes its former painted band. */
+  /* Optional opaque native-art square. Legacy reviewed caps use these with
+   * surface_texture=0; verified patches use1; actual-edge inward sources use2.
+   * World coordinates select artwork only, never lighting or geometry. */
   short top_sample_x, top_sample_y;
   unsigned char top_sample_size;
+  unsigned char surface_texture;
+  unsigned char surface_derived; /* Cached native band; no unchanged square donor. */
+  unsigned char surface_native_x; /* Reviewed band keeps source pixel boundaries, including native cutout columns. */
   uint16_t top_owned_art; /* One-based immutable donor; zero samples capture. */
+  unsigned char surface_top_material; /* Tiny soft riser shares its reviewed cap's world-X/depth art. */
+  unsigned char contour_skin; /* Reviewed hard diagonal: top/bottom material and its short closing risers. */
+  unsigned char snow_closing_riser[2]; /* Native supported Snow step below left/right cap endpoint,1..2px; effect metadata only. */
   uint16_t source_owned_art[2]; /* One-based front/rear native source patches. */
   int16_t source_x[2], source_y[2]; /* World origin of each 16px source patch. */
   int16_t fold_origin_y;
@@ -237,7 +295,13 @@ typedef struct VoxelEdge {
 /* A lower tree shaft bends from its unchanged branch contact at top_y to the
  * rear vegetation at base_y. Query the owning cell once, then evaluate that
  * same curve for every vertex, including vertices on a neighbouring cell. */
-typedef struct VoxelTrunkCurve { short top_y, base_y; } VoxelTrunkCurve;
+typedef struct VoxelTrunkCurve {
+  short top_y, base_y;
+  /* A native ramp keeps its2px collision columns. Resolve one column before
+   * evaluating its4px front lip and12px linear return to the rear plane. */
+  short contact_x, contact[8];
+  unsigned char contact_count, linear;
+} VoxelTrunkCurve;
 const VoxelTrunkCurve *ActionVoxel_TrunkCurveForCell(const ActionVoxelGeometry *c,int tile_x,int tile_y);
 const VoxelTrunkCurve *ActionVoxel_TrunkCurveForEdge(const ActionVoxelGeometry *c,const VoxelEdge *edge);
 float ActionVoxel_TrunkFrontDepth(const ActionVoxelGeometry *c,const VoxelTrunkCurve *curve,float world_y);
@@ -247,6 +311,7 @@ float ActionVoxel_TrunkBackDepth(const ActionVoxelGeometry *c,const VoxelTrunkCu
 bool ActionVoxel_HasColumns(const ActionVoxelGeometry *c);
 const VoxelTrunkCurve *ActionVoxel_ColumnCurveForCell(const ActionVoxelGeometry *c,int tile_x,int tile_y);
 const VoxelTrunkCurve *ActionVoxel_ColumnCurveForEdge(const ActionVoxelGeometry *c,const VoxelEdge *edge);
+void ActionVoxel_ColumnSection(const VoxelTrunkCurve *curve,float world_x,VoxelTrunkCurve *section);
 float ActionVoxel_ColumnFrontDepth(const ActionVoxelGeometry *c,const VoxelTrunkCurve *curve,float world_y);
 /* A painted ground strip folds onto the back of the deck without moving the
  * native walking contact. Invalid depth inputs leave the original geometry. */
@@ -295,15 +360,29 @@ typedef enum VoxelPatchKind {
 typedef struct VoxelPatch {
   short x, y, width, height;
   unsigned char high_priority, kind;
+  unsigned char surface_compiled; /* Includes an intentionally empty profile after authored ownership. */
+  uint16_t surface_first, surface_count; /* Optional immutable native side-art cells. */
 } VoxelPatch;
 const VoxelPatch *ActionVoxel_Patches(const ActionVoxelGeometry *c, unsigned *count);
+typedef struct VoxelProfileSurface {
+  short x, y; /* Native 16px source cell, before mapping across profile depth. */
+  uint16_t art_id; /* Zero-based pinned owned art; structural native ink only. */
+} VoxelProfileSurface;
+const VoxelProfileSurface *ActionVoxel_ProfileSurfaces(const ActionVoxelGeometry *c,unsigned *count);
 /* Native pool surface runs, independent of environmental-effects settings. */
 typedef struct VoxelWaterSurface {
   short x, y, width;
   unsigned char high_priority, background; /* Zero-based native source. */
   unsigned char sample_y, sample_height; /* Relative to the surface's world y. */
   unsigned char opaque; /* Lava and full-add water keep native source opacity. */
+  /* Optional reviewed solid-water terms, BG1 then BG2, RGB555 with opaque bit.
+   * Both must be present. Zero retains the original captured texture sampling. */
+  uint16_t uniform_color[2];
 } VoxelWaterSurface;
+/* Resolve the selected native term using this captured frame's fade/math.
+ * Zero means the original textured surface remains authoritative. */
+uint32_t ActionVoxel_WaterSurfaceColor(const VoxelWaterSurface *, unsigned background,
+    const ActionRoomSceneFrameState *);
 const VoxelWaterSurface *ActionVoxel_WaterSurfaces(const ActionVoxelGeometry *c, unsigned *count);
 typedef struct VoxelWaterfall {
   short x, y, width, height;
@@ -346,12 +425,14 @@ bool ActionVoxel_BuildWithTiles(ActionVoxelGeometry *c, const ActionRoomScene *s
 bool ActionVoxel_AnimationMatches(const ActionRoomScene *reference,
                                    const uint8_t characters[kActionRoomSceneCharacterBytes],
                                    size_t *offset, size_t *bytes);
-/* These policies do not bake neighbouring rear artwork into generated faces.
- * Every native phase still has to pass the material/topology proof below. */
+/* Every native phase must pass the material/topology proof below. Jungle
+ * admits only BG2 waves with no BG1 owner and unchanged native BG2 definitions;
+ * its neighbouring rear-art repairs remain outside that reuse proof. */
 static inline bool ActionVoxel_AnimationCacheCandidate(ActionVoxelProfile profile) {
   return profile==kActionVoxelProfile_KassandoraDesert ||
       profile==kActionVoxelProfile_KassandoraTomb || profile==kActionVoxelProfile_AitosCaverns ||
-      profile==kActionVoxelProfile_MarahnaTemple || profile==kActionVoxelProfile_NorthwallSnow;
+      profile==kActionVoxelProfile_MarahnaTemple || profile==kActionVoxelProfile_MarahnaJungle ||
+      profile==kActionVoxelProfile_NorthwallSnow;
 }
 bool ActionVoxel_AnimationIsPresentationOnly(const ActionRoomScene *scene,
                                    const ActionRoomScene *reference,

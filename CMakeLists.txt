@@ -1559,6 +1559,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_frame_queue_test tests/frame_queue_test.c
         src/host/frame_queue.c src/platform/sdl/frame_producer_sdl.c
+        src/diorama/diorama_trunk_guard.c src/diorama/diorama_trunk_guard_layout.c
         src/action/action_voxel.c src/diorama/diorama_capture_blend.c)
     target_include_directories(actraiser_frame_queue_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_frame_queue_test PRIVATE snesrecomp::sdk SDL3::SDL3)
@@ -1571,6 +1572,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_frame_pipeline_test tests/frame_pipeline_test.c
         src/host/frame_queue.c src/platform/sdl/frame_producer_sdl.c
+        src/diorama/diorama_trunk_guard_layout.c
         src/action/action_voxel.c src/diorama/diorama_capture_blend.c)
     target_include_directories(actraiser_frame_pipeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_frame_pipeline_test PRIVATE snesrecomp::sdk SDL3::SDL3)
@@ -2292,12 +2294,47 @@ if(BUILD_TESTING)
         COMMAND actraiser_action_bg_tuner_test)
 
     add_executable(actraiser_action_voxel_test tests/action_voxel_test.c
-        src/action/action_voxel.c src/action/action_voxel_build.c
+        src/action/action_trunk.c src/action/action_voxel.c src/action/action_voxel_build.c
+        src/diorama/diorama_trunk_guard.c src/diorama/diorama_trunk_guard_layout.c
         src/action/action_scene_snapshot.c src/action/action_room_scene.c
         src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c)
     target_include_directories(actraiser_action_voxel_test PRIVATE src tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_action_voxel_test PRIVATE actraiser_rom_decode_test_support)
     add_test(NAME actraiser_action_voxel COMMAND actraiser_action_voxel_test)
+
+    add_executable(actraiser_action_voxel_native_surface_test
+        tests/action_voxel_native_surface_test.c)
+    target_include_directories(actraiser_action_voxel_native_surface_test PRIVATE src)
+    add_test(NAME actraiser_action_voxel_native_surface
+        COMMAND actraiser_action_voxel_native_surface_test)
+
+    # Read-only room-depth diagnostics. Uses the production compiler and INI
+    # resolver without SDL, the game, a GPU, or a second material policy.
+    add_executable(actraiser_voxel_depth_audit tools/action_editor/voxel_depth_export.c
+        src/action/action_voxel.c src/action/action_trunk.c
+        src/action/action_scene_snapshot.c src/action/action_room_scene.c
+        src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c)
+    target_include_directories(actraiser_voxel_depth_audit PRIVATE src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_voxel_depth_audit PRIVATE actraiser_rom_decode_test_support)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME actraiser_voxel_surface_audit
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_voxel_surface_audit.py)
+        add_test(NAME actraiser_voxel_surface_coverage
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_voxel_surface_coverage.py)
+        add_test(NAME actraiser_voxel_visual_plan
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_voxel_visual_plan.py)
+        set_tests_properties(actraiser_voxel_visual_plan PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(actraiser_voxel_surface_coverage PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(actraiser_voxel_surface_audit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        add_test(NAME actraiser_voxel_depth_audit_adversarial
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_voxel_depth_audit_adversarial.py)
+        add_test(NAME actraiser_voxel_depth_audit_native
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_voxel_depth_audit_native.py)
+        set_tests_properties(actraiser_voxel_depth_audit_adversarial actraiser_voxel_depth_audit_native
+            PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(actraiser_voxel_depth_audit_native PROPERTIES
+            ENVIRONMENT "AR_VOXEL_DEPTH_BINARY=$<TARGET_FILE:actraiser_voxel_depth_audit>")
+    endif()
 
     add_executable(actraiser_action_voxel_split_test tests/action_voxel_split_test.c
         src/action/action_voxel.c src/action/action_voxel_build.c
@@ -2361,6 +2398,50 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests)
     target_link_libraries(actraiser_cloud_material_test PRIVATE actraiser_math)
     add_test(NAME actraiser_cloud_material COMMAND actraiser_cloud_material_test)
+
+    add_executable(actraiser_action_ground_cover_test
+        tests/action_ground_cover_test.c src/action/action_ground_cover.c)
+    target_include_directories(actraiser_action_ground_cover_test PRIVATE src tests)
+    target_link_libraries(actraiser_action_ground_cover_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_action_ground_cover COMMAND actraiser_action_ground_cover_test)
+
+    add_executable(actraiser_diorama_ground_cover_test
+        tests/diorama_ground_cover_test.c src/action/action_ground_cover.c)
+    target_include_directories(actraiser_diorama_ground_cover_test PRIVATE src tests)
+    target_link_libraries(actraiser_diorama_ground_cover_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_diorama_ground_cover COMMAND actraiser_diorama_ground_cover_test)
+
+    add_executable(actraiser_diorama_owned_heat_test
+        tests/diorama_owned_heat_test.c)
+    target_include_directories(actraiser_diorama_owned_heat_test PRIVATE src tests
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diorama_owned_heat_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_diorama_owned_heat COMMAND actraiser_diorama_owned_heat_test)
+
+    add_executable(actraiser_diorama_trunk_guard_upload_test
+        tests/diorama_trunk_guard_upload_test.c
+        src/diorama/diorama_trunk_guard_upload.c src/diorama/diorama_trunk_guard.c src/diorama/diorama_trunk_guard_layout.c
+        src/present/presentation_upload_mirror.c src/render/render_device.c)
+    target_include_directories(actraiser_diorama_trunk_guard_upload_test PRIVATE src tests)
+    target_link_libraries(actraiser_diorama_trunk_guard_upload_test PRIVATE
+        actraiser_math actraiser_performance_test_support)
+    add_test(NAME actraiser_diorama_trunk_guard_upload COMMAND actraiser_diorama_trunk_guard_upload_test)
+
+    add_executable(actraiser_diorama_voxel_guard_upload_test
+        tests/diorama_voxel_guard_upload_test.c
+        src/diorama/diorama_voxel_guard_upload.c src/diorama/diorama_trunk_guard_layout.c
+        src/present/presentation_upload_mirror.c src/render/render_device.c)
+    target_include_directories(actraiser_diorama_voxel_guard_upload_test PRIVATE src tests
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diorama_voxel_guard_upload_test PRIVATE
+        actraiser_math actraiser_performance_test_support)
+    add_test(NAME actraiser_diorama_voxel_guard_upload COMMAND actraiser_diorama_voxel_guard_upload_test)
+
+    add_executable(actraiser_diorama_voxel_source_clip_test tests/diorama_voxel_source_clip_test.c)
+    target_include_directories(actraiser_diorama_voxel_source_clip_test PRIVATE src tests
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diorama_voxel_source_clip_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_diorama_voxel_source_clip COMMAND actraiser_diorama_voxel_source_clip_test)
 
     set(AR_ACTION_EFFECT_TEST_SOURCES
         src/action/action_map_effect_scene.c
@@ -2647,6 +2728,7 @@ if(BUILD_TESTING)
         src/diorama/diorama_layer_order.c src/diorama/diorama_projection.c
         src/diorama/diorama_depth_shapes.c src/diorama/diorama_skybox_uv.c
         src/action/action_voxel.c src/render/render_device.c
+        src/action/action_ground_cover.c src/diorama/diorama_trunk_guard_layout.c
         src/render/scene3d_math.c src/render/presentation_layout.c)
     target_include_directories(actraiser_action_editor_objects_test PRIVATE src tests tools/action_editor
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS} snesrecomp-go/runtime/src
@@ -2706,6 +2788,7 @@ if(BUILD_TESTING)
         src/action/action_scene_snapshot.c src/action/action_room_scene.c
         src/action/action_bg_world.c src/action/action_bg_plan.c src/action/action_camera_bounds.c
         src/action/action_voxel.c src/diorama/diorama.c src/diorama/diorama_astral_rift.c src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c
+        src/action/action_ground_cover.c
         src/diorama/diorama_projection.c src/diorama/diorama_skybox_uv.c src/diorama/diorama_depth_shapes.c
         src/render/scene3d_math.c src/render/presentation_layout.c
         snesrecomp-go/runtime/src/scene_renderer.c snesrecomp-go/runtime/src/snes/ppu.c)
@@ -2724,6 +2807,8 @@ if(BUILD_TESTING)
         src/action/action_scene_snapshot.c src/action/action_room_scene.c
         src/action/action_bg_world.c src/diorama/diorama_capture_blend.c
         src/diorama/diorama_rom_backdrop.c src/diorama/diorama_snapshot.c
+        src/diorama/diorama_trunk_guard_upload.c src/diorama/diorama_voxel_guard_upload.c
+        src/present/presentation_upload_mirror.c
         snesrecomp-go/runtime/src/scene_renderer.c snesrecomp-go/runtime/src/snes/ppu.c
         src/platform/sdl/diorama_effect_backend_sdl.c
         src/render/gpu_compile_log.c src/platform/sdl/action_effect_source_sdl.c
@@ -4332,6 +4417,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_diorama_frame_generation_test
         tests/diorama_frame_generation_test.c
+        src/diorama/diorama_trunk_guard.c src/diorama/diorama_trunk_guard_layout.c
         src/action/action_voxel.c
         src/diorama/diorama_capture_blend.c
         src/action/action_effect_masks.c
@@ -4760,6 +4846,40 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_diorama_capture_blend
         COMMAND actraiser_diorama_capture_blend_test)
+
+    # The final arena's atmosphere uses exactly its authentic native rows.
+    add_executable(actraiser_diorama_death_heim_nebula_window_test
+        tests/diorama_death_heim_nebula_window_test.c
+    )
+    target_include_directories(actraiser_diorama_death_heim_nebula_window_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(actraiser_diorama_death_heim_nebula_window_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_diorama_death_heim_nebula_window
+        COMMAND actraiser_diorama_death_heim_nebula_window_test)
+
+    # Preserve ordinary source triangles outside grounded desert columns.
+    add_executable(actraiser_diorama_desert_column_source_test
+        tests/diorama_desert_column_source_test.c
+    )
+    target_include_directories(actraiser_diorama_desert_column_source_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(actraiser_diorama_desert_column_source_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_diorama_desert_column_source
+        COMMAND actraiser_diorama_desert_column_source_test)
+
+    # Finite Marahna terminal ink: exact source overlap and corner ownership.
+    add_executable(actraiser_diorama_jungle_terminal_test
+        tests/diorama_jungle_terminal_test.c
+    )
+    target_include_directories(actraiser_diorama_jungle_terminal_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_diorama_jungle_terminal_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_diorama_jungle_terminal
+        COMMAND actraiser_diorama_jungle_terminal_test)
 
     # Coarse alpha-occupancy mesh filtering for sparse diorama object planes.
     # Pure -- verifies pitch handling, conservative dilation, and the grid's

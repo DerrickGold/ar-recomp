@@ -1,5 +1,7 @@
 #include "action/action_effect_capture.h"
 #include "action/action_voxel.h"
+#include "action/action_trunk.h"
+#include "diorama/diorama_trunk_guard.h"
 #include "diorama/diorama_camera_policy.h"
 #include "diorama/diorama_layer_manifest.h"
 /* ActRaiser diorama capture: prepares the diorama's captures each frame: HUD
@@ -12,6 +14,7 @@
 #include "dev/action_object_snapshot_capture.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_capture.h"
+#include "diorama/diorama_capture_hdma.h"
 #include "sim/sim3d/sim3d_textures.h"
 #include "host/host_frame_surfaces.h"
 #include "action/action_effect_manifest.h"
@@ -28,6 +31,24 @@ static bool s_authoring_object_attributes;
 bool ActRaiser_DioramaPropAttributes(void) { return s_prop_attribute_owners.valid; }
 static DioramaBgSourceBounds s_bg2_source_bounds;
 static bool s_track_bg2_source_bounds;
+
+static bool IndependentSubscreenHdmaSafe(void) {
+  const SnesRunnerApi *api=ActRaiser_RunnerApi();
+  SrRunnerHandle *runner=ActRaiser_Runner();
+  SrDmaStateSnapshot state={.struct_size=sizeof(state)};
+  if(!runner || !api || api->struct_size<SNES_RUNNER_API_DMA_STATE_SIZE ||
+      !(api->capabilities&SR_RUNNER_CAP_DMA_STATE) || !api->query_dma_state ||
+      api->query_dma_state(runner,&state)!=SR_RESULT_OK ||
+      state.channel_count!=SR_DMA_CHANNEL_COUNT)return false;
+  const SrPpuFrameTransactionContext *frame=ActRaiser_PpuFrame();
+  if(!frame || state.lifetime_generation!=frame->lifetime_generation)return false;
+  for(unsigned i=0;i<SR_DMA_CHANNEL_COUNT;++i) {
+    const SrDmaChannelState *channel=&state.channels[i];
+    if((channel->flags&SR_DMA_CHANNEL_HDMA_ACTIVE) &&
+        !DioramaCaptureHdma_ChannelSafe(channel->b_address,channel->mode))return false;
+  }
+  return true;
+}
 
 static SrPpuObjColorTransform ReceiverTransform(const float multiply[3],const float add[3]) {
   SrPpuObjColorTransform result;
@@ -237,6 +258,113 @@ void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
 }
 static uint32_t s_diorama_skybox_pixels[
     SR_PPU_SURFACE_MAX_WIDTH * SR_PPU_SURFACE_MAX_HEIGHT];
+static uint32_t *s_diorama_trunk_guard_pixels;
+static uint64_t s_diorama_trunk_guard_generation;
+
+unsigned ActRaiser_PrepareTrunkGuard(const SnesRunnerApi *api,
+    bool scanout_ready, bool profile_diorama,
+    SrPpuBackgroundGuardRequest guards[2], DioramaTrunkGuardSource *source) {
+  if (!guards || !source) return 0;
+  memset(guards, 0, 2 * sizeof(*guards));
+  memset(source, 0, sizeof(*source));
+  const unsigned group = g_ram[kActRaiserWram_MapGroup], room_number = g_ram[kActRaiserWram_CurrentMap];
+  const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
+  const ActionBgLayerPlan *layer = &ActRaiser_PendingActionBgPlan()->layer[0];
+  if (!scanout_ready || !profile_diorama || !api ||
+      !(api->capabilities & SR_RUNNER_CAP_PPU_BACKGROUND_GUARDS) ||
+      !DioramaTrunk_ResolveForMode(g_settings.diorama_mode, group, room_number, room).enabled ||
+      !DioramaCameraPolicy_WorldApron(layer) ||
+      !ActRaiserActionBg_TrunkAssets(group, room_number, room)) return 0;
+  const int camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
+  const int camera_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
+  DioramaTrunkGuardBounds bounds;
+  DioramaScenery_AxisExtent(room, 0, layer->world_width, false, &bounds.x, &bounds.width);
+  DioramaScenery_AxisExtent(room, 0, layer->world_height, true, &bounds.y, &bounds.height);
+  const int width = 256 + 2 * g_ws_extra + 2 * SR_PPU_OBJ_APRON;
+  if (!DioramaTrunkGuard_Resolve(camera_x - g_ws_extra - SR_PPU_OBJ_APRON,
+      camera_y - g_ws_extra_top + 1, width,
+      224 + g_ws_extra_top + g_ws_extra_bottom, bounds, &source->layout)) return 0;
+  if (!s_diorama_trunk_guard_pixels)
+    s_diorama_trunk_guard_pixels = calloc(kDioramaTrunkGuardPixels, sizeof(uint32_t));
+  if (!s_diorama_trunk_guard_pixels) return 0;
+  if (!++s_diorama_trunk_guard_generation) ++s_diorama_trunk_guard_generation;
+  source->pixels = s_diorama_trunk_guard_pixels;
+  source->pitch_pixels = kDioramaTrunkGuardWidth;
+  source->pixel_count = kDioramaTrunkGuardPixels;
+  source->capture_generation = s_diorama_trunk_guard_generation;
+  for (unsigned i = 0; i < 2; ++i) {
+    const DioramaTrunkGuardStrip *strip = &source->layout.strips[i];
+    guards[i] = (SrPpuBackgroundGuardRequest){
+      .struct_size = sizeof(*guards), .layer = SR_PPU_OVERLAY_BG1,
+      .screen_x0 = strip->world_x - camera_x,
+      .screen_y0 = strip->world_y - camera_y - 1,
+      .width = (unsigned)strip->width, .height = kDioramaTrunkGuardRows,
+      .source_x0 = bounds.x, .source_y0 = bounds.y,
+      .source_width = (unsigned)bounds.width, .source_height = (unsigned)bounds.height,
+      .pixels = s_diorama_trunk_guard_pixels + strip->atlas_y * kDioramaTrunkGuardWidth,
+      .pitch_bytes = kDioramaTrunkGuardWidth * sizeof(uint32_t),
+      .pixel_byte_size = kDioramaTrunkGuardWidth * kDioramaTrunkGuardRows * sizeof(uint32_t),
+    };
+  }
+  return 2;
+}
+
+/* Generic Voxel capture keeps native priority lanes independent. Only the
+ * reviewed waterfall source family currently requests the lower continuation;
+ * this is visual source headroom and never changes native camera travel. */
+static uint32_t *s_diorama_voxel_guard_pixels;
+static uint64_t s_diorama_voxel_guard_generation;
+unsigned ActRaiser_PrepareVoxelGuard(const SnesRunnerApi *api,
+    bool scanout_ready, bool profile_diorama, SrPpuBackgroundGuardRequest *guard,
+    SrPpuBackgroundGuardBands *bands, DioramaVoxelGuardSource *source) {
+  if (!guard || !bands || !source) return 0;
+  *guard = (SrPpuBackgroundGuardRequest){0};
+  *bands = (SrPpuBackgroundGuardBands){0};
+  *source = (DioramaVoxelGuardSource){0};
+  const unsigned group = g_ram[kActRaiserWram_MapGroup], map = g_ram[kActRaiserWram_CurrentMap];
+  const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
+  const ActionBgLayerPlan *layer = &ActRaiser_PendingActionBgPlan()->layer[0];
+  if (!scanout_ready || !profile_diorama || g_settings.diorama_mode != kAction3D_Voxel ||
+      !api || !(api->capabilities & SR_RUNNER_CAP_PPU_BACKGROUND_GUARD_BANDS) ||
+      ActRaiserRoom_ProfileFor(group, map) != kActRaiserRoomProfile_AitosWaterfall ||
+      !ActRaiserActionBg_VoxelGeometry(group, map) ||
+      DioramaTrunk_ResolveForMode(g_settings.diorama_mode, group, map, room).enabled ||
+      !DioramaCameraPolicy_WorldApron(layer) || layer->wrap_world_x ||
+      !ActRaiserActionBg_WorldApronAvailable(0)) return 0;
+  const int camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
+  const int camera_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
+  DioramaTrunkGuardBounds bounds;
+  DioramaScenery_AxisExtent(room, 0, layer->world_width, false, &bounds.x, &bounds.width);
+  DioramaScenery_AxisExtent(room, 0, layer->world_height, true, &bounds.y, &bounds.height);
+  if (!DioramaVoxelGuard_Resolve(camera_x - g_ws_extra - SR_PPU_OBJ_APRON,
+      camera_y - g_ws_extra_top + 1, 256 + 2 * g_ws_extra + 2 * SR_PPU_OBJ_APRON,
+      224 + g_ws_extra_top + g_ws_extra_bottom, bounds, &source->layout)) return 0;
+  if (!source->layout.lower.valid.width || !source->layout.lower.valid.height) return 0;
+  if (!s_diorama_voxel_guard_pixels)
+    s_diorama_voxel_guard_pixels = calloc(3 * kDioramaVoxelGuardPixels, sizeof(uint32_t));
+  if (!s_diorama_voxel_guard_pixels) return 0;
+  if (!++s_diorama_voxel_guard_generation) ++s_diorama_voxel_guard_generation;
+  source->pitch_pixels = kDioramaVoxelGuardWidth;
+  source->pixel_count = kDioramaVoxelGuardPixels;
+  source->capture_generation = s_diorama_voxel_guard_generation;
+  bands->struct_size = sizeof(*bands);
+  bands->flags = SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL;
+  for (unsigned i = 0; i < 3; ++i) {
+    uint32_t *pixels = s_diorama_voxel_guard_pixels + i * kDioramaVoxelGuardPixels;
+    source->pixels[i] = pixels;
+    bands->bands[i] = (SrPpuBackgroundGuardBandOutput){.pixels = pixels,
+      .pitch_bytes = kDioramaVoxelGuardWidth * sizeof(uint32_t),
+      .pixel_byte_size = kDioramaVoxelGuardPixels * sizeof(uint32_t)};
+  }
+  const DioramaTrunkGuardStrip *lower = &source->layout.lower;
+  *guard = (SrPpuBackgroundGuardRequest){.struct_size = sizeof(*guard),
+    .layer = SR_PPU_OVERLAY_BG1, .screen_x0 = lower->world_x - camera_x,
+    .screen_y0 = lower->world_y - camera_y - 1,
+    .width = (unsigned)lower->width, .height = kDioramaVoxelGuardRows,
+    .source_x0 = bounds.x, .source_y0 = bounds.y,
+    .source_width = (unsigned)bounds.width, .source_height = (unsigned)bounds.height};
+  return 1;
+}
 
 static void ActRaiser_BindDioramaHudCapture(int width, size_t pitch,
                                             int capture_height,
@@ -319,6 +447,7 @@ static void ActRaiser_BindDioramaPriorityBands(size_t pitch) {
 }
 
 void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
+  DioramaCapture_SetIndependentSubscreenSources(0);
   ActRaiserActionBg_ConfigureLavaBubbles(g_diorama_frame_active && g_settings.action_environmental_effects
       ? ActionEffectManifest_NativeBubbleField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]) : NULL,
       ActionEffectCapture_VisualClock());
@@ -344,10 +473,21 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
   const bool pixel_edits_active = want_capture &&
       ActRaiserActionBg_PixelEditsActive();
   const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
+  /* Cached publication only; visual guards must not change the camera helper
+   * used by ActionCamera_DioramaMargins before geometry is available. */
+  const bool voxel_ready=active && g_settings.diorama_mode==kAction3D_Voxel &&
+      (ActRaiserActionBg_VoxelGeometry(g_ram[kActRaiserWram_MapGroup],
+          g_ram[kActRaiserWram_CurrentMap])!=NULL ||
+       (DioramaTrunk_ResolveForMode(g_settings.diorama_mode,g_ram[kActRaiserWram_MapGroup],
+          g_ram[kActRaiserWram_CurrentMap],room).enabled &&
+        ActRaiserActionBg_TrunkAssets(g_ram[kActRaiserWram_MapGroup],
+          g_ram[kActRaiserWram_CurrentMap],room)!=NULL));
   for (unsigned bg = 0; bg < 2; bg++)
     if (ActRaiser_DioramaNeedsBgApron(room, bg,
             pixel_edits_active && ActRaiserActionBg_PixelLayerHasEdits(bg),
-            active && ActRaiserActionBg_WorldApronAvailable(bg)))
+            active && ActRaiserActionBg_WorldApronAvailable(bg)) ||
+        DioramaCameraPolicy_VoxelCaptureApron(voxel_ready,bg,
+            ActRaiserActionBg_WorldApronAvailable(bg)))
       s_bg_apron_mask |= (uint8_t)(1u << bg);
   g_diorama_frame_active = active;
   if (want_capture) {
@@ -382,6 +522,23 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
         DioramaCaptureBlend_FullAddSubscreenSources(
             ppu->color_math_control, ppu->color_math_designation,
             ppu->main_screen, ppu->sub_screen);
+    /* This is a cached readiness query, not a geometry build. Off, ordinary
+     * Diorama, one-shot inactive captures and unsupported math keep their
+     * existing winner-filtered input. Native OBJ's first-writer/OAM handling
+     * and HUD range handoff are independent of this colour-math crop flag. */
+    uint8_t independent_sub_sources=DioramaCaptureBlend_IndependentSubscreenSources(
+        voxel_ready,ppu->color_math_control,ppu->color_math_designation,
+        ppu->main_screen,ppu->sub_screen);
+    if(independent_sub_sources && !IndependentSubscreenHdmaSafe())independent_sub_sources=0;
+    DioramaCapture_SetIndependentSubscreenSources(independent_sub_sources);
+    if(independent_sub_sources) {
+      static bool reported_independent;
+      if(!reported_independent) {
+        reported_independent=true;
+        fprintf(stderr,"[diorama-blend] gf=%u Voxel full-add independent TS sources=$%02x preserved before 3D separation\n",
+            ActRaiser_ReadWram16(kActRaiserWram_GameFrame),independent_sub_sources);
+      }
+    }
     uint8_t layer_group = 0, layer_map = 0;
     uint8_t layer_section = kDioramaLayerSection_Room;
     const bool layer_room_live =
@@ -398,7 +555,7 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
                               kHostDisplayFramebufferHeight);
       if (capture_screens & (1 << src)) {
         uint32_t flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME;
-        if (full_add_sub_sources & (1 << src))
+        if ((full_add_sub_sources & (1 << src)) && !(independent_sub_sources & (1 << src)))
           flags |= SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN;
         /* OBJ keeps its own per-palette-group flag; this one is BG-only. */
         if (src != SR_PPU_OVERLAY_OBJ &&

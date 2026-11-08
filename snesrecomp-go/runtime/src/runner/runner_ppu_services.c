@@ -331,6 +331,11 @@ static SrResult run_ppu_scanout(
     const bool native_view =
         (SrPpuBackgroundView_Flags(view) & SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE) != 0u;
     bool view_ready = view != NULL && !native_view;
+    const unsigned guard_count = request->struct_size >= SR_PPU_SCANOUT_REQUEST_BACKGROUND_GUARDS_SIZE
+        ? request->background_guard_count : 0;
+    const SrPpuBackgroundGuardRequest *guards = guard_count ? request->background_guards : NULL;
+    const bool guard_bands = request->struct_size >= SR_PPU_SCANOUT_REQUEST_BACKGROUND_GUARD_BANDS_SIZE;
+    bool guards_ready = guard_count != 0;
     if (ppu == NULL || dma == NULL || api == NULL)
         return SR_RESULT_UNAVAILABLE;
     if (!PpuOutputSurfacesFitGeometry(
@@ -373,6 +378,10 @@ static SrResult run_ppu_scanout(
         if (line > 0 && view_ready)
             view_ready = PpuRenderBackgroundViewLine(ppu, view, line - 1);
         if (line == 0) {
+            for (unsigned i = 0; guards_ready && i < guard_count; ++i)
+                if (guards[i].screen_y0 < 0)
+                    guards_ready = PpuRenderBackgroundGuardBands(ppu, &guards[i],
+                        guard_bands ? request->background_guard_bands[i] : NULL);
             if (request->flags & SR_PPU_SCANOUT_BULK_OBJ_CLEAR)
                 PpuPreclearObjOverlay(ppu);
             int margin;
@@ -421,6 +430,13 @@ static SrResult run_ppu_scanout(
             view_ready = PpuRenderBackgroundViewLine(
                 ppu, view, (int)SR_PPU_NATIVE_HEIGHT + line - 1);
     }
+    for (unsigned i = 0; guards_ready && i < guard_count; ++i)
+        if (guards[i].screen_y0 >= 0)
+            guards_ready = PpuRenderBackgroundGuardBands(ppu, &guards[i],
+                guard_bands ? request->background_guard_bands[i] : NULL);
+    if (!guards_ready) for (unsigned i = 0; i < guard_count; ++i)
+        PpuClearBackgroundGuard(&guards[i],
+            guard_bands ? request->background_guard_bands[i] : NULL);
     if (native_view)
         view_ready = PpuRenderNativeBackgroundView(ppu, view);
     if (!view_ready && ppu->backgroundPacket) {
@@ -434,6 +450,7 @@ static SrResult run_ppu_scanout(
         sr_runner_handle(snes), &out_result->final_state);
     out_result->flags =
         (view_ready ? SR_PPU_SCANOUT_BACKGROUND_VIEW_READY : 0u) |
+        (guards_ready ? SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY : 0u) |
         (PpuAuthenticSurfaceReady(ppu)
             ? SR_PPU_SCANOUT_AUTHENTIC_SURFACE_READY : 0u) |
         (PpuAuthenticCameraFrameReady(

@@ -446,7 +446,8 @@ const VoxelEditor=(()=>{
     const hint='Select the whole classified object to move/resize it; use Attached pull or convert a partial selection.';
     const surfaceFields=['front','back','width','offset','front-art','top-art','side-art','left-art','right-art','bottom-art',
       'shape','shape-span','front-end','back-end','bend'];
-    const hasSurface=record=>surfaceFields.some(field=>record?.[field]!==undefined);
+    const hasSurface=record=>surfaceFields.some(field=>record?.[field]!==undefined &&
+        (!field.endsWith('-art')||record[field]!=='auto'));
     const nativeCandidate=(record,fact)=>fact.nativeGeometry!==undefined&&!hasSurface(record);
     const affected=changes.filter(record=>{
       const before=recordFor({kind:'tile',x:record.x,y:record.y})||{};
@@ -479,7 +480,7 @@ const VoxelEditor=(()=>{
       if(!native.length)continue; // Authored surfaces can transform independently.
       for(const member of native) {
         const record=recordFor(member,candidate)||{};
-        if(record.backing!==undefined||record['back-art']!==undefined)throw Error(
+        if(record.backing!==undefined||(record['back-art']!==undefined&&record['back-art']!=='auto'))throw Error(
           'Reset backing-only overrides before moving or resizing this native structural group.');
         if(member.transformSupported===false)throw Error(member.transformReason||hint);
       }
@@ -915,7 +916,8 @@ const VoxelEditor=(()=>{
         const near=index===0||Math.abs(item.x*16-nativeCamera.x)<1100&&Math.abs(item.y*16-nativeCamera.y)<800;
         if(!near||queried>=160)return {...item,quad:[],handle:null};
         queried++;const found=SharedRoomPreview.voxelTile(item.x,item.y,faceEnum[item.face]??0);
-        return found?{...item,...found}:{...item,quad:[],depthHandle:null,handle:null};
+        return found?{...item,sampleSource:null,sampleSourceAmbiguous:false,...found}:
+          {...item,sampleSource:null,sampleSourceAmbiguous:false,quad:[],depthHandle:null,handle:null};
       });
       refresh();updatePullHandles();updateTransformHandles();overlay();
     } catch(error){status(error.message,true);}

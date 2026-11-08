@@ -138,6 +138,13 @@ static void CapturePolicy(void) {
   assert(!DioramaCameraPolicy_NeedsBgApron(NULL, 0, false, true, 16, 10));
   assert(DioramaCameraPolicy_NeedsBgApron(NULL, 0, false, true, 16, 9));
   assert(!DioramaCameraPolicy_NeedsBgApron(NULL, 0, false, false, 21, 9));
+  assert(DioramaCameraPolicy_VoxelCaptureApron(true,0,true));
+  assert(!DioramaCameraPolicy_VoxelCaptureApron(false,0,true));
+  assert(!DioramaCameraPolicy_VoxelCaptureApron(true,0,false));
+  assert(!DioramaCameraPolicy_VoxelCaptureApron(true,1,true));
+  assert(!DioramaCameraPolicy_VoxelCaptureApron(true,2,true));
+  /* Visual-only guards leave the 16:10 native travel policy unchanged. */
+  assert(!ActRaiser_DioramaNeedsBgApron(NULL,0,false,true));
   DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&s_layers, 1, 1); assert(room);
   room->framing[0].x = 12;
   assert(DioramaCameraPolicy_HasEdits(room, 0));

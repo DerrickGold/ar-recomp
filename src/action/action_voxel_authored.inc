@@ -253,7 +253,7 @@ static bool BuildAuthoredCells(ActionVoxelGeometry *c,const ActionRoomScene *s,
     /* Showing every native face is a semantic no-op, not a request to
      * replace a reviewed curved/profile model with an authored prism.
      * Keep record ownership resolved first so it also resets older ranges. */
-    const unsigned fields=edit->fields & ~((edit->faces==kDioramaVoxelFaceMask_All)?kDioramaVoxelCell_Faces:0u);
+    const unsigned fields=DioramaVoxelCell_EffectiveFields(edit) & ~((edit->faces==kDioramaVoxelFaceMask_All)?kDioramaVoxelCell_Faces:0u);
     if(fields){++count;used[c->authored_at[i]-1]=true;}
   }
   if(!count){memset(c->authored_at,0,(size_t)columns*rows*sizeof(*c->authored_at));return true;}
@@ -286,7 +286,7 @@ static bool BuildAuthoredCells(ActionVoxelGeometry *c,const ActionRoomScene *s,
     c->authored_at[row*columns+col]=0;
     if(!record)continue;
     const DioramaVoxelCell *edit=&terrain->voxel.cells[record-1];
-    const unsigned fields=edit->fields & ~((edit->faces==kDioramaVoxelFaceMask_All)?kDioramaVoxelCell_Faces:0u);
+    const unsigned fields=DioramaVoxelCell_EffectiveFields(edit) & ~((edit->faces==kDioramaVoxelFaceMask_All)?kDioramaVoxelCell_Faces:0u);
     if(!fields)continue;
     if((fields&kDioramaVoxelCell_Transform) && (fields&(kDioramaVoxelCell_Backing|kDioramaVoxelCell_BackArt)) &&
         !(fields&~(kDioramaVoxelCell_Transform|kDioramaVoxelCell_Faces|kDioramaVoxelCell_Backing|kDioramaVoxelCell_BackArt))) {
@@ -337,6 +337,8 @@ static bool BuildAuthoredCells(ActionVoxelGeometry *c,const ActionRoomScene *s,
       a->front_end[q]=edit->fields&kDioramaVoxelCell_FrontEnd?edit->front_end:a->back[q];
       a->back_end[q]=edit->fields&kDioramaVoxelCell_BackEnd?edit->back_end:a->back[q];
       a->priority[q]=!!(m.words[q]&0x2000);
+      a->native_actor_priority[q]=c->native_priority_decks &&
+          (c->native_priority_decks[row*columns+col]&(1u<<q));
       if(!isfinite(a->front[q]) || !isfinite(a->back[q]) || !isfinite(a->front_end[q]) ||
           !isfinite(a->back_end[q]) || a->shape>kDioramaVoxelShape_Curve ||
           !(a->width>=1 && a->width<=64) || !isfinite(a->offset_x)) {ok=false;c->build_error=4;break;}
@@ -362,6 +364,16 @@ static bool BuildAuthoredCells(ActionVoxelGeometry *c,const ActionRoomScene *s,
     }
     const ActionRoomSceneFrameState frame={.brightness=15};
     if(!ActionVoxel_Split(c,a->x,a->y,16,16,16,&frame,source,16,rear,front)){ok=false;break;}
+    /* A native face with a reviewed baked-shadow repair must retain those
+     * repaired pixels when it becomes editor-owned. Explicit face painting
+     * still supplies its own complete artwork and bypasses this fallback. */
+    if(donors[record-1][0]==UINT32_MAX)
+      for(unsigned i=0;i<c->rear_fill_count;++i) {
+        const VoxelRearFill *repair=&c->rear_fills[i];
+        if(!repair->replace_front || repair->x!=a->x || repair->y!=a->y)continue;
+        for(unsigned at=0;at<256;++at)
+          if(repair->colors[at]&0x8000)face_pixels[at]=AuthoredRgb555(front[at]);
+      }
     if(a->native_transform)for(unsigned at=0;at<256;++at)
       if(!a->priority[(at/16/8)*2+(at%16/8)])face_pixels[at]=AuthoredRgb555(front[at]);
     if(!InternAuthoredArt(c,slots,face_pixels,&a->art_id[0])){ok=false;break;}
@@ -378,7 +390,7 @@ static bool BuildAuthoredCells(ActionVoxelGeometry *c,const ActionRoomScene *s,
       const unsigned at=y*16+x,q=(y/8)*2+x/8;
       bool owned_rear=false;
       if((edit->fields&kDioramaVoxelCell_Transform) && !native_identity &&
-          !(edit->fields&(kDioramaVoxelCell_Backing|kDioramaVoxelCell_BackArt))) {
+          !(fields&(kDioramaVoxelCell_Backing|kDioramaVoxelCell_BackArt))) {
         const int mx=a->x+x-c->origin_x,my=a->y+y-c->origin_y;
         const size_t world_at=(size_t)my*c->width+mx;
         const unsigned material=c->front[world_at],kind=material&kVoxelKindMask;

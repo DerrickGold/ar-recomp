@@ -23,7 +23,7 @@ class ActionWebGL2Backend {
     this.uniformBuffer = gl.createBuffer();
     this.vertexCapacity = 0;
     this.indexCapacity = 0;
-    this.uniforms = new Float32Array(176);
+    this.uniforms = new Float32Array(180);
     this.vertexArray = gl.createVertexArray();
     gl.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -93,6 +93,7 @@ void main() {
 
   program(fragmentSource, depth = false) {
     if (depth) {
+      fragmentSource=fragmentSource.replace('#version 300 es','#version 300 es\n#define AR_SCENERY_DEPTH_PASS 1');
       const alpha = this.alphaSource.replace(/layout\(location=2\) flat in/, 'flat in').replaceAll('alpha.options', 'u_alpha_options');
       fragmentSource = fragmentSource.replace(/(?:layout\(location\s*=\s*0\)\s*)?out vec4 o_color;/, 'layout(location=0) out vec4 o_color;').replace(/void\s+main\s*\(/, 'void material_main(');
       fragmentSource += `\nuniform vec4 u_alpha_options;
@@ -110,13 +111,13 @@ precision highp float;
 layout(location=0) in vec2 position;
 layout(location=1) in vec4 color;
 layout(location=2) in vec2 tex_coord;
-${depth ? "layout(location=3) in vec3 depth_info; flat out float v_ordinal;" : ""}
+${depth ? "layout(location=3) in vec3 depth_info; layout(location=4) in vec2 heat_world_xy; flat out float v_ordinal; out vec2 v_heat_world_xy;" : ""}
 uniform vec2 u_view_size;
 out vec4 v_color; out vec2 v_uv;
 void main() {
  gl_Position = vec4(position.x/u_view_size.x*2.0-1.0,
                     1.0-position.y/u_view_size.y*2.0,0.0,1.0);
-${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ordinal=depth_info.z;" : ""}
+${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ordinal=depth_info.z; v_heat_world_xy=heat_world_xy;" : ""}
  v_color=color; v_uv=tex_coord;
 }`], [gl.FRAGMENT_SHADER, fragmentSource]];
     const shaders = [];
@@ -319,10 +320,12 @@ ${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ord
     this.blend(depth?.opaquePass ? 0 : blend);
     gl.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    const stride = depth ? 44 : 32;
+    const stride = depth ? 52 : 32;
     for (const [index, count, offset] of [[0, 2, 0], [1, 4, 8], [2, 2, 24]]) gl.vertexAttribPointer(index, count, gl.FLOAT, false, stride, offset);
-    if (depth) { gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 3, gl.FLOAT, false, stride, 32); }
-    else gl.disableVertexAttribArray(3);
+    if (depth) {
+      gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 3, gl.FLOAT, false, stride, 32);
+      gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 2, gl.FLOAT, false, stride, 44);
+    } else { gl.disableVertexAttribArray(3); gl.disableVertexAttribArray(4); }
     const vb = vertexCount * stride, ib = indexCount * 4;
     if (vb > this.vertexCapacity) {
       this.vertexCapacity = 2 ** Math.ceil(Math.log2(vb));
@@ -427,19 +430,22 @@ ${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ord
     this.depthActive=false;gl.disable(gl.DEPTH_TEST);gl.depthMask(false);
     gl.bindFramebuffer(gl.FRAMEBUFFER,this.currentFramebuffer());this.applyViewport();return ok?1:0;
   }
-  depth_geometry(id,vertices,nv,indices,ni,blend,u,v,filter,depths,clipW,mode) {
+  depth_geometry(id,vertices,nv,indices,ni,blend,u,v,filter,depths,clipW,mode,heatWorld=0) {
     if(!this.depthActive || nv<=0 || ni<=0 || ni%3 || nv>131072 || ni>393216 || mode<0 || mode>3)return 0;
     if(this.depthQueue.length===256 || this.depthVertices+nv>131072 || this.depthIndices+ni>393216)
       if(!this.flushDepth())return 0;
     const source=new Float32Array(this.memory.buffer,vertices,nv*8),z=new Float32Array(this.memory.buffer,depths,nv);
     const w=clipW?new Float32Array(this.memory.buffer,clipW,nv):null;
-    const index=new Int32Array(this.memory.buffer,indices,ni),expanded=new Float32Array(ni*11);
+    const receiver=heatWorld?new Float32Array(this.memory.buffer,heatWorld,nv*2):null;
+    const index=new Int32Array(this.memory.buffer,indices,ni),expanded=new Float32Array(ni*13);
     const sequential=new Uint32Array(ni),ordinal=this.depthIndices/3;
     for(let i=0;i<ni;i++) {
       const at=index[i];if(at<0||at>=nv||!Number.isFinite(z[at])||(w&&!(w[at]>0)))return 0;
-      expanded.set(source.subarray(at*8,at*8+8),i*11);
-      expanded[i*11+8]=mode===3?1:z[at];expanded[i*11+9]=w?w[at]:1;
-      expanded[i*11+10]=ordinal+Math.floor(i/3);sequential[i]=i;
+      if(receiver&&(!Number.isFinite(receiver[at*2])||!Number.isFinite(receiver[at*2+1])))return 0;
+      expanded.set(source.subarray(at*8,at*8+8),i*13);
+      expanded[i*13+8]=mode===3?1:z[at];expanded[i*13+9]=w?w[at]:1;
+      expanded[i*13+10]=ordinal+Math.floor(i/3);
+      expanded[i*13+11]=receiver?receiver[at*2]:0;expanded[i*13+12]=receiver?receiver[at*2+1]:0;sequential[i]=i;
     }
     const draw={id,vertices:expanded,indices:sequential,nv:ni,ni,blend,u,v,filter,mode,
       effectKind:this.effectKind,uniforms:this.uniforms.slice(),illuminationId:this.illuminationId,
@@ -502,8 +508,8 @@ ${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ord
     if (kind >= 0) {
       this.uniforms.fill(0);
       const values = new Float32Array(this.memory.buffer, pointer, count);
-      this.uniforms.set(values.subarray(0,kind === 4 ? 176 : 16));
-      if (kind === 4) this.illuminationId = values[176];
+      this.uniforms.set(values.subarray(0,kind === 4 ? 180 : 16));
+      if (kind === 4) this.illuminationId = values[180];
       if (kind === 5) this.actorTextureIds = Array.from(values.subarray(16,19));
       const gl = this.gl;
       gl.bindBuffer(gl.UNIFORM_BUFFER, this.uniformBuffer);

@@ -493,10 +493,10 @@ render([960,540,1,0,0,0,0]);
 const gradeDraws=draws.filter(d=>d.effect===4);
 assert(gradeDraws.length>0,'palette-only scenery binds the material shader');
 for(const draw of gradeDraws) {
- assert.equal(draw.params.length,177);assert(Math.abs(draw.params[16]-.48)<.0001);
+ assert.equal(draw.params.length,181);assert(Math.abs(draw.params[16]-.48)<.0001);
  assert.equal(draw.params[17],1.25);
  assert(Math.abs(draw.params[20]-0x34/255)<.0001);
- const map=textures.get(draw.params[176]);assert(map&&map.w===1&&map.h===1,'palette-only map is one black texel');
+ const map=textures.get(draw.params[180]);assert(map&&map.w===1&&map.h===1,'palette-only map is one black texel');
  assert.equal(map.pixels[0],0xff000000);
 }
 const gradeAllocations=creates,gradeDrawCount=draws.length;
@@ -518,7 +518,7 @@ const heatDrawCount=draws.length,heatAllocations=creates;
 for(const d of heatDraws) {
  assert.deepEqual([...d.params.slice(36,40)],[230,210,370,310]);
  assert.equal(d.params[52],2);
- const map=textures.get(d.params[176]);assert(map.w===1&&map.h===1,'heat-only room reuses one black texel');
+ const map=textures.get(d.params[180]);assert(map.w===1&&map.h===1,'heat-only room reuses one black texel');
 }
 camera=[160,144];render([960,540,1,0,0,0,0]);
 assert.equal(creates,heatAllocations);assert.equal(draws.length,heatDrawCount);
@@ -628,7 +628,7 @@ console.log('Ground top face: Voxel native subscreen and ordinary Diorama orderi
 configure('[effects]\nversion=1\n[emitter:05:01:0:cloud-bank:1]\nx=128\ny=128\nwidth=512\nheight=192\nanchor=bg2-point\nplacement=background\ntextured=1\nrolling=.8\nvolume=1\nstrands=6\ncolor=f4e7d1\ncolor-end=68748c\n');
 camera=[0,96];render(undefined,1200);
 const volumeDraws=()=>{
-  const lightTargets=new Set(draws.flatMap(d=>d.effect===4?[d.params[176]]:
+  const lightTargets=new Set(draws.flatMap(d=>d.effect===4?[d.params[180]]:
     d.effect===5?[d.params[17],d.params[18]]:[]).filter(id=>id>0));
   return draws.filter(d=>isEffectAtlas(d.id)&&!lightTargets.has(d.target));
 };
@@ -798,7 +798,7 @@ console.log('Wet-surface fields: portable catalogue, landing handles, member sav
 // expose editable handles. Check the shared light maps with real regional art.
 const shippedBlocks=shippedEffects.split(/(?=^\[)/m);
 const properties=block=>Object.fromEntries([...block.matchAll(/^([a-z0-9-]+)=([^\n]*)$/gm)].map(m=>[m[1],m[2]]));
-const sceneryEnergy=()=>draws.filter(d=>d.effect===4).reduce((sum,d)=>sum+energy(d.params[176]),0);
+const sceneryEnergy=()=>draws.filter(d=>d.effect===4).reduce((sum,d)=>sum+energy(d.params[180]),0);
 // Castle darkness and opening/torch light reach real OBJ material attributes,
 // including the non-player role used by enemies, pickups and sprite platforms.
 for(const [map,cx,cy,px,py,dim,exposure] of [

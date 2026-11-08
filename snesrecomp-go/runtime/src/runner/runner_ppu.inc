@@ -1240,6 +1240,24 @@ static bool valid_background_view(const Ppu *ppu,
     return true;
 }
 
+static bool valid_background_guard(const Ppu *ppu,
+        const SrPpuBackgroundGuardRequest *guard,
+        const SrPpuBackgroundGuardBands *bands) {
+    if (!ppu || !PpuBackgroundGuardStorageValid(ppu, guard, bands) ||
+        !guard->source_width || guard->source_width > UINT16_MAX ||
+        !guard->source_height || guard->source_height > UINT16_MAX ||
+        (int64_t)guard->source_x0 + guard->source_width > INT32_MAX ||
+        (int64_t)guard->source_y0 + guard->source_height > INT32_MAX ||
+        guard->screen_x0 < -kPpuSurfaceWidth ||
+        (int64_t)guard->screen_x0 + guard->width > kPpuSurfaceWidth)
+        return false;
+    const int64_t y1 = (int64_t)guard->screen_y0 + guard->height;
+    const int first = -ppu->extraTopCur, last = kPpuYPixels + ppu->extraBottomCur;
+    if (!((guard->screen_y0 >= first - 64 && y1 <= first) ||
+          (guard->screen_y0 >= last && y1 <= last + 64))) return false;
+    return true;
+}
+
 static SrResult run_ppu_scanout_with_background_view(
         SrRunnerHandle *runner,
         const SrPpuScanoutRequest *request,
@@ -1258,6 +1276,39 @@ static SrResult run_ppu_scanout_with_background_view(
         return SR_RESULT_STALE_VIEW;
     if (view != NULL && !valid_background_view(snes->ppu, view))
         return SR_RESULT_INVALID_ARGUMENT;
+    if (request->struct_size >= SR_PPU_SCANOUT_REQUEST_BACKGROUND_GUARDS_SIZE) {
+        const bool have_bands = request->struct_size >= SR_PPU_SCANOUT_REQUEST_BACKGROUND_GUARD_BANDS_SIZE;
+        if (request->background_guard_count > 2 || request->background_guard_reserved ||
+            (!!request->background_guard_count != !!request->background_guards) ||
+            (request->background_guards && (uintptr_t)request->background_guards %
+                _Alignof(SrPpuBackgroundGuardRequest))) return SR_RESULT_INVALID_ARGUMENT;
+        if (have_bands) for (unsigned i = request->background_guard_count; i < 2; ++i)
+            if (request->background_guard_bands[i]) return SR_RESULT_INVALID_ARGUMENT;
+        for (unsigned i = 0; i < request->background_guard_count; ++i) {
+            const SrPpuBackgroundGuardRequest *guard = &request->background_guards[i];
+            const SrPpuBackgroundGuardBands *bands = have_bands ? request->background_guard_bands[i] : NULL;
+            if (!valid_background_guard(snes->ppu, guard, bands)) return SR_RESULT_INVALID_ARGUMENT;
+            if (view) for (unsigned b = 0; b < 4; ++b) {
+                const SrPpuBackgroundGuardBandOutput output = PpuBackgroundGuardOutput(guard, bands, b);
+                const SrPpuBackgroundViewRequest storage = {.pixels = output.pixels,
+                    .pitch_bytes = output.pitch_bytes, .height = guard->height};
+                if (background_view_overlaps(&storage, view->pixels,
+                        view->pitch_bytes * view->height)) return SR_RESULT_INVALID_ARGUMENT;
+            }
+            for (unsigned j = 0; j < i; ++j) {
+                const SrPpuBackgroundGuardRequest *prior = &request->background_guards[j];
+                const SrPpuBackgroundGuardBands *prior_bands = have_bands ? request->background_guard_bands[j] : NULL;
+                if (PpuBackgroundGuardsStorageOverlap(guard, bands, prior, prior_bands))
+                    return SR_RESULT_INVALID_ARGUMENT;
+                if (guard->layer == prior->layer &&
+                    (int64_t)guard->screen_y0 < (int64_t)prior->screen_y0 + prior->height &&
+                    (int64_t)prior->screen_y0 < (int64_t)guard->screen_y0 + guard->height &&
+                    (int64_t)guard->screen_x0 < (int64_t)prior->screen_x0 + prior->width &&
+                    (int64_t)prior->screen_x0 < (int64_t)guard->screen_x0 + guard->width)
+                    return SR_RESULT_INVALID_ARGUMENT;
+            }
+        }
+    }
     memset(out_result, 0, SR_PPU_SCANOUT_RESULT_V2_SIZE);
     out_result->struct_size = SR_PPU_SCANOUT_RESULT_V2_SIZE;
     out_result->lifetime_generation = snes->abiLifetimeGeneration;

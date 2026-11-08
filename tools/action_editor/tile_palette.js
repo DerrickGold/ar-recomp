@@ -414,6 +414,9 @@ function paletteSampleFaceArt(hit) {
   if(own==='none'||(!paletteReadArt(own)&&inheritsSide&&hit.sideArt==='none'))return null;
   const art=paletteReadArt(own)||(inheritsSide?paletteReadArt(hit.sideArt):null);
   if(art)return {art,label:`Picked ${face} face artwork from cell ${hit.x}, ${hit.y}.`};
+  // Coordinate selections can span different native material patches. A scene
+  // eyedropper resolves the actual clicked patch; do not guess one here.
+  if(hit.sampleSourceAmbiguous)return null;
   const donor=paletteSourceArt(hit.sampleSource);
   if(donor)return {art:donor,label:`Picked the ${face} face's native ${donor.size} × ${donor.size} donor at ${hit.sampleSource.x}, ${hit.sampleSource.y}.`};
   const bg=hit.bg??0;if(![0,1].includes(bg)||!room.bg[bg])return null;
