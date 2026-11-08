@@ -3,9 +3,8 @@
 #define main material_main
 #include "actor_material.glsl"
 #undef main
-layout(set=2,binding=4) uniform sampler2D previous_key;
-layout(set=2,binding=5) uniform sampler2D opaque_depth;
-layout(set=2,binding=6) uniform sampler2D opaque_order;
+layout(set=2,binding=4) uniform sampler2D opaque_depth;
+layout(set=2,binding=5) uniform sampler2D opaque_order;
 layout(set=3,binding=1) uniform Alpha { vec4 options; } alpha;
 #include "diorama_alpha_common.glsl"
 void main() {

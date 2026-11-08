@@ -35,7 +35,7 @@ function mockGl() {
     depthFunc:v=>{state.depthFunc=v;},drawBuffers:v=>{state.outputs=v;},
     drawElements:()=>{
       const uniforms=state.program.uniforms;
-      const sampled=['u_texture','u_illumination','u_attributes','u_enemy_light','previous_key','opaque_depth','opaque_order'];
+      const sampled=['u_texture','u_illumination','u_attributes','u_enemy_light','opaque_depth','opaque_order'];
       for(const name of sampled)if(uniforms[name]!==undefined) {
         const texture=state.textures.get(1000+uniforms[name]);
         if(texture)for(const attached of state.fbo?.attachments.values()||[])assert.notEqual(texture,attached,'No framebuffer/texture feedback');
@@ -61,12 +61,13 @@ assert.equal(backend.depth_begin(),1);
 assert.equal(backend.target(0),1);assert.equal(state.fbo,backend.depthCanvas.fbo,'Target zero remains the scoped color target');
 assert.equal(backend.depth_geometry(art,vertices,3,indices,3,1,0,0,-1,depths,clipW,0),1);
 assert.equal(state.draws.length,0,'World geometry waits for the native band boundary');
-/* Native actor is a boundary: all four layers and the tail resolve first. */
+/* Native actor is a boundary: the opaque pass and blended tail flush first. */
 assert.equal(backend.depth_geometry(art,vertices,3,indices,3,1,0,0,-1,depths,0,3),1);
-assert.equal(state.draws.length,11);
-assert.deepEqual(state.draws.slice(0,6).map(d=>d.options[0]),[0,1,1,1,1,2]);
+assert.equal(state.draws.length,3);
+assert.deepEqual(state.draws.slice(0,2).map(d=>d.options[0]),[0,1]);
 assert.equal(state.draws[0].blend,false,'Opaque ordinal MRT never requires floating-point blending');
-assert.ok(state.draws.slice(1,5).every(d=>!d.blend));
+assert.equal(state.draws[1].blend,true,'Tail blends over the opaque result');
+assert.equal(state.draws[1].mask,false,'Tail never writes depth');
 assert.equal(state.draws.at(-1).native,1);assert.equal(state.draws.at(-1).func,'ALWAYS');assert.equal(state.draws.at(-1).mask,true);
 assert.equal(backend.depth_clear(),1);
 assert.equal(backend.depth_geometry(art,vertices,3,indices,3,3,0,0,-1,depths,clipW,1),1);
@@ -95,4 +96,4 @@ if(spawnSync('glslangValidator',['--version'],{encoding:'utf8'}).status===0) {
   } finally {fs.rmSync(directory,{recursive:true,force:true});}
 } else console.log('glslangValidator unavailable: ESSL compilation skipped');
 backend.dispose();
-console.log('WebGL shared-depth CPU contract: native bands, four fractional layers, target ownership, no texture feedback, bounded uploads, abort and ESSL linkage passed');
+console.log('WebGL shared-depth CPU contract: native bands, opaque pass + blended tail, target ownership, no texture feedback, bounded uploads, abort and ESSL linkage passed');

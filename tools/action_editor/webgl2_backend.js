@@ -97,7 +97,7 @@ void main() {
       fragmentSource = fragmentSource.replace(/(?:layout\(location\s*=\s*0\)\s*)?out vec4 o_color;/, 'layout(location=0) out vec4 o_color;').replace(/void\s+main\s*\(/, 'void material_main(');
       fragmentSource += `\nuniform vec4 u_alpha_options;
 uniform bool u_depth_native;
-uniform sampler2D previous_key, opaque_depth, opaque_order;
+uniform sampler2D opaque_depth, opaque_order;
 ${alpha}
 void main() {
   if (u_depth_native) { material_main(); if (o_color.a <= .5/255.0) discard; return; }
@@ -142,7 +142,6 @@ ${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ord
         flip: gl.getUniformLocation(program, 'u_flip_source'),
         alphaOptions: gl.getUniformLocation(program, 'u_alpha_options'),
         depthNative: gl.getUniformLocation(program, 'u_depth_native'),
-        previousKey: gl.getUniformLocation(program, 'previous_key'),
         opaqueDepth: gl.getUniformLocation(program, 'opaque_depth'),
         opaqueOrder: gl.getUniformLocation(program, 'opaque_order'),
         texture: gl.getUniformLocation(program, 'u_texture'),
@@ -284,7 +283,7 @@ ${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ord
     if (depth) {
       gl.uniform4fv(shader.alphaOptions, depth.options);
       gl.uniform1i(shader.depthNative, depth.native ? 1 : 0);
-      for (const [slot, uniform, texture] of [[4, shader.previousKey, depth.previous], [5, shader.opaqueDepth, depth.opaque], [6, shader.opaqueOrder, depth.order]]) {
+      for (const [slot, uniform, texture] of [[5, shader.opaqueDepth, depth.opaque], [6, shader.opaqueOrder, depth.order]]) {
         gl.uniform1i(uniform, slot); gl.activeTexture(gl.TEXTURE0+slot);
         gl.bindTexture(gl.TEXTURE_2D, texture || this.white); gl.bindSampler(slot, this.samplers[0]);
       }
@@ -317,7 +316,7 @@ ${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ord
     // A filter of -1 keeps the texture's own; 0/1 override it for this draw.
     const linear = filter >= 0 ? filter === 1 : !!entry?.filter;
     gl.bindSampler(0, this.samplers[(linear ? 4 : 0) + (u === 2 ? 2 : 0) + (v === 2 ? 1 : 0)]);
-    this.blend(depth?.peel || depth?.opaquePass ? 0 : blend);
+    this.blend(depth?.opaquePass ? 0 : blend);
     gl.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     const stride = depth ? 44 : 32;
@@ -359,8 +358,7 @@ ${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ord
   }
   releaseDepthScratch() {
     const gl=this.gl,s=this.depthScratch;if(!s)return;
-    for(const t of [...s.layers,...s.keys,s.order,s.depth])gl.deleteTexture(t);
-    gl.deleteFramebuffer(s.fbo);this.depthScratch=null;
+    gl.deleteTexture(s.order);this.depthScratch=null;
   }
   ensureDepthTarget() {
     const gl=this.gl,entry=this.textures[this.targetId]||this.depthCanvas;
@@ -379,10 +377,7 @@ ${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ord
     const gl=this.gl;
     if(this.depthScratch?.width===width && this.depthScratch?.height===height)return this.depthScratch;
     this.releaseDepthScratch();
-    this.depthScratch={width,height,fbo:gl.createFramebuffer(),
-      layers:Array.from({length:4},()=>this.depthTexture(width,height,gl.RGBA16F)),
-      keys:Array.from({length:2},()=>this.depthTexture(width,height,gl.RG32F)),
-      order:this.depthTexture(width,height,gl.R32F),depth:this.depthTexture(width,height,gl.DEPTH_COMPONENT32F)};
+    this.depthScratch={width,height,order:this.depthTexture(width,height,gl.R32F)};
     return this.depthScratch;
   }
   depth_begin() {
@@ -483,26 +478,12 @@ ${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ord
       for(const draw of draws)if(!this.replayDepth(draw,{opaquePass:true,options:[0,0,draw.blend===3?2:draw.blend?1:0,draw.mode===0?1:0]}))throw new Error('Opaque draw failed');
       gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,null,0);
       gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-      /* Exactly four nearest fractional layers, followed by the native
-       * painter tail and a back-to-front premultiplied resolve. */
-      for(let layer=0;layer<4;layer++) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER,scratch.fbo);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,scratch.layers[layer],0);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,scratch.keys[layer&1],0);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.TEXTURE_2D,scratch.depth,0);
-        gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
-        if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw new Error('Fractional target is incomplete');
-        gl.disable(gl.SCISSOR_TEST);gl.clearBufferfv(gl.COLOR,0,new Float32Array(4));
-        gl.clearBufferfv(gl.COLOR,1,new Float32Array([-1,0,0,0]));gl.clearDepth(1);gl.clear(gl.DEPTH_BUFFER_BIT);
-        for(const draw of draws)if(!this.replayDepth(draw,{peel:true,options:[1,layer?1:0,draw.blend===3?2:draw.blend?1:0,draw.mode===0?1:0],
-          previous:layer?scratch.keys[(layer-1)&1]:null,opaque:target.worldDepth,order:scratch.order}))throw new Error('Fractional draw failed');
-      }
-      gl.bindFramebuffer(gl.FRAMEBUFFER,target.fbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.TEXTURE_2D,null,0);
+      /* Everything the opaque pass rejected (coverage edges, fades, additive
+       * light) blends in band draw order in front of the opaque depth. */
       gl.disable(gl.DEPTH_TEST);gl.depthMask(false);
-      for(const draw of draws)if(!this.replayDepth(draw,{options:[2,1,draw.blend===3?2:draw.blend?1:0,draw.mode===0?1:0],
-        previous:scratch.keys[1],opaque:target.worldDepth,order:scratch.order}))throw new Error('Fractional tail failed');
-      this.resolveDepthLayers(scratch);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.TEXTURE_2D,null,0);
+      for(const draw of draws)if(!this.replayDepth(draw,{options:[1,0,draw.blend===3?2:draw.blend?1:0,draw.mode===0?1:0],
+        opaque:target.worldDepth,order:scratch.order}))throw new Error('Fractional tail failed');
       ok=true;
     } catch(error) {this.warnings.push(`Voxel shared-depth draw failed: ${error.message}`);}
     finally {
@@ -513,21 +494,6 @@ ${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ord
       gl.disable(gl.DEPTH_TEST);gl.depthMask(false);this.applyViewport();
     }
     return ok;
-  }
-  resolveDepthLayers(scratch) {
-    const gl=this.gl,shader=this.programs[0],w=scratch.width,h=scratch.height;
-    gl.useProgram(shader.program);gl.uniform2f(shader.size,w,h);gl.uniform1i(shader.flip,0);gl.uniform1i(shader.texture,0);
-    gl.viewport(0,0,w,h);gl.disable(gl.SCISSOR_TEST);this.blend(2);
-    const vertices=new Float32Array([0,0,1,1,1,1,0,1,w,0,1,1,1,1,1,1,w,h,1,1,1,1,1,0,0,h,1,1,1,1,0,0]);
-    gl.bindVertexArray(this.vertexArray);gl.bindBuffer(gl.ARRAY_BUFFER,this.vertexBuffer);
-    if(this.vertexCapacity<vertices.byteLength){this.vertexCapacity=256;gl.bufferData(gl.ARRAY_BUFFER,this.vertexCapacity,gl.STREAM_DRAW);}
-    for(const [index,count,offset]of[[0,2,0],[1,4,8],[2,2,24]])gl.vertexAttribPointer(index,count,gl.FLOAT,false,32,offset);
-    gl.disableVertexAttribArray(3);gl.bufferSubData(gl.ARRAY_BUFFER,0,vertices);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.indexBuffer);
-    if(this.indexCapacity<24){this.indexCapacity=32;gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,this.indexCapacity,gl.STREAM_DRAW);}
-    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER,0,new Uint32Array([0,1,2,0,2,3]));
-    gl.activeTexture(gl.TEXTURE0);gl.bindSampler(0,this.samplers[0]);
-    for(let layer=3;layer>=0;layer--){gl.bindTexture(gl.TEXTURE_2D,scratch.layers[layer]);gl.drawElements(gl.TRIANGLES,6,gl.UNSIGNED_INT,0);this.stats.draws++;}
   }
 
   effect(kind, pointer, count) {

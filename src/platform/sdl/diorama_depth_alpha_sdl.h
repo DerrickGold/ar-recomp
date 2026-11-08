@@ -3,14 +3,14 @@
 
 #include "diorama_depth_pass_sdl.h"
 
-/* Production bounded transparency policy. Each uninterrupted world band first
- * writes opaque fragments, then resolves its four nearest fractional layers.
- * Remaining layers use the existing painter order behind those four: overflow
- * never silently drops artwork and needs no GPU readback. Native actors and
- * explicit overlays keep their original ordered slots and pixel depth policy.
- * The opaque depth attachment survives calls. Fractional history does not:
- * ordinary SDL/effect boundaries keep their existing painter relationship.
- * This is not an exact whole-frame transparency solver. */
+/* Production world transparency policy. Each uninterrupted world band first
+ * writes its opaque fragments (opaque blend, or alpha that reaches 1) with
+ * depth. Every other fragment in front of that depth -- coverage edges, fades
+ * and additive light -- is then blended in band draw order. Write-mode alpha is
+ * edge coverage and Read-mode draws are additive, so draw order is the only
+ * order this needs; overlapping partial fragments are not depth sorted.
+ * Native actors and explicit overlays keep their original ordered slots and
+ * pixel depth policy. The opaque depth attachment survives calls. */
 bool ArGpuDioramaDepthPass_PrepareHybrid(ArGpuDioramaDepthPass *, unsigned width,
     unsigned height, unsigned vertices, unsigned indices);
 bool ArGpuDioramaDepthPass_EncodeHybridMaterials(ArGpuDioramaDepthPass *,
