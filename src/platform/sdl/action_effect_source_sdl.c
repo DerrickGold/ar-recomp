@@ -28,12 +28,28 @@ _Static_assert(sizeof(EffectPlaneUniform) == 112 && sizeof(EffectUniform) == 179
                "effect projection std140");
 _Static_assert(kDioramaBgMaxValidSpans == kDioramaSkyboxSourceBands, "sky band ABI");
 _Static_assert(sizeof(ActionEffectSourceLightData) == 35440, "moon transport ABI");
+_Static_assert(kActionSourceMaxLightPoints == 2193, "action_effect_moon LightJob.points and kMoonPartialBase");
 _Static_assert(kActionShadowWidth == 400 && kActionShadowHeight == 176, "GPU shadow coverage grid");
+/* A finished moon result and every input that produced it (see Draw). */
+typedef struct ArGpuMoonResult {
+  SDL_GPUBuffer *values; /* kActionSourceMaxLightPoints floats; cycled per save. */
+  uint64_t epoch, used;  /* Valid only while epoch matches the source's. */
+  SDL_GPUBuffer *motion;
+  int origin_x, origin_y;
+  unsigned occluder_count;
+  EffectUniform uniform;
+  ActionEffectSourceLightData data;
+  ActionMoonlightOccluder occluders[kActionMoonlightMaxOccluders];
+} ArGpuMoonResult;
 #define BLOBS(name)                                                                                \
   {k##name##MSL, k##name##MSLSize, k##name##SPV, k##name##SPVSize, k##name##DXIL, k##name##DXILSize}
 
 enum {
   kPrimitiveBytes = kActionSourceMaximumPrimitives * sizeof(ActionEffectSourcePrimitive),
+  /* moon_work: header (16) + receiver samples + two vec4 partials per
+   * stage-0 point workgroup (kMoonPartialBase in action_effect_moon). */
+  kMoonPointGroups = (kActionSourceMaxLightPoints + 63) / 64,
+  kMoonWorkBytes = (16 + kActionSourceMaxLightPoints + 2 * kMoonPointGroups) * 16,
   kOccluderBytes = (kActionMoonlightMaxOccluders + 1) * 16,
   kOutputBytes = kActionSourceMaximumPrimitives * kActionSourceVerticesPerPrimitive * 32,
   kFrameUploadBytes = kPrimitiveBytes + kOccluderBytes +
@@ -46,7 +62,8 @@ enum {
   kScratchMoonWork = 1u << 2,
   kScratchMoonMask = 1u << 3,
   kScratchMoonLight = 1u << 4,
-  kScratchSkyVertices = 1u << 5
+  kScratchSkyVertices = 1u << 5,
+  kMoonResultEntries = 8
 };
 _Static_assert(kUploadBytes >= kActionMaskAtlasWidth*kActionMaskAtlasHeight*sizeof(uint32_t),
                "effect upload buffer holds the startup mask atlas");
@@ -84,6 +101,7 @@ static void CancelCommands(ArGpuEffectSource *p) {
   p->pending_draws = 0;
   p->batch_failed = true;
   InvalidateInputs(p);
+  ++p->moon_epoch; /* Saves recorded in the cancelled commands never ran. */
 }
 
 static bool SubmitCommands(ArGpuEffectSource *p) {
@@ -173,6 +191,10 @@ void ArGpuEffectSource_Destroy(ArGpuEffectSource *p) {
   SDL_ReleaseGPUSampler(p->device, p->nearest_sampler);
   SDL_ReleaseGPUSampler(p->device, p->wrap_sampler);
   SDL_ReleaseGPUSampler(p->device, p->wrap_nearest_sampler);
+  if (p->moon_results)
+    for (unsigned i = 0; i < kMoonResultEntries; ++i)
+      SDL_ReleaseGPUBuffer(p->device, p->moon_results[i].values);
+  SDL_free(p->moon_results);
   *p = (ArGpuEffectSource){0};
 }
 
@@ -254,12 +276,18 @@ bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
   buffer.usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
   buffer.size = (400 * 176 + 4) * 4;
   p->coverage = SDL_CreateGPUBuffer(gpu, &buffer);
-  buffer.size = (16 + kActionSourceMaxLightPoints) * 16;
+  buffer.size = kMoonWorkBytes;
   p->moon_work = SDL_CreateGPUBuffer(gpu, &buffer);
   buffer.size = 800 * 224 * 4;
   p->moon_mask = SDL_CreateGPUBuffer(gpu, &buffer);
   buffer.size = kActionSourceMaxLightJobs * kActionSourceMaxLightPoints * 4;
   p->moon_light = SDL_CreateGPUBuffer(gpu, &buffer);
+  p->moon_results = SDL_calloc(kMoonResultEntries, sizeof(*p->moon_results));
+  p->moon_epoch = 1;
+  buffer.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+  buffer.size = kActionSourceMaxLightPoints * 4;
+  for (unsigned i = 0; p->moon_results && i < kMoonResultEntries; ++i)
+    if (!(p->moon_results[i].values = SDL_CreateGPUBuffer(gpu, &buffer))) ok = false;
   buffer.usage =
       SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
   buffer.size = kOutputBytes;
@@ -311,7 +339,7 @@ bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
   } else ok=false;
   if (ok && p->wrap_sampler && p->wrap_nearest_sampler && p->coverage && p->vertices && p->sky_vertices &&
       p->upload && p->sky_upload && p->sampler && p->nearest_sampler && p->moon_work &&
-      p->moon_mask && p->moon_light)
+      p->moon_mask && p->moon_light && p->moon_results)
     return true;
   ArGpuEffectSource_Destroy(p);
   return false;
@@ -415,6 +443,96 @@ static unsigned PackedVertexCount(unsigned kind) {
     case kActionSourceStar: return 12;
     default: return kActionSourceVerticesPerPrimitive;
   }
+}
+
+/* Bloodpool draws its moon-ray job for several receiver categories and sky
+ * bands of one presentation; the copies differ only in uniforms the moon
+ * chain never reads. Its result is a pure function of the job, occluders,
+ * motion buffer and the uniform fields it reads (stage 1 sums integer
+ * atomics; the bounds fold is min/max), and each job clears or writes its
+ * mask and work scratch before reading them. So a finished result is kept in
+ * a small cycled buffer and an identical later job copies it instead of
+ * running four dispatches. The motion buffer is keyed by identity only: the
+ * owner calls ArGpuEffectSource_ForgetMoonResults before rewriting it. */
+static bool MappingAnchored(float flags) {
+  return flags >= 0 && flags < 4294967296.0f && ((uint32_t)flags & 2u);
+}
+static float PlaneSky(const EffectUniform *u, float plane) {
+  return plane >= 0 && plane < 9 && floorf(plane) == plane ? u->planes[(int)plane].sky[2] : -1;
+}
+/* sky_meta.y (the active band) reaches the chain only through an unanchored
+ * sky-plane mapping (sky.z == 1; world-anchored sky.z == 2 projects as a
+ * plane), a receiver clip on any sky plane (used by kinds 1 and 2) or an
+ * occluder bound on a sky plane. Unknown planes count as reads. */
+static bool MappingReadsActiveBand(float sky, float flags) {
+  return sky != 0 && sky != 2 && !(sky == 1 && MappingAnchored(flags));
+}
+static bool MoonReadsActiveSkyBand(const EffectUniform *u, const ActionEffectSourceLightData *d,
+                                   unsigned occluders) {
+  const float receiver = PlaneSky(u, d->receiver[2]), kind = d->meta[1];
+  return MappingReadsActiveBand(PlaneSky(u, d->light[2]), d->light[3]) ||
+      MappingReadsActiveBand(receiver, d->receiver[3]) ||
+      (receiver != 0 && (kind == 1 || kind == 2)) || (occluders && u->planes[1].sky[2] != 0);
+}
+/* action_effect_moon reads matrix, viewport, capture, geometry.x, clock.xy,
+ * follow, planes, sky state and moon.y; geometry.yzw (target size, packet
+ * primitive count), clock.zw (shadow count, stage) and moon.x (output
+ * region) never change the values of a result. */
+static EffectUniform MoonUniformKey(const EffectUniform *u, const ActionEffectSourceLightData *d,
+                                    unsigned occluders) {
+  EffectUniform key = *u;
+  key.geometry[1] = key.geometry[2] = key.geometry[3] = 0;
+  key.clock[2] = key.clock[3] = 0;
+  key.moon[0] = 0;
+  if (!MoonReadsActiveSkyBand(u, d, occluders)) key.sky_meta[1] = 0;
+  return key;
+}
+
+static const ActionMoonlightOccluder *MoonOccluders(const ActionEffectSourceLightJob *job,
+                                                    unsigned count) {
+  return count ? job->occlusion->rectangles : NULL;
+}
+
+static int FindMoonResult(const ArGpuEffectSource *p, SDL_GPUBuffer *motion, int ox, int oy,
+    const EffectUniform *key, const ActionEffectSourceLightJob *job, unsigned occluders) {
+  for (unsigned e = 0; e < kMoonResultEntries; ++e) {
+    const ArGpuMoonResult *r = &p->moon_results[e];
+    if (r->epoch == p->moon_epoch && r->motion == motion && r->origin_x == ox &&
+        r->origin_y == oy && r->occluder_count == occluders &&
+        !memcmp(&r->uniform, key, sizeof(*key)) && !memcmp(&r->data, &job->data, sizeof(job->data)) &&
+        (!occluders || !memcmp(r->occluders, MoonOccluders(job, occluders),
+                               occluders * sizeof(*r->occluders))))
+      return (int)e;
+  }
+  return -1;
+}
+
+/* A stale entry, else the least recently used one this draw has not touched. */
+static ArGpuMoonResult *MoonResultVictim(ArGpuEffectSource *p, uint64_t draw_start) {
+  ArGpuMoonResult *victim = NULL;
+  for (unsigned e = 0; e < kMoonResultEntries; ++e) {
+    ArGpuMoonResult *r = &p->moon_results[e];
+    if (r->epoch != p->moon_epoch) return r;
+    if (r->used <= draw_start && (!victim || r->used < victim->used)) victim = r;
+  }
+  return victim;
+}
+
+static void RecordMoonResult(ArGpuEffectSource *p, ArGpuMoonResult *r, SDL_GPUBuffer *motion,
+    int ox, int oy, const EffectUniform *u, const ActionEffectSourceLightJob *job,
+    unsigned occluders) {
+  r->epoch = p->moon_epoch;
+  r->used = ++p->moon_clock;
+  r->motion = motion;
+  r->origin_x = ox; r->origin_y = oy;
+  r->occluder_count = occluders;
+  r->uniform = MoonUniformKey(u, &job->data, occluders);
+  r->data = job->data;
+  if (occluders) memcpy(r->occluders, MoonOccluders(job, occluders), occluders * sizeof(*r->occluders));
+}
+
+void ArGpuEffectSource_ForgetMoonResults(ArGpuEffectSource *p) {
+  if (p) ++p->moon_epoch;
 }
 
 static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *motion,
@@ -606,12 +724,49 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
       SDL_DispatchGPUCompute(compute, stage ? shadow_count : (400 * 176 + 63) / 64, 1, 1);
       SDL_EndGPUComputePass(compute);
     }
+  /* Retained moon results are copied in first, the rest computed, then the
+   * new ones retained: at most two copy passes per draw with lights. */
+  int reuse[kActionSourceMaxLightJobs];
+  bool any_reuse = false, any_computed = false;
+  const uint64_t draw_start = p->moon_clock;
+  for (unsigned i = 0; i < batch->light_count; ++i) {
+    const ArGpuEffectLight *light = &packet->lights[i];
+    reuse[i] = -1;
+    if (!light->point_count) continue;
+    u.moon[1] = light->occluder_count;
+    const EffectUniform key = MoonUniformKey(&u, &batch->lights[i].data, light->occluder_count);
+    reuse[i] = FindMoonResult(p, motion, ox, oy, &key, &batch->lights[i], light->occluder_count);
+    if (reuse[i] < 0) { any_computed = true; continue; }
+    any_reuse = true;
+    p->moon_results[reuse[i]].used = ++p->moon_clock;
+    ++p->moon_reuses;
+  }
+  if (any_reuse) {
+    SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+    if (!copy) goto failed;
+    for (unsigned i = 0; i < batch->light_count; ++i) {
+      if (reuse[i] < 0) continue;
+      const SDL_GPUBufferLocation from = {.buffer = p->moon_results[reuse[i]].values};
+      const SDL_GPUBufferLocation to = {.buffer = p->moon_light,
+                                        .offset = i * kActionSourceMaxLightPoints * 4};
+      SDL_CopyGPUBufferToBuffer(copy, &from, &to, packet->lights[i].point_count * 4,
+                                CycleScratch(p, kScratchMoonLight));
+    }
+    SDL_EndGPUCopyPass(copy);
+  }
   for (unsigned i = 0; i < batch->light_count; ++i) {
     const ArGpuEffectLight *light = &packet->lights[i];
     u.moon[0] = i*kActionSourceMaxLightPoints; u.moon[1] = light->occluder_count;
     const unsigned count = light->point_count;
-    if (!count) continue;
-    for (unsigned stage=0; stage<3; ++stage) {
+    if (!count || reuse[i] >= 0) continue;
+    /* 0 clears the mask and projects receivers across workgroups, 3 maps the
+     * light frame and folds their bounds, 1 rasterizes occluders, 2 lights.
+     * Stage 0 used to project every receiver in one workgroup, a ~1.4 ms
+     * serial chain per moon-ray light on the frame's critical path. */
+    static const unsigned kMoonStages[] = {0, 3, 1, 2};
+    const unsigned point_groups = (count + 63) / 64;
+    for (unsigned order = 0; order < SDL_arraysize(kMoonStages); ++order) {
+      const unsigned stage = kMoonStages[order];
       if (stage==1 && !light->occluder_count) continue;
       u.clock[3] = stage;
       SDL_PushGPUComputeUniformData(cmd,0,&u,sizeof(u));
@@ -627,10 +782,28 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
       SDL_GPUBuffer *inputs[] = {light->data, motion, light->occluder_count ?
           packet->lights[light->occluder_index].occluders : packet->occluders};
       SDL_BindGPUComputeStorageBuffers(pass,0,inputs,3);
-      const unsigned groups = stage==0 ? (light->kind==3 ? 1 : (800*224+63)/64) :
-          stage==1 ? light->occluder_count : (count+63)/64;
+      const unsigned mask_groups = light->kind==3 ? 0 : (800*224+63)/64;
+      const unsigned groups = stage==0 ? SDL_max(mask_groups, point_groups) : stage==3 ? 1 :
+          stage==1 ? light->occluder_count : point_groups;
       SDL_DispatchGPUCompute(pass,groups,1,1);SDL_EndGPUComputePass(pass);
     }
+  }
+  if (any_computed) {
+    SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+    if (!copy) goto failed;
+    for (unsigned i = 0; i < batch->light_count; ++i) {
+      const ArGpuEffectLight *light = &packet->lights[i];
+      if (!light->point_count || reuse[i] >= 0) continue;
+      ArGpuMoonResult *r = MoonResultVictim(p, draw_start);
+      if (!r) break;
+      const SDL_GPUBufferLocation from = {.buffer = p->moon_light,
+                                          .offset = i * kActionSourceMaxLightPoints * 4};
+      const SDL_GPUBufferLocation to = {.buffer = r->values};
+      SDL_CopyGPUBufferToBuffer(copy, &from, &to, light->point_count * 4, true);
+      u.moon[1] = light->occluder_count;
+      RecordMoonResult(p, r, motion, ox, oy, &u, &batch->lights[i], light->occluder_count);
+    }
+    SDL_EndGPUCopyPass(copy);
   }
   /* Shadow/light preparation uses clock.w as its stage. Projection reuses
    * that slot for the sky-source destination; clock.z remains shadow count. */

@@ -35,9 +35,16 @@ typedef struct ArGpuEffectSource {
   uint64_t draws, submissions;
   unsigned pending_draws, largest_batch;
   uint32_t command_writes;
+  /* Recent finished moon results; an identical light job copies one instead
+   * of recomputing it. Valid while epoch matches moon_epoch. */
+  struct ArGpuMoonResult *moon_results;
+  uint64_t moon_epoch, moon_clock, moon_reuses;
 } ArGpuEffectSource;
 
 bool ArGpuEffectSource_Init(ArGpuEffectSource *, SDL_GPUDevice *);
+/* Call before anything rewrites a motion buffer passed to Draw: retained moon
+ * results are keyed by the buffer's identity, not its contents. */
+void ArGpuEffectSource_ForgetMoonResults(ArGpuEffectSource *);
 void ArGpuEffectSource_Destroy(ArGpuEffectSource *);
 /* Owner-thread scope containing only this source's draws. End submits before
  * any SDL draw, target change, resource mutation or readback. No nested scopes.

@@ -12,6 +12,24 @@ static ArRenderVertex2D s_voxel_vertices[kVoxelMaxVisibleFaces * 4];
 static float s_voxel_depths[kVoxelMaxVisibleFaces * 4];
 static float s_voxel_clip_w[kVoxelMaxVisibleFaces * 4];
 static int32_t s_voxel_indices[kVoxelMaxVisibleFaces * 6];
+/* Faces are ordered far-to-near through a compact key array. Sorting the
+ * 168-byte faces themselves moved most of their bytes on every swap. */
+typedef struct VoxelSideKey { float distance; uint16_t index; } VoxelSideKey;
+_Static_assert(kVoxelMaxVisibleFaces <= 65536, "face keys use 16-bit indices");
+static VoxelSideKey s_voxel_keys[kVoxelMaxVisibleFaces];
+static uint16_t s_voxel_order[kVoxelMaxVisibleFaces];
+
+/* Every quad batch uses the same {0,1,2,0,2,3} pattern; build it once. */
+static const int32_t *VoxelQuadIndices(void) {
+  static bool ready;
+  if (!ready) {
+    static const int tri[] = {0, 1, 2, 0, 2, 3};
+    for (int i = 0; i < kVoxelMaxVisibleFaces; ++i)
+      for (int j = 0; j < 6; ++j) s_voxel_indices[i * 6 + j] = i * 4 + tri[j];
+    ready = true;
+  }
+  return s_voxel_indices;
+}
 
 /* Curve endpoints are native pixel boundaries, not necessarily cell borders.
  * Front faces and contours must include both knots before interpolation. */
@@ -33,9 +51,18 @@ static unsigned VoxelTrunkCuts(const VoxelTrunkCurve *curve,float top,float bott
   }
   return count;
 }
-static int VoxelSideCompare(const void *a, const void *b) {
-  float x = ((const VoxelSide *)a)->distance, y = ((const VoxelSide *)b)->distance;
-  return x > y ? -1 : x < y ? 1 : 0;
+static int VoxelSideKeyCompare(const void *a, const void *b) {
+  const VoxelSideKey *x = a, *y = b;
+  if (x->distance != y->distance) return x->distance > y->distance ? -1 : 1;
+  return (x->index > y->index) - (x->index < y->index);
+}
+/* Fills s_voxel_order with s_voxel_sides[0..count) indices, farthest first.
+ * Equal distances keep build order, so the result is deterministic. */
+static void SortVoxelSides(unsigned count) {
+  for (unsigned i = 0; i < count; ++i)
+    s_voxel_keys[i] = (VoxelSideKey){s_voxel_sides[i].distance, (uint16_t)i};
+  qsort(s_voxel_keys, count, sizeof(*s_voxel_keys), VoxelSideKeyCompare);
+  for (unsigned i = 0; i < count; ++i) s_voxel_order[i] = s_voxel_keys[i].index;
 }
 static bool VoxelProjectWithW(const DioramaViewGeometry *g, float x, float y, float z,
                           ArRenderPointF *point, float *distance, float *depth,float *clip_w) {
@@ -96,6 +123,18 @@ static void PrepareVoxelRearMesh(const DioramaCapture *capture,const DioramaView
   TriangulateGrid(nx-1,ny-1,mesh->indices,&mesh->index_count);
   ShadeDioramaVertices(layer,mesh->vertices,mesh->vertex_count);
 }
+static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *g,
+                             const DioramaLayerDraw *layer, int count, float blur);
+/* A full face buffer submits its batch and continues instead of failing the
+ * layer. Distance order holds within each batch; only an overflowing view
+ * (already a failure before) splits across batches. */
+static bool ReserveVoxelSide(ArRenderDevice *device, const DioramaViewGeometry *g,
+                             const DioramaLayerDraw *layer, int *count, float blur) {
+  if (*count < kVoxelMaxVisibleFaces) return true;
+  if (!SubmitVoxelSides(device, g, layer, *count, blur)) return false;
+  *count = 0;
+  return true;
+}
 static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capture,
                                const DioramaViewGeometry *g, const DioramaLayerDraw *layer,
                                float near_depth, float far_depth, VoxelEdgePass pass) {
@@ -111,6 +150,9 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
   const bool high_priority =
       pass != kVoxelEdgeNative || layer->description->plane == kDioramaPlane_Bg1Hi;
   const float rear_offset = rear ? ActionVoxel_RearFaceDepth(layer->voxel_geometry) : 0;
+  const float blur =
+      (rear || rear_grass) && DofBlurEnabled(device, g->options)
+          ? DofRadiusForLayer(.5f - (rear_grass ? depth : rear_offset)) : 0;
   int count = 0;
   /* The iron gate is a two-sided grating, not an extrusion of opaque pixels.
    * Repeat its native transparent strip across the doorway and join the rear
@@ -151,7 +193,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
                                              layer->shade.b * shade, 1};
         }
         if (!ok) continue;
-        if (count == kVoxelMaxVisibleFaces) return false;
+        if (!ReserveVoxelSide(device, g, layer, &count, blur)) return false;
         s_voxel_sides[count++] = face;
       }
     }
@@ -204,7 +246,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
               face.v[j].color=(ArRenderColorF){layer->shade.r*shade,layer->shade.g*shade,layer->shade.b*shade,1};
             }
             if (!ok) continue;
-            if (count == kVoxelMaxVisibleFaces) return false;
+            if (!ReserveVoxelSide(device, g, layer, &count, blur)) return false;
             s_voxel_sides[count++]=face;
           }
         }
@@ -245,7 +287,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
                                              layer->shade.b*shade,1};
         }
         if (!ok) continue;
-        if (count == kVoxelMaxVisibleFaces) return false;
+        if (!ReserveVoxelSide(device, g, layer, &count, blur)) return false;
         s_voxel_sides[count++] = face;
       }
     }
@@ -277,7 +319,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
                                            layer->shade.b * shade, 1};
       }
       if (!ok) continue;
-      if (count == kVoxelMaxVisibleFaces) return false;
+      if (!ReserveVoxelSide(device, g, layer, &count, blur)) return false;
       s_voxel_sides[count++] = face;
     }
   }
@@ -453,17 +495,19 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       orientation += (c.x-a.x)*(d.y-a.y)-(c.y-a.y)*(d.x-a.x);
     }
     if (orientation >= -.00001f) continue;
-    if (count == kVoxelMaxVisibleFaces) return false;
+    if (!ReserveVoxelSide(device, g, layer, &count, blur)) return false;
     s_voxel_sides[count++] = next;
     }
   }
+  return SubmitVoxelSides(device, g, layer, count, blur);
+}
+/* Sort and submit the accumulated faces, farthest first. */
+static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *g,
+                             const DioramaLayerDraw *layer, int count, float blur) {
   if (!count) return true;
-  qsort(s_voxel_sides, count, sizeof(s_voxel_sides[0]), VoxelSideCompare);
-  const int tri[] = {0, 1, 2, 0, 2, 3};
+  SortVoxelSides(count);
+  const int32_t *quad_indices = VoxelQuadIndices();
   DioramaSceneryLightEffectParams light = layer->lighting;
-  const float blur =
-      (rear || rear_grass) && DofBlurEnabled(device, g->options)
-          ? DofRadiusForLayer(.5f - (rear_grass ? depth : rear_offset)) : 0;
   light.mode = blur > 0 ? 1 : 0;
   light.blur_radius = blur;
   light.attributes_uv = (ArRenderRectF){0, 0, 1, 1};
@@ -485,22 +529,21 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
   /* Keep distance order on painter backends as well as depth backends.
    * Only adjacent faces with the same native source share a submission. */
   for (int first = 0; first < count && ok;) {
-    const bool rear_source = s_voxel_sides[first].rear_source;
+    const bool rear_source = s_voxel_sides[s_voxel_order[first]].rear_source;
     int end = first + 1;
-    while (end < count && s_voxel_sides[end].rear_source == rear_source) ++end;
+    while (end < count && s_voxel_sides[s_voxel_order[end]].rear_source == rear_source) ++end;
     const int packed = end - first;
     for (int i = 0; i < packed; ++i) {
-      const VoxelSide *face = &s_voxel_sides[first+i];
+      const VoxelSide *face = &s_voxel_sides[s_voxel_order[first+i]];
       memcpy(s_voxel_vertices+i*4,face->v,sizeof(face->v));
       if(g->depth_sink) {
         memcpy(s_voxel_depths+i*4,face->depths,sizeof(face->depths));
         memcpy(s_voxel_clip_w+i*4,face->clip_w,sizeof(face->clip_w));
       }
-      for (int j=0;j<6;++j)s_voxel_indices[i*6+j]=i*4+tri[j];
     }
     ok = RenderShadedDioramaDepthGeometryWithW(device,
         rear_source ? layer->voxel_rear_texture : layer->texture,
-        s_voxel_vertices,s_voxel_depths,g->depth_sink?s_voxel_clip_w:NULL,packed*4,s_voxel_indices,packed*6,
+        s_voxel_vertices,s_voxel_depths,g->depth_sink?s_voxel_clip_w:NULL,packed*4,quad_indices,packed*6,
         layer->blend,NULL,(ArRenderRectF){0,0,1,1},&light,g->depth_sink,layer->description->plane,false);
     first = end;
   }
@@ -598,12 +641,10 @@ static bool DrawVoxelWaterSurfaces(ArRenderDevice *device, const DioramaCapture 
     if (!ok) continue;
     memcpy(s_voxel_vertices+count*4,face.v,sizeof(face.v));
     if(g->depth_sink)memcpy(s_voxel_depths+count*4,face.depths,sizeof(face.depths));
-    const int tri[] = {0,1,2,0,2,3};
-    for (int j = 0; j < 6; ++j) s_voxel_indices[count*6+j] = count*4+tri[j];
     ++count;
   }
   return !count || RenderShadedDioramaDepthGeometry(device,layer->texture,s_voxel_vertices,s_voxel_depths,count*4,
-      s_voxel_indices,count*6,layer->blend,NULL,(ArRenderRectF){0,0,1,1},&layer->lighting,
+      VoxelQuadIndices(),count*6,layer->blend,NULL,(ArRenderRectF){0,0,1,1},&layer->lighting,
       g->depth_sink,layer->description->plane,false);
 }
 
@@ -703,7 +744,7 @@ static unsigned BuildVoxelWaterfallFaces(const DioramaCapture *capture,const Dio
     }
   }
   if(rear) {
-    qsort(s_voxel_sides,count,sizeof(*s_voxel_sides),VoxelSideCompare);
+    SortVoxelSides(count);
     return count;
   }
   nx=VoxelUniqueCuts(xs,nx);ny=VoxelUniqueCuts(ys,ny);
@@ -715,7 +756,7 @@ static unsigned BuildVoxelWaterfallFaces(const DioramaCapture *capture,const Dio
     if(VoxelSourceQuad(g,layer,xs[x],ys[y],xs[x+1],ys[y+1],depth,depth,false,false,0,0,1,
         &s_voxel_sides[count]))++count;
   }
-  qsort(s_voxel_sides,count,sizeof(*s_voxel_sides),VoxelSideCompare);
+  SortVoxelSides(count);
   return count;
 }
 
@@ -816,6 +857,6 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
     if(VoxelSourceQuad(g,layer,x0,y0,x1,y1,depth,depth,false,false,0,0,1,
         &s_voxel_sides[count]))++count;
   }
-  qsort(s_voxel_sides,count,sizeof(*s_voxel_sides),VoxelSideCompare);
+  SortVoxelSides(count);
   return count;
 }

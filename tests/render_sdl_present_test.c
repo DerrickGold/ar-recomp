@@ -84,7 +84,101 @@ static void TestBlit(SDL_GPUCommandBuffer *commands, const SDL_GPUBlitInfo *blit
 #define SDL_GetTicksNS TestTicks
 #include "../src/platform/sdl/render_sdl.c"
 
+typedef struct ExternalProbe {
+  ArRenderDevice *device;
+  bool pending, fail, wrong_owner, certified, recurse;
+  unsigned calls;
+} ExternalProbe;
+
+static bool ProbeExternal(void *userdata) {
+  ExternalProbe *probe=userdata;
+  ++probe->calls;
+  probe->certified=false;
+  if(probe->pending) {
+    probe->pending=false;
+    probe->certified=ArSdlRenderBackend_CertifyExternalSdlIdle(probe->device,
+        probe->wrong_owner ? (void *)&s_source : userdata);
+    if(probe->recurse)assert(!ArSdlRenderBackend_SubmitPending(probe->device));
+  }
+  return !probe->fail;
+}
+
+static void CheckPending(ArRenderDevice *device,bool ok,unsigned flushed,unsigned producers) {
+  memset(&s_test,0,sizeof(s_test));
+  assert(ArSdlRenderBackend_SubmitPending(device)==ok);
+  assert(s_test.flushed==flushed && s_test.producers==producers);
+  assert(!s_test.acquired && !s_test.submitted);
+  const ArSdlRenderBackend *backend=device->context;
+  assert(!backend->external_flushing && !backend->external_sdl_idle);
+}
+
+static void CheckExternalSubmission(void) {
+  ArSdlRenderBackend backend={.renderer=(SDL_Renderer *)&s_renderer,
+      .gpu_device=(SDL_GPUDevice *)&s_device,.output_window=(SDL_Window *)&s_window,
+      .output_target=(SDL_Texture *)&s_target,.output_width=640,.output_height=480};
+  ArRenderDevice device={0};
+  assert(ArRenderDevice_Init(&device,&kSdlRenderOps,&backend,(ArRenderCapabilities){0}));
+  ExternalProbe probe={.device=&device};
+  assert(!ArSdlRenderBackend_CertifyExternalSdlIdle(&device,&probe));
+  CheckPending(&device,true,1,1); /* No owner cannot certify an empty recorder. */
+  assert(ArSdlRenderBackend_SetExternalFlush(&device,ProbeExternal,&probe));
+  CheckPending(&device,true,1,1); /* Empty owner still needs normal submission. */
+  probe.pending=true;
+  CheckPending(&device,true,1,0);
+  assert(probe.certified);
+  CheckPending(&device,true,1,1); /* The certificate expires in that same call. */
+
+  probe.pending=probe.wrong_owner=true;
+  CheckPending(&device,true,1,1);
+  assert(!probe.certified);
+  probe.wrong_owner=false;
+  probe.pending=probe.fail=true;
+  CheckPending(&device,false,0,0); /* A failed callback cannot publish proof. */
+  assert(probe.certified);
+  probe.fail=false;
+  CheckPending(&device,true,1,1);
+  probe.pending=probe.recurse=true;
+  CheckPending(&device,true,1,1); /* Ignored recursion cannot retain a certificate. */
+  assert(probe.certified);
+  probe.recurse=false;
+
+  probe.pending=true;
+  memset(&s_test,0,sizeof(s_test));s_test.fail_flush=true;
+  assert(!ArSdlRenderBackend_SubmitPending(&device));
+  assert(probe.certified && s_test.flushed==1 && !s_test.producers);
+  assert(!backend.external_sdl_idle);
+  CheckPending(&device,true,1,1); /* SDL's flush failure is never bypassed. */
+
+  probe.pending=true;
+  assert(ProbeExternal(&probe)); /* Owner-internal capacity/clear drain. */
+  assert(!probe.certified);
+  CheckPending(&device,true,1,1);
+  probe.pending=true;
+  assert(FlushExternal(&backend)); /* Ordinary draw/target boundary discards proof. */
+  assert(probe.certified && !backend.external_sdl_idle);
+  CheckPending(&device,true,1,1);
+
+  probe.pending=true;
+  assert(ArSdlRenderBackend_SetExternalFlush(&device,NULL,&probe));
+  assert(probe.certified && !backend.external_sdl_idle);
+  CheckPending(&device,true,1,1); /* Detached proof must not reach the next caller. */
+  assert(ArSdlRenderBackend_SetExternalFlush(&device,ProbeExternal,&probe));
+  probe.pending=true;
+  memset(&s_test,0,sizeof(s_test));
+  assert(ArRenderDevice_Present(&device)); /* Final window present is never elided. */
+  assert(s_test.flushed==1 && s_test.producers==1 && s_test.acquired==1 && s_test.submitted==1);
+  assert(probe.certified && !backend.external_sdl_idle);
+
+  backend.output_window=NULL;
+  probe.pending=true;
+  CheckPending(&device,true,1,0); /* Legacy Flush-only contract is unchanged. */
+  assert(!probe.certified);
+  assert(ArSdlRenderBackend_SetExternalFlush(&device,NULL,&probe));
+  memset(&s_test,0,sizeof(s_test));s_clock=0;
+}
+
 int main(void) {
+  CheckExternalSubmission();
   ArSdlRenderBackend backend = {
     .renderer = (SDL_Renderer *)&s_renderer, .gpu_device = (SDL_GPUDevice *)&s_device,
     .output_window = (SDL_Window *)&s_window, .output_target = (SDL_Texture *)&s_target,

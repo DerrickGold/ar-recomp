@@ -31,20 +31,58 @@ ActionVoxelSettings ActionVoxel_SettingsForRoom(unsigned group, unsigned room) {
    * artwork behind the actors without inventing a floor or recessing them. */
   if (group==7 && room==8)
     return (ActionVoxelSettings){.depth=.20f,.play_recess=0};
-  if (ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_NorthwallSnow ||
-      (group==7 && (room==1 || room==7)))
+  const ActionVoxelProfile profile=ActionVoxel_ProfileForRoom(group,room);
+  if (profile==kActionVoxelProfile_NorthwallSnow || (group==7 && (room==1 || room==7)))
     return (ActionVoxelSettings){.depth=.20f,.play_recess=.065f};
-  if (ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_NorthwallIce)
-    return (ActionVoxelSettings){.depth=.22f,.play_recess=.075f};
-  if (ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_BloodpoolMarsh ||
-      ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_KassandoraDesert ||
-      ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_AitosMountains ||
-      ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_MarahnaJungle)
-    return (ActionVoxelSettings){.depth=.20f,.play_recess=.065f};
-  if (ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_FillmoreCave)
-    return (ActionVoxelSettings){.depth=.22f,.play_recess=.075f};
-  return ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_FillmoreForest
-      ? (ActionVoxelSettings){.depth=.18f,.play_recess=.06f} : ActionVoxel_DefaultSettings();
+  switch(profile) {
+    case kActionVoxelProfile_NorthwallIce:
+    case kActionVoxelProfile_FillmoreCave:
+      return (ActionVoxelSettings){.depth=.22f,.play_recess=.075f};
+    case kActionVoxelProfile_BloodpoolMarsh:
+    case kActionVoxelProfile_KassandoraDesert:
+    case kActionVoxelProfile_AitosMountains:
+    case kActionVoxelProfile_MarahnaJungle:
+      return (ActionVoxelSettings){.depth=.20f,.play_recess=.065f};
+    case kActionVoxelProfile_FillmoreForest:
+      return (ActionVoxelSettings){.depth=.18f,.play_recess=.06f};
+    default:
+      return ActionVoxel_DefaultSettings();
+  }
+}
+/* Per-profile depth policy. Rear-mounted architecture and the deeper trim
+ * class are fixed by the material profile, never by room geometry. */
+typedef enum VoxelSceneryRecessMode {
+  kVoxelSceneryRecess_None,      /* Scenery stays on the native contact plane. */
+  kVoxelSceneryRecess_RearFace,  /* Scenery projects from the rear wall. */
+  kVoxelSceneryRecess_Contact    /* Thin forest scenery follows actor contact. */
+} VoxelSceneryRecessMode;
+typedef struct VoxelProfilePolicy {
+  bool rear_mounted, deep_trim;
+  unsigned char scenery_recess;
+} VoxelProfilePolicy;
+static const VoxelProfilePolicy kVoxelProfilePolicies[] = {
+  [kActionVoxelProfile_None] = {0},
+  [kActionVoxelProfile_Castle] = {0},
+  [kActionVoxelProfile_FillmoreForest] = {.scenery_recess=kVoxelSceneryRecess_Contact},
+  [kActionVoxelProfile_FillmoreCave] = {0},
+  [kActionVoxelProfile_FillmoreTemple] = {true,true,kVoxelSceneryRecess_RearFace},
+  [kActionVoxelProfile_FillmoreTower] = {true,true,kVoxelSceneryRecess_RearFace},
+  [kActionVoxelProfile_BloodpoolMarsh] = {false,true,kVoxelSceneryRecess_RearFace},
+  [kActionVoxelProfile_KassandoraDesert] = {false,true,kVoxelSceneryRecess_None},
+  [kActionVoxelProfile_KassandoraTomb] = {false,true,kVoxelSceneryRecess_RearFace},
+  [kActionVoxelProfile_AitosMountains] = {false,true,kVoxelSceneryRecess_None},
+  [kActionVoxelProfile_AitosCaverns] = {false,true,kVoxelSceneryRecess_None},
+  [kActionVoxelProfile_MarahnaJungle] = {false,true,kVoxelSceneryRecess_RearFace},
+  [kActionVoxelProfile_MarahnaTemple] = {false,true,kVoxelSceneryRecess_RearFace},
+  [kActionVoxelProfile_NorthwallSnow] = {false,true,kVoxelSceneryRecess_RearFace},
+  [kActionVoxelProfile_NorthwallIce] = {false,true,kVoxelSceneryRecess_RearFace},
+  [kActionVoxelProfile_DeathHeim] = {false,true,kVoxelSceneryRecess_RearFace},
+};
+_Static_assert(sizeof(kVoxelProfilePolicies)/sizeof(*kVoxelProfilePolicies)==kActionVoxelProfile_DeathHeim+1,
+               "every voxel profile has a depth policy");
+static const VoxelProfilePolicy *ProfilePolicy(const ActionVoxelGeometry *c) {
+  const unsigned profile=(unsigned)ActionVoxel_Profile(c);
+  return &kVoxelProfilePolicies[profile<=kActionVoxelProfile_DeathHeim ? profile : 0];
 }
 ActionVoxelProfile ActionVoxel_Profile(const ActionVoxelGeometry *geometry) {
   return geometry ? geometry->profile : kActionVoxelProfile_None;
@@ -113,22 +151,19 @@ float ActionVoxel_PlayRecess(const ActionVoxelGeometry *c) {
   return c ? c->settings.play_recess : 0;
 }
 bool ActionVoxel_RearMountedScenery(const ActionVoxelGeometry *c) {
-  const ActionVoxelProfile profile=ActionVoxel_Profile(c);
-  return profile==kActionVoxelProfile_FillmoreTemple || profile==kActionVoxelProfile_FillmoreTower;
+  return ProfilePolicy(c)->rear_mounted;
 }
 float ActionVoxel_SceneryRecess(const ActionVoxelGeometry *c) {
-  if(ActionVoxel_RearMountedScenery(c) || ActionVoxel_Profile(c)==kActionVoxelProfile_BloodpoolMarsh ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_KassandoraTomb ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_MarahnaJungle ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_MarahnaTemple ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_NorthwallSnow ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_NorthwallIce ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_DeathHeim)
-    return ActionVoxel_Depth(c)-ActionVoxel_TrimDepth(c);
-  /* OBJ2's native depth is .01 ahead of BG1. Match that contact surface
-   * without changing object positions, priority or the trunk's thickness. */
-  return ActionVoxel_Profile(c)==kActionVoxelProfile_FillmoreForest
-      ? fmaxf(0,ActionVoxel_PlayRecess(c)-.01f) : 0;
+  switch(ProfilePolicy(c)->scenery_recess) {
+    case kVoxelSceneryRecess_RearFace:
+      return ActionVoxel_Depth(c)-ActionVoxel_TrimDepth(c);
+    case kVoxelSceneryRecess_Contact:
+      /* OBJ2's native depth is .01 ahead of BG1. Match that contact surface
+       * without changing object positions, priority or the trunk's thickness. */
+      return fmaxf(0,ActionVoxel_PlayRecess(c)-.01f);
+    default:
+      return 0;
+  }
 }
 float ActionVoxel_FrontRecess(const ActionVoxelGeometry *c,int tile_x,int tile_y) {
   if(!c || !c->ready || !c->front_recess)return 0;
@@ -147,18 +182,7 @@ float ActionVoxel_TrimBackDepth(const ActionVoxelGeometry *c) {
   return ActionVoxel_SceneryRecess(c)+ActionVoxel_TrimDepth(c);
 }
 float ActionVoxel_TrimDepth(const ActionVoxelGeometry *c) {
-  if(ActionVoxel_RearMountedScenery(c) || ActionVoxel_Profile(c)==kActionVoxelProfile_BloodpoolMarsh ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_KassandoraDesert ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_KassandoraTomb ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_AitosMountains ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_AitosCaverns ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_MarahnaJungle ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_MarahnaTemple ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_NorthwallSnow ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_NorthwallIce ||
-      ActionVoxel_Profile(c)==kActionVoxelProfile_DeathHeim)
-    return ActionVoxel_Depth(c)*.25f;
-  return ActionVoxel_Depth(c) * .12f;
+  return ActionVoxel_Depth(c)*(ProfilePolicy(c)->deep_trim ? .25f : .12f);
 }
 float ActionVoxel_BranchDepth(const ActionVoxelGeometry *c) {
   return fminf(ActionVoxel_Depth(c), fmaxf(ActionVoxel_TrimDepth(c),

@@ -14,11 +14,22 @@ layout(std430,set=1,binding=2) buffer Lighting { float values[]; } lighting;
 #include "action_effect_context.glsl"
 #include "action_effect_projection.glsl"
 
+/* Receiver samples occupy workspace[16..16+2193); stage-0 partials follow,
+ * two vec4s per point workgroup. Keep in sync with the host's moon_work size. */
+const uint kMoonPartialBase=16u+2193u;
 shared vec4 limits[64];
+shared vec4 receiver_clip;
 shared vec2 origin;
 shared float scale;
 shared uint valid;
 float cross2(vec2 a,vec2 b){return a.x*b.y-a.y*b.x;}
+void reduce_limits(uint lane) {
+    for(uint stride=32;stride>0;stride/=2) {
+        if(lane<stride)limits[lane]=vec4(min(limits[lane].xy,limits[lane+stride].xy),
+                                       max(limits[lane].zw,limits[lane+stride].zw));
+        barrier();
+    }
+}
 bool mapped(vec4 mapping,vec2 local,out vec2 point) {
     return project_effect(int(mapping.z),mapping.xy+local,mapping.y,(uint(mapping.w)&2u)!=0u,point);
 }
@@ -47,9 +58,46 @@ float coverage(vec2 point) {
 void main() {
     uint id=gl_GlobalInvocationID.x, lane=gl_LocalInvocationID.x;
     int kind=int(job.data.meta.y),count=int(job.data.meta.x);
+    /* Stage 0 clears the mask and projects receiver points in parallel: one
+     * point per invocation, one bounds/valid partial per point workgroup.
+     * Stage 3 (dispatched before 1 and 2) maps the light frame and sources in
+     * one workgroup and folds those partials into the frame header. Min/max
+     * folding is order-independent, so the header matches a serial pass. */
     if(settings.clock.w==0) {
         if(kind!=3 && id<800*224)mask.values[id]=0;
-        if(gl_WorkGroupID.x!=0)return;
+        if(gl_WorkGroupID.x>=(uint(count)+63u)/64u)return;
+        if(lane==0) {
+            valid=1;vec2 below;
+            if(!mapped(job.data.light,vec2(0),origin)||!mapped(job.data.light,vec2(0,20),below))valid=0;
+            scale=length(below-origin)/20;
+            vec4 clip=effect_bounds(int(job.data.receiver.z),job.data.receiver.xy,
+                                    uint(job.data.receiver.w),true);
+            receiver_clip=vec4(max(clip.xy,job.data.clip.xy),min(clip.zw,job.data.clip.zw));
+        }
+        barrier();
+        vec4 bounds=vec4(0);
+        if(id<uint(count)) {
+            vec4 clip=receiver_clip;
+            vec2 local=job.data.points[id].xy,point;
+            bool selected_point=true;
+            if(kind==1)selected_point=local.x>=floor((clip.x+job.data.selection.x)/4)*4-job.data.selection.x &&
+                local.x<=ceil((clip.z+job.data.selection.x)/4)*4-job.data.selection.x;
+            if(kind==2)selected_point=local.x>=clip.x-8 && local.x<=clip.z+8 && local.y>=clip.y-1 && local.y<=clip.w;
+            if(!mapped(job.data.receiver,local,point))atomicAnd(valid,0u);
+            workspace.values[16+id]=vec4(point,selected_point?1:0,0);
+            if(selected_point){point=(point-origin)/scale;bounds=vec4(min(bounds.xy,point),max(bounds.zw,point));}
+        }
+        limits[lane]=bounds;
+        barrier();
+        reduce_limits(lane);
+        if(lane==0) {
+            uint partial=kMoonPartialBase+2u*gl_WorkGroupID.x;
+            workspace.values[partial]=limits[0];
+            workspace.values[partial+1u]=vec4(valid!=0?1:0,0,0,0);
+        }
+        return;
+    }
+    if(settings.clock.w==3) {
         if(lane==0) {
             valid=1;vec2 below,rays[3];
             if(!mapped(job.data.light,vec2(0),origin)||!mapped(job.data.light,vec2(0,20),below))valid=0;
@@ -75,26 +123,15 @@ void main() {
             workspace.values[4+lane]=vec4(point,0,0);
             bounds=vec4(min(bounds.xy,point),max(bounds.zw,point));
         }
-        vec4 clip=effect_bounds(int(job.data.receiver.z),job.data.receiver.xy,
-                                uint(job.data.receiver.w),true);
-        clip=vec4(max(clip.xy,job.data.clip.xy),min(clip.zw,job.data.clip.zw));
-        for(uint at=lane;at<uint(count);at+=64) {
-            vec2 local=job.data.points[at].xy,point;
-            bool selected_point=true;
-            if(kind==1)selected_point=local.x>=floor((clip.x+job.data.selection.x)/4)*4-job.data.selection.x &&
-                local.x<=ceil((clip.z+job.data.selection.x)/4)*4-job.data.selection.x;
-            if(kind==2)selected_point=local.x>=clip.x-8 && local.x<=clip.z+8 && local.y>=clip.y-1 && local.y<=clip.w;
-            if(!mapped(job.data.receiver,local,point))atomicAnd(valid,0u);
-            workspace.values[16+at]=vec4(point,selected_point?1:0,0);
-            if(selected_point){point=(point-origin)/scale;bounds=vec4(min(bounds.xy,point),max(bounds.zw,point));}
+        for(uint group=lane;group<(uint(count)+63u)/64u;group+=64u) {
+            uint partial=kMoonPartialBase+2u*group;
+            vec4 b=workspace.values[partial];
+            bounds=vec4(min(bounds.xy,b.xy),max(bounds.zw,b.zw));
+            if(workspace.values[partial+1u].x==0)atomicAnd(valid,0u);
         }
         limits[lane]=bounds;
         barrier();
-        for(uint stride=32;stride>0;stride/=2) {
-            if(lane<stride)limits[lane]=vec4(min(limits[lane].xy,limits[lane+stride].xy),
-                                           max(limits[lane].zw,limits[lane+stride].zw));
-            barrier();
-        }
+        reduce_limits(lane);
         if(lane==0) {
             vec2 start=floor(limits[0].xy)-8;
             float step=max(1,max((limits[0].z-start.x+8)/800,(limits[0].w-start.y+8)/224));
@@ -116,25 +153,34 @@ void main() {
         if(any(greaterThanEqual(r.xy,r.zw)))return;
         vec2 q[4];
         if(!project_point(1,r.xy,q[0])||!project_point(1,r.zy,q[1])||!project_point(1,r.zw,q[2])||!project_point(1,r.xw,q[3]))return;
-        float top=224,bottom=0;
+        float top=224,bottom=0,low=800,high=0;
         for(int j=0;j<4;++j) {
             q[j]=((q[j]-frame.xy)/frame.z-field.xy)/frame.w;
             top=min(top,q[j].y);bottom=max(bottom,q[j].y);
+            low=min(low,q[j].x);high=max(high,q[j].x);
         }
-        for(int y=int(floor(max(0,top)))+int(lane);y<int(ceil(min(224,bottom)));y+=64) {
-            for(int tap=0;tap<2;++tap) {
-                float scan=y+.25+.5*tap,left=800,right=0;int hits=0;
-                for(int e=0;e<4;++e) {
-                    vec2 a=q[e],b=q[(e+1)&3];
-                    if((a.y<=scan&&b.y>scan)||(b.y<=scan&&a.y>scan)) {
-                        float x=a.x+(b.x-a.x)*(scan-a.y)/(b.y-a.y);
-                        left=min(left,x);right=max(right,x);hits++;
-                    }
+        /* Work items are (row, tap, 16-pixel column chunk), spread over all
+         * lanes; one lane per row left wide occluders as serial atomic loops.
+         * Chunks tile [0,800) (the outer two are open-ended), so each span
+         * pixel gets the same integer atomicAdd exactly once and the mask is
+         * unchanged by the split. */
+        const int kChunk=16;
+        int y0=int(floor(max(0,top))),rows=int(ceil(min(224,bottom)))-y0;
+        int x0=clamp(int(floor(low)),0,799),chunks=(clamp(int(ceil(high)),x0+1,800)-x0+kChunk-1)/kChunk;
+        for(int item=int(lane);item<rows*2*chunks;item+=64) {
+            int chunk=item%chunks,row=item/chunks,y=y0+(row>>1),tap=row&1;
+            float scan=y+.25+.5*tap,left=800,right=0;int hits=0;
+            for(int e=0;e<4;++e) {
+                vec2 a=q[e],b=q[(e+1)&3];
+                if((a.y<=scan&&b.y>scan)||(b.y<=scan&&a.y>scan)) {
+                    float x=a.x+(b.x-a.x)*(scan-a.y)/(b.y-a.y);
+                    left=min(left,x);right=max(right,x);hits++;
                 }
-                if(hits!=2||left>=right)continue;
-                for(int x=int(floor(max(0,left)));x<int(ceil(min(800,right)));++x)
-                    atomicAdd(mask.values[y*800+x],uint((min(x+1,right)-max(x,left))*127.5+.5));
             }
+            if(hits!=2||left>=right)continue;
+            int from=chunk==0?0:x0+chunk*kChunk,to=chunk==chunks-1?800:x0+(chunk+1)*kChunk;
+            for(int x=max(int(floor(max(0,left))),from);x<min(int(ceil(min(800,right))),to);++x)
+                atomicAdd(mask.values[y*800+x],uint((min(x+1,right)-max(x,left))*127.5+.5));
         }
         return;
     }

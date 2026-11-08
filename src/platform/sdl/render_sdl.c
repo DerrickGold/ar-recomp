@@ -111,18 +111,22 @@ static bool UploadBoundary(ArSdlRenderBackend *backend) {
   return SDL_SetError("render operation inside texture upload scope");
 }
 
-static bool DrainExternal(ArSdlRenderBackend *backend) {
+static bool DrainExternal(ArSdlRenderBackend *backend, bool *sdl_idle) {
+  if (sdl_idle) *sdl_idle = false;
+  if (backend) backend->external_sdl_idle = false;
   if (!backend || !backend->external_flush) return true;
   if (backend->external_flushing)
     return SDL_SetError("recursive external GPU batch flush");
   backend->external_flushing = true;
   const bool ok = backend->external_flush(backend->external_userdata);
   backend->external_flushing = false;
+  if (sdl_idle) *sdl_idle = ok && backend->external_sdl_idle;
+  backend->external_sdl_idle = false;
   return ok;
 }
 
 static bool FlushExternal(ArSdlRenderBackend *backend) {
-  return UploadBoundary(backend) && DrainExternal(backend);
+  return UploadBoundary(backend) && DrainExternal(backend, NULL);
 }
 
 static bool CancelTextureUploads(ArSdlRenderBackend *backend) {
@@ -271,7 +275,7 @@ static bool UpdateGpuTexture(ArSdlRenderBackend *backend, SDL_Texture *texture,
   SDL_GPUCommandBuffer *commands = backend->upload_commands;
   SDL_GPUCopyPass *copy = backend->upload_copy;
   if (!commands) {
-    if ((backend->upload_open && !DrainExternal(backend)) ||
+    if ((backend->upload_open && !DrainExternal(backend, NULL)) ||
         !SDL_FlushRenderer(backend->renderer) || !SDL_RenderPresent(backend->renderer)) return false;
     commands = SDL_AcquireGPUCommandBuffer(upload->device);
     if (!commands) return false;
@@ -817,11 +821,21 @@ bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device) {
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   if (!renderer) return false;
   ArSdlRenderBackend *backend = device->context;
-  if (!FlushExternal(backend)) return false;
+  bool sdl_idle = false;
+  if (!UploadBoundary(backend) || !DrainExternal(backend, &sdl_idle)) return false;
   /* Preserve the explicit recording-failure check before submission: SDL's
    * RenderPresent does not propagate its internal command-flush result. */
   if (!SDL_FlushRenderer(renderer)) return false;
-  return !backend->output_window || SDL_RenderPresent(renderer);
+  return !backend->output_window || sdl_idle || SDL_RenderPresent(renderer);
+}
+
+bool ArSdlRenderBackend_CertifyExternalSdlIdle(const ArRenderDevice *device, void *userdata) {
+  if (!ArSdlRenderBackend_Renderer(device)) return false;
+  ArSdlRenderBackend *backend = device->context;
+  if (!backend->output_window || !backend->external_flushing ||
+      !backend->external_flush || backend->external_userdata != userdata) return false;
+  backend->external_sdl_idle = true;
+  return true;
 }
 
 bool ArSdlRenderBackend_SetExternalFlush(ArRenderDevice *device,

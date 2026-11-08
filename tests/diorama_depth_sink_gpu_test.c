@@ -88,6 +88,91 @@ static bool Overlay(ArRenderDevice *device,ArRenderTexture white,float x,float y
   return ArRenderDevice_DrawTextureWithState(device,white,NULL,&rect,&state);
 }
 
+/* Intentionally no SubmitPending here: the caller proves the boundary before
+ * recording native work. Downloading in this command observes the actual GPU
+ * order without an SDL readback accidentally submitting delayed drawing. */
+static SDL_GPUCommandBuffer *NativeOverlaySnapshot(ArRenderDevice *device,
+    ArRenderTexture target,ArRenderTexture color,int x,SDL_GPUTransferBuffer *download) {
+  SDL_GPUDevice *gpu=ArSdlRenderBackend_GpuDevice(device);
+  SDL_GPUTexture *destination=SDL_GetPointerProperty(
+      SDL_GetTextureProperties(ArSdlRenderBackend_UnwrapTexture(target)),
+      SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER,NULL);
+  SDL_GPUTexture *source=SDL_GetPointerProperty(
+      SDL_GetTextureProperties(ArSdlRenderBackend_UnwrapTexture(color)),
+      SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER,NULL);
+  assert(destination && source);
+  SDL_GPUCommandBuffer *cmd=SDL_AcquireGPUCommandBuffer(gpu);assert(cmd);
+  const SDL_GPUBlitInfo blit={.source={.texture=source,.w=1,.h=1},
+      .destination={.texture=destination,.x=x,.y=4,.w=8,.h=8},
+      .load_op=SDL_GPU_LOADOP_LOAD,.filter=SDL_GPU_FILTER_NEAREST};
+  SDL_BlitGPUTexture(cmd,&blit);
+  SDL_GPUCopyPass *copy=SDL_BeginGPUCopyPass(cmd);assert(copy);
+  const SDL_GPUTextureRegion from={.texture=destination,.w=W,.h=H,.d=1};
+  const SDL_GPUTextureTransferInfo to={.transfer_buffer=download,.pixels_per_row=W,.rows_per_layer=H};
+  SDL_DownloadFromGPUTexture(copy,&from,&to);
+  SDL_EndGPUCopyPass(copy);
+  return cmd;
+}
+
+static void ExternalSubmissionChecks(ArSdlDioramaDepthSink *state,ArRenderDevice *device,
+    ArRenderTexture target,ArRenderTexture white) {
+  SDL_Renderer *renderer=ArSdlRenderBackend_Renderer(device);
+  SDL_GPUDevice *gpu=ArSdlRenderBackend_GpuDevice(device);
+  ArRenderTexture blue=Make(device,false,0xff0000ff),green=Make(device,false,0xff00ff00);
+  SDL_GPUTransferBuffer *download[2];
+  const SDL_GPUTransferBufferCreateInfo info={.usage=SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,.size=W*H*4};
+  for(unsigned i=0;i<2;++i){download[i]=SDL_CreateGPUTransferBuffer(gpu,&info);assert(download[i]);}
+  const DioramaDepthSink *sink=Begin(state,device,target);
+  /* First native submission must close this queued SDL draw before collecting
+   * its depth geometry. The following explicit SubmitPending drains a NONEMPTY
+   * depth batch, unlike Finish followed by a later ordinary readback. */
+  assert(Overlay(device,white,4,4,(ArRenderColorF){1,0,0,1}));
+  assert(Quad(sink,device,white,4,4,.4f,(ArRenderColorF){0,1,0,1},false,NULL));
+  assert(Quad(sink,device,white,24,4,.4f,(ArRenderColorF){1,0,0,1},false,NULL));
+  assert(state->count==2);
+  assert(ArSdlRenderBackend_SubmitPending(device));
+  assert(!state->count && state->stats.submissions==1);
+  SDL_GPUCommandBuffer *cmd=NativeOverlaySnapshot(device,target,blue,8,download[0]);
+  assert(SDL_SubmitGPUCommandBuffer(cmd));
+
+  /* A later raw SDL draw arrives after the certified boundary. Its following
+   * empty external callback must not reuse that certificate: native green must
+   * be submitted AFTER this yellow rectangle, with no intermediate CPU wait. */
+  const SDL_FRect rectangle={10,4,8,8};
+  assert(SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_NONE));
+  assert(SDL_SetRenderDrawColor(renderer,255,255,0,255));
+  assert(SDL_RenderFillRect(renderer,&rectangle));
+  assert(ArSdlRenderBackend_SubmitPending(device));
+  assert(state->stats.submissions==1);
+  cmd=NativeOverlaySnapshot(device,target,green,12,download[1]);
+  SDL_GPUFence *fence=SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);assert(fence);
+  assert(SDL_WaitForGPUFences(gpu,true,&fence,1));SDL_ReleaseGPUFence(gpu,fence);
+  assert(sink->finish(sink->userdata,device,true));
+  for(unsigned snapshot=0;snapshot<2;++snapshot) {
+    const uint8_t *pixels=SDL_MapGPUTransferBuffer(gpu,download[snapshot],false);assert(pixels);
+    uint64_t hash=UINT64_C(14695981039346656037);
+    for(unsigned i=0;i<W*H*4;++i)hash=(hash^pixels[i])*UINT64_C(1099511628211);
+    for(int y=0;y<H;++y)for(int x=0;x<W;++x) {
+      uint32_t expected=0xff000000;
+      if(y>=4 && y<12) {
+        if(x>=4 && x<12)expected=0xff00ff00;
+        if(x>=24 && x<32)expected=0xffff0000;
+        if(x>=8 && x<16)expected=0xff0000ff;
+        if(snapshot && x>=10 && x<18)expected=0xffffff00;
+        if(snapshot && x>=12 && x<20)expected=0xff00ff00;
+      }
+      const uint8_t *actual=pixels+(y*W+x)*4;
+      assert(actual[0]==((expected>>16)&255) && actual[1]==((expected>>8)&255) &&
+          actual[2]==(expected&255) && actual[3]==255);
+      ++checks;
+    }
+    printf("external-submit-snapshot=%u hybrid=%u rgba-fnv=%016llx\n",snapshot,
+        hybrid?1u:0u,(unsigned long long)hash);
+    SDL_UnmapGPUTransferBuffer(gpu,download[snapshot]);SDL_ReleaseGPUTransferBuffer(gpu,download[snapshot]);
+  }
+  ArRenderDevice_DestroyTexture(device,blue);ArRenderDevice_DestroyTexture(device,green);
+}
+
 static uint32_t GrainColor(unsigned x) {
   return 0xff000000u|((x*13u)<<16)|(((15-x)*11u)<<8)|(x*7u);
 }
@@ -317,6 +402,7 @@ int main(int argc,char **argv) {
   assert(sink->finish(sink->userdata,&device,true));
   Check(&device,ArRenderTexture_Invalid(),8,8,0xffff0000);
 
+  ExternalSubmissionChecks(&state,&device,target,white);
   PerspectiveChecks(&state,&device,target,white);
 
   assert(submit_scopes==submit_ends && submit_scopes>10);

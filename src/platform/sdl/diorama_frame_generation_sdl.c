@@ -119,6 +119,7 @@ static struct {
   SDL_GPUTransferBuffer *validation;
   SDL_GPUFence *projection_fence;
   uint32_t pending_analysis_mask;
+  uint32_t skipped_map_analysis_mask;
   unsigned checks, errors;
   uint64_t direct_frames, unpack_frames, unpack_bytes_avoided;
   bool attempted, ready, endpoint, layers_attempted, direct_layers;
@@ -498,6 +499,7 @@ static bool GatherGpuEndpoints(ArGpuFramePack planes[kArGpuFrameHandoffMaximumPl
     int height, unsigned *count, uint32_t *mask) {
   *count = 0;
   *mask = 0;
+  const uint32_t synthesis_mask = analyzed_mask | s_voxel_map_pair_mask;
   for (int i = 0; i < 16; ++i) {
     const int index = kGpuPlanes[i];
     const DioramaFrameGenerationPlane *plane = &s_planes[index];
@@ -517,7 +519,7 @@ static bool GatherGpuEndpoints(ArGpuFramePack planes[kArGpuFrameHandoffMaximumPl
           .source = {(float)(plane->gpu_only ? plane->output_x : 0), 0,
               (float)plane->texture_width, (float)height}},
         .destination = {0, i * height, plane->texture_width, height}};
-    if (GpuOwnsAnalysis() ? (analyzed_mask & (1u << index)) != 0 :
+    if (GpuOwnsAnalysis() ? (synthesis_mask & (1u << index)) != 0 :
         plane->pair_valid && (plane->motion.uniform || i >= 8)) *mask |= 1u << index;
   }
   return *count != 0;
@@ -599,6 +601,7 @@ static SDL_GPUBuffer *SourceMotion(void) {
 static void CaptureGpu(ArRenderDevice *device, int width, int height, bool continuous, uint32_t analyzed_mask,
     const ArRenderTexture source_textures[kFrameGenerationPlaneCount]) {
   s_gpu.mask = 0;
+  ArGpuEffectSource_ForgetMoonResults(&s_gpu.effects); /* Every path rewrites motion. */
   // A drained source may never be presented. Retire its handle without a CPU
   // wait; submissions stay ordered, and only the newest download is mapped.
   if (s_gpu.projection_fence) {
@@ -626,6 +629,7 @@ static void CaptureGpu(ArRenderDevice *device, int width, int height, bool conti
       SDL_CancelGPUCommandBuffer(cmd); return;
     }
   } else {
+    const uint32_t synthesis_mask = analyzed_mask | s_voxel_map_pair_mask;
     SDL_Texture *old_target = SDL_GetRenderTarget(renderer);
     Uint8 r = 0, g = 0, b = 0, a = 0;
     if (!SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a)) return;
@@ -655,7 +659,7 @@ static void CaptureGpu(ArRenderDevice *device, int width, int height, bool conti
           SDL_RenderTexture(renderer, source, &src, &dest);
       const bool restored = SDL_SetTextureBlendMode(source, blend);
       ok = copied && restored;
-      if (GpuOwnsAnalysis() ? (analyzed_mask & (1u << index)) != 0 :
+      if (GpuOwnsAnalysis() ? (synthesis_mask & (1u << index)) != 0 :
           plane->pair_valid && (plane->motion.uniform || i >= 8)) mask |= 1u << index;
     }
     const bool target_restored = SDL_SetRenderTarget(renderer, old_target);
@@ -703,6 +707,43 @@ static void ResolveGpuProjection(void) {
       s_pair_mask &= ~s_gpu.pending_analysis_mask;
     } else s_gpu.mask &= s_pair_mask;
   }
+}
+
+/* Exact map synthesis never reads global pixel motion. A later presentation
+ * can lose a required source texture or hide part of that group, selecting
+ * the existing pixel-motion fallback instead. Restore the omitted searches
+ * once for this immutable pair before that fallback can read their vectors.
+ * Analyze replaces all eight result slots, so retain the original eligibility
+ * of every other global plane and recompute them too; actor fields are separate. */
+static bool RestoreMapAnalysis(ArRenderDevice *device, uint32_t exact_mask) {
+  const uint32_t skipped = s_gpu.skipped_map_analysis_mask;
+  if (!(skipped & ~exact_mask) || !s_gpu.mask) return true;
+  if (s_gpu.projection_fence) {
+    ResolveGpuProjection();
+    if (!s_gpu.mask) return false;
+  }
+  if (!ArSdlRenderBackend_SubmitPending(device)) goto failed;
+  for (unsigned i = 0; i < 8; ++i)
+    if (skipped & (1u << kGpuPlanes[i])) s_gpu.motion.extents[i][1] = 1.f;
+  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(s_gpu.motion.device);
+  if (!cmd) goto failed;
+  if (!ArGpuGlobalMotion_Analyze(&s_gpu.motion, cmd,
+          NativeGpuTexture(s_gpu.previous), NativeGpuTexture(s_gpu.current))) {
+    SDL_CancelGPUCommandBuffer(cmd);
+    goto failed;
+  }
+  s_gpu.pending_analysis_mask |= skipped;
+  if (!(s_gpu.resident ? SDL_SubmitGPUCommandBuffer(cmd) : QueueGpuResults(cmd, false)))
+    goto failed;
+  s_gpu.skipped_map_analysis_mask = 0;
+  return true;
+failed:
+  /* A canceled analysis may already have cycled storage. No plane may read
+   * that incomplete backing; retain raw current textures until reset. */
+  s_gpu.mask = s_pair_mask = 0;
+  s_gpu.endpoint = false;
+  s_gpu.failed = true;
+  return false;
 }
 
 static bool UnpackGpuPlanes(SDL_GPUCommandBuffer *cmd, uint32_t mask) {
@@ -894,6 +935,7 @@ void DioramaFrameGeneration_InvalidateHistory(void) {
   }
   s_gpu.endpoint = s_gpu.resident = false;
   s_gpu.mask = s_gpu.presented_mask = s_gpu.pending_analysis_mask = 0;
+  s_gpu.skipped_map_analysis_mask = 0;
   s_gpu.phase = 1;
   for (unsigned i = 0; i < kActionSourcePacketSlots; ++i)
     s_gpu.effects.packets[i].input_revision = s_gpu.effects.packets[i].revision = 0;
@@ -1134,6 +1176,7 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   s_voxel_map_pair_mask = s_voxel_map_present_mask = 0;
   s_voxel_map_dx = s_voxel_map_dy = 0;
   s_gpu.mask = 0;
+  s_gpu.skipped_map_analysis_mask = 0;
   s_gpu.resident = false;
   s_policy = slot ? DioramaGpuPolicy_ForRoom(slot->diorama_map_group, slot->diorama_map_number)
                   : (DioramaGpuPolicy){0};
@@ -1381,8 +1424,12 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   /* Low, high and rear artwork must share one temporal world. A newly added
    * or unavailable member seeds the whole map group before opting back in. */
   if ((exact_map_mask & plane_mask) != (plane_mask & kVoxelMapPlanes)) exact_map_mask = 0;
-  analyzed_bg_mask |= exact_map_mask;
+  /* Keep endpoint packing and synthesis eligible, but omit the unused global
+   * search. The exact warp returns before reading any pixel-motion vectors. */
+  analyzed_bg_mask &= ~exact_map_mask;
   s_voxel_map_pair_mask = exact_map_mask;
+  s_gpu.skipped_map_analysis_mask = exact_map_mask;
+  s_pair_mask |= exact_map_mask;
   s_voxel_map_dx = map_dx; s_voxel_map_dy = map_dy;
   /* The immutable pair already carries both camera positions. These hints
    * only tighten pixel-derived search bounds; raster effects, animation and
@@ -1560,6 +1607,8 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
     ArRenderTexture resolved_textures[kDioramaPlane_Count],
     ArRenderTexture skybox_texture, ArRenderTexture *resolved_skybox) {
   DioramaFrameGeneration_FinishCapture();
+  /* Map restore and GPU analysis below may rewrite the motion buffer. */
+  ArGpuEffectSource_ForgetMoonResults(&s_gpu.effects);
   memset(s_present_offsets,0,sizeof(s_present_offsets));
   s_gpu.presented_mask = 0;
   s_gpu.phase = 1;
@@ -1610,7 +1659,7 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
     if (map_mask & (1u << kGpuPlanes[i])) s_gpu.motion.exact_map_mask |= 1u << i;
   s_gpu.motion.map_camera_dx = s_voxel_map_dx;
   s_gpu.motion.map_camera_dy = s_voxel_map_dy;
-  const uint32_t gpu_mask = PrepareGpu(device, phase);
+  const uint32_t gpu_mask = RestoreMapAnalysis(device, map_mask) ? PrepareGpu(device, phase) : 0;
   s_gpu.phase = phase;
   s_voxel_map_present_mask = map_mask & gpu_mask;
   /* CPU-known placement is already in the plane projection. Never add the

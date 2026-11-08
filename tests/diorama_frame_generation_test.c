@@ -972,8 +972,11 @@ static void TestExactMapPlacement(ArRenderDevice *device,SDL_Renderer *renderer,
         CHECK(generated==mask && DioramaFrameGeneration_GeneratedPlaneMask()==mask);
         CHECK(DioramaFrameGeneration_GpuPlaneMask()==0); /* Do not move effects twice. */
         CHECK(!resident || DioramaFrameGeneration_MetadataReadbackCount()==0);
+        uint64_t hash=UINT64_C(14695981039346656037);
         for(unsigned i=0;i<3;++i) {
           const ArRenderPointF offset=DioramaFrameGeneration_PlaneOffset(bands[i]);
+          hash=SourceFixtureHash(hash,&offset.x,sizeof(offset.x));
+          hash=SourceFixtureHash(hash,&offset.y,sizeof(offset.y));
           CHECK(fabsf(offset.x-deltas[test][0]*(1-phase))<.00001f);
           CHECK(fabsf(offset.y-deltas[test][1]*(1-phase))<.00001f);
           CHECK(SDL_SetRenderTarget(renderer,ArSdlRenderBackend_UnwrapTexture(resolved[bands[i]])));
@@ -987,9 +990,13 @@ static void TestExactMapPlacement(ArRenderDevice *device,SDL_Renderer *renderer,
             const uint32_t *row=(const uint32_t *)((const uint8_t *)argb->pixels+y*argb->pitch);
             CHECK(row[x]==want);
           }
+          if(argb)for(int y=0;y<kHeight;++y)
+            hash=SourceFixtureHash(hash,(const uint8_t *)argb->pixels+y*argb->pitch,kDisplayWidth*4);
           SDL_DestroySurface(argb);SDL_DestroySurface(image);
           CHECK(SDL_SetRenderTarget(renderer,saved));
         }
+        printf("exact-map-case=%u endpoint=%u phase=%.2f rgba-offset-fnv=%016" PRIx64 "\n",
+            test,endpoint,phase,hash);
       }
     }
   }
@@ -999,6 +1006,127 @@ static void TestExactMapPlacement(ArRenderDevice *device,SDL_Renderer *renderer,
       DioramaFrameGeneration_PlaneOffset(bands[i]).y==0);
   ActionVoxel_Release(voxel);
   printf("exact Voxel map: signed/vertical continuous placement, all3 bands, endpoint bytes, border fallback, unchanged pixels and unsupported-source guards\n");
+}
+
+/* Hash both raw and generated outputs through the same opaque copy, together
+ * with the masks and offsets consumed by effects. The unchanged encoder and
+ * candidate run this identical fixture; no new search-vector API is needed. */
+static void HashMapTransition(SDL_Renderer *renderer,SDL_Texture *readback,
+    const ArRenderTexture textures[kDioramaPlane_Count],uint32_t generated,unsigned test) {
+  const int planes[]={SR_PPU_OVERLAY_BG1,kDioramaPlane_Bg1Hi,kDioramaPlane_Bg1Far,
+      SR_PPU_OVERLAY_BG2,SR_PPU_OVERLAY_OBJ};
+  uint64_t hash=UINT64_C(14695981039346656037);
+  const uint32_t masks[]={generated,DioramaFrameGeneration_GpuPlaneMask(),
+      DioramaFrameGeneration_VoxelMapPlaneMask(),DioramaFrameGeneration_GeneratedPlaneMask()};
+  hash=SourceFixtureHash(hash,masks,sizeof(masks));
+  SDL_Texture *saved=SDL_GetRenderTarget(renderer);
+  for(unsigned i=0;i<SDL_arraysize(planes);++i) {
+    const int plane=planes[i];
+    const ArRenderPointF offset=DioramaFrameGeneration_PlaneOffset(plane);
+    hash=SourceFixtureHash(hash,&offset.x,sizeof(offset.x));
+    hash=SourceFixtureHash(hash,&offset.y,sizeof(offset.y));
+    SDL_Texture *texture=ArSdlRenderBackend_UnwrapTexture(textures[plane]);
+    if(!texture)continue;
+    DioramaPlaneCaptureRegion region;
+    CHECK(DioramaPlaneCaptureRegion_Resolve(plane,kSurfaceWidth,kHeight,kApron,0,&region));
+    const SDL_FRect source={(float)region.x,0,(float)region.width,kHeight};
+    const SDL_FRect destination={0,0,(float)region.width,kHeight};
+    SDL_BlendMode blend;
+    CHECK(SDL_GetTextureBlendMode(texture,&blend));
+    CHECK(SDL_SetTextureBlendMode(texture,SDL_BLENDMODE_NONE));
+    CHECK(SDL_SetRenderTarget(renderer,readback));
+    CHECK(SDL_RenderTexture(renderer,texture,&source,&destination));
+    CHECK(SDL_SetTextureBlendMode(texture,blend));
+    const SDL_Rect rect={0,0,region.width,kHeight};
+    SDL_Surface *image=SDL_RenderReadPixels(renderer,&rect);
+    SDL_Surface *rgba=image?SDL_ConvertSurface(image,SDL_PIXELFORMAT_RGBA32):NULL;
+    CHECK(rgba!=NULL);
+    if(rgba)for(int y=0;y<kHeight;++y)
+      hash=SourceFixtureHash(hash,(const uint8_t *)rgba->pixels+y*rgba->pitch,(size_t)region.width*4);
+    SDL_DestroySurface(rgba);SDL_DestroySurface(image);
+  }
+  CHECK(SDL_SetRenderTarget(renderer,saved));
+  printf("exact-map-transition=%u rgba-mask-offset-fnv=%016" PRIx64 "\n",test,hash);
+}
+
+static void TestExactMapTransitions(ArRenderDevice *device,SDL_Renderer *renderer,
+    SDL_Texture *current) {
+  const int bands[]={SR_PPU_OVERLAY_BG1,kDioramaPlane_Bg1Hi,kDioramaPlane_Bg1Far};
+  const uint32_t map_mask=(1u<<bands[0])|(1u<<bands[1])|(1u<<bands[2]);
+  const uint32_t controls=(1u<<SR_PPU_OVERLAY_BG2)|(1u<<SR_PPU_OVERLAY_OBJ);
+  const uint32_t mask=map_mask|controls;
+  ActionVoxelGeometry *voxel=ActionVoxel_Create();CHECK(voxel);if(!voxel)return;
+  voxel->ready=true;voxel->active_group=voxel->active_room=1;
+  voxel->profile=kActionVoxelProfile_FillmoreForest;
+  voxel->settings=ActionVoxel_SettingsForRoom(1,1);
+  static FrameSlot slot;static SrPpuBgPacket packet;
+  memset(&slot,0,sizeof(slot));memset(&packet,0,sizeof(packet));
+  packet.owned_sources=packet.words[2]=3;
+  slot=(FrameSlot){.diorama_active=true,.interp_setting_enabled=true,
+      .snes_width=kDisplayWidth,.snes_height=kHeight,.obj_apron=kApron,
+      .capture_ticks=1,.bg_mode=1,.diorama_map_group=1,.diorama_map_number=1,
+      .diorama_plane_request_mask=mask,.diorama_plane_content_mask=mask,
+      .diorama_voxel=voxel,.background_packet=&packet};
+  slot.action_bg_plan.valid=true;
+  slot.action_bg_plan.layer[0]=(ActionBgLayerPlan){.valid=true,.role=kActionBgLayerRole_Playfield,
+      .source=kActionBgSource_WorldMap,.default_edge=kActionBgEdge_LiveWorld,
+      .world_width=1024,.world_height=768};
+  ArRenderTexture raw[kDioramaPlane_Count]={0},resolved[kDioramaPlane_Count]={0};
+  const uint8_t *pixels[kDioramaPlane_Count]={0};size_t pitches[kDioramaPlane_Count]={0};
+  for(unsigned i=0;i<3;++i)raw[bands[i]]=ArSdlRenderBackend_BorrowTexture(current);
+  raw[SR_PPU_OVERLAY_BG2]=raw[SR_PPU_OVERLAY_OBJ]=ArSdlRenderBackend_BorrowTexture(current);
+  uint32_t native[kSurfaceWidth*kHeight];
+  pixels[SR_PPU_OVERLAY_OBJ]=(const uint8_t *)native;
+  pitches[SR_PPU_OVERLAY_OBJ]=kSurfaceWidth*4;
+  const SDL_Rect region={0,0,kSurfaceWidth,kHeight};
+  SDL_Texture *readback=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_RGBA32,
+      SDL_TEXTUREACCESS_TARGET,kSurfaceWidth,kHeight);
+  CHECK(readback);if(!readback){ActionVoxel_Release(voxel);return;}
+  DioramaFrameGeneration_InvalidateHistory();
+  unsigned case_number=0;
+  for(unsigned endpoint=0;endpoint<13;++endpoint) {
+    /* Lifecycle mode/editor changes happen at capture boundaries. The first
+     * capture seeds a changed key; its second compatible capture can pair. */
+    slot.diorama_voxel=(endpoint==2||endpoint==3)?NULL:voxel;
+    if(endpoint==6)++slot.diorama_layer_section;
+    if(endpoint==8)DioramaFrameGeneration_InvalidateHistory();
+    raw[bands[1]]=endpoint==10?ArRenderTexture_Invalid():ArSdlRenderBackend_BorrowTexture(current);
+    for(int y=0;y<kHeight;++y)for(int x=0;x<kSurfaceWidth;++x)
+      native[y*kSurfaceWidth+x]=MapPixel(x-kApron+(int)endpoint*2,y,endpoint&1,false);
+    DioramaFrameGeneration_FinishCapture();
+    CHECK(SDL_UpdateTexture(current,&region,native,kSurfaceWidth*4));
+    slot.timestamp_ns=UINT64_C(3000000000)+endpoint*UINT64_C(16666667);
+    slot.bg1_camera_x=slot.bg2_camera_x=(int)endpoint*2;
+    DioramaFrameGeneration_Capture(device,&slot,raw,pixels,pitches,mask);
+    if(endpoint==1) {
+      /* The first presentation lacks a texture, before any metadata readback.
+       * Repeat it, then restore all sources, hide part/all of the map, restore
+       * again. Other global planes and actor fields remain live throughout. */
+      for(unsigned presentation=0;presentation<6;++presentation) {
+        ArRenderTexture available[kDioramaPlane_Count];memcpy(available,raw,sizeof(available));
+        if(presentation<2)available[bands[1]]=ArRenderTexture_Invalid();
+        const uint32_t current_mask=presentation==3?controls|(1u<<bands[0]):
+            presentation==4?controls:mask;
+        const float phase=presentation&1?.75f:.25f;
+        const uint32_t generated=DioramaFrameGeneration_Prepare(device,&slot,phase,
+            available,current_mask,resolved);
+        const uint32_t expected_map=presentation<2||presentation==4?0:
+            presentation==3?1u<<bands[0]:map_mask;
+        CHECK(DioramaFrameGeneration_VoxelMapPlaneMask()==expected_map);
+        if(presentation<2)CHECK(!(generated&(1u<<bands[1])));
+        HashMapTransition(renderer,readback,resolved,generated,case_number++);
+      }
+    } else {
+      const uint32_t generated=DioramaFrameGeneration_Prepare(device,&slot,.25f,raw,mask,resolved);
+      const uint32_t expected_map=endpoint==5||endpoint==7||endpoint==9||endpoint==12?map_mask:0;
+      CHECK(DioramaFrameGeneration_VoxelMapPlaneMask()==expected_map);
+      HashMapTransition(renderer,readback,resolved,generated,case_number++);
+    }
+  }
+  DioramaFrameGeneration_InvalidateHistory();
+  CHECK(DioramaFrameGeneration_VoxelMapPlaneMask()==0 && DioramaFrameGeneration_GpuPlaneMask()==0);
+  ActionVoxel_Release(voxel);SDL_DestroyTexture(readback);
+  puts("exact Voxel map transitions: missing/restored textures, partial/hidden masks, ordinary mode, editor section, reset and reseeding with BG2/actor controls");
 }
 
 int main(void) {
@@ -1487,7 +1615,10 @@ int main(void) {
     slot.interp_setting_enabled=true;
   }
 
-  if(gpu_motion && gpu_owned)TestExactMapPlacement(&render_device,renderer,current,resident);
+  if(gpu_motion && gpu_owned) {
+    TestExactMapPlacement(&render_device,renderer,current,resident);
+    TestExactMapTransitions(&render_device,renderer,current);
+  }
 
   /* Teardown may happen immediately after dispatch, without Prepare ever
    * joining it. Repeated lifetimes must retire the borrow before destruction. */

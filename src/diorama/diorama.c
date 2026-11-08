@@ -3967,8 +3967,9 @@ static PresentationOutcome DrawVoxelPartitionedFace(ArRenderDevice *device,const
   for(unsigned first=0;first<count;) {
     DioramaLayerMesh mesh={.constrained=true,.has_depth=layer->depth_sink!=NULL};
     while(first<count && mesh.vertex_count+4<=DIORAMA_VERTS_PER_LAYER && mesh.index_count+6<=DIORAMA_INDICES_PER_LAYER) {
-      const int base=mesh.vertex_count;memcpy(mesh.vertices+base,s_voxel_sides[first].v,4*sizeof(*mesh.vertices));
-      if(mesh.has_depth)memcpy(mesh.depths+base,s_voxel_sides[first].depths,4*sizeof(*mesh.depths));
+      const VoxelSide *side=&s_voxel_sides[s_voxel_order[first]];
+      const int base=mesh.vertex_count;memcpy(mesh.vertices+base,side->v,4*sizeof(*mesh.vertices));
+      if(mesh.has_depth)memcpy(mesh.depths+base,side->depths,4*sizeof(*mesh.depths));
       ++first;
       const int tri[]={0,1,2,0,2,3};for(unsigned j=0;j<6;++j)mesh.indices[mesh.index_count++]=base+tri[j];
       mesh.vertex_count+=4;

@@ -125,12 +125,11 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaViewGeometry *g
     }
   }
   if (!count) return true;
-  qsort(s_voxel_sides,count,sizeof(*s_voxel_sides),VoxelSideCompare);
+  SortVoxelSides(count);
   for (unsigned i=0;i<count;++i) {
-    memcpy(s_voxel_vertices+i*4,s_voxel_sides[i].v,sizeof(s_voxel_sides[i].v));
-    if(g->depth_sink)memcpy(s_voxel_depths+i*4,s_voxel_sides[i].depths,sizeof(s_voxel_sides[i].depths));
-    const int32_t indices[]={i*4,i*4+1,i*4+2,i*4,i*4+2,i*4+3};
-    memcpy(s_voxel_indices+i*6,indices,sizeof(indices));
+    const VoxelSide *face=&s_voxel_sides[s_voxel_order[i]];
+    memcpy(s_voxel_vertices+i*4,face->v,sizeof(face->v));
+    if(g->depth_sink)memcpy(s_voxel_depths+i*4,face->depths,sizeof(face->depths));
   }
   /* The existing screen-space receiver map works with arbitrary atlas UVs.
    * Reuse it for these faces instead of rebuilding/sampling light on the CPU. */
@@ -140,6 +139,6 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaViewGeometry *g
           (float)output->viewport.w/output->output_width,
           (float)output->viewport.h/output->output_height}};
   return RenderShadedDioramaDepthGeometry(device,scene->voxel_sprite_atlas,
-      s_voxel_vertices,s_voxel_depths,count*4,s_voxel_indices,count*6,kArRenderBlendMode_Alpha,
+      s_voxel_vertices,s_voxel_depths,count*4,VoxelQuadIndices(),count*6,kArRenderBlendMode_Alpha,
       NULL,(ArRenderRectF){0,0,1,1},&light,g->depth_sink,DioramaPlaneForObjectPriority(priority),false);
 }

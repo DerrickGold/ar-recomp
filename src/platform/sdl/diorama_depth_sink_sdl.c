@@ -58,6 +58,9 @@ static bool Flush(void *context) {
     ++s->stats.submissions;
     s->stats.draws+=s->count;
     if (s->stats.largest_batch<s->count) s->stats.largest_batch=s->count;
+    /* Submit closed prior SDL drawing before this uninterrupted native batch.
+     * Only a backend-owned drain can consume this same-call certificate. */
+    (void)ArSdlRenderBackend_CertifyExternalSdlIdle(s->owner,s);
   } else {
     s->failed=true;
     SDL_SetError("shared depth batch failed (%u draws, %u vertices)",s->count,s->vertex_count);

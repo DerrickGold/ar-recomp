@@ -40,6 +40,7 @@ typedef struct ArSdlRenderBackend {
   bool (*external_flush)(void *userdata);
   void *external_userdata;
   bool external_flushing;
+  bool external_sdl_idle; /* Callback-local certificate, cleared after every drain. */
 } ArSdlRenderBackend;
 
 /* Borrow a device/renderer-lifetime shader. SDL's pipeline cache keys custom
@@ -56,6 +57,13 @@ ArRenderTexture ArSdlRenderBackend_BorrowTexture(SDL_Texture *texture);
  * Removal drains first, and detaches even if that drain fails. The callback
  * must not submit through the portable renderer or change the registration. */
 bool ArSdlRenderBackend_SetExternalFlush(ArRenderDevice *, bool (*flush)(void *), void *userdata);
+/* Optional notification from the currently draining owner after a successful
+ * nonempty native submission. The owner must have submitted all prior SDL
+ * drawing before collecting native work, with no intervening SDL drawing.
+ * Only this same drain may omit SDL's redundant offscreen RenderPresent;
+ * SDL_FlushRenderer still runs. Direct calls, wrong owners and legacy adapters
+ * cannot certify anything and simply return false. */
+bool ArSdlRenderBackend_CertifyExternalSdlIdle(const ArRenderDevice *, void *userdata);
 /* Focused SDL adapter tests may bind an externally owned renderer. Production
  * boot uses CreateForWindow so native lifetime remains backend-owned. */
 bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
