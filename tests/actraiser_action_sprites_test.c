@@ -4,6 +4,7 @@
 #include "actraiser/actraiser_ar2_master.h"
 #include "actraiser/actraiser_action_visibility.h"
 #include "actraiser/actraiser_sprite_ownership.h"
+#include "actraiser/actraiser_death_heim_eyes.h"
 #include "actraiser/regional/actraiser_actor_art.h"
 #include "actraiser_game.h"
 #include "app/settings.h"
@@ -22,6 +23,8 @@ static SrPpuObjPositionUpdate s_positions[128];
 static unsigned s_position_count, s_composition_reads, s_query_count;
 static int s_runner;
 static bool s_sim_test, s_regional_art;
+static bool s_eye_override;
+static ActRaiserDeathHeimEyesDraw s_eye_draw;
 static SrPpuObjPart s_sim_parts[4];
 static unsigned s_sim_part_count, s_sim_native_count, s_sim_clipped_count;
 static ActRaiserDisplayGeometry s_geometry;
@@ -92,6 +95,23 @@ bool ActRaiserAr2Master_DrawObject(const CpuState *cpu, uint16_t object,
   return false;
 }
 bool ActRaiserActorArt_Active(void) { return s_regional_art; }
+bool ActRaiserDeathHeimEyes_Draw(CpuState *cpu, uint16_t owner,
+    bool flip_x, bool flip_y, int16_t left, int16_t top,
+    ActRaiserDeathHeimEyesDraw *out) {
+  (void)cpu;
+  (void)owner;
+  (void)flip_x;
+  (void)flip_y;
+  (void)left;
+  (void)top;
+  if (s_eye_override) *out = s_eye_draw;
+  return s_eye_override;
+}
+int ActRaiserDeathHeimEyes_FlareOffset(CpuState *cpu, uint16_t owner) {
+  (void)cpu;
+  (void)owner;
+  return 0;
+}
 bool ActRaiserActorArt_Draw(uint16_t base, uint16_t composition, unsigned visual,
                             ActRaiserActorArtDraw *out) {
   (void)base;
@@ -189,6 +209,8 @@ static void Reset(unsigned extend) {
   s_apron = (ActionApronGeometry){0};
   s_sim_test = false;
   s_regional_art = false;
+  s_eye_override = false;
+  s_eye_draw = (ActRaiserDeathHeimEyesDraw){0};
   s_sim_part_count = s_sim_native_count = s_sim_clipped_count = 0;
   memset(g_ram, 0, sizeof(g_ram));
   s_composition_reads = s_query_count = 0;
@@ -598,6 +620,27 @@ static void TestEmptyCompositionIsEmpty(void) {
   for (unsigned i = 0; i < 32; ++i)
     assert(g_ram[kActRaiserOamHighTable + i] == 0xa5);
 }
+static void TestDeathHeimProjectionUsesSharedEmission(void) {
+  for (unsigned wide = 0; wide <= 1; ++wide) {
+    Reset(wide ? 64 : 0);
+    g_settings.ws_sprites = wide != 0;
+    g_ram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_DeathHeim;
+    const unsigned obj = Object(0, 40, 3, 99);
+    Write(obj + kActRaiserActionObject_SourceDescriptor, 0xf408);
+    Write(obj + kActRaiserActionObject_LeftExtent, 8);
+    s_eye_override = true;
+    s_eye_draw.count = 1;
+    s_eye_draw.parts[0] = (ActRaiserActorArtPart){.x=16,.y=0,.attributes=2};
+    Scan();
+    assert(s_position_count == 1);
+    assert(s_positions[0].x == 108 && s_positions[0].y == 39);
+    assert(Read(kActRaiserOamShadow + 2) == 2);
+    /* A native three-part definition must stay empty when both acts are done. */
+    s_eye_draw.count = 0;
+    Scan();
+    assert(s_position_count == 0);
+  }
+}
 static void TestCompleteBubblesAtWindowEdges(void) {
   /* The bottom part crosses the flat emitter's edge while the projected
    * bubble can still be visible above its roof. Check both emitters, every
@@ -688,6 +731,7 @@ int main(int argc, char **argv) {
   TestFittedCameraPreservesAuthenticActivation();
   TestReceiverOwnership();
   TestVoxelCompositionOrigin();
+  TestDeathHeimProjectionUsesSharedEmission();
   TestWallTorchGuardOwnership();
   TestAutoDrawIgnoresManualProfile();
   TestCaptureGuardParts();

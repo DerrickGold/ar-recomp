@@ -25,6 +25,7 @@
 #include "actraiser/actraiser_action_visibility.h"
 #include "actraiser/actraiser_ar2_master.h"
 #include "actraiser/actraiser_sprite_ownership.h"
+#include "actraiser/actraiser_death_heim_eyes.h"
 #include "actraiser/actraiser_rtl.h"
 #include "actraiser/regional/actraiser_actor_art.h"
 #include "present/display_geometry.h"
@@ -979,6 +980,14 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
   ActRaiserAr2MasterDraw ar2_draw;
   const bool ar2_master = ActRaiserAr2Master_DrawObject(cpu, object_address, &ar2_draw);
   if (ar2_master) component_count = (uint16)ar2_draw.count;
+  ActRaiserDeathHeimEyesDraw death_heim_draw;
+  const bool death_heim_eyes = ActRaiserDeathHeimEyes_Draw(cpu, object_address,
+      (flip_attributes & kDefinitionFlipHorizontal) != 0,
+      (flip_attributes & kDefinitionFlipVertical) != 0,
+      native_left, native_top, &death_heim_draw);
+  if (death_heim_eyes) component_count = (uint16)death_heim_draw.count;
+  const int death_heim_flare_offset =
+      ActRaiserDeathHeimEyes_FlareOffset(cpu, object_address);
   unsigned component_index = 0;
   ws_dp16w(cpu, kSpriteDp_ComponentCount, component_count);
 
@@ -1031,7 +1040,9 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
     const bool flip_x = (flip_attributes & kDefinitionFlipHorizontal) != 0;
     const bool flip_y = (flip_attributes & kDefinitionFlipVertical) != 0;
     ActRaiserActorArtPart part = {0};
-    if (ar2_master) {
+    if (death_heim_eyes) {
+      part = death_heim_draw.parts[component_index];
+    } else if (ar2_master) {
       const ActRaiserAr2MasterPart *source = &ar2_draw.parts[component_index];
       part.x = source->x[flip_x];
       part.y = source->y[flip_y];
@@ -1047,9 +1058,10 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
       part.large = (cpu_read8(cpu, definition_bank,
           (uint16)(definition_address + kActionPartFlags)) & 1) != 0;
     }
-    if (regional && !ar2_master)
+    if (regional && !ar2_master && !death_heim_eyes)
       ActRaiserActorArt_ResolvePart(&regional_draw, component_index, flip_x,
           flip_y, native_left, native_top, &part);
+    part.x += death_heim_flare_offset;
     const int component_offset_y = part.y;
     uint16 biased_y = (uint16)(
         component_offset_y + ws_dp16(cpu, kSpriteDp_ScreenOriginY));

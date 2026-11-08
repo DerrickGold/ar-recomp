@@ -14,6 +14,13 @@ Unless a release is explicitly named, addresses below describe the US ROM.
 | $7E:001A | 1 | Destination map number |
 | $7E:001B | 1 | Destination map group (first byte of map ID) |
 
+Current and destination fields have opposite byte order. A little-endian word
+read at `$18` is `map << 8 | group`; the destination word at `$1A` is
+`group << 8 | map`. For the Death Heim hub, current bytes `$18/$19 = 07/01`
+read as `$0107`, while staging destination bytes `$1A/$1B = 01/07` writes
+`$0701`. See the [Death Heim boss-rush contract](death-heim-boss-rush.md)
+for routing between the hub, rematches, and borrowed Act 1 rooms.
+
 ### Platformer Stats
 | Address | Size | Description | Notes |
 |---------|------|-------------|-------|
@@ -180,6 +187,18 @@ The tile/attribute word contains no size information.
 | slot `+38` | 2 | Role-specific counter/flag. Controller `$0860+38` is selected spell ID; cohort spells reuse `+38` for repeat counts. Original/rematch Pharaoh root uses it as a pending-sphere flag: successful allocation increments it, the child clears it through `+$3A` after formation, and the root checks between waiting sequences. It is not a shared boss timer. |
 | slot `+3A` | 2 | Spawner backlink. The cast controller and player sword-beam child point to player `$08A0`; Bloodpool boss-lightning strike child `$08E0` points to boss `$12E0`, while its floor child `$0920` points to `$08E0`. Marahna split fireballs point to their retired `$E047` orb, snake fireballs point to their validated `$DE96` parent, linked-lightning children point to the first `$E18E` endpoint while the `$E254` partner occupies the next slot, and both `$E483` boss bolt stages point to boss `$12E0`. Death Heim's room owner is `$001C`; the Viper parent and the visible Flaming Wheel body retain it in their rematches. Minotaur axes and Ice Dragon balls point to their allocator with the same original/rematch source; the address does not promise that allocator remains live. The original Flaming Wheel body is root-owned (`0`); helper/child records have action-object backlinks and are rejected. Combined with `+32`, this establishes provenance at admission. The backlink value can remain stable after the referenced slot retires or is reused; it is not a lifetime owner or a globally unique identity. |
 | `$7E:00F4/$00F8/$00F9` | 2 each | Input-enable mask, cast-active gate, and cast-transition state used by `$9DE1-$9F10` |
+
+The custom Death Heim Act 1 adapter reserves 32 placement records starting at
+`$0AE0`, then initializes its boss root at `$12E0`. In Bloodpool, `$0AE0` holds
+the native hidden environment controller (`$00:B919`); the other reserved
+records remain available to native boss children. The final boss has been
+observed at `$1320` in the native Death Heim placement sequence. These are
+encounter-specific allocation results, not permanent stock boss addresses.
+Rush admission binds the actual root slot to its scene, source descriptor,
+and attempt; a matching address alone does not establish ownership. During
+Act 1 arrival the adapter temporarily uses the admitted root for the native
+teleport beam, then restores its initialized boss record before combat.
+See [Death Heim actor and resource ownership](death-heim-boss-rush.md).
 
 ### Sword and beam damage
 
@@ -471,10 +490,11 @@ the falling projectile's current position.
 | $7E:0076/$0079 (+banks $78/$7B) | 2+1 ea | NMI record-drain pointers — reset EVERY NMI by $02:ACC8 to $3900/$3A02 then $3B04/$3C06 (game-side reads see the resting values; not a game variable) |
 | $7E:3900/$3A02/$3B04/$3C06 | $102 ea | the four one-record upload buffers (BG1 col/row, BG2 col/row): +0 header = VRAM base word (0=empty, zeroed after drain), data = 4x64B chunks at +2/+$42/+$82/+$C2. Column records use VMAIN=$81 and target `base,+1,+$800,+$801` (32 words, stride `$20`); row records use VMAIN=$80 and target `base,+$20,+$400,+$420` (32 contiguous words). |
 | $7E:00C4-$00CA | — | Fade gate/config and background page-flip counters: `$C5/$C6` are page masks, `$C7/$C8` current offsets, `$C9/$CA` packed reload/countdown bytes. `$02:BC27` services both pairs. Aitos Act 1 rooms 2/3 use mask `$0C`, counter `$40`: offsets 4/8/12/0 held five calls each. Same checked settings/cycle in all five ROMs; PAL addresses are one higher. [Native profile checks](regional-differences-technical.md#aitos-background-animation-and-video-profiles). |
-| $7E:00CB/$00CD/$00CE/$00CF | 2+1+1+1 | CGRAM upload descriptor: src addr/bank, CGADD, row count ($02:AE75) |
+| $7E:00CB/$00CD/$00CE/$00CF | 2+1+1+1 | Pending CGRAM upload descriptor: source address/bank, CGADD, 16-color row count (`$02:AE75`); `$CF=0` is idle. A queued upload can overwrite a direct palette restoration on the next NMI. |
 | $7E:00D0-$00D6 | 7 | VRAM DMA descriptor slot 0: src16/bank/VMADD/size (size=0 idle; $02:AF30) |
-| $7E:00D7-$00DD | 7 | VRAM DMA descriptor slot 1 = tile-anim upload. Action/town `$02:BC56` uses `[$D9]:$D7 = $7F:B800+n*$E1`; world navigation's `$02:AF86` instead fixes bank `$0A`, with `$D7 = $B000/$B040/$B080/$B0C0` for the four water frames. |
-| $7E:00DE-$00E1 | 1+1+1+2 | tile-anim: tick period mask / frame count-1 / frame index / frame stride (bytes); $FF/$FF/-/0 = disabled |
+| $7E:00D7-$00DD | 7 | VRAM DMA descriptor slot 1 = tile-anim upload: source address `$D7/$D8`, bank `$D9`, destination VRAM word `$DA/$DB`, pending byte count `$DC/$DD`. Action/town `$02:BC56` uses `[$D9]:$D7 = $7F:B800+n*$E1`; world navigation's `$02:AF86` instead fixes bank `$0A`, with `$D7 = $B000/$B040/$B080/$B0C0` for the four water frames. |
+| $7E:00DE-$00E2 | 1+1+1+2 | tile-anim: tick period mask `$DE` / frame count-1 `$DF` / frame index `$E0` / frame stride in bytes `$E1/$E2`; `$FF/$FF/-/0` = disabled. Before `$02:BAF5`, bit 7 of `$DE` requests retention of the previous character snapshot; the routine clears that bit without recapturing. |
+| $7E:00EA/$00EC | 2+1 | Pending single-register PPU write: register address at `$EA/$EB`, value at `$EC`. NMI `$02:AC42` writes `$EC` through `($EA)` when `$EB!=0`, then clears only `$EB`; the low address byte can remain while idle. Teleport code can queue `OBSEL` (`$2101`) here, independently of the current PPU register value. |
 | $7E:00F1 | 1 | one-shot flag: re-stream BG3 map rows 4-26 ($7F:B100 -> VRAM $5880) next NMI |
 | $7F:B000-$B6BF | 1728 | HUD/BG3 tilemap compose buffer (rows 0-3 streamed every frame to VRAM $5800; rows 4-26 on $F1) |
 | $7F:0000-$1FFF | 8192 | **Full town BG1 tilemap**, the whole 64x64-tile (512x512 pixel) town, not just the on-screen window. Quadrant-paged: `$03:9B5A/$03:9C43` write each cell's 2x2 tile block at `quadrant*2048 + (cellY & 15)*128 + (cellX & 15)*4`, four words at `+$00/+$02/+$40/+$42`, using terrain/structure definitions respectively. Row stride is 32 tiles, quadrant stride 32x32 tiles. A row-major read looks like an unrelated layer — it was mistaken for BG2 twice before `$9C43` was disassembled. This is the authoritative displayed cell artwork across staged construction and Marahna's water-to-land event; the semantic `$7F:2000` value can lead the visible redraw, so presentation observes this range plus live VRAM/CGRAM rather than reconstructing the image from cell ids |
@@ -483,7 +503,7 @@ the falling projectile's current position.
 | $7E:2900-$30FF | 2048 | Action BG2 metatile definitions, 8 bytes (four tilemap words) per ID, installed by command 5. Outside action mode this range is shared and must not be treated as persistent BG2 authority. |
 | $7F:2000-$37FF | 6144 | **Six town terrain cell maps**, one 32x32-cell, `$400`-byte block per town. Each block is quadrant-paged as four 16x16 pages at +0/+256/+512/+768. Values are semantic terrain ids or temporary/special structure marks: terrain redraws expand `$7E:2100` through `$03:9B5A`, while structure rebuilds expand `$7E:3100` through `$03:9C43`; structure records' `+0/+1` cell X/Y address the active block. During staged animation this semantic value may change before the displayed 2x2 words at `$7F:0000`, so it is not a presentation oracle. |
 | $7E:3100+ | 2048 | Structure metatile table: 8 bytes (four BG1 tilemap words) per metatile index, consumed by the shared `$03:9C43` metatile-copy routine. Note the cell value is **not** a direct index — expansion is a write path the game runs on change, and cell → 2x2 block is only ~62-77% single-valued when inverted, so read `$7F:0000` rather than trying to rebuild it |
-| $7F:B800-$BFFF | `$1000` | Contiguous 4 KiB character-animation snapshot used by action mode and sim towns (`$18=0`, `$19!=0,9`). During scene entry `$02:BAF5` reads `$1000` bytes of character VRAM beginning at word `$DA` (`$0000` or `$1000`) into this range; `$02:BC56` later selects `$E1`-byte phase `($E0 & $DF)` and `$02:AF30` uploads it back. Raw config cadence bit 7 marks a continuation and makes `$BAF5` retain the prior capture. Only the separate sim `$19=0 or 9` branch uses ROM bank `$0A` directly through `$02:AF86`. |
+| $7F:B800-$C7FF | `$1000` | Contiguous 4 KiB character-animation snapshot used by action mode and sim towns (`$18=0`, `$19!=0,9`). During scene entry `$02:BAF5` reads `$1000` bytes of character VRAM beginning at word `$DA` (`$0000` or `$1000`) into this range; `$02:BC56` later selects `$E1`-byte phase `($E0 & $DF)` and `$02:AF30` uploads it back. Raw config cadence bit 7 marks a continuation and makes `$BAF5` retain the prior capture. Only the separate sim `$19=0 or 9` branch uses ROM bank `$0A` directly through `$02:AF86`. |
 
 ### Mode 7 / World Map
 | Address | Size | Description |
@@ -511,7 +531,21 @@ commands 5 and 4. Several addresses serve as scratch space in other game modes.
 | $7E:6000-$7FFF | 8192 | Shared action graphics workspace. Compressed command-7 character banks and command-5 metatiles expand here before VRAM/definition-table copies. Persistent raster builders later reuse `$6000`, `$6800`, or `$7000`; partially written raster entries intentionally retain bytes from the last decompression. |
 | $7E:8000+ | `widthChunks × heightChunks × 256` | BG1 page-major metatile-id map loaded by command 4. `$46` points here in stock action rooms; `$2E/$30` publish `widthChunks/heightChunks × 256` pixels. This is also the collision map consumed by `$00:91C3`. |
 | $7E:C000+ | `widthChunks × heightChunks × 256` | BG2 page-major metatile-id map loaded by command 4; `$4A` points here and `$32/$34` hold its pixel dimensions. Only the active prefix is action-owned. The enclosing `$C000-$FFFF` range is reused by the world-map and town paths. |
-| $7F:B800-$BFFF | 4096 | Character-animation source snapshot captured by `$02:BAF5` from VRAM word `$DA`; `$02:BC56/$02:AF30` upload phase-sized windows back to the same target. Continuation profiles intentionally retain the prior capture. |
+| $7F:B800-$C7FF | 4096 | Character-animation source snapshot captured by `$02:BAF5` from VRAM word `$DA`; `$02:BC56/$02:AF30` upload phase-sized windows back to the same target. Continuation profiles intentionally retain the prior capture. |
+
+In Bloodpool Act 1 (group `$02`, map `$01`), the persistent native controller
+`$00:B919 → $02:9204` rebuilds the water-perspective HDMA table at `$7E:6000`
+and configures HDMA channel 2 each update. This workspace is live rendering
+state, not free scratch after decompression. The Death Heim adapter retains
+that controller and runs the ordinary pre-fade actor update before the first
+visible arena frame; see [the arena loading contract](death-heim-boss-rush.md).
+
+Kasandora Act 1 room `03/02` retains the sand-animation snapshot captured in
+`03/01`. Its settled state is `$DA=$0000`, `$DE=$07`, `$DF=$01`, and
+`$E1=$0200`: two 512-byte phases from `$7F:B800/$BA00` replace VRAM words
+`$0000-$00FF` every eight updates. The complete `$1000`-byte snapshot must
+survive the room transition. See the verified
+[ROM profile and character source](rom-map.md#death-heim-encounters-and-teleport-resources).
 
 ## Action terrain collision
 | Address | Size | Description |
@@ -530,7 +564,7 @@ commands 5 and 4. Several addresses serve as scratch space in other game modes.
 | $7E:00A2 | 3 | Asset-script long pointer. |
 | $7E:00A5 | 3 | Long pointer to compressed input byte |
 | $7E:00A5/$00A7 | 2+1 | Asset-script requested resource pointer, reused by non-music commands. At accepted music boundary `$02:B653`, Japan's Fillmore cave routing may replace the recognized `$0E:F69F` request with US `$18:947F`. Not the resident source cache. |
-| $7E:00AB | 3 | Resident music-source cache, owned by native upload/comparison at `$02:B655`. Regional setting edits do not write it. |
+| $7E:00AB | 3 | Resident music-source cache: address word `$AB/$AC`, bank `$AD`, owned by native upload/comparison at `$02:B655`. Regional setting edits do not write it. Native retry `$02:BD14` executes `STZ $AC` with M=0, clearing **both** `$AC/$AD` and invalidating the cached source. A custom Death Heim Act 1 retry with lives remaining skips that store while retaining the playing hub song and suppressing level-song uploads; see [music continuity](death-heim-boss-rush.md). |
 | $7E:00AE | 1 | Bit weight (0x80, 0x40... 0x01) |
 | $7E:00AF | 2 | Sliding window position |
 | $7E:00B1 | 2 | Source position in sliding window |
@@ -712,7 +746,16 @@ screen coordinates are not. Native camera/screen offsets still apply to anchors.
 | $7E:033E | 1 | Temple action (0x00=Give Oracle, 0x01=Listen, 0x02=Take Offering) |
 | $7E:0334 | 1 | **Selected/requested song id** (earlier "Death Heim/ending state" reading was a misread of music state). The `[$A2]`-script song handler `$02:B64B` executes a declaration only when this byte matches its selector; a separate loaded-source comparison against DP `$AB/$AD` skips redundant uploads. Written by ~10 play sites (`$00:828F/A370/F650/FF04`, `$01:8602/8754/8856`, `$02:8345/BD2A`, `$03:8262`); zeroed by the transition stop at `$00:83F2`. `$00:A370` selects 4 after all six act counts reach two. `$00:FEFC` selects 1 at final-boss teleport-out; `$00:F650` selects 3 after the returning `0701` sky fade-in — too late for the black-frame BG page swap (`$00:F5F0-$F619`, BG1SC/BG2SC `$64/$74`). JP equivalent field is `$0322`. |
 | $7E:0341 | 1 | Active world-location ID, 1-7. `$01:B6CA` first clears it, then writes the entry whose 256x256 source-pixel region from ROM table `$01:B73C` contains the `$0300/$0302` focus; zero therefore means outside every town border. The location label and 3D navigation clear-region mask consume the same value; zero keeps the full world hazed. Also read by `$00:A375` as the pending post-Death-Heim destination |
-| $7E:0347 | 1 | Death Heim boss-rush/ending progress: `$00:FEEC` writes `$19 - 1` after each boss (hub stager `$F3D4` warps to `$0347+2` next); `$07` = final boss beaten. Epilogue completion `$01:8859` increments it to `$08`; world-scene handler `$02:84EC` then selects silent music ID 21 and runs the departure into credits. |
+| $7E:0347 | 2 | Death Heim boss-rush/ending progress. Native `$00:FEEC` writes the word `$19 - 1` after each boss. Values `$00-$05` leave rematches outstanding; `$06` means all six rematches are cleared and the final boss is next; `$07` means the final boss is beaten. Hub routing `$00:F3E4` reads the low byte and stages map `progress+2`. Epilogue completion `$01:8859` increments the low byte to `$08`; world-scene handler `$02:84EC` tests that byte for `$08`, selects silent music ID 21 (`$15`), and runs the departure into credits. The high byte is zero in this lifecycle. |
+
+For a custom Death Heim rush, `$0347` remains a native compatibility value,
+not a count of every completed fight. The host run owns the encounter order
+and completion mask; its projection stays within `$00-$05` while required
+bosses remain, becomes `$06` when the roster is complete, and becomes `$07`
+after the final victory. Extended runs therefore do not write `$07` after
+their seventh ordinary boss. `$0334` continues to select music and must not
+be used as a progression or scenery-completion flag. See
+[Death Heim progression and ending](death-heim-boss-rush.md).
 
 ## Debug / System
 
@@ -734,9 +777,21 @@ screen coordinates are not. Native camera/screen offsets still apply to anchors.
 | $7F:6800+ | varies | Road construction data (one word per 4x4 block) |
 | $7F:B000-$7F:B7FF | 2KB | BG3 tilemap |
 
+The Death Heim hub's ordinary-object animation image spans
+`$7E:4000-$533D` (4,926 bytes), overlapping the first 830 bytes of the boss
+image at `$5000`. The custom Act 1 teleport temporarily installs this full
+span together with OBJ characters at **VRAM word** `$3000-$3FFF` and
+**CGRAM color indices** 128-191, then restores the arena resources before
+boss animation resumes. These are temporary resource spans, not additional
+WRAM allocations. Pending PPU/CGRAM descriptors at `$EA-$EC` and `$CB-$CF`
+must also respect the resource owner; see
+[the teleport resource contract](death-heim-boss-rush.md).
+
 ### Act Completion ($7F:6B18-$7F:6B23)
-Two bytes per town tracking act completion counts. `$00:A343` (Death Heim exit
-stager) requires all six words == 2 for the all-bosses-done path.
+Two bytes per town tracking act completion counts. Ordinary act-departure
+handler `$00:A343` requires all six words == 2 to stage Death Heim's island
+emergence; otherwise it returns to the current town. This is not a post-rush
+exit handler.
 The town BG character-bank filter also reads this count: below 2 loads raw
 file `0x60000`, at 2 or more loads `0x64000`. Both are 16 KiB uploads to the
 same VRAM destination. This selector is not the house-development tier.

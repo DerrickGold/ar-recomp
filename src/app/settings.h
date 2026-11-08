@@ -179,6 +179,7 @@ typedef enum {
   kSettingCat_Localization,
   kSettingCat_LocalizationFont,
   kSettingCat_Interface,
+  kSettingCat_RandoBosses,    /* Randomizer: independent Death Heim order */
   kSettingCat_Count,
 } SettingCategory;
 
@@ -308,6 +309,9 @@ struct SettingDesc {
   bool (*can_change)(void);
   /* Optional content/session actions disappear instead of offering a disabled row. */
   bool hide_when_unavailable;
+  /* Transactional owner preflight for scalar edits. Called before publishing
+   * the value; false preserves both the setting and its owner's state. */
+  bool (*prepare_change)(const SettingDesc *desc, long value);
 };
 
 typedef enum {
@@ -475,6 +479,10 @@ typedef struct Settings {
   int  rando_lair_types;      /* RandomizerMode */
   bool rando_regional_action;
   bool rando_regional_towns;
+
+  int death_heim_roster;
+  bool death_heim_shuffle_order;
+  int death_heim_seed;
 
   /* Widescreen behavior. All default ON; the per-frame gates read these. */
   bool ws_action;             /* AR_WS_ACTION            action stages wide */
@@ -784,6 +792,8 @@ bool Settings_SetLocalizationPacks(const SettingsLocalizationPack *packs,
                                     size_t count);
 const char *Settings_LocalizationPackPath(int content);
 bool Settings_IsAvailable(const SettingDesc *desc);
+/* Settings owned by the master Randomizer recipe. Death Heim order has its
+ * own campaign recipe even though its controls share the Randomizer section. */
 bool Settings_IsRandomizer(const SettingDesc *desc);
 /* Video boot/reset publishes tested semantic features. Unsupported switches
  * are blocked for this session without overwriting the saved preference. */
@@ -860,6 +870,16 @@ int Settings_AudioFrequencyHz(void);
 void Settings_SetHdReplacementsAvailable(bool available);
 void Settings_SetAr2MasterAvailable(bool available);
 void Settings_SetImportedLevelActive(bool active);
+
+/* The game owner binds campaign persistence and attempt/replay locks without
+ * introducing CPU or save ownership into the settings registry. */
+typedef struct SettingsDeathHeimHost {
+  void *context;
+  bool (*can_change)(void *context);
+  bool (*roster_available)(void *context, unsigned roster);
+  bool (*prepare)(void *context, unsigned roster, bool shuffle, uint32_t seed);
+} SettingsDeathHeimHost;
+void Settings_SetDeathHeimHost(const SettingsDeathHeimHost *host);
 
 /* Backing pixels per window point for the window's current display
  * (SDL_GetWindowPixelDensity), pushed from host_display.c. */

@@ -1,4 +1,6 @@
 #include "actraiser/actraiser_scene_music.h"
+#include "actraiser/actraiser_death_heim_runtime.h"
+#include "actraiser_game.h"
 #include "regional/presentation/regional_music.h"
 #include "byte_order.h"
 #include "support/test_assert.h"
@@ -7,6 +9,17 @@
 #include <string.h>
 static uint8_t ram[65536], profile;
 static unsigned target, origin, captures;
+static bool rush_active;
+static bool arena_loading;
+static const ActRaiserDeathHeimEncounter *rush_encounter;
+bool ActRaiserDeathHeim_Active(void) { return rush_active; }
+bool ActRaiserDeathHeimArenas_Loading(CpuState *cpu) {
+  const unsigned map = cpu_read8(cpu, 0, kActRaiserWram_CurrentMap);
+  return arena_loading && rush_encounter && map && map <= rush_encounter->map;
+}
+const ActRaiserDeathHeimEncounter *ActRaiserDeathHeim_CurrentEncounter(void) {
+  return rush_encounter;
+}
 bool ActRaiserRegional_BeginSceneMusic(uint8_t *out) {
   *out = profile;
   ++captures;
@@ -122,6 +135,171 @@ static void Adapters(void) {
   assert(!ArRegionalMusic_Resolve(3, &unchanged) && !ArRegionalMusic_Resolve(0, NULL));
   assert(!ArRegionalMusic_UseFillmore(2, 0x0201));
 }
+
+static void BorrowedArenaMusic(void) {
+  profile = 0;
+  for (unsigned city = 1; city <= 6; ++city) {
+    rush_encounter = ActRaiserDeathHeimRush_Encounter((city - 1) * 2);
+    assert(rush_encounter && rush_encounter->act == 1);
+    rush_active = true;
+    for (unsigned map = 1; map <= rush_encounter->map; ++map) {
+      arena_loading = true;
+      memset(ram, 0x5a, sizeof(ram));
+      ram[kActRaiserWram_MapGroup] = city;
+      ram[kActRaiserWram_CurrentMap] = map;
+      ram[0x334] = ram[0x8d] = 0;
+      CpuState cpu = {.PB = 2, .DB = 0, .A = 0xbe00, .X = 0xa5,
+                     .Y = 0x1234, .S = 0x1efc, .P = CPU_P_M | CPU_P_C};
+      cpu_p_to_mirrors(&cpu);
+      const CpuState before = cpu;
+      uint8_t expected[sizeof(ram)];
+      memcpy(expected, ram, sizeof(ram));
+      assert(ActRaiser_SceneMusicEntry(&cpu));
+      assert(ActRaiser_SceneMusic(&cpu) == RECOMP_RETURN_TAILCALL);
+      assert(target == 0x02b69b && origin == 0x02b653);
+      assert(!memcmp(&cpu, &before, sizeof(cpu)) && !memcmp(expected, ram, sizeof(ram)));
+      /* Both the ordinary stage and its retry are accepted without touching
+       * the resident image, SFX mailboxes or any APU command port. */
+      assert(ActRaiser_SceneMusic(&cpu) == RECOMP_RETURN_TAILCALL);
+      assert(!memcmp(expected, ram, sizeof(ram)));
+      arena_loading = false;
+      assert(ActRaiser_SceneMusic(&cpu) == RECOMP_RETURN_TAILCALL);
+      assert(target == (map == rush_encounter->map ? 0x02b69b : 0x02b655));
+    }
+    /* The same physical level outside a rush keeps its native song path. */
+    CpuState cpu = {.PB = 2, .P = CPU_P_M};
+    cpu_p_to_mirrors(&cpu);
+    rush_active = false;
+    assert(ActRaiser_SceneMusic(&cpu) == RECOMP_RETURN_TAILCALL && target == 0x02b655);
+    rush_active = true;
+    ram[kActRaiserWram_CurrentMap] = rush_encounter->map + 1;
+    assert(ActRaiser_SceneMusic(&cpu) == RECOMP_RETURN_TAILCALL && target == 0x02b655);
+  }
+  /* A hub, native Act 2 rematch or final boss must still load its own song. */
+  for (unsigned id = 0; id <= kActRaiserDeathHeimRush_FinalEncounter; ++id) {
+    rush_encounter = ActRaiserDeathHeimRush_Encounter(id);
+    ram[kActRaiserWram_MapGroup] = 7;
+    ram[kActRaiserWram_CurrentMap] = id == 12 ? 8 : 1;
+    CpuState cpu = {.PB = 2, .P = CPU_P_M};
+    cpu_p_to_mirrors(&cpu);
+    assert(ActRaiser_SceneMusic(&cpu) == RECOMP_RETURN_TAILCALL && target == 0x02b655);
+  }
+  rush_active = false;
+  rush_encounter = NULL;
+}
+
+static void BossMusicActor(void) {
+  for (unsigned city = 1; city <= 6; ++city) {
+    rush_encounter = ActRaiserDeathHeimRush_Encounter((city - 1) * 2);
+    rush_active = true;
+    memset(ram, 0x5a, sizeof(ram));
+    ram[kActRaiserWram_MapGroup] = city;
+    ram[kActRaiserWram_CurrentMap] = rush_encounter->map;
+    const uint16_t slot = 0x1320;
+    ByteOrder_WriteLe16(ram + slot, 0x0800);
+    ByteOrder_WriteLe16(ram + slot + kActRaiserActionObject_Handler, 0xa3fe);
+    ByteOrder_WriteLe16(ram + slot + kActRaiserActionObject_LocalCounter, 0);
+    CpuState cpu = {.X = slot, .A = 0x1234, .S = 0x1efe, .P = CPU_P_C};
+    cpu_p_to_mirrors(&cpu);
+    const CpuState before = cpu;
+    uint8_t expected[sizeof(ram)];
+    memcpy(expected, ram, sizeof(ram));
+    assert(ActRaiser_DeathHeimBossMusicEntry(&cpu));
+    assert(ActRaiser_DeathHeimBossMusic(&cpu) == RECOMP_RETURN_TAILCALL);
+    assert(target == 0x00a4b4 && origin == 0x00a3fe);
+    assert(!memcmp(&cpu, &before, sizeof(cpu)) && !memcmp(expected, ram, sizeof(ram)));
+    /* Authored trigger actors become status0 before this same music entry. */
+    ByteOrder_WriteLe16(ram + slot, 0);
+    assert(ActRaiser_DeathHeimBossMusicEntry(&cpu));
+    for (unsigned bad = 0; bad < 11; ++bad) {
+      cpu = before;
+      memcpy(ram, expected, sizeof(ram));
+      switch (bad) {
+      case 0: rush_active = false; break;
+      case 1: cpu.PB = 1; break;
+      case 2: cpu.DB = 1; break;
+      case 3: cpu.m_flag = 1; break;
+      case 4: cpu.x_flag = 1; break;
+      case 5: cpu.D = 1; break;
+      case 6: cpu.X = slot + 1; break;
+      case 7: cpu.X = 0xffff; break;
+      case 8: ByteOrder_WriteLe16(ram + slot, 0x4000); break;
+      case 9: ByteOrder_WriteLe16(ram + slot + kActRaiserActionObject_Handler, 0xa410); break;
+      case 10: ByteOrder_WriteLe16(ram + slot + kActRaiserActionObject_LocalCounter, 1); break;
+      }
+      assert(!ActRaiser_DeathHeimBossMusicEntry(&cpu));
+      rush_active = true;
+    }
+  }
+  rush_active = false;
+  rush_encounter = NULL;
+  assert(!ActRaiser_DeathHeimBossMusicEntry(NULL));
+}
+
+static void RetryMusicCache(void) {
+  for (unsigned city = 1; city <= 6; ++city) {
+    rush_encounter = ActRaiserDeathHeimRush_Encounter((city - 1) * 2);
+    rush_active = true;
+    memset(ram, 0x5a, sizeof(ram));
+    ram[kActRaiserWram_MapGroup] = city;
+    ram[kActRaiserWram_CurrentMap] = rush_encounter->map;
+    ram[kActRaiserWram_Lives] = 1;
+    ByteOrder_WriteLe16(ram + 0xab, 0x9470);
+    ram[0xad] = 0x1b;
+    CpuState cpu = {.PB = 2, .X = kActRaiserWram_PlayerObject,
+                   .A = 0x0040, .S = 0x1efb, .P = CPU_P_C | CPU_P_V};
+    cpu_p_to_mirrors(&cpu);
+    const CpuState before = cpu;
+    uint8_t expected[sizeof(ram)];
+    memcpy(expected, ram, sizeof(ram));
+    assert(ActRaiser_DeathHeimRetryMusicEntry(&cpu));
+    assert(ActRaiser_DeathHeimRetryMusic(&cpu) == RECOMP_RETURN_TAILCALL);
+    assert(target == 0x02bd16 && origin == 0x02bd14);
+    assert(!memcmp(&cpu, &before, sizeof(cpu)) && !memcmp(expected, ram, sizeof(ram)));
+    /* Skip only the cache invalidation. Native code still owns death effects,
+     * retry animation, resources and the life debit after this boundary. */
+    for (unsigned bad = 0; bad < 12; ++bad) {
+      cpu = before;
+      memcpy(ram, expected, sizeof(ram));
+      switch (bad) {
+      case 0: rush_active = false; break;
+      case 1: ram[kActRaiserWram_Lives] = 0; break;
+      case 2: cpu.PB = 0; break;
+      case 3: cpu.DB = 1; break;
+      case 4: cpu.D = 1; break;
+      case 5: cpu.emulation = 1; break;
+      case 6: cpu.m_flag = 1; break;
+      case 7: cpu.x_flag = 1; break;
+      case 8: cpu._flag_D = 1; break;
+      case 9: cpu.P |= CPU_P_D; break;
+      case 10: ram[kActRaiserWram_MapGroup] = 7; break;
+      case 11: ram[kActRaiserWram_CurrentMap] = rush_encounter->map + 1; break;
+      }
+      assert(!ActRaiser_DeathHeimRetryMusicEntry(&cpu));
+      rush_active = true;
+    }
+    cpu = before;
+    memcpy(ram, expected, sizeof(ram));
+    /* Even an owned prerequisite room is not a live encounter retry. */
+    if (rush_encounter->map > 1) {
+      arena_loading = true;
+      ram[kActRaiserWram_CurrentMap] = 1;
+      assert(!ActRaiser_DeathHeimRetryMusicEntry(&cpu));
+      arena_loading = false;
+    }
+    /* Act 2 and final-boss retries retain their native cache invalidation. */
+    for (unsigned id = 1; id <= kActRaiserDeathHeimRush_FinalEncounter; ++id) {
+      if (!(id & 1) && id != kActRaiserDeathHeimRush_FinalEncounter) continue;
+      rush_encounter = ActRaiserDeathHeimRush_Encounter(id);
+      ram[kActRaiserWram_MapGroup] = rush_encounter->map_group;
+      ram[kActRaiserWram_CurrentMap] = rush_encounter->map;
+      assert(!ActRaiser_DeathHeimRetryMusicEntry(&cpu));
+    }
+  }
+  rush_active = false;
+  rush_encounter = NULL;
+  assert(!ActRaiser_DeathHeimRetryMusicEntry(NULL));
+}
 static size_t SongSize(const uint8_t *r, size_t offset) {
   const size_t start = offset;
   for (unsigned block = 0; block < 64; ++block) {
@@ -180,10 +358,14 @@ static void RomCheck(char **paths) {
 }
 int main(int argc, char **argv) {
   Adapters();
+  BorrowedArenaMusic();
+  BossMusicActor();
+  RetryMusicCache();
   if (argc == 6)
     RomCheck(argv + 1);
   else
     assert(argc == 1);
-  puts("Scene music: guarded routing, untouched native cache/handshake, five-ROM sources passed");
+  puts("Scene music: regional routing, borrowed arenas, boss music "
+       "and native cache preservation passed");
   return 0;
 }

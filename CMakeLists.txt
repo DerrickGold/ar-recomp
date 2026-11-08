@@ -151,9 +151,12 @@ foreach(_line IN LISTS _AR_REGIONAL_SOURCE_LINES)
     string(STRIP "${_source}" _source)
     list(APPEND _AR_REGIONAL_SOURCES "${_source}")
 endforeach()
+add_library(actraiser_death_heim_rush STATIC
+    src/actraiser/actraiser_death_heim_rush.c)
+target_include_directories(actraiser_death_heim_rush PUBLIC ${CMAKE_SOURCE_DIR}/src)
 add_library(actraiser_regional_rules STATIC ${_AR_REGIONAL_SOURCES})
 target_include_directories(actraiser_regional_rules PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(actraiser_regional_rules PUBLIC snesrecomp::sdk)
+target_link_libraries(actraiser_regional_rules PUBLIC snesrecomp::sdk actraiser_death_heim_rush)
 
 # The template grammar is independent of the game, file system and renderer.
 add_library(ar_text_template STATIC src/localization/text_template.c)
@@ -375,6 +378,7 @@ snesrecomp_configure_runtime_target(snesrecomp_runtime)
 add_library(snesrecomp::runtime ALIAS snesrecomp_runtime)
 
 list(FILTER ACTRAISER_GAME_SOURCES EXCLUDE REGEX "(^|/)src/regional/")
+list(FILTER ACTRAISER_GAME_SOURCES EXCLUDE REGEX "(^|/)src/actraiser/actraiser_death_heim_rush[.]c$")
 add_executable(ActRaiserRecomp
     # game-specific runtime, from snesbuild.ini (see above)
     ${ACTRAISER_GAME_SOURCES}
@@ -419,6 +423,7 @@ if(ACTRAISER_GO_EXECUTABLE AND NOT CMAKE_CROSSCOMPILING)
 endif()
 
 target_include_directories(ActRaiserRecomp PRIVATE
+    ${ACTRAISER_GEN_DIR}
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/recomp
@@ -3829,6 +3834,44 @@ if(BUILD_TESTING)
         actraiser_hle_fatal_test_support actraiser_regional_rules)
     target_include_directories(actraiser_scene_music_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_scene_music COMMAND actraiser_scene_music_test)
+
+    add_executable(actraiser_death_heim_rush_test tests/actraiser_death_heim_rush_test.c)
+    target_link_libraries(actraiser_death_heim_rush_test PRIVATE actraiser_death_heim_rush)
+    target_include_directories(actraiser_death_heim_rush_test PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+    add_test(NAME actraiser_death_heim_rush COMMAND actraiser_death_heim_rush_test)
+
+    add_executable(actraiser_death_heim_runtime_test
+        tests/actraiser_death_heim_runtime_test.c
+        src/actraiser/actraiser_death_heim_runtime.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
+    target_link_libraries(actraiser_death_heim_runtime_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_death_heim_rush)
+    target_include_directories(actraiser_death_heim_runtime_test PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+    add_test(NAME actraiser_death_heim_runtime COMMAND actraiser_death_heim_runtime_test)
+
+    add_executable(actraiser_death_heim_arena_test
+        tests/actraiser_death_heim_arena_test.c
+        src/actraiser/actraiser_death_heim_arena.c)
+    target_link_libraries(actraiser_death_heim_arena_test PRIVATE
+        actraiser_hle_fatal_test_support actraiser_death_heim_rush)
+    target_include_directories(actraiser_death_heim_arena_test PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+    add_test(NAME actraiser_death_heim_arena COMMAND actraiser_death_heim_arena_test)
+
+    add_executable(actraiser_death_heim_eyes_test
+        tests/actraiser_death_heim_eyes_test.c
+        src/actraiser/actraiser_death_heim_eyes.c)
+    target_link_libraries(actraiser_death_heim_eyes_test PRIVATE
+        snesrecomp::sdk actraiser_death_heim_rush)
+    target_include_directories(actraiser_death_heim_eyes_test PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+    add_test(NAME actraiser_death_heim_eyes COMMAND actraiser_death_heim_eyes_test)
+
+    add_executable(actraiser_death_heim_teleport_assets_test
+        tests/actraiser_death_heim_teleport_assets_test.c
+        src/actraiser/actraiser_death_heim_teleport_assets.c)
+    target_link_libraries(actraiser_death_heim_teleport_assets_test PRIVATE
+        actraiser_hle_fatal_test_support actraiser_rom_decode_test_support)
+    target_include_directories(actraiser_death_heim_teleport_assets_test PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+    add_test(NAME actraiser_death_heim_teleport_assets COMMAND actraiser_death_heim_teleport_assets_test)
 
     add_executable(actraiser_boss_rules_test tests/actraiser_boss_rules_test.c
         src/actraiser/actraiser_boss_rules.c)

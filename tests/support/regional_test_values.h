@@ -56,6 +56,10 @@ static inline bool TestRegional_EqualSession(const ArRegionalSession *a,
          TestRegional_EqualReloads(&a->reloads, &b->reloads) &&
          TestRegional_EqualActors(&a->sim_actors, &b->sim_actors) &&
          a->arrival_locked == b->arrival_locked &&
+         a->death_heim.algorithm == b->death_heim.algorithm &&
+         a->death_heim.roster == b->death_heim.roster &&
+         a->death_heim.shuffle_order == b->death_heim.shuffle_order &&
+         a->death_heim.seed == b->death_heim.seed &&
          TestRegional_EqualRecipe(&a->randomizer, &b->randomizer);
 }
 

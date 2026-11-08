@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Stable v1-v70 persistence, separate from live activation. See
+/* Stable v1-v71 persistence, separate from live activation. See
  * docs/actraiser-1/save-format.md for the wire contract before extending. */
 enum {
   kHeaderBytes = 36,
@@ -167,7 +167,13 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   if (!ArRegionalSession_Valid(session)) return false;
   memset(out, 0, kHeaderBytes);
   memcpy(out, kMagic, sizeof(kMagic));
-  ByteOrder_WriteLe16(out + 8, session->randomizer.generator ? 70 : 69);
+  const ActRaiserDeathHeimRushConfig baseline = ActRaiserDeathHeimRushConfig_Default();
+  const bool rush_recipe = session->death_heim.roster != baseline.roster ||
+      session->death_heim.shuffle_order != baseline.shuffle_order ||
+      session->death_heim.seed != baseline.seed ||
+      session->death_heim.algorithm != baseline.algorithm;
+  /* Preserve historical encodings for an unchanged baseline recipe. */
+  ByteOrder_WriteLe16(out + 8, rush_recipe ? 71 : session->randomizer.generator ? 70 : 69);
   const unsigned record_count = LatestRecordCount();
   ByteOrder_WriteLe16(out + 10, record_count);
   ByteOrder_WriteLe32(out + 12, session->slot);
@@ -214,10 +220,15 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   out[offset + 8] = (uint8_t)session->requested.difficulty.level;
   out[offset + 9] = (uint8_t)session->effective.difficulty.level;
   offset += 10;
-  if(session->randomizer.generator) {
+  if(session->randomizer.generator || rush_recipe) {
     if(kPayloadCapacity-offset<kRandomizerConfigBytes ||
         !RandomizerConfig_Encode(&session->randomizer,out+offset))return false;
     offset+=kRandomizerConfigBytes;
+  }
+  if (rush_recipe) {
+    if (kPayloadCapacity - offset < kActRaiserDeathHeimRushConfigBytes ||
+        !ActRaiserDeathHeimRushConfig_Encode(&session->death_heim, out + offset)) return false;
+    offset += kActRaiserDeathHeimRushConfigBytes;
   }
   *size = offset;
   return true;
@@ -234,13 +245,14 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
   const bool pricing_only = !memcmp(bytes, kPriceMagic, sizeof(kPriceMagic));
   if (!pricing_only && memcmp(bytes, kMagic, sizeof(kMagic))) return kSaveCheckpoint_Invalid;
   const unsigned version = ByteOrder_ReadLe16(bytes + 8);
-  if (version < 1 || version > (pricing_only ? 1u : 70u)) return kSaveCheckpoint_Unsupported;
+  if (version < 1 || version > (pricing_only ? 1u : 71u)) return kSaveCheckpoint_Unsupported;
   const unsigned count =
       pricing_only ? (unsigned)kArRegionalCostRule_Count : WireRecordCount(version);
   if (count > kRecordCapacity) return kSaveCheckpoint_Invalid;
   if (ByteOrder_ReadLe16(bytes + 10) != count) return kSaveCheckpoint_Unsupported;
   ArRegionalSession next = {.slot = ByteOrder_ReadLe32(bytes + 12),
-                            .revision = ByteOrder_ReadLe32(bytes + 32)};
+                            .revision = ByteOrder_ReadLe32(bytes + 32),
+                            .death_heim = ActRaiserDeathHeimRushConfig_Default()};
   memcpy(next.campaign, bytes + 16, sizeof(next.campaign));
   ArRegionalTimers_Init(&next.requested.timers, kArRegionalSource_US);
   next.effective.timers = next.requested.timers;
@@ -313,7 +325,9 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
               bytes[offset + 7] != '1')
             return kSaveCheckpoint_Unsupported;
           if (size - offset !=
-                  (version >= 70       ? 19u + kRandomizerConfigBytes
+                  (version >= 71       ? 19u + kRandomizerConfigBytes +
+                                             kActRaiserDeathHeimRushConfigBytes
+                       : version >= 70 ? 19u + kRandomizerConfigBytes
                        : version >= 51 ? 19u
                                        : 9u) ||
               memcmp(bytes + offset, "ARARRIV1", 8) || bytes[offset + 8] > 1)
@@ -329,10 +343,19 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
             next.effective.difficulty.level = (ArRegionalDifficulty)bytes[offset + 9];
             if(version>=70) {
               offset+=10;
-              if(memcmp(bytes+offset,"ARRANDO1",8) || bytes[offset+8]!=kRandomizerGenerator)
+              if(memcmp(bytes+offset,"ARRANDO1",8) ||
+                  (bytes[offset+8]!=kRandomizerGenerator && !(version>=71 && !bytes[offset+8])))
                 return kSaveCheckpoint_Unsupported;
-              if(!RandomizerConfig_Decode(bytes+offset,size-offset,&next.randomizer))
+              if(!RandomizerConfig_Decode(bytes+offset,kRandomizerConfigBytes,&next.randomizer))
                 return kSaveCheckpoint_Invalid;
+              offset += kRandomizerConfigBytes;
+              if (version >= 71) {
+                if (memcmp(bytes + offset, "ARDHRSH1", 8) ||
+                    bytes[offset + 8] != kActRaiserDeathHeimRushAlgorithm)
+                  return kSaveCheckpoint_Unsupported;
+                if (!ActRaiserDeathHeimRushConfig_Decode(bytes + offset,
+                        size - offset, &next.death_heim)) return kSaveCheckpoint_Invalid;
+              }
             }
           }
         }

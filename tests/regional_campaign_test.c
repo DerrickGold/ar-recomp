@@ -674,6 +674,11 @@ static void SettingsOnly(SaveFileFormat format) {
   after = live;
   CHECK(ArRegionalSession_RequestArtwork(&after, after.revision, kArRegionalArtwork_TitleBackground,
                                          kArRegionalSource_Japan));
+  ActRaiserDeathHeimRushConfig rush = ActRaiserDeathHeimRushConfig_Default();
+  rush.roster = kActRaiserDeathHeimRoster_Extended;
+  rush.shuffle_order = true;
+  rush.seed = 917;
+  CHECK(ArRegionalSession_RequestDeathHeim(&after, after.revision, &rush));
   CHECK(ArRegionalCampaign_SaveSettings(&live, &after, format, path, image, &error));
   CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(image, disk, sizeof(image)));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready);
@@ -684,6 +689,8 @@ static void SettingsOnly(SaveFileFormat format) {
   CHECK(TestRegional_EqualReloads(&loaded.reloads, &saved.reloads));
   CHECK(TestRegional_EqualActors(&loaded.sim_actors, &saved.sim_actors));
   CHECK(!loaded.arrival_locked && loaded.randomizer.seed == 321);
+  CHECK(loaded.death_heim.roster == kActRaiserDeathHeimRoster_Extended &&
+        loaded.death_heim.shuffle_order && loaded.death_heim.seed == 917);
   CHECK(!ArRegionalCampaign_SaveSettings(&live, &after, format, path, image,
                                          &error)); /* stale request */
   live = loaded;

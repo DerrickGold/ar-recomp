@@ -595,6 +595,9 @@ static void UpdateEmptyDraft(const char *root, SaveBackend backend) {
   RandomizerConfig recipe = RandomizerConfig_Default();
   recipe.seed = 987;
   assert(SaveSlotManager_Draft(&draft, 0, id, &rules, &recipe));
+  draft.death_heim.roster = kActRaiserDeathHeimRoster_Extended;
+  draft.death_heim.shuffle_order = true;
+  draft.death_heim.seed = 123;
   uint8_t bytes[kSaveSlotDraftCapacity];
   size_t size;
   assert(ArRegionalSession_Encode(&draft, bytes, sizeof(bytes), &size));

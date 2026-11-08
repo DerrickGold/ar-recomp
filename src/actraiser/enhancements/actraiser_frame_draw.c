@@ -382,7 +382,35 @@ static void ActRaiser_PublishScanout(SrResult scanout_status,
        (result->final_state.flags & SR_PPU_STATE_FORCED_BLANK) != 0u ||
        result->final_state.bg_mode != 1u ||
        (result->flags & authentic_camera_flags) == authentic_camera_flags);
+  const uint64_t previous_authentic_serial = HostPpuOutput_AuthenticFrameSerial();
   HostPpuOutput_AuthenticFrameCompleted(authentic_frame_valid);
+  if (HostPpuOutput_AuthenticEnabled() && !authentic_frame_valid &&
+      !(result->final_state.display_control & 0x80u) &&
+      (result->final_state.display_control & 0x0fu)) {
+    SrDmaStateSnapshot dma = {.struct_size = sizeof(dma)};
+    const SnesRunnerApi *api = ActRaiser_RunnerApi();
+    const SrResult dma_status = api && ActRaiser_Runner()
+        ? api->query_dma_state(ActRaiser_Runner(), &dma)
+        : SR_RESULT_UNAVAILABLE;
+    const SrDmaChannelState *channel = &dma.channels[2];
+    fprintf(stderr,
+        "[authentic-invalid] gf=%u scene=%02x/%02x scanout=%d flags=%08x "
+        "inidisp=%02x mode=%u serial=%llu->%llu dma=%d "
+        "ch2={flags:%x mode:%u target:%02x source:%02x:%04x} "
+        "hdma-shadow=%02x camera=%u,%u margins=%u,%u,%u,%u\n",
+        ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+        g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+        (int)scanout_status, result->flags, result->final_state.display_control,
+        result->final_state.bg_mode,
+        (unsigned long long)previous_authentic_serial,
+        (unsigned long long)HostPpuOutput_AuthenticFrameSerial(),
+        (int)dma_status, channel->flags, channel->mode, channel->b_address,
+        channel->a_bank, channel->a_address, g_ram[0x0092],
+        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
+        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY),
+        result->final_state.margin_left, result->final_state.margin_right,
+        result->final_state.margin_top, result->final_state.margin_bottom);
+  }
 }
 
 static void ActRaiser_FinishSceneCapture(void) {

@@ -17,8 +17,8 @@ first Progress Log save. Browsing, cancelling and confirming never reroll it.
 
 Turn on **Randomizer**, enter a seed or choose **New seed**, and select the
 options you want. Starting **New Game** captures that setup for the campaign.
-The seed and every randomizer option are saved when you save your game.
-They cannot be changed during that run; use an empty slot or return to the title
+This content and regional recipe is saved when you save your game. Its options
+cannot be changed during that run; use an empty slot or return to the title
 screen to prepare another one. A native title-screen New Game in the active slot
 does not replace its existing save until you actually save
 the new campaign.
@@ -56,6 +56,19 @@ Those edits are saved, but are not new seed rolls.
 To reproduce a setup, share the seed, enabled options, starting regional rules
 and game version. The seed chooses content and regional rules; it does not
 replace the game's moment-to-moment RNG or reproduce player input.
+
+## Death Heim boss order
+
+With **Show debug settings** enabled, open **Randomizer → Bosses** for **Shuffle
+boss order** and **Boss order seed**. They work with the Randomizer master
+switch off and use their own saved seed. They can be changed before entering
+Death Heim, including after starting a campaign; they lock during the rush and
+input recording or replay. Hiding debug settings leaves their saved choices
+in effect.
+
+Choose the [boss roster](../manual.md#death-heim-boss-rush) under **System → Game
+→ Quality of life**. Boss order shuffle never selects a different roster, and
+changing enemy, item or regional randomizer options does not change that order.
 
 ## Moving or backing up a save
 

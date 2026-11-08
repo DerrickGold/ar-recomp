@@ -148,6 +148,15 @@ static bool SlotDraft(unsigned slot,ArRegionalSession *out,SaveError *error) {
     snprintf(error->message, sizeof(error->message), "Cannot prepare this new-game setup.");
     return false;
   }
+  out->death_heim = (ActRaiserDeathHeimRushConfig){
+      .algorithm = kActRaiserDeathHeimRushAlgorithm,
+      .roster = (uint8_t)g_settings.death_heim_roster,
+      .shuffle_order = g_settings.death_heim_shuffle_order,
+      .seed = (uint32_t)g_settings.death_heim_seed};
+  if (!ActRaiserDeathHeimRushConfig_Valid(&out->death_heim)) {
+    snprintf(error->message, sizeof(error->message), "Cannot prepare this Death Heim setup.");
+    return false;
+  }
   return true;
 }
 static bool SlotDraftView(const ArRegionalSession *draft,ActRaiserRegionalRulesView *out) {
@@ -184,8 +193,12 @@ static bool SlotSaveRegionalSettings(void *context,const ArRegionalSession *befo
   const RandomizerConfig recipe=Randomizer_CurrentConfig();
   uint8_t bytes[kSaveSlotDraftCapacity];
   size_t size;
-  if(!SaveSlotManager_Draft(&draft,after->slot,after->campaign,&after->requested,&recipe) ||
-      !ArRegionalSession_Encode(&draft,bytes,sizeof(bytes),&size)) {
+  if(!SaveSlotManager_Draft(&draft,after->slot,after->campaign,&after->requested,&recipe)) {
+    snprintf(error->message, sizeof(error->message), "Cannot prepare the new-game settings.");
+    return false;
+  }
+  draft.death_heim = after->death_heim;
+  if (!ArRegionalSession_Encode(&draft,bytes,sizeof(bytes),&size)) {
     snprintf(error->message, sizeof(error->message), "Cannot prepare the new-game settings.");
     return false;
   }
@@ -215,8 +228,12 @@ static bool SlotStart(unsigned slot, uint64_t fingerprint, const ArRegionalSessi
     ArRegionalSession validated;
     if (draft->slot != slot ||
         !SaveSlotManager_Draft(&validated, slot, draft->campaign, &draft->requested,
-                               &draft->randomizer) ||
-        !ArRegionalSession_Encode(&validated, bytes, sizeof(bytes), &size)) {
+                               &draft->randomizer)) {
+      snprintf(error->message, sizeof(error->message), "The new-game configuration is invalid.");
+      return false;
+    }
+    validated.death_heim = draft->death_heim;
+    if (!ArRegionalSession_Encode(&validated, bytes, sizeof(bytes), &size)) {
       snprintf(error->message, sizeof(error->message), "The new-game configuration is invalid.");
       return false;
     }

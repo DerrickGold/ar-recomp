@@ -6,6 +6,7 @@
 #include "regional/towns/regional_sim_actors.h"
 #include "save/save_checkpoint.h"
 #include "randomizer/randomizer_config.h"
+#include "actraiser/actraiser_death_heim_rush.h"
 
 /* Campaign and slot identities are host-supplied, never inferred from native
  * name/locale/ROM state. This codec covers the integrated rule families;
@@ -19,11 +20,14 @@ typedef struct ArRegionalSession {
   ArRegionalSimActors sim_actors;
   bool arrival_locked;
   RandomizerConfig randomizer;
+  ActRaiserDeathHeimRushConfig death_heim;
 } ArRegionalSession;
 
 /* Caller-owned state; no singleton, filesystem access or old-save mutation. */
 bool ArRegionalSession_NewGame(ArRegionalSession *session, uint32_t slot,
     const uint8_t campaign[16], const ArRegionalCostPolicy *defaults);
+bool ArRegionalSession_RequestDeathHeim(ArRegionalSession *session, uint32_t revision,
+                                      const ActRaiserDeathHeimRushConfig *config);
 /* Atomic multi-family request after profile expansion. Preserves every
  * effective transaction snapshot and retained history. Numerical support
  * changes are rejected: only the confirmed redevelopment owner may apply

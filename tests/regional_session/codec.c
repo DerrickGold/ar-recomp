@@ -1428,9 +1428,52 @@ static void CheckCodecGolden(void) {
   remove(companion);
 }
 
+static void CheckDeathHeimRecipe(void) {
+  ArRegionalSession session, loaded;
+  const uint8_t id[16] = {9};
+  const ArRegionalCostPolicy defaults = {{0}};
+  CHECK(ArRegionalSession_NewGame(&session, 0, id, &defaults));
+  uint8_t payload[kSaveCheckpointPayloadMax];
+  size_t size;
+  CHECK(ArRegionalSession_Encode(&session, payload, sizeof(payload), &size));
+  CHECK(ByteOrder_ReadLe16(payload + 8) == 69);
+  CHECK(ArRegionalSession_Decode(payload, size, &loaded) == kSaveCheckpoint_Ready);
+  CHECK(loaded.death_heim.algorithm == 1 && loaded.death_heim.seed == 1 &&
+        !loaded.death_heim.roster && !loaded.death_heim.shuffle_order);
+  ActRaiserDeathHeimRushConfig recipe = ActRaiserDeathHeimRushConfig_Default();
+  recipe.roster = kActRaiserDeathHeimRoster_Extended;
+  recipe.shuffle_order = true;
+  recipe.seed = 7654321;
+  CHECK(!ArRegionalSession_RequestDeathHeim(&session, session.revision + 1, &recipe));
+  CHECK(ArRegionalSession_RequestDeathHeim(&session, session.revision, &recipe));
+  const uint32_t revision = session.revision;
+  CHECK(ArRegionalSession_RequestDeathHeim(&session, revision, &recipe));
+  CHECK(session.revision == revision);
+  CHECK(ArRegionalSession_Encode(&session, payload, sizeof(payload), &size));
+  CHECK(ByteOrder_ReadLe16(payload + 8) == 71);
+  CHECK(ArRegionalSession_Decode(payload, size, &loaded) == kSaveCheckpoint_Ready);
+  CHECK(loaded.death_heim.roster == recipe.roster && loaded.death_heim.shuffle_order &&
+        loaded.death_heim.seed == recipe.seed && !loaded.randomizer.generator);
+  const size_t rush = size - kActRaiserDeathHeimRushConfigBytes;
+  payload[rush + 8] = 2;
+  CHECK(ArRegionalSession_Decode(payload, size, &loaded) == kSaveCheckpoint_Unsupported);
+  payload[rush + 8] = 1;
+  payload[rush + 11] = 1;
+  CHECK(ArRegionalSession_Decode(payload, size, &loaded) == kSaveCheckpoint_Invalid);
+  payload[rush + 11] = 0;
+  CHECK(ArRegionalSession_Decode(payload, size - 1, &loaded) == kSaveCheckpoint_Invalid);
+  session.randomizer = RandomizerConfig_Default();
+  session.randomizer.enabled = true;
+  session.randomizer.seed = 42;
+  CHECK(ArRegionalSession_Encode(&session, payload, sizeof(payload), &size));
+  CHECK(ArRegionalSession_Decode(payload, size, &loaded) == kSaveCheckpoint_Ready);
+  CHECK(loaded.randomizer.seed == 42 && loaded.death_heim.seed == recipe.seed);
+}
+
 int RegionalSessionTest_RunCodec(void) {
   s_failures = 0;
   CheckRandomizerRecipe();
+  CheckDeathHeimRecipe();
   CheckCodecGolden();
   CheckFeatureCodec();
   return s_failures;

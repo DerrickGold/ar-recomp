@@ -2641,6 +2641,74 @@ static void TestRandomizerDraftEdits(void) {
   CHECK(Randomizer_AppliedStatScale().attack_percent == 100);
 }
 
+typedef struct RushSettingsTestHost {
+  bool locked, reject;
+  unsigned calls, roster;
+  bool shuffle;
+  uint32_t seed;
+} RushSettingsTestHost;
+static bool RushSettingsCanChange(void *context) {
+  return !((RushSettingsTestHost *)context)->locked;
+}
+static bool RushSettingsPrepare(void *context, unsigned roster, bool shuffle, uint32_t seed) {
+  RushSettingsTestHost *host = context;
+  ++host->calls;
+  if (host->reject) return false;
+  host->roster = roster;
+  host->shuffle = shuffle;
+  host->seed = seed;
+  return true;
+}
+static void TestDeathHeimSettings(void) {
+  Settings_SetDeathHeimHost(NULL);
+  ClearSettingsEnv();
+  Settings_Init();
+  const SettingDesc *roster = Settings_Find("death_heim_roster");
+  const SettingDesc *shuffle = Settings_Find("death_heim_shuffle_order");
+  const SettingDesc *seed = Settings_Find("death_heim_seed");
+  CHECK(roster && shuffle && seed);
+  CHECK(!g_settings.death_heim_roster && !g_settings.death_heim_shuffle_order &&
+        g_settings.death_heim_seed == 1);
+  CHECK(roster->category == kSettingCat_Enhancements && !Settings_IsDebugOnly(roster));
+  CHECK(roster->game_change_kind == kSettingGameChange_QualityOfLife);
+  CHECK(shuffle->category == kSettingCat_RandoBosses && seed->category == kSettingCat_RandoBosses);
+  CHECK(!strcmp(Settings_CategoryName(kSettingCat_RandoBosses), "Bosses"));
+  CHECK(Settings_IsDebugOnly(shuffle) && Settings_IsDebugOnly(seed));
+  CHECK(Settings_IsMenuVisible(roster) && !Settings_IsMenuVisible(shuffle) &&
+        !Settings_IsMenuVisible(seed));
+  g_settings.show_debug_settings = true;
+  CHECK(Settings_IsMenuVisible(shuffle) && Settings_IsMenuVisible(seed));
+  CHECK(!g_settings.rando_enable && Settings_IsAvailable(shuffle) && Settings_IsAvailable(seed));
+  CHECK(!Settings_IsRandomizer(shuffle) && !Settings_IsRandomizer(seed));
+  CHECK(Settings_SetText(roster, "act1") == kSettingChange_Applied);
+  CHECK(Settings_SetText(roster, "extended") == kSettingChange_Applied);
+  CHECK(Settings_SetText(roster, "mixed") == kSettingChange_Rejected);
+  RushSettingsTestHost host = {0};
+  const SettingsDeathHeimHost callbacks = {.context = &host,
+      .can_change = RushSettingsCanChange, .prepare = RushSettingsPrepare};
+  Settings_SetDeathHeimHost(&callbacks);
+  CHECK(Settings_SetLong(shuffle, 1) == kSettingChange_Applied);
+  CHECK(host.calls == 1 && host.roster == 2 && host.shuffle && host.seed == 1);
+  host.reject = true;
+  CHECK(Settings_SetLong(seed, 1234) == kSettingChange_Rejected);
+  CHECK(g_settings.death_heim_seed == 1 && host.seed == 1);
+  host.reject = false;
+  host.locked = true;
+  const unsigned before = host.calls;
+  CHECK(Settings_SetText(roster, "standard") == kSettingChange_Rejected);
+  CHECK(Settings_Reset(shuffle) == kSettingChange_Rejected);
+  CHECK(host.calls == before && g_settings.death_heim_roster == 2);
+  host.locked = false;
+  CHECK(Settings_SetLong(seed, 1234) == kSettingChange_Applied);
+  Settings_SetDeathHeimHost(NULL);
+  const char *path = "actraiser-death-heim-settings-test.ini";
+  CHECK(Settings_Save(path));
+  Settings_InitWithFile(path);
+  CHECK(g_settings.death_heim_roster == 2 && g_settings.death_heim_shuffle_order &&
+        g_settings.death_heim_seed == 1234);
+  remove(path);
+}
+
 static void TestAutoBootPreservesDisplayPreferences(void) {
   const char *path = "actraiser-settings-auto-boot-test.ini";
   ClearSettingsEnv();
@@ -2834,6 +2902,7 @@ int main(int argc, char **argv) {
   TestHardwareCapabilities();
   TestGpuBackendChoice();
   TestRandomizerDraftEdits();
+  TestDeathHeimSettings();
   ClearSettingsEnv();
   Settings_SetChangeObserver(NULL);
   Settings_SetActionObserver(NULL);

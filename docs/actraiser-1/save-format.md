@@ -1161,6 +1161,58 @@ the next completed story save records that baseline recipe. New campaigns
 record generator 1 even with the randomizer off. See [Seeded campaigns](randomizer.md)
 for user-facing setup and backup guidance.
 
+### Death Heim rush recipe (version 71)
+
+Version 71 keeps the same regional records and appends a 16-byte `ARDHRSH1`
+recipe after the fixed-width 28-byte `ARRANDO1` block. The recipe is independent
+of the Randomizer master switch and leaves cartridge SRAM and its checksum
+unchanged.
+
+| Recipe offset | Bytes | Meaning |
+| --- | ---: | --- |
+| 0 | 8 | `ARDHRSH1` |
+| 8 | 1 | Encounter-order algorithm version, currently `1` |
+| 9 | 1 | Roster: `0` Standard, `1` Act boss swap, `2` Extended boss rush |
+| 10 | 1 | Shuffle order: `0` off, `1` on |
+| 11 | 1 | Reserved; must be zero |
+| 12 | 4 | Little-endian dedicated order seed, `0`–`999999999` |
+
+Payloads through version 70 decode the missing rush recipe as algorithm `1`,
+Standard, shuffle off, seed `1`. That exact default continues to encode as
+version 69 or 70, preserving their existing bytes. Any other saved recipe,
+including a different seed while shuffle is off, uses version 71. Its
+`ARRANDO1` block may carry generator `0` with every recipe value zero to retain
+the explicitly unknown randomizer history of an older campaign. Version 70
+continues to require generator `1`. Unsupported algorithms, invalid roster or
+shuffle values, reserved bytes and incorrect lengths are rejected without
+publishing a partial session.
+
+The campaign owner persists recipe edits through the existing settings-only
+checkpoint transaction before publishing them to the game. It copies the
+requested rush recipe, not live fight progress, into the durable campaign;
+external replacement or a stale prior recipe rejects the edit. Prepared
+new-game slots, campaign imports and exports retain the same recipe. A failed
+write leaves both the active recipe and the settings rows unchanged.
+
+The active sequence, current encounter, attempt token and completed-eye mask
+are runtime state only. Room retries retain them. Campaign switch, new-game
+entry, restart and abandonment clear runtime ownership; a new rush regenerates
+the same order from the saved recipe. No mid-rush resume data is added.
+
+`ActRaiserRegional_ReplayDigest` binds a non-native recipe's canonical bytes
+and the active controller state to input recordings. Standard with shuffle
+off preserves the existing native digest, including when its unused seed
+differs. The dedicated order generator does not consume native combat RNG or
+any Randomizer stream. Roster, shuffle and seed changes are rejected while a
+rush is active or recording/replay owns the policy.
+
+Implementation owners are `actraiser_death_heim_rush.c` for the value-only
+recipe/model, `actraiser_death_heim_runtime.c` for attempt lifetime and native
+continuations, and `regional_session_codec.c` plus `regional_campaign.c` for
+campaign persistence. The settings registry calls the game owner's
+transactional `prepare_change` hook before changing a scalar row. See the
+[manual](../manual.md#death-heim-boss-rush) for menu choices and eye semantics.
+
 ### 4.1 Lossless INI schema (version 1)
 
 A field-only INI is unsafe until every meaningful byte has been decoded. It

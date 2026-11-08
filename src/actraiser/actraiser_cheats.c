@@ -2,6 +2,7 @@
  * (ActRaiser_ApplyCheats), the magic cycle, and level warp.
  * Phase: game (main thread). */
 #include "actraiser/actraiser_rtl_internal.h"
+#include "actraiser/actraiser_death_heim_runtime.h"
 
 /* Reload the selector-dependent part of the action OBJ atlas after a live
  * magic selection change. The native level-entry loader $02:BC9E copies 128
@@ -408,6 +409,7 @@ void ActRaiser_ApplyCheats(void) {
  * the Warp action in runtime_settings.c, using AR_WARP=<region_hex><map_hex>. The map
  * byte is written directly to $19 and is not a uniform act number. */
 void ActRaiser_Warp(unsigned region, unsigned map) {
+  ActRaiserDeathHeim_Reset();
   uint8 source_map_group = g_ram[kActRaiserWram_MapGroup];
   uint8 source_map = g_ram[kActRaiserWram_CurrentMap];
   g_ram[kActRaiserWram_DestinationMapGroup] = (uint8)region;

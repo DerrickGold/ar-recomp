@@ -5,6 +5,7 @@
 #include "text_parse_utils.h"
 #include "constants.h"
 #include "randomizer/randomizer.h"
+#include "actraiser/actraiser_death_heim_rush.h"
 #include "render/render_capabilities.h"
 #include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
 #include "present/display_geometry.h"
@@ -19,6 +20,47 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static SettingsDeathHeimHost s_death_heim_host;
+void Settings_SetDeathHeimHost(const SettingsDeathHeimHost *host) {
+  s_death_heim_host = host ? *host : (SettingsDeathHeimHost){0};
+}
+static bool DeathHeimCanChange(void) {
+  return !s_death_heim_host.can_change ||
+      s_death_heim_host.can_change(s_death_heim_host.context);
+}
+static bool DeathHeimRosterAvailable(long roster) {
+  return !s_death_heim_host.roster_available ||
+      s_death_heim_host.roster_available(s_death_heim_host.context, (unsigned)roster);
+}
+static bool DeathHeimPrepareChange(const SettingDesc *desc, long value) {
+  if (!s_death_heim_host.prepare) return true; /* Boot preferences precede game ownership. */
+  const unsigned roster = desc->field == &g_settings.death_heim_roster
+      ? (unsigned)value : (unsigned)g_settings.death_heim_roster;
+  const bool shuffle = desc->field == &g_settings.death_heim_shuffle_order
+      ? value != 0 : g_settings.death_heim_shuffle_order;
+  const uint32_t seed = desc->field == &g_settings.death_heim_seed
+      ? (uint32_t)value : (uint32_t)g_settings.death_heim_seed;
+  return s_death_heim_host.prepare(s_death_heim_host.context, roster, shuffle, seed);
+}
+static const char *const kDeathHeimRosterLabels[] = {
+  "Standard", "Act boss swap", "Extended boss rush"
+};
+static bool ParseDeathHeimRoster(const char *text, void *field) {
+  static const char *const keys[] = {"standard", "act1", "extended"};
+  for (unsigned i = 0; i < 3; ++i)
+    if (!strcmp(text, keys[i]) || !strcmp(text, kDeathHeimRosterLabels[i]) ||
+        (text[0] == (char)('0' + i) && !text[1])) {
+      *(int *)field = (int)i;
+      return true;
+    }
+  return false;
+}
+static int SerializeDeathHeimRoster(char *out, int capacity, const void *field) {
+  static const char *const keys[] = {"standard", "act1", "extended"};
+  const unsigned roster = (unsigned)*(const int *)field;
+  return snprintf(out, capacity, "%s", roster < 3 ? keys[roster] : "standard");
+}
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
@@ -2549,6 +2591,34 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Custom, kApply_Passive, kSettingCat_Extras,
     &g_settings.warp_target, 0x0101, 0, 0xffff, 1, false, NULL, 0,
     NULL, NULL, ParseWarpTarget, FormatWarpTarget, .menu_hidden = true },
+  { .key = "death_heim_roster", .env = "AR_DEATH_HEIM_ROSTER", .label = "Death Heim boss roster",
+    .tooltip = "Standard fights six Act 2 bosses. Act boss swap fights six Act 1 bosses. "
+               "Extended boss rush fights each city's Act 1 then Act 2 boss. "
+               "The final boss always follows the full roster. "
+               "Locked during a rush and recording/replay.",
+    .type = kSettingType_Enum, .apply = kApply_Passive, .category = kSettingCat_Enhancements,
+    .field = &g_settings.death_heim_roster, .defval = kActRaiserDeathHeimRoster_Standard,
+    .maxval = kActRaiserDeathHeimRoster_Extended, .step = 1,
+    .enum_labels = kDeathHeimRosterLabels, .enum_count = 3,
+    .parse = ParseDeathHeimRoster, .serialize = SerializeDeathHeimRoster,
+    .modern_env = true, .game_change_kind = kSettingGameChange_QualityOfLife,
+    .can_change = DeathHeimCanChange,
+    .value_available = DeathHeimRosterAvailable, .prepare_change = DeathHeimPrepareChange },
+  { .key = "death_heim_shuffle_order", .env = "AR_DEATH_HEIM_SHUFFLE_ORDER",
+    .label = "Shuffle boss order",
+    .tooltip = "Shuffle Death Heim's selected roster without repeats. The final boss stays last. "
+               "The same roster and seed keep the same order, including retries.",
+    .type = kSettingType_Bool, .apply = kApply_Passive, .category = kSettingCat_RandoBosses,
+    .field = &g_settings.death_heim_shuffle_order, .maxval = 1, .step = 1,
+    .modern_env = true, .can_change = DeathHeimCanChange,
+    .prepare_change = DeathHeimPrepareChange },
+  { .key = "death_heim_seed", .env = "AR_DEATH_HEIM_SEED", .label = "Boss order seed",
+    .tooltip = "Seed for Death Heim's boss order, saved with this campaign. "
+               "Independent of enemy and item randomization. Change it before entering Death Heim.",
+    .type = kSettingType_Int, .apply = kApply_Passive, .category = kSettingCat_RandoBosses,
+    .field = &g_settings.death_heim_seed, .defval = 1,
+    .maxval = kActRaiserDeathHeimRushSeedMax, .step = 1, .modern_env = true,
+    .can_change = DeathHeimCanChange, .prepare_change = DeathHeimPrepareChange },
   /* ---- Randomizer title draft (src/randomizer/randomizer.c). Confirmed campaigns bind
    * the full recipe, rather than reading mutable per-install settings. */
   { "rando_start", NULL, "Start new randomized game...", "Copy this setup into an empty slot. The current campaign stays unchanged.",
@@ -3201,6 +3271,8 @@ SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value) {
     hardware->requested = false;
   }
   if (old_value == value) return kSettingChange_Unchanged;
+  if (desc->prepare_change && !desc->prepare_change(desc, value))
+    return kSettingChange_Rejected;
 
   switch (desc->type) {
     case kSettingType_Bool: *(bool *)desc->field = value != 0; break;
@@ -3376,6 +3448,7 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_Localization: return "Localization";
     case kSettingCat_LocalizationFont: return "Enhanced font";
     case kSettingCat_Interface: return "Interface";
+    case kSettingCat_RandoBosses: return "Bosses";
     case kSettingCat_Count: break;
   }
   return "Unknown";
@@ -3403,7 +3476,8 @@ bool Settings_IsDebugOnly(const SettingDesc *desc) {
   if (desc->category == kSettingCat_RandoSeed ||
       desc->category == kSettingCat_RandoEnemies ||
       desc->category == kSettingCat_RandoItems ||
-      desc->category == kSettingCat_RandoSim)
+      desc->category == kSettingCat_RandoSim ||
+      desc->category == kSettingCat_RandoBosses)
     return true;
 
   /* The granular widescreen flags are all preset by Screen ratio / Render
@@ -3667,6 +3741,7 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
 }
 
 void Settings_InitWithFile(const char *path) {
+  Settings_SetDeathHeimHost(NULL);
   SettingsChangeObserver observer = s_change_observer;
   s_change_observer = NULL;
   /* Startup owns hardware discovery. Never carry a previous initialization's

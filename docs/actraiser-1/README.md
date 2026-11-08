@@ -29,6 +29,8 @@ For application controls, building, and shared authoring tools, see the
 - [RAM map](ram-map.md) and [ROM map](rom-map.md) — known state and data regions.
 - [Symbol map](research-symbol-map.md) — native addresses, candidate names, and
   confidence levels.
+- [Death Heim boss rush](death-heim-boss-rush.md) — roster orchestration, native
+  arena and teleport contracts, persistence, and verification limits.
 - [Save format](save-format.md) — SRAM, checksums, campaign metadata, and editing.
 - [Regional differences: technical evidence](regional-differences-technical.md)
   — native routines, tables, comparisons, and qualifications.

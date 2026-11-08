@@ -432,6 +432,14 @@ count. Walk until the nearest forward pointer target (the payload boundary), and
 treat zero words as unused type slots rather than termination. `$00:B449` is the
 important proof: types `$19-$1D` are zero, while `$1E-$27` resume with ten valid
 records; type `$21` points to record `$BB19` and exact handler `$BB25`.
+
+### Death Heim encounters and teleport resources
+
+The addresses in this section are verified against the US ROM. Native records
+and scripts remain the source of boss behavior and artwork; the optional
+[Death Heim boss-rush controller](death-heim-boss-rush.md) owns encounter order
+and the additional Act 1 arena entry positions.
+
 Tables `$A8F6-$E722` correspond to the six ordinary two-act kingdom regions.
 `$F39A` is Death Heim's distinct no-act boss-rush/final-boss table. Its `$19`
 layout, verified end-to-end on 2026-07-14, is: `$19=1` =
@@ -443,15 +451,84 @@ tail-call the corresponding original boss handler. That distinction matters:
 the record address is persistent object identity, while the wrapper, `$F778`
 continuation, and original handler are control flow.
 
-| Room | Boss | Retained `+$32` source record | Spawn wrapper → boss family |
+| Room | Boss | Placement / file offset | Retained `+$32` source record | Spawn wrapper → boss family |
+| --- | --- | --- | ---: | --- |
+| `0702` | Minotaur | `$0A:C475` / `0x054475` | `$F6CA` (original `$AF5D`) | `$F6D6` → `$AF69` |
+| `0703` | Wizard | `$0A:C484` / `0x054484` | `$F6E2` (original `$BDFF`) | `$F6EE` → `$BE0B` |
+| `0704` | Pharaoh | `$0A:C493` / `0x054493` | `$F6FA` | `$F706` → `$C1AE` |
+| `0705` | Flaming Wheel | `$0A:C4A2` / `0x0544A2` | `$F712` (original `$D838`) | `$F71E` → `$D844` |
+| `0706` | Viper | `$0A:C4B6` / `0x0544B6` | `$F72A` (original `$E483`) | `$F736` → `$E48F` |
+| `0707` | Ice Dragon | `$0A:C4F7` / `0x0544F7` | `$F760` (original `$F161`) | `$F76C` → `$F16D` |
+| `0708` | Tanzara | `$0A:C506` / `0x054506` | `$F80F` | `$F81B` → `$F82D+` final-boss family |
+
+Source records and handlers in the last two columns are in bank `$00`; their
+file offsets are the listed address minus `$8000`. Placement records are four
+bytes `[tileX, tileY, parameter, type]`, distinct from the 12-byte initializer
+records retained in object `+$32`.
+
+The Act 1 rush encounters reuse these original placements and initializer
+records in their original rooms. Room notation below is `group/map`, matching
+`$18/$19` rather than the little-endian layout-index key.
+
+| City | Room | Placement / file offset | Placement bytes | Source record / file offset |
+| --- | --- | --- | --- | --- |
+| Fillmore | `01/01` | `$0A:B28D` / `0x05328D` | `FB 2D 00 04` | `$00:AD45` / `0x002D45` |
+| Bloodpool | `02/01` | `$0A:B55C` / `0x05355C` | `F0 24 00 06` | `$00:B786` / `0x003786` |
+| Kasandora | `03/02` | `$0A:B8D6` / `0x0538D6` | `A6 37 00 04` | `$00:C66F` / `0x00466F` |
+| Aitos | `04/03` | `$0A:BBC2` / `0x053BC2` | `1A FF 00 0D` | `$00:D646` / `0x005646` |
+| Marahna | `05/03` | `$0A:BD9F` / `0x053D9F` | `1E 0E 00 05` | `$00:D974` / `0x005974` |
+| Northwall | `06/04` | `$0A:C23D` / `0x05423D` | `1C 1D 00 07` | `$00:E7C6` / `0x0067C6` |
+
+Aitos's placement Y byte `$FF` is intentional native data; the dragon's
+initializer wraps its entrance above the screen. The rush's player landing
+coordinates and reserved boss slot are HLE policy, not additional ROM records
+or replacements for these boss coordinates.
+
+Bloodpool `02/01` also requires its first ordinary placement, `$0A:B4CB`
+(file `0x0534CB`), bytes `00 00 FF 07`. Parameter `$FF` selects the
+handler-only branch at `$00:9592` of the `$9557` initializer: status `$0800`,
+handler `$B919`, and cleared animation/collision fields `+$24/+$26/+$30`.
+The Bloodpool type-7 table entry at `$00:B457` points directly to `$B919`,
+which calls `$02:9204` each update. This invisible environment actor builds
+the BG2 water-perspective table at `$7E:6000` and installs direct HDMA channel
+2, mode 2, targeting `$210F`. It must survive enemy-placement filtering;
+without it, the room lacks its native raster and authentic comparison cannot
+publish an exact camera frame.
+
+Kasandora's sand requires a separate inherited resource. Room `03/01` loads
+BG1 characters from `$11:99E2` (file `0x0899E2`, 8,192 decoded bytes) to VRAM
+word `$0000`. Video profiles `$10/$11`, at `$02:8AFE/$8B1A` (files
+`0x010AFE/0x010B1A`), have character-animation bytes `+23/+24` equal to
+`42 08` / `42 88`. `$42` selects VRAM word `$0000`, a 512-byte phase stride,
+and two phases; the cadence byte becomes `$DE=$07/$87` after the loader's
+decrement. `$02:BAF5` captures 4 KiB from VRAM into `$7F:B800-$C7FF` for
+room 1, but room 2's continuation bit makes it clear `$DE` bit 7 and retain
+that snapshot. `$02:BC56/$02:AF30` subsequently upload alternating 512-byte
+phases to VRAM words `$0000-$00FF` every eight updates. Replaying room 1's
+asset commands alone is insufficient: arena preparation must establish this
+native snapshot before loading the continuation profile. The snapshot and
+animated BG characters are disjoint from the teleport resources below.
+
+The hub's `07/01` asset script supplies the native teleport artwork:
+
+| Resource | SNES source / file offset | Stored / decoded bytes | Native destination |
 | --- | --- | ---: | --- |
-| `0702` | Minotaur | `$F6CA` (original `$AF5D`) | `$F6D6` → `$AF69` |
-| `0703` | Wizard | `$F6E2` (original `$BDFF`) | `$F6EE` → `$BE0B` |
-| `0704` | Pharaoh | `$F6FA` | `$F706` → `$C1AE` |
-| `0705` | Flaming Wheel | `$F712` (original `$D838`) | `$F71E` → `$D844` |
-| `0706` | Viper | `$F72A` (original `$E483`) | `$F736` → `$E48F` |
-| `0707` | Ice Dragon | `$F760` (original `$F161`) | `$F76C` → `$F16D` |
-| `0708` | Tanzara | `$F80F` | `$F81B` → `$F82D+` final-boss family |
+| Common animation/composition blob | `$18:8000` / `0x0C0000` | 2,706 / 4,926 (`$133E`) | `$7E:4000-$533D` |
+| Ordinary OBJ characters | `$17:9058` / `0x0B9058` | 4,112 / 8,192 (`$2000`) | VRAM words `$3000-$3FFF` |
+| Four OBJ palette rows | `$1C:E4F8` / `0x0E64F8` | 128 / 128, uncompressed | CGRAM colors `$80-$BF` |
+
+Compressed extents above include the two-byte decoded-size header and the
+last byte consumed by the bit stream, excluding any following padding. Their
+exclusive file ends are `0x0C0A92` and `0x0BA068`; the palette ends at
+`0x0E6578`. Script operands are linear file offsets, converted to LoROM as
+`bank = offset >> 15`, `address = $8000 | (offset & $7FFF)`.
+Native arrival `$00:F7B8` selects animation state `$0E` and departure selects
+`$0F`; both use the hub's `$4000` blob with OBSEL `$01`. The HLE Act 1 path
+temporarily borrows these resources, preserves the arena's original memory,
+and restores it before boss combat. Abandonment restores only while the same
+arena still owns the resources. This is a host resource transaction, not unused
+WRAM allocation: the common blob extends into `$5000`, where the arena's boss
+animation data normally resides.
 
 Key code: `$00:FEEC` (end of the `$FE89` teleport-out sequencer) writes
 `$0347 = $19 - 1` (rush progress) and `LDA #$0701; STA $1A` (16-bit = stage

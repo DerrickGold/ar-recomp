@@ -1690,6 +1690,9 @@ static void CheckLayerEditorSection(void) {
   CHECK(!Settings_IsMenuVisible(Settings_Find("rando_enable")));
   CHECK(!Settings_IsMenuVisible(Settings_Find("rando_statue_drops")));
   CHECK(!Settings_IsMenuVisible(Settings_Find("rando_lair_types")));
+  CHECK(!Settings_IsMenuVisible(Settings_Find("death_heim_shuffle_order")));
+  CHECK(!Settings_IsMenuVisible(Settings_Find("death_heim_seed")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("death_heim_roster")));
 
   g_settings.show_debug_settings = true;
   SettingsOverlay_Refresh();
@@ -1714,18 +1717,23 @@ static void CheckLayerEditorSection(void) {
   CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, NULL));
   CHECK(wrapped == kSection_Layers);
 
-  /* The randomizer section: four tabs, and every row the player edits must be
-   * reachable by name. Its rows are gated on the master being on and on the ROM
-   * snapshot existing, so this drives the master first -- otherwise the gated
-   * rows are legitimately absent and "reachable" would prove nothing. Seed sits
-   * on tab 0 beside the master; the per-area rows are on their own tabs. */
+  /* The randomizer section has five tabs. Death Heim's independent recipe is
+   * editable with the master off; the remaining recipes use its ROM snapshot. */
   NavToSection(kSection_Randomizer);
   {
     int tabs = 0;
     CHECK(SettingsOverlay_GetTabState(NULL, &tabs));
-    CHECK(tabs == 4);
+    CHECK(tabs == 5);
   }
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* into the rows */
+  NavToTab(2);
+  CHECK(!g_settings.rando_enable);
+  RowToKey("death_heim_shuffle_order");
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.death_heim_shuffle_order);
+  RowToKey("death_heim_seed");
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.death_heim_seed == 2);
   NavToTab(0);
   RowToKey("rando_enable");
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false)); /* master on */
@@ -1738,10 +1746,10 @@ static void CheckLayerEditorSection(void) {
   NavToTab(1);
   RowToKey("rando_enemy_hp");
   RowToKey("rando_enemy_types");
-  NavToTab(2);
+  NavToTab(3);
   RowToKey("rando_statue_drops");
   RowToKey("rando_statue_spots");
-  NavToTab(3);
+  NavToTab(4);
   RowToKey("rando_lair_spots");
   RowToKey("rando_lair_types");
   /* Turning the master back off must retract the gated rows, which is what
@@ -1764,6 +1772,8 @@ static void CheckLayerEditorSection(void) {
     CHECK(Settings_SetLong(Settings_Find("rando_enable"), 0) == kSettingChange_Rejected);
     Randomizer_Reroll();
     CHECK(Randomizer_CurrentConfig().seed == 654321);
+    CHECK(Settings_SetLong(Settings_Find("death_heim_seed"), 3) == kSettingChange_Applied);
+    CHECK(g_settings.death_heim_seed == 3);
     Randomizer_ReleaseCampaign();
     CHECK(!g_settings.rando_enable);
   }
@@ -3663,6 +3673,10 @@ int main(int argc, char **argv) {
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.remember_last_town);
 
+  RowToKey("death_heim_roster");
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.death_heim_roster == 1);
+
   /* Inspector is the section's third tab: its first row makes the enabled
    * state explicit, its second dispatches the complete scene-asset dump, and
    * the remainder is supplied by the read-only live-info provider. */
@@ -3728,7 +3742,10 @@ int main(int argc, char **argv) {
   CHECK(!Settings_IsMenuVisible(Settings_Find("sim3d_landscape_height_pct")));
 #endif
   CHECK(Settings_IsMenuVisible(Settings_Find("diorama_skybox")));
-  /* System drops the all-debug Inspector tab, leaving Tools and Game. */
+  CHECK(Settings_IsMenuVisible(Settings_Find("death_heim_roster")));
+  CHECK(!Settings_IsMenuVisible(Settings_Find("death_heim_shuffle_order")));
+  CHECK(!Settings_IsMenuVisible(Settings_Find("death_heim_seed")));
+  /* System drops the all-debug Inspector tab, retaining Tools and Game. */
   {
     int tabs = -1;
     CHECK(SettingsOverlay_GetTabState(NULL, &tabs));
@@ -3955,6 +3972,10 @@ int main(int argc, char **argv) {
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false)); /* Back to section navigation. */
   NavToSection(host_sections - 1); /* System, in the reduced navigation. */
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  {
+    int tabs = 0;
+    CHECK(SettingsOverlay_GetTabState(NULL, &tabs) && tabs == 1);
+  } /* Imported games expose host tools, not AR1's Death Heim rules. */
   NavToTab(0);
   RowToKey("retry_imported_level");
   RowToKey("return_imported_world");

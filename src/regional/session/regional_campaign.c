@@ -122,10 +122,16 @@ bool ArRegionalCampaign_SaveSettings(const ArRegionalSession *before,
       return Fail(error, "cannot prepare legacy campaign settings");
   } else if (status != kSaveCheckpoint_Ready) return false;
   if (memcmp(saved.campaign, before->campaign, sizeof(saved.campaign)) ||
-      memcmp(&saved.requested, &before->requested, sizeof(saved.requested)))
+      memcmp(&saved.requested, &before->requested, sizeof(saved.requested)) ||
+      saved.death_heim.algorithm != before->death_heim.algorithm ||
+      saved.death_heim.roster != before->death_heim.roster ||
+      saved.death_heim.shuffle_order != before->death_heim.shuffle_order ||
+      saved.death_heim.seed != before->death_heim.seed)
     return Fail(error, "saved campaign changed; reload it before editing regional settings");
   if (!ArRegionalSession_RequestRules(&saved, saved.revision, &after->requested))
     return Fail(error, "these rules require saved history or a confirmed town redevelopment");
+  if (!ArRegionalSession_RequestDeathHeim(&saved, saved.revision, &after->death_heim))
+    return Fail(error, "invalid Death Heim campaign recipe");
   return ArRegionalSession_SaveActiveMetadata(&saved, image, error);
 }
 

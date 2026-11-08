@@ -148,6 +148,7 @@ static const MenuTab kTabsManual[] = {
 static const MenuTab kTabsRandomizer[] = {
   TAB(RandoSeed, "overlay.tab.seed"),
   TAB(RandoEnemies, "overlay.tab.enemies"),
+  TAB(RandoBosses, "overlay.tab.bosses"),
   TAB(RandoItems, "overlay.tab.items"),
   TAB(RandoSim, "overlay.tab.simulation"),
 };
@@ -456,7 +457,8 @@ static const MenuSection *ActiveSection(void) {
  * collapse and are cheap to short-circuit. */
 static bool ContextAllowsSetting(const SettingDesc *desc) {
   if (!s_host_settings_only) return true;
-  if (desc->category == kSettingCat_Enhancements || desc->category == kSettingCat_Inspector)
+  if (desc->category == kSettingCat_Enhancements || desc->category == kSettingCat_Inspector ||
+      desc->category == kSettingCat_RandoBosses)
     return false;
   if (desc->category != kSettingCat_Extras) return true;
   return desc->action == kSettingAction_TogglePause || desc->action == kSettingAction_Snapshot ||

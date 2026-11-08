@@ -112,6 +112,44 @@ this is separate from the ROM-free CTest tier. See the
 [native sword and beam rules](../docs/actraiser-1/ram-map.md#sword-and-beam-damage).
 Controlled fixtures do not establish complete-campaign coverage.
 
+## Generated Death Heim regression (local ROM)
+
+With a current Unix Makefiles game build and the US ROM, run:
+
+```sh
+python3 tests/death_heim_generated_test.py --matrix
+python3 tests/death_heim_generated_test.py --roster act1 --retry-id 12 \
+  --output build-check/death-heim-final-retry
+python3 tests/death_heim_generated_test.py --build-dir build-death-heim \
+  --roster extended --pip-video --settings settings.ini \
+  --output build-check/death-heim-pip
+```
+
+Use `--build-dir` to select another game build and `--captures` to retain
+framebuffer images. The harness relinks only the diagnostic observer, copies
+the tracked boot fixtures into its output directory, and runs the production
+game, generated routines, arena loaders and death animations. It checks the
+six roster/shuffle combinations, native arena assets and camera positions,
+the inherited background-animation cache and live terrain phases against ROM,
+visible boss activation without movement, animated arrival/departure beams,
+uninterrupted Death Heim music, hub returns, both final-boss forms and optional
+timeout/retry preservation.
+Encounter IDs are `(city - 1) * 2 + act - 1`, with `12` for the final boss.
+
+`--pip-video` requires GPU/display access and runs actual compositor draws in a
+hidden window, with PiP inset enabled. It verifies PiP stays active and frames
+are presented; hidden mode does not exercise a separate comparison window.
+`--settings` copies the supplied file into the isolated run without editing the
+source. All runs reject missing-width, unresolved-dispatch/stub, stack and render
+failure diagnostics, even if gameplay appears to complete.
+
+Invulnerability and controlled lethal damage after 600 frames of live combat make this an
+orchestration regression, not a combat-balance playthrough. The observer
+configures the recipe after boot; campaign persistence has separate session
+tests. The full ending tour is outside this harness's assertions; GPU
+presentation is exercised only with `--pip-video`. It does not change the game
+executable, ROM or player saves.
+
 ## Shared implementation dependencies
 
 `cmake/TestSupport.cmake` owns shared ROM-free implementation libraries for

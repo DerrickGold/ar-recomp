@@ -7,4 +7,8 @@
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_SceneMusicEntry(CpuState *cpu);
 RecompReturn ActRaiser_SceneMusic(CpuState *cpu);
+bool ActRaiser_DeathHeimBossMusicEntry(CpuState *cpu);
+RecompReturn ActRaiser_DeathHeimBossMusic(CpuState *cpu);
+bool ActRaiser_DeathHeimRetryMusicEntry(CpuState *cpu);
+RecompReturn ActRaiser_DeathHeimRetryMusic(CpuState *cpu);
 #endif

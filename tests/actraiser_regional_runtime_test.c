@@ -14,6 +14,7 @@
 #include "actraiser/regional/actraiser_regional_arrival.h"
 #include "actraiser/actraiser_stage_placements.h"
 #include "actraiser/actraiser_rtl.h"
+#include "actraiser/actraiser_death_heim_runtime.h"
 #include "actraiser/enhancements/actraiser_world_resume.h"
 #include "app/settings.h"
 #include "randomizer/randomizer.h"
@@ -25,6 +26,25 @@
 
 Settings g_settings;
 uint8 g_ram[kSnesWramSize];
+static SettingsDeathHeimHost rush_settings_host;
+static ActRaiserDeathHeimRushConfig configured_rush;
+static bool rush_active;
+void Settings_SetDeathHeimHost(const SettingsDeathHeimHost *host) {
+  rush_settings_host = host ? *host : (SettingsDeathHeimHost){0};
+}
+void ActRaiserDeathHeim_Reset(void) { rush_active = false; }
+bool ActRaiserDeathHeim_Configure(const ActRaiserDeathHeimRushConfig *config) {
+  if (rush_active || !ActRaiserDeathHeimRushConfig_Valid(config)) return false;
+  configured_rush = *config;
+  return true;
+}
+bool ActRaiserDeathHeim_Active(void) { return rush_active; }
+bool ActRaiserDeathHeim_RosterAvailable(unsigned roster) { return roster <= 2; }
+bool ActRaiserDeathHeim_Fingerprint(const uint8_t before[32], uint8_t out[32], bool *baseline) {
+  memmove(out, before, 32);
+  *baseline = !rush_active;
+  return true;
+}
 void ActRaiserWorldResume_Begin(uint8_t *wram, size_t size, bool continuing,
                                 bool remember_last_town, bool permitted) {
   assert(wram == g_ram && size == sizeof(g_ram));
@@ -2664,5 +2684,39 @@ int main(void) {
   assert(ActRaiserRegional_BeginTitleArtwork(&title_art) &&
          title_art == kArRegionalArtwork_TitleMask);
   assert(!SaveSystem_CopyDurableImage(unchanged_image));
+  /* The settings bridge persists the recipe before publishing it and rejects
+   * edits throughout a rush or a recording. Default gameplay keeps its old
+   * replay identity even when an unused order seed changes. */
+  uint8_t native_rush_digest[32], seeded_rush_digest[32], extended_rush_digest[32];
+  bool native_rush;
+  assert(rush_settings_host.can_change(NULL));
+  assert(ActRaiserRegional_ReplayDigest(NULL, native_rush_digest, &native_rush));
+  settings_fail = true;
+  const uint32_t old_seed = configured_rush.seed;
+  assert(!rush_settings_host.prepare(NULL, 2, true, 54321));
+  assert(configured_rush.seed == old_seed && configured_rush.roster == 0);
+  settings_fail = false;
+  assert(rush_settings_host.prepare(NULL, 0, false, 77));
+  assert(ActRaiserRegional_ReplayDigest(NULL, seeded_rush_digest, &native_rush) &&
+         !memcmp(native_rush_digest, seeded_rush_digest, 32));
+  assert(rush_settings_host.prepare(NULL, 2, true, 54321));
+  assert(configured_rush.roster == 2 && configured_rush.shuffle_order &&
+         configured_rush.seed == 54321 && persisted_draft.death_heim.seed == 54321);
+  assert(ActRaiserRegional_ReplayDigest(NULL, extended_rush_digest, &native_rush) &&
+         !native_rush && memcmp(native_rush_digest, extended_rush_digest, 32));
+  assert(rush_settings_host.prepare(NULL, 2, true, 54322));
+  assert(ActRaiserRegional_ReplayDigest(NULL, seeded_rush_digest, &native_rush) &&
+         memcmp(extended_rush_digest, seeded_rush_digest, 32));
+  edits_allowed = false;
+  assert(!rush_settings_host.can_change(NULL) &&
+         !rush_settings_host.prepare(NULL, 0, false, 1));
+  edits_allowed = true;
+  rush_active = true;
+  assert(!rush_settings_host.can_change(NULL) &&
+         !rush_settings_host.prepare(NULL, 0, false, 1));
+  assert(ActRaiserRegional_InitializeSlot(4, Identity, NULL) && !rush_active);
+  assert(ActRaiserRegional_StageNewGame(&persisted_draft));
+  assert(configured_rush.roster == 2 && configured_rush.seed == 54322 &&
+         g_settings.death_heim_roster == 2 && g_settings.death_heim_seed == 54322);
   return 0;
 }

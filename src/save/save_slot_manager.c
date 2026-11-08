@@ -126,5 +126,6 @@ bool SaveSlotManager_ReadDraft(const SaveSlots *s, unsigned slot, ArRegionalSess
     if(e)snprintf(e->message,sizeof(e->message),"The prepared new game is damaged or unsupported.");
     return false;
   }
+  validated.death_heim = draft.death_heim;
   *out=validated;return true;
 }

@@ -9,6 +9,7 @@
 
 bool ArRegionalSession_Valid(const ArRegionalSession *session) {
   if (!session || !session->revision || !RandomizerConfig_Valid(&session->randomizer) ||
+      !ActRaiserDeathHeimRushConfig_Valid(&session->death_heim) ||
       !ArRegionalLairHistory_Valid(&session->lairs) ||
       !ArRegionalLairReloads_Valid(&session->reloads) ||
       !ArRegionalSimActors_Valid(&session->sim_actors))
@@ -377,13 +378,28 @@ bool ArRegionalSession_NewGame(ArRegionalSession *session, uint32_t slot,
     const uint8_t campaign[16], const ArRegionalCostPolicy *defaults) {
   if (!session || !campaign || !defaults) return false;
   ArRegionalSession next = {
-    .slot = slot, .revision = 1, .requested.costs = *defaults, .effective.costs = *defaults
+    .slot = slot, .revision = 1, .requested.costs = *defaults, .effective.costs = *defaults,
+    .death_heim = ActRaiserDeathHeimRushConfig_Default()
   };
   ArRegionalTimers_Init(&next.requested.timers, kArRegionalSource_US);
   next.effective.timers = next.requested.timers;
   memcpy(next.campaign, campaign, sizeof(next.campaign));
   if (!ArRegionalSession_Valid(&next)) return false;
   *session = next;
+  return true;
+}
+
+bool ArRegionalSession_RequestDeathHeim(ArRegionalSession *session, uint32_t revision,
+                                      const ActRaiserDeathHeimRushConfig *config) {
+  if (!ArRegionalSession_Valid(session) || session->revision != revision ||
+      !ActRaiserDeathHeimRushConfig_Valid(config)) return false;
+  const ActRaiserDeathHeimRushConfig *current = &session->death_heim;
+  if (current->algorithm == config->algorithm && current->roster == config->roster &&
+      current->shuffle_order == config->shuffle_order && current->seed == config->seed)
+    return true;
+  if (session->revision == UINT32_MAX) return false;
+  session->death_heim = *config;
+  ++session->revision;
   return true;
 }
 

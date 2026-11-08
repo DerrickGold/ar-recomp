@@ -141,10 +141,68 @@ extracted [regional media package](actraiser-1/regional-media.md); missing media
 to US assets without changing your requested region or language.
 
 The experimental **Randomizer** section appears with **Show debug settings**
-enabled. Configure it at the title screen before New Game; its seed and options
-belong to that campaign and are restored on Continue. Independent Action and
-Town options can roll regional rules as well as the existing content shuffles.
+enabled. Configure its content and regional rolls at the title screen before
+New Game; their seed and options belong to that campaign and are restored on
+Continue. Independent Action and Town options can roll regional rules as well
+as the existing content shuffles. **Randomizer → Bosses** has separate Death
+Heim order controls, which can be changed before entering the rush.
 See [Seeded campaigns](actraiser-1/randomizer.md) for exclusions and backup requirements.
+
+## Death Heim boss rush
+
+Open **System → Game → Quality of life** before entering Death Heim. **Death
+Heim boss roster** chooses the fights before the final boss:
+
+| Roster | Fights | Order with shuffle off |
+| --- | ---: | --- |
+| Standard | Six Act 2 bosses | Fillmore through Northwall |
+| Act boss swap | Six Act 1 bosses | Fillmore through Northwall |
+| Extended boss rush | All twelve bosses | Each city's Act 1, then Act 2, from Fillmore through Northwall |
+
+To change the order, enable **Show debug settings** under **System → Tools**,
+then open **Randomizer → Bosses**. **Shuffle boss order** changes only the order
+of the selected roster, without repeats. It can place an Act 2 fight before
+that city's Act 1 fight in Extended mode. The final boss always comes last,
+with its original forms. **Boss order
+seed** accepts `0`–`999999999`; the same roster, seed and algorithm produce the
+same sequence. These controls work with the Randomizer master switch off and
+use a dedicated seed, independent of enemy, item and regional rolls. Hiding
+debug settings does not turn off a saved boss-order shuffle.
+
+Act 1 bosses fight at their boss positions in their original levels. You
+teleport into each arena with the fight ready to begin, and teleport back to
+Death Heim's hub after each victory. Death Heim's music continues through
+these fights. Each statue keeps its city identity:
+in Extended mode, its screen-left eye represents Act 1 and its screen-right
+eye represents Act 2. Defeating that boss extinguishes its eye. Aitos has one
+visible eye: it flashes after the first victory and stays lit, then goes dark
+after both bosses are defeated. Standard and Act boss swap extinguish all of
+a statue's eyes when that city's fight is complete.
+Losing a life retries the current encounter; completed fights and the order
+remain unchanged. Leaving the rush starts a fresh sequence of fights on the
+next entry, using the same saved recipe.
+
+The three choices are locked during a rush, including Act 1 fights in ordinary
+city maps, and during input recording or replay. In managed save slots, edits
+are saved immediately with that campaign or its prepared new-game setup.
+They do not save gameplay progress. Continue restores the campaign's choices;
+older saves use Standard with shuffle off and seed `1`. Keep the checkpoint
+companion when moving saves, or use a complete campaign export. This feature
+does not add mid-rush saving or enable debug snapshot restore.
+
+The corresponding preference keys are:
+
+| `settings.ini` key | Values | Default | Environment alias |
+| --- | --- | --- | --- |
+| `death_heim_roster` | `standard`, `act1`, `extended` | `standard` | `AR_DEATH_HEIM_ROSTER` |
+| `death_heim_shuffle_order` | `Off`, `On` | `Off` | `AR_DEATH_HEIM_SHUFFLE_ORDER` |
+| `death_heim_seed` | `0`–`999999999` | `1` | `AR_DEATH_HEIM_SEED` |
+
+These preferences seed new setups; a saved campaign's recipe takes precedence
+on Continue. Standard with shuffle off retains the original rush execution.
+The **Action 3D → Death Heim** controls remain separate visual options.
+For the native arena, teleport, music and save contracts, see the
+[Death Heim technical reference](actraiser-1/death-heim-boss-rush.md).
 
 ## Controls
 

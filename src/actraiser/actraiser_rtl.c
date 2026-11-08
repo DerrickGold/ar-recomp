@@ -13,6 +13,8 @@
 #include "app/input_replay.h"
 #include "actraiser/actraiser_angel.h"
 #include "actraiser/actraiser_world_travel.h"
+#include "actraiser/actraiser_death_heim_runtime.h"
+#include "actraiser/actraiser_death_heim_teleport_assets.h"
 #if defined(__ANDROID__) && defined(__aarch64__)
 /* Bionic declares ucontext_t but implements none of getcontext/makecontext/
  * swapcontext, so Android switches stacks with the small AArch64 routine
@@ -63,6 +65,7 @@ bool ActRaiserSimMenu_ArtworkAvailable(void) {
 }
 
 void ActRaiser_BindRunner(SrRunnerHandle *runner) {
+  ActRaiserDeathHeimTeleportAssets_BindRunner(runner);
   s_runner = runner;
   s_runner_api = runner
       ? sr_runner_get_api(SR_RUNNER_ABI_VERSION)
@@ -137,6 +140,7 @@ bool ActRaiser_ClearPpuObjMetadata(void) {
 
 bool ActRaiser_InitializeGame(
     const RtlGameInitializeContext *context) {
+  ActRaiserDeathHeim_Reset();
   ActRaiserHud_Reset();
   ActRaiserCredits_Reset();
   ActRaiserLocalizationText_ResetObservation();
@@ -1445,6 +1449,8 @@ static bool CreateGameCoroutine(void) {
  * the guard-page mapping and the fiber are not leaked, and so a leak checker
  * run against a clean exit stays quiet. Safe to call without a coroutine. */
 void ActRaiser_DestroyGameCoroutine(void) {
+  ActRaiserDeathHeim_Reset();
+  Settings_SetDeathHeimHost(NULL);
   ActRaiserWorldTravel_Reset();
   ActRaiserBg3Upload_Reset();
   ActRaiserSpriteOwnership_Reset();
@@ -1490,6 +1496,7 @@ static bool ActRaiser_ControlGameTiming(
 }
 
 void RunOneFrameOfGame(void) {
+  if (s_game_started) ActRaiserDeathHeim_ObserveScene(&g_cpu);
   ActRaiserWorldResume_Observe(g_ram, kSnesWramSize,
       g_settings.remember_last_town && InputReplay_PolicyChangesAllowed());
   ActRaiserHud_ObserveScene(g_ram[kActRaiserWram_MapGroup],

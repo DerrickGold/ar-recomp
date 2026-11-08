@@ -1,4 +1,14 @@
 [
+  {"key":"setting.death_heim_roster.label","text":["Death Heim boss roster","Liste des boss de Death Heim","Bossauswahl: Death Heim","デスヘイムのボス構成"]},
+  {"key":"setting.death_heim_roster.help","text":["Standard fights six Act 2 bosses. Act boss swap fights six Act 1 bosses. Extended boss rush fights each city's Act 1 then Act 2 boss. The final boss always follows the full roster. Locked during a rush and recording/replay.","Standard : six boss de l’acte 2. Boss de l’acte 1 : six boss de l’acte 1. Série étendue : les boss des actes 1 puis 2 de chaque ville. Le boss final vient toujours en dernier. Verrouillé pendant la série et l’enregistrement ou la lecture.","Standard: sechs Bosse aus Akt 2. Bosstausch: sechs Bosse aus Akt 1. Erweiterte Bossserie: je Stadt erst Akt 1, dann Akt 2. Der Endboss bleibt zuletzt. Während der Serie und bei Aufnahme/Wiedergabe gesperrt.","標準はアクト2のボス6体、入れ替えはアクト1のボス6体と戦います。拡張では各地域のアクト1、アクト2の順で全12体と戦います。最終ボスは常に最後です。連戦中と記録・再生中は変更できません。"]},
+  {"key":"setting.death_heim_roster.value.0","text":["Standard","Standard","Standard","標準"]},
+  {"key":"setting.death_heim_roster.value.1","text":["Act boss swap","Boss de l’acte 1","Bosstausch","アクト1に入れ替え"]},
+  {"key":"setting.death_heim_roster.value.2","text":["Extended boss rush","Série de boss étendue","Erweiterte Bossserie","拡張ボスラッシュ"]},
+  {"key":"setting.death_heim_shuffle_order.label","text":["Shuffle boss order","Mélanger les boss","Bossreihenfolge mischen","ボスの順番をシャッフル"]},
+  {"key":"setting.death_heim_shuffle_order.help","text":["Shuffle Death Heim's selected roster without repeats. The final boss stays last. The same roster and seed keep the same order, including retries.","Mélange la liste choisie des boss de Death Heim sans répétition. Le boss final reste en dernier. La même liste et la même graine conservent le même ordre, même lors des nouvelles tentatives.","Mischt die gewählte Bossauswahl in Death Heim ohne Wiederholungen. Der Endboss bleibt zuletzt. Dieselbe Auswahl und derselbe Seed ergeben auch bei neuen Versuchen dieselbe Reihenfolge.","デスヘイムで選んだ構成のボスを重複せずに並べ替えます。最終ボスは最後のままです。構成とシードが同じなら、再挑戦しても順番は変わりません。"]},
+  {"key":"setting.death_heim_seed.label","text":["Boss order seed","Graine de l’ordre des boss","Seed der Bossreihenfolge","ボス順のシード"]},
+  {"key":"setting.death_heim_seed.help","text":["Seed for Death Heim's boss order, saved with this campaign. Independent of enemy and item randomization. Change it before entering Death Heim.","Graine de l’ordre des boss de Death Heim, enregistrée avec cette partie. Indépendante des ennemis et objets aléatoires. À modifier avant d’entrer dans Death Heim.","Seed für Death Heims Bossreihenfolge, mit dieser Kampagne gespeichert. Unabhängig von zufälligen Gegnern und Gegenständen. Vor dem Betreten von Death Heim ändern.","デスヘイムのボスの順番を決めるシードです。セーブデータに保存され、敵やアイテムのランダム化とは独立しています。デスヘイムに入る前に変更してください。"]},
+
   {"key": "setting.diorama_mode.value.0", "text": ["Off", "Non", "Aus", "オフ"]},
   {"key": "setting.diorama_mode.value.1", "text": ["Diorama", "Diorama", "Diorama", "ジオラマ"]},
   {"key": "setting.diorama_mode.value.2", "text": ["Voxel 3D (WIP)", "Voxel 3D (WIP)", "Voxel 3D (WIP)", "ボクセル3D（WIP）"]},
@@ -6038,6 +6048,7 @@
   {"key":"overlay.tab.inspector","text":["Inspector","Inspection","Inspektor","検査"]},
   {"key":"overlay.tab.seed","text":["Seed","Graine","Startwert","シード"]},
   {"key":"overlay.tab.enemies","text":["Enemies","Ennemis","Gegner","敵"]},
+  {"key":"overlay.tab.bosses","text":["Bosses","Boss","Bosse","ボス"]},
   {"key":"overlay.tab.simulation","text":["Simulation","Simulation","Simulation","シミュレーション"]},
   {"key":"overlay.tab.game_text","text":["Game text","Texte du jeu","Spieltext","ゲーム内の文章"]},
   {"key":"overlay.tab.font","text":["Enhanced font","Police améliorée","Verbesserte Schrift","高精細フォント"]},

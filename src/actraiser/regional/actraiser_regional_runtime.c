@@ -1,5 +1,6 @@
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_rtl.h"
+#include "actraiser/actraiser_death_heim_runtime.h"
 #include "actraiser/regional/actraiser_regional_editor.h"
 #include "regional/session/regional_session_action.h"
 #include "actraiser/enhancements/actraiser_world_resume.h"
@@ -128,6 +129,28 @@ static ArRegionalLairHistory s_boot_lairs;
 static ArRegionalLairReloads s_boot_reloads;
 static ArRegionalSimActors s_boot_sim_actors;
 static bool s_boot_valid,s_boot_arrival_locked;
+static ActRaiserDeathHeimRushConfig s_boot_death_heim;
+static bool DeathHeimCanChange(void *unused);
+static bool DeathHeimRosterAvailable(void *unused, unsigned roster);
+static bool PrepareDeathHeimSetting(void *unused, unsigned roster, bool shuffle, uint32_t seed);
+static ActRaiserDeathHeimRushConfig DeathHeimSettingsConfig(void) {
+  return (ActRaiserDeathHeimRushConfig){
+      .algorithm = kActRaiserDeathHeimRushAlgorithm,
+      .roster = (uint8_t)g_settings.death_heim_roster,
+      .shuffle_order = g_settings.death_heim_shuffle_order,
+      .seed = (uint32_t)g_settings.death_heim_seed};
+}
+static void ShowDeathHeimConfig(const ActRaiserDeathHeimRushConfig *config) {
+  g_settings.death_heim_roster = config->roster;
+  g_settings.death_heim_shuffle_order = config->shuffle_order;
+  g_settings.death_heim_seed = (int)config->seed;
+}
+static void BindDeathHeimConfig(const ActRaiserDeathHeimRushConfig *config) {
+  ActRaiserDeathHeim_Reset();
+  if (!ActRaiserDeathHeim_Configure(config))
+    ActRaiserHleFatal("Cannot restore this campaign's Death Heim recipe; saves preserved");
+  ShowDeathHeimConfig(config);
+}
 
 /* Published only after every room-boundary activation succeeds. One aggregate
  * also guarantees title/recovery resets cannot leave an older family cached. */
@@ -156,6 +179,9 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
 bool ActRaiserRegional_InitializeSlot(uint32_t slot, ArRegionalCampaignIdentity identity,
                                       void *context) {
   s_prepared_new_game=false;
+  Settings_SetDeathHeimHost(NULL);
+  ActRaiserDeathHeim_Reset();
+  s_boot_death_heim = DeathHeimSettingsConfig();
   Randomizer_ReleaseCampaign();
   s_profile_cache = (ArRegionalProfileCache){0};
   s_title_open=false;
@@ -234,6 +260,9 @@ bool ActRaiserRegional_InitializeSlot(uint32_t slot, ArRegionalCampaignIdentity 
   s_boot_valid = true;
   uint8_t image[kActRaiserSramSize];
   if (SaveSystem_CopyDurableImage(image)) {
+    /* A legacy campaign has an authentic rush, independent of this
+     * installation's new-game preferences. */
+    s_boot_death_heim = ActRaiserDeathHeimRushConfig_Default();
     ArRegionalSession loaded;
     SaveError error = {{0}};
     SaveCheckpointStatus status = ArRegionalSession_Load(&loaded, slot,
@@ -246,9 +275,15 @@ bool ActRaiserRegional_InitializeSlot(uint32_t slot, ArRegionalCampaignIdentity 
       s_boot_reloads = loaded.reloads;
       s_boot_sim_actors = loaded.sim_actors;
       s_boot_arrival_locked=loaded.arrival_locked;
+      s_boot_death_heim = loaded.death_heim;
     }
   }
   SaveCommitHost host = ArRegionalCampaign_SaveHost(&s_campaign);
+  BindDeathHeimConfig(&s_boot_death_heim);
+  const SettingsDeathHeimHost rush_host = {
+      .can_change = DeathHeimCanChange, .roster_available = DeathHeimRosterAvailable,
+      .prepare = PrepareDeathHeimSetting};
+  Settings_SetDeathHeimHost(&rush_host);
   return SaveSystem_SetCommitHost(&host);
 }
 
@@ -261,6 +296,8 @@ bool ActRaiserRegional_StageNewGame(const ArRegionalSession *draft) {
   s_prepared_rules = draft->requested;
   s_prepared_new_game = true;
   s_boot_requested=s_boot_effective=draft->requested;
+  s_boot_death_heim = draft->death_heim;
+  BindDeathHeimConfig(&draft->death_heim);
   return true;
 }
 
@@ -421,6 +458,38 @@ static ArRegionalSession *EditableSession(void) {
   return s_title_open?&s_title_draft:s_campaign.active_valid?&s_campaign.active:NULL;
 }
 
+static bool DeathHeimCanChange(void *unused) {
+  (void)unused;
+  return InputReplay_PolicyChangesAllowed() && !ActRaiserDeathHeim_Active() &&
+      EditableSession() != NULL;
+}
+static bool DeathHeimRosterAvailable(void *unused, unsigned roster) {
+  (void)unused;
+  return ActRaiserDeathHeim_RosterAvailable(roster);
+}
+static bool PrepareDeathHeimSetting(void *unused, unsigned roster, bool shuffle, uint32_t seed) {
+  if (!DeathHeimCanChange(unused) || !DeathHeimRosterAvailable(unused, roster)) return false;
+  ArRegionalSession *session = EditableSession();
+  const ActRaiserDeathHeimRushConfig config = {.algorithm = kActRaiserDeathHeimRushAlgorithm,
+      .roster = (uint8_t)roster, .shuffle_order = shuffle, .seed = seed};
+  ArRegionalSession candidate = *session;
+  if (!ArRegionalSession_RequestDeathHeim(&candidate, session->revision, &config)) return false;
+  if (s_settings_writer) {
+    SaveError error = {{0}};
+    if (!s_settings_writer(s_settings_context, session, &candidate, &error)) {
+      fprintf(stderr, "[death-heim] settings not saved: %s\n", error.message);
+      return false;
+    }
+  }
+  /* Single game-thread owner; the attempt cannot start between preflight and
+   * publication. Persistence failures above never change the running recipe. */
+  if (!ActRaiserDeathHeim_Configure(&config))
+    ActRaiserHleFatal("Death Heim recipe changed outside its inactive boundary");
+  *session = candidate;
+  s_boot_death_heim = config;
+  return true;
+}
+
 bool ActRaiserRegional_ModeEntry(bool activate,uint8_t *snapshot) {
   if(!snapshot)return false;
   ArRegionalSession *session=EditableSession();
@@ -434,6 +503,7 @@ bool ActRaiserRegional_ReturnToTitle(void) {
   s_population.intent.pending=false;
   s_return_rules = s_campaign.active.requested;
   s_return_rules_valid = true;
+  ActRaiserDeathHeim_Reset();
   // Mode access/return routing must not reset the independently chosen difficulty.
   s_town_art_scene = 0;
   s_town_artwork = 0;
@@ -734,9 +804,21 @@ bool ActRaiserRegional_ReplayDigest(void *unused, uint8_t out[32], bool *baselin
     if(!RandomizerConfig_Encode(&recipe,randomized+48) ||
         !sr_support_sha256(randomized,sizeof(randomized),digest))return false;
   }
+  const ActRaiserDeathHeimRushConfig *rush = s_campaign.active_valid
+      ? &s_campaign.active.death_heim : &s_boot_death_heim;
+  const bool rush_native = ActRaiserDeathHeimRushConfig_IsNative(rush);
+  if (!rush_native) {
+    uint8_t state[48 + kActRaiserDeathHeimRushConfigBytes] = "ARDHRUSHSTATE-R1";
+    memcpy(state + 16, digest, 32);
+    if (!ActRaiserDeathHeimRushConfig_Encode(rush, state + 48) ||
+        !sr_support_sha256(state, sizeof(state), digest)) return false;
+  }
+  bool rush_runtime_native;
+  if (!ActRaiserDeathHeim_Fingerprint(digest, digest, &rush_runtime_native)) return false;
   memcpy(out,digest,sizeof(digest));
   *baseline = rules_native && lairs_native && reloads_native && actors_native &&
-      placements_native && stats_native && !s_inventory.enabled && !recipe.enabled;
+      placements_native && stats_native && !s_inventory.enabled && !recipe.enabled &&
+      rush_native && rush_runtime_native;
   return true;
 }
 
@@ -1635,6 +1717,7 @@ static bool PrepareContinue(void) {
 
 RecompReturn ActRaiser_RegionalContinue(CpuState *cpu) {
   if (PrepareContinue()) {
+    BindDeathHeimConfig(&s_campaign.active.death_heim);
     if(!Randomizer_BindCampaign(&s_campaign.active.randomizer))
       ActRaiserHleFatal("Cannot restore this save's randomizer recipe; saves preserved");
     if (s_trace) fprintf(stderr, "[regional] Continue history ready before native restoration\n");
@@ -1667,6 +1750,7 @@ bool ActRaiser_RegionalTitleEntry(CpuState *cpu) {
 
 static void PrepareTitleDraft(void) {
   Randomizer_ReleaseCampaign();
+  ActRaiserDeathHeim_Reset();
   s_population.intent.pending=false;
   ArRegionalCampaign draft;
   ArRegionalCampaign_Init(&draft,s_campaign.slot,s_campaign.identity,s_campaign.identity_context);
@@ -1675,6 +1759,7 @@ static void PrepareTitleDraft(void) {
   SaveError error={{0}};
   if(!ArRegionalCampaign_NewGame(&draft,&defaults,&error))
     ActRaiserHleFatal("Cannot prepare new-game rules; saves preserved: %s",error.message);
+  draft.active.death_heim = DeathHeimSettingsConfig();
   for(unsigned town=0;town<6;++town)
     if(!ArRegionalLairHistory_InitTown(&draft.active.lairs,town))
       ActRaiserHleFatal("Cannot prepare exact new-game lair history");
@@ -1705,6 +1790,7 @@ static void PrepareTitleDraft(void) {
     s_title_saved=true;
   }
   s_title_draft = draft.active;
+  BindDeathHeimConfig(&s_title_draft.death_heim);
   s_title_artwork = 0;
   s_title_open = true;
 }
@@ -1739,6 +1825,7 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
       /* New Game inherits choices, never the occupied slot's identity, lair
        * history or active actors. Continue remains that saved campaign. */
       const ArRegionalRules starting=s_title_draft.requested;
+      const ActRaiserDeathHeimRushConfig rush = s_title_draft.death_heim;
       ArRegionalCampaign fresh;
       ArRegionalCampaign_Init(&fresh, s_campaign.slot, s_campaign.identity,
                               s_campaign.identity_context);
@@ -1752,6 +1839,7 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
         ActRaiserHleFatal("Cannot initialize new lair delays");
       s_title_draft = fresh.active;
       s_title_draft.requested = starting;
+      s_title_draft.death_heim = rush;
     }
     RandomizerConfig recipe;
     ArRegionalRules rules;
@@ -1781,6 +1869,7 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
   }
   if(!Randomizer_BindCampaign(&s_campaign.active.randomizer))
     ActRaiserHleFatal("Cannot bind this campaign's randomizer recipe; saves preserved");
+  BindDeathHeimConfig(&s_campaign.active.death_heim);
   s_lair_seed_pending=selection!=1;
   s_town_art_scene = 0;
   s_town_artwork = 0;

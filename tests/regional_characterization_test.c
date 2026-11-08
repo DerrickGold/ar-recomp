@@ -184,8 +184,10 @@ static void RecordRejection(const ArRegionalSession *base, const ArRegionalRules
   }
 }
 
-/* The record count each format version carries, as Decode enforces it: for a
- * header-only payload, the one count it does not reject as unsupported. */
+/* The historical versions' record counts plus one unsupported future-version
+ * probe. Its digest label remains 71, the original sentinel; the actual probe
+ * moves past the newly supported v71. New v71 payloads have explicit codec
+ * coverage in regional_session/codec.c, not a replacement golden digest. */
 static void RecordVersions(void) {
   static const uint8_t kMagics[2][8] = {
     {'A', 'R', 'R', 'E', 'G', 'I', 'O', 'N'}, {'A', 'R', 'P', 'R', 'I', 'C', 'E', 0},
@@ -196,7 +198,7 @@ static void RecordVersions(void) {
       for (unsigned count = 0; count < 1024; ++count) {
         uint8_t header[36] = {0};
         memcpy(header, kMagics[magic], 8);
-        header[8] = (uint8_t)version;
+        header[8] = (uint8_t)(version == 71 ? 72 : version);
         header[10] = (uint8_t)count;
         header[11] = (uint8_t)(count >> 8);
         ArRegionalSession decoded;
