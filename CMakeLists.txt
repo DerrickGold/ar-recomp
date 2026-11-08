@@ -88,6 +88,10 @@ endif()
 
 find_package(SDL3 3.4.0 REQUIRED)
 
+# Optional local USB reader for original Xbox One controllers on macOS.
+# Empty by default: normal builds keep their existing SDL dependencies.
+set(AR_XBOX_USB_ROOT "" CACHE PATH "Path to the shared Xbox USB bridge module")
+
 # Standalone GPU PPU parity/throughput harness. The live experiment shares its
 # global-motion kernels, but does not link the harness or offline tile packet.
 option(AR_PPU_GPU_PROBE "Build the experimental GPU background parity/throughput probe" OFF)
@@ -556,6 +560,16 @@ target_link_libraries(ActRaiserRecomp PRIVATE
     SDL3::SDL3
     actraiser_math
 )
+if(AR_XBOX_USB_ROOT)
+    if(NOT APPLE)
+        message(FATAL_ERROR "AR_XBOX_USB_ROOT is currently supported only on macOS")
+    endif()
+    set(XBOX_USB_ENABLE_SDL ON)
+    add_subdirectory("${AR_XBOX_USB_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/xbox-usb")
+    target_link_libraries(ActRaiserRecomp PRIVATE xbox_usb_sdl)
+    target_compile_definitions(ActRaiserRecomp PRIVATE AR_XBOX_USB_BRIDGE=1)
+endif()
+
 if(AR_ENHANCED_TEXT)
     target_link_libraries(ActRaiserRecomp PRIVATE SDL3_ttf::SDL3_ttf)
 endif()
@@ -1172,7 +1186,8 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_host_ppu_output COMMAND actraiser_host_ppu_output_test)
 
     add_executable(actraiser_host_input_test
-        tests/host_input_test.c src/host/host_input.c src/diorama/diorama_camera.c)
+        tests/host_input_test.c src/host/host_input.c src/diorama/diorama_camera.c
+        src/platform/sdl/xbox_usb_gamepad_sdl.c)
     target_include_directories(actraiser_host_input_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_host_input_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_host_input COMMAND actraiser_host_input_test)

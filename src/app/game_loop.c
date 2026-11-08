@@ -32,6 +32,7 @@
 #include "host/host_display.h"
 #include "host/host_display_pacing.h"
 #include "host/host_input.h"
+#include "host/xbox_usb_gamepad.h"
 #include "host/host_localization.h"
 #include "host/host_ppu_output.h"
 #include "host/host_video.h"
@@ -639,6 +640,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
       HostDisplay_EmulatedFramePresentMode(
           config->headless, config->headless_video);
   while (running) {
+    if (!config->headless) HostXboxUsbGamepad_Update();
     /* A reset request is valid only in the owner iteration that handled it.
      * Early exits (pause, transition, shutdown) must not defer a recapture. */
     (void)HostDisplay_TakeVoxelCameraReseed(false);

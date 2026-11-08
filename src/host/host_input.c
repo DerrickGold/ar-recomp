@@ -28,6 +28,7 @@
 #include "host/host_display.h"
 #include "host/host_video.h"
 #include "host/touch_controls.h"
+#include "host/xbox_usb_gamepad.h"
 #include "app/user_data_dir.h"
 #include "manual/manual_reader.h"
 #include "actraiser_game.h"
@@ -379,6 +380,7 @@ static void OnGamepadHostAction(InputAction action) {
 }
 
 void HostInput_BeginSession(void) {
+  HostXboxUsbGamepad_Start();
   TouchControls_Init();
   InputMap_Init();
   s_paused = s_turbo = s_inspector_owns_pause = s_paused_redraw_pending = false;
@@ -392,6 +394,7 @@ void HostInput_EndSession(void) {
   InputMap_SetActionHandler(NULL);
   HostInput_ClearHeld();
   InputMap_Shutdown();
+  HostXboxUsbGamepad_Stop();
   TouchControls_Shutdown();
 }
 
