@@ -414,7 +414,9 @@ void DioramaLayerOrder_ClearTable(DioramaLayerOrderTable *table) {
 
 bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
                                   unsigned profile, DioramaRoomOverride *out) {
-  if (!room || !out || profile >= kDioramaTerrainProfileCount || room == out)
+  if (!room || !out || profile >= kDioramaTerrainProfileCount || room == out ||
+      room->voxel.cell_count > kDioramaVoxelCellMax ||
+      room->voxel.object_count > kDioramaVoxelObjectMax)
     return false;
   for (unsigned bg = 0; bg < 2; bg++)
     if (!ReserveStamps(&out->stamp_layers[bg], room->stamp_layers[bg].count))
@@ -481,6 +483,40 @@ bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
       PutStamp(stamps, cell, false);
     }
   }
+  out->voxel.cell_count = out->voxel.object_count = 0;
+  for (unsigned i = 0; i < room->voxel.cell_count; ++i) {
+    const DioramaVoxelCell *cell = &room->voxel.cells[i];
+    if (!(TerrainMask(cell->terrain_mask) & bit)) continue;
+    unsigned at = out->voxel.cell_count;
+    for (unsigned j = 0; j < at; ++j)
+      if (DioramaVoxelCell_SameRegion(&out->voxel.cells[j], cell)) {
+        at = j; break;
+      }
+    /* Move replacements to the end: matching object filters and overlapping
+     * regional records consistently use the last authored complete record. */
+    if (at < out->voxel.cell_count) {
+      memmove(&out->voxel.cells[at], &out->voxel.cells[at + 1],
+              (out->voxel.cell_count - at - 1) * sizeof(*cell));
+      --out->voxel.cell_count;
+    }
+    out->voxel.cells[out->voxel.cell_count++] = *cell;
+  }
+  for (unsigned i = 0; i < room->voxel.object_count; ++i) {
+    const DioramaVoxelObject *object = &room->voxel.objects[i];
+    if (!(TerrainMask(object->terrain_mask) & bit)) continue;
+    unsigned at = out->voxel.object_count;
+    for (unsigned j = 0; j < at; ++j)
+      if (DioramaVoxelObject_SameSelector(&out->voxel.objects[j], object)) {
+        at = j; break;
+      }
+    if (at < out->voxel.object_count) {
+      memmove(&out->voxel.objects[at], &out->voxel.objects[at + 1],
+              (out->voxel.object_count - at - 1) * sizeof(*object));
+      --out->voxel.object_count;
+    }
+    out->voxel.objects[out->voxel.object_count++] = *object;
+  }
+
   return true;
 }
 
@@ -504,7 +540,8 @@ int DioramaLayerOrder_VirtualBand(const DioramaRoomOverride *room, int bg,
 
 bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   if (!room || !room->used) return false;
-  if (room->scenery_grade.set || room->native_bloom.set || room->trunk.set) return true;
+  if (room->scenery_grade.set || room->native_bloom.set || room->trunk.set ||
+      room->voxel.cell_count || room->voxel.object_count) return true;
   for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++)
     if (room->framing[profile].set) return true;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
@@ -1158,6 +1195,324 @@ invalid:
   return false;
 }
 
+
+/* Voxel records are parsed into a local value before publication. These are
+ * visual material edits, independent of tile IDs, collision and sprite rank. */
+static bool VoxelUnsigned(const char *text, unsigned base, unsigned maximum,
+                           unsigned *out) {
+  if (!*text) return false;
+  unsigned value = 0;
+  for (const char *p = text; *p; ++p) {
+    unsigned digit = *p >= '0' && *p <= '9' ? (unsigned)(*p - '0') :
+        *p >= 'a' && *p <= 'f' ? (unsigned)(*p - 'a' + 10) :
+        *p >= 'A' && *p <= 'F' ? (unsigned)(*p - 'A' + 10) : 16;
+    if (digit >= base || digit > maximum || value > (maximum - digit) / base)
+      return false;
+    value = value * base + digit;
+  }
+  *out = value;
+  return true;
+}
+
+/* Compare rounded floats so the lossless %.9g formatter can round-trip the
+ * inclusive endpoints (-.4f and .8f lie just outside their decimal values). */
+static bool VoxelFloat(const char *text, float lo, float hi, float *out) {
+  char *end;
+  const double value = strtod(text, &end);
+  const float rounded = (float)value;
+  if (end == text || *end || !isfinite(value) || !isfinite(rounded) ||
+      rounded < lo || rounded > hi) return false;
+  *out = rounded;
+  return true;
+}
+
+static bool ParseVoxelArt(char *text, DioramaVoxelArt *out) {
+  if (!strcmp(text, "auto")) { *out = (DioramaVoxelArt){0}; return true; }
+  unsigned values[8];
+  for (unsigned i = 0; i < 8; ++i) {
+    char *comma = strchr(text, ',');
+    if ((i != 7) != (comma != NULL)) return false;
+    if (comma) *comma = '\0';
+    if (!VoxelUnsigned(text, i >= 1 && i <= 4 ? 16 : 10,
+                       i >= 1 && i <= 4 ? 65535 : 16, &values[i])) return false;
+    if (comma) text = comma + 1;
+  }
+  if (values[0] > 1 || (values[7] != 8 && values[7] != 16) ||
+      values[5] + values[7] > 16 || values[6] + values[7] > 16) return false;
+  *out = (DioramaVoxelArt){.bg = values[0], .x = values[5], .y = values[6],
+                           .size = values[7], .set = true};
+  for (unsigned i = 0; i < 4; ++i) out->words[i] = (uint16_t)values[i + 1];
+  return true;
+}
+
+static bool ParseVoxelPair(char *text, int lo, int hi, int second_lo,
+                           int second_hi, int *first, int *second) {
+  char *end;
+  const long a = strtol(text, &end, 10);
+  if (end == text || *end != ',' || a < lo || a > hi) return false;
+  const char *tail = end + 1;
+  const long b = strtol(tail, &end, 10);
+  if (end == tail || *end || b < second_lo || b > second_hi) return false;
+  *first = (int)a; *second = (int)b;
+  return true;
+}
+
+static bool ParseVoxelFaces(char *text, uint8_t *out) {
+  if (!strcmp(text, "all")) { *out = kDioramaVoxelFaceMask_All; return true; }
+  if (!strcmp(text, "none")) { *out = 0; return true; }
+  static const char *const names[] = {"front", "back", "top", "bottom", "left", "right"};
+  unsigned faces = 0;
+  for (;;) {
+    char *plus = strchr(text, '+');
+    if (plus) *plus = '\0';
+    unsigned i = 0;
+    while (i < 6 && strcmp(text, names[i])) ++i;
+    if (i == 6 || (faces & (1u << i))) return false;
+    faces |= 1u << i;
+    if (!plus) break;
+    text = plus + 1;
+  }
+  *out = (uint8_t)faces;
+  return true;
+}
+
+static bool ParseVoxelBend(char *text, DioramaVoxelBend *out) {
+  char *parts[6];
+  for (unsigned i = 0; i < 6; ++i) {
+    parts[i] = text;
+    char *comma = strchr(text, ',');
+    if ((i != 5) != (comma != NULL)) return false;
+    if (comma) { *comma = '\0'; text = comma + 1; }
+  }
+  DioramaVoxelBend bend = {0};
+  if (!strcmp(parts[0], "x")) bend.axis = kDioramaVoxelBend_X;
+  else if (!strcmp(parts[0], "y")) bend.axis = kDioramaVoxelBend_Y;
+  else return false;
+  int16_t *domain[] = {&bend.anchor, &bend.tip};
+  for (unsigned i = 0; i < 2; ++i) {
+    char *end;
+    const long n = strtol(parts[i + 1], &end, 10);
+    if (end == parts[i + 1] || *end || n < -8192 || n > 8192) return false;
+    *domain[i] = (int16_t)n;
+  }
+  if (bend.anchor == bend.tip || !VoxelFloat(parts[3], -256, 256, &bend.dx) ||
+      !VoxelFloat(parts[4], -256, 256, &bend.dy) ||
+      !VoxelFloat(parts[5], -1.2f, 1.2f, &bend.dz)) return false;
+  *out = bend;
+  return true;
+}
+
+static bool ParseVoxelCell(DioramaRoomOverride *room, unsigned terrain,
+                            const char *text, const char **error) {
+  DioramaVoxelCell next = {.terrain_mask = (uint8_t)terrain, .w = 1, .h = 1};
+  enum { kCell = 1u << 24, kAuto = 1u << 25, kSize = 1u << 26, kSpan = 1u << 27 };
+  unsigned seen = 0;
+  char word[192];
+  const char *p = text, *after;
+  while ((after = NextWord(p, word, sizeof(word))) != NULL) {
+    if ((size_t)(after - SkipSpace(p)) >= sizeof(word)) goto bad;
+    p = after;
+    char *value = strchr(word, ':');
+    if (!value) goto bad;
+    *value++ = '\0';
+    unsigned flag = 0;
+    if (!strcmp(word, "cell")) {
+      int x, y;
+      flag = kCell;
+      if (!ParseVoxelPair(value, -512, 511, -512, 511, &x, &y)) goto bad;
+      next.x = (int16_t)x; next.y = (int16_t)y;
+    } else if (!strcmp(word, "size")) {
+      int w, h;
+      flag = kSize;
+      if (!ParseVoxelPair(value, 1, 1024, 1, 1024, &w, &h)) goto bad;
+      next.w = (uint16_t)w; next.h = (uint16_t)h;
+    } else if (!strcmp(word, "auto")) {
+      flag = kAuto;
+      if (strcmp(value, "1")) goto bad;
+    } else if (!strcmp(word, "front")) {
+      flag = kDioramaVoxelCell_Front;
+      if (!VoxelFloat(value, -.4, .8, &next.front)) goto bad;
+    } else if (!strcmp(word, "back")) {
+      flag = kDioramaVoxelCell_Back;
+      if (!VoxelFloat(value, -.4, .8, &next.back)) goto bad;
+    } else if (!strcmp(word, "width")) {
+      flag = kDioramaVoxelCell_Width;
+      if (!VoxelFloat(value, 1, 64, &next.width)) goto bad;
+    } else if (!strcmp(word, "offset")) {
+      flag = kDioramaVoxelCell_Offset;
+      if (!VoxelFloat(value, -32, 32, &next.offset_x)) goto bad;
+    } else if (!strcmp(word, "backing")) {
+      static const char *const names[] = {"auto", "none", "fill", "replace"};
+      flag = kDioramaVoxelCell_Backing;
+      unsigned i = 0;
+      while (i < 4 && strcmp(value, names[i])) ++i;
+      if (i == 4) goto bad;
+      next.backing = (uint8_t)i;
+    } else if (!strcmp(word, "back-art")) {
+      flag = kDioramaVoxelCell_BackArt;
+      if (!ParseVoxelArt(value, &next.backing_art)) goto bad;
+    } else if (!strcmp(word, "top-art")) {
+      flag = kDioramaVoxelCell_TopArt;
+      if (!ParseVoxelArt(value, &next.top_art)) goto bad;
+    } else if (!strcmp(word, "side-art")) {
+      flag = kDioramaVoxelCell_SideArt;
+      if (!ParseVoxelArt(value, &next.side_art)) goto bad;
+    } else if (!strcmp(word, "front-art")) {
+      flag = kDioramaVoxelCell_FrontArt;
+      if (!ParseVoxelArt(value, &next.front_art)) goto bad;
+    } else if (!strcmp(word, "left-art")) {
+      flag = kDioramaVoxelCell_LeftArt;
+      if (!ParseVoxelArt(value, &next.left_art)) goto bad;
+    } else if (!strcmp(word, "right-art")) {
+      flag = kDioramaVoxelCell_RightArt;
+      if (!ParseVoxelArt(value, &next.right_art)) goto bad;
+    } else if (!strcmp(word, "bottom-art")) {
+      flag = kDioramaVoxelCell_BottomArt;
+      if (!ParseVoxelArt(value, &next.bottom_art)) goto bad;
+    } else if (!strcmp(word, "faces")) {
+      flag = kDioramaVoxelCell_Faces;
+      if (!ParseVoxelFaces(value, &next.faces)) goto bad;
+    } else if (!strcmp(word, "shape")) {
+      static const char *const names[] = {"box", "taper", "curve"};
+      flag = kDioramaVoxelCell_Shape;
+      unsigned i = 0;
+      while (i < 3 && strcmp(value, names[i])) ++i;
+      if (i == 3) goto bad;
+      next.shape = (uint8_t)i;
+    } else if (!strcmp(word, "shape-span")) {
+      int y, h;
+      flag = kSpan;
+      if (!ParseVoxelPair(value, -8192, 8191, 1, 16384, &y, &h) || y + h > 8192) goto bad;
+      next.shape_y = (int16_t)y; next.shape_h = (uint16_t)h;
+    } else if (!strcmp(word, "front-end")) {
+      flag = kDioramaVoxelCell_FrontEnd;
+      if (!VoxelFloat(value, -.4, .8, &next.front_end)) goto bad;
+    } else if (!strcmp(word, "back-end")) {
+      flag = kDioramaVoxelCell_BackEnd;
+      if (!VoxelFloat(value, -.4, .8, &next.back_end)) goto bad;
+    } else if (!strcmp(word, "bend")) {
+      flag = kDioramaVoxelCell_Bend;
+      if (!ParseVoxelBend(value, &next.bend)) goto bad;
+    } else if (!strcmp(word, "transform")) {
+      flag = kDioramaVoxelCell_Transform;
+      float *fields[] = {&next.transform.px, &next.transform.py, &next.transform.pz,
+          &next.transform.dx, &next.transform.dy, &next.transform.dz,
+          &next.transform.sx, &next.transform.sy, &next.transform.sz};
+      const float lo[] = {-8192,-8192,-2,-256,-256,-1.2f,.125f,.125f,.125f};
+      const float hi[] = {8192,8192,2,256,256,1.2f,4,4,4};
+      for(unsigned i=0;i<9;++i) {
+        char *comma=strchr(value,',');if((i!=8)!=(comma!=NULL))goto bad;
+        if(comma)*comma='\0';
+        if(!VoxelFloat(value,lo[i],hi[i],fields[i]))goto bad;
+        if(comma)value=comma+1;
+      }
+    } else goto bad;
+    if (seen & flag) goto bad;
+    seen |= flag;
+  }
+  next.fields = seen & ((1u << 18) - 1);
+  if (!(seen & kCell) || (!next.fields && !(seen & kAuto)) ||
+      (next.fields && (seen & kAuto)) || next.x + next.w > 512 || next.y + next.h > 512 ||
+      ((next.fields & 3u) == 3u && next.back < next.front)) goto bad;
+  if ((seen & (kSpan | kDioramaVoxelCell_FrontEnd | kDioramaVoxelCell_BackEnd)) &&
+      (!(next.fields & kDioramaVoxelCell_Shape) || next.shape == kDioramaVoxelShape_Box)) goto bad;
+  if ((next.fields & kDioramaVoxelCell_Shape) && next.shape != kDioramaVoxelShape_Box) {
+    if (!(seen & kSpan)) { next.shape_y = next.y * 16; next.shape_h = next.h * 16; }
+    if ((next.fields & (kDioramaVoxelCell_FrontEnd | kDioramaVoxelCell_BackEnd)) ==
+        (kDioramaVoxelCell_FrontEnd | kDioramaVoxelCell_BackEnd) &&
+        next.back_end < next.front_end) goto bad;
+  }
+  DioramaVoxelEdits *edits = &room->voxel;
+  if (edits->cell_count > kDioramaVoxelCellMax) goto bad;
+  unsigned at = edits->cell_count;
+  for (unsigned i = 0; i < edits->cell_count; ++i)
+    if (DioramaVoxelCell_SameRegion(&edits->cells[i], &next) &&
+        edits->cells[i].terrain_mask == next.terrain_mask) { at = i; break; }
+  if (at == kDioramaVoxelCellMax) goto full;
+  if (at < edits->cell_count) {
+    memmove(&edits->cells[at], &edits->cells[at + 1],
+            (edits->cell_count - at - 1) * sizeof(next));
+    --edits->cell_count;
+  }
+  edits->cells[edits->cell_count++] = next;
+  return true;
+ full:
+  if (error) *error = "too many voxel regions (maximum 256 records per room)";
+  return false;
+ bad:
+  if (error) *error = "invalid voxel region, depth/width, faces, shape, bend, transform, backing or current-room artwork";
+  return false;
+}
+
+static bool ParseVoxelObject(DioramaRoomOverride *room, unsigned terrain,
+                              const char *text, const char **error) {
+  DioramaVoxelObject next = {.terrain_mask = (uint8_t)terrain};
+  unsigned seen = 0;
+  char word[96];
+  const char *p = text, *after;
+  while ((after = NextWord(p, word, sizeof(word))) != NULL) {
+    if ((size_t)(after - SkipSpace(p)) >= sizeof(word)) goto bad;
+    p = after;
+    char *value = strchr(word, ':');
+    if (!value) goto bad;
+    *value++ = '\0';
+    unsigned flag = 0, n;
+    if (!strcmp(word, "source")) {
+      flag = 1u << 8;
+      if (!VoxelUnsigned(value, 16, 65535, &n) || !n) goto bad;
+      next.source = (uint16_t)n;
+    } else if (!strcmp(word, "parent")) {
+      flag = 1u << 9;
+      if (!VoxelUnsigned(value, 16, 65535, &n)) goto bad;
+      next.parent = (uint16_t)n; next.selector_fields |= kDioramaVoxelObject_Parent;
+    } else if (!strcmp(word, "animation")) {
+      flag = 1u << 10;
+      if (!VoxelUnsigned(value, 16, 65535, &n)) goto bad;
+      next.animation = (uint16_t)n; next.selector_fields |= kDioramaVoxelObject_Animation;
+    } else if (!strcmp(word, "mode")) {
+      static const char *const names[] = {"auto", "flat", "extruded"};
+      flag = kDioramaVoxelObject_Mode;
+      unsigned i = 0;
+      while (i < 3 && strcmp(value, names[i])) ++i;
+      if (i == 3) goto bad;
+      next.mode = (uint8_t)i;
+    } else if (!strcmp(word, "offset")) {
+      flag = kDioramaVoxelObject_Offset;
+      if (!VoxelFloat(value, -.4, .8, &next.offset)) goto bad;
+    } else if (!strcmp(word, "thickness")) {
+      flag = kDioramaVoxelObject_Thickness;
+      if (!VoxelFloat(value, 0, .8, &next.thickness)) goto bad;
+    } else if (!strcmp(word, "width")) {
+      flag = kDioramaVoxelObject_Width;
+      if (!VoxelFloat(value, .125, 4, &next.width_scale)) goto bad;
+    } else goto bad;
+    if (seen & flag) goto bad;
+    seen |= flag;
+  }
+  next.fields = (uint8_t)(seen & 15u);
+  if (!(seen & (1u << 8)) || !next.fields) goto bad;
+  DioramaVoxelEdits *edits = &room->voxel;
+  if (edits->object_count > kDioramaVoxelObjectMax) goto bad;
+  unsigned at = edits->object_count;
+  for (unsigned i = 0; i < edits->object_count; ++i)
+    if (edits->objects[i].terrain_mask == next.terrain_mask &&
+        DioramaVoxelObject_SameSelector(&edits->objects[i], &next)) { at = i; break; }
+  if (at == kDioramaVoxelObjectMax) goto full;
+  if (at < edits->object_count) {
+    memmove(&edits->objects[at], &edits->objects[at + 1],
+            (edits->object_count - at - 1) * sizeof(next));
+    --edits->object_count;
+  }
+  edits->objects[edits->object_count++] = next;
+  return true;
+ full:
+  if (error) *error = "too many voxel object rules (maximum 64 per room)";
+  return false;
+ bad:
+  if (error) *error = "invalid voxel source/parent/animation selector, mode, depth or width";
+  return false;
+}
+
 /* Key suffixes use stable region codes. German shares the European terrain
  * profile; a combined suffix shares one record across matching layouts. */
 static bool ParseTerrainSuffix(char *token, unsigned *mask) {
@@ -1350,10 +1705,17 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
   }
   unsigned terrain;
   const bool scoped = strchr(token, ':') != NULL;
-  if (!ParseTerrainSuffix(token, &terrain)) {
+  if (!strcmp(token, "voxel-cell:all") || !strcmp(token, "voxel-object:all")) {
+    *strchr(token, ':') = '\0';
+    terrain = 7;
+  } else if (!ParseTerrainSuffix(token, &terrain)) {
     if (out_error) *out_error = "bad terrain suffix (us, jp, eu or ge)";
     return false;
   }
+  if (!strcmp(token, "voxel-cell"))
+    return ParseVoxelCell(room, terrain, equals + 1, out_error);
+  if (!strcmp(token, "voxel-object"))
+    return ParseVoxelObject(room, terrain, equals + 1, out_error);
   if (!strcmp(token, "trunk")) {
     DioramaTrunkSettings t=DioramaTrunk_Default();
     unsigned enabled; int used=0; char tail;
@@ -1896,6 +2258,76 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
              (cell->bands >> 6) & 3u);
     }
   }
+  for (unsigned i = 0; i < room->voxel.cell_count && i < kDioramaVoxelCellMax; ++i) {
+    const DioramaVoxelCell *cell = &room->voxel.cells[i];
+    APPEND("voxel-cell%s = cell:%d,%d", TerrainSuffix(cell->terrain_mask), cell->x, cell->y);
+    if (DioramaVoxelCell_Width(cell) != 1 || DioramaVoxelCell_Height(cell) != 1)
+      APPEND(" size:%u,%u", DioramaVoxelCell_Width(cell), DioramaVoxelCell_Height(cell));
+    if (!cell->fields) APPEND(" auto:1");
+    if (cell->fields & kDioramaVoxelCell_Front) APPEND(" front:%.9g", (double)cell->front);
+    if (cell->fields & kDioramaVoxelCell_Back) APPEND(" back:%.9g", (double)cell->back);
+    if (cell->fields & kDioramaVoxelCell_Width) APPEND(" width:%.9g", (double)cell->width);
+    if (cell->fields & kDioramaVoxelCell_Offset) APPEND(" offset:%.9g", (double)cell->offset_x);
+    if (cell->fields & kDioramaVoxelCell_Backing) {
+      static const char *const names[] = {"auto", "none", "fill", "replace"};
+      APPEND(" backing:%s", names[cell->backing < 4 ? cell->backing : 0]);
+    }
+    const DioramaVoxelArt *arts[] = {&cell->backing_art, &cell->top_art, &cell->side_art,
+        &cell->front_art, &cell->left_art, &cell->right_art, &cell->bottom_art};
+    static const char *const tokens[] = {"back-art", "top-art", "side-art", "front-art",
+        "left-art", "right-art", "bottom-art"};
+    for (unsigned j = 0; j < 7; ++j) if (cell->fields & (kDioramaVoxelCell_BackArt << j)) {
+      const DioramaVoxelArt *art = arts[j];
+      APPEND(" %s:", tokens[j]);
+      if (!art->set) APPEND("auto");
+      else APPEND("%u,%04X,%04X,%04X,%04X,%u,%u,%u", art->bg,
+          art->words[0], art->words[1], art->words[2], art->words[3], art->x, art->y, art->size);
+    }
+    if (cell->fields & kDioramaVoxelCell_Faces) {
+      APPEND(" faces:");
+      if (!cell->faces) APPEND("none");
+      else if (cell->faces == kDioramaVoxelFaceMask_All) APPEND("all");
+      else {
+        static const char *const names[] = {"front", "back", "top", "bottom", "left", "right"};
+        bool first = true;
+        for (unsigned j = 0; j < 6; ++j) if (cell->faces & (1u << j)) {
+          APPEND("%s%s", first ? "" : "+", names[j]); first = false;
+        }
+      }
+    }
+    if (cell->fields & kDioramaVoxelCell_Shape) {
+      static const char *const names[] = {"box", "taper", "curve"};
+      APPEND(" shape:%s", names[cell->shape < 3 ? cell->shape : 0]);
+      if (cell->shape != kDioramaVoxelShape_Box)
+        APPEND(" shape-span:%d,%u", cell->shape_y, cell->shape_h);
+    }
+    if (cell->fields & kDioramaVoxelCell_FrontEnd) APPEND(" front-end:%.9g", (double)cell->front_end);
+    if (cell->fields & kDioramaVoxelCell_BackEnd) APPEND(" back-end:%.9g", (double)cell->back_end);
+    if (cell->fields & kDioramaVoxelCell_Bend)
+      APPEND(" bend:%c,%d,%d,%.9g,%.9g,%.9g", cell->bend.axis == kDioramaVoxelBend_X ? 'x' : 'y',
+          cell->bend.anchor, cell->bend.tip, (double)cell->bend.dx, (double)cell->bend.dy, (double)cell->bend.dz);
+    if (cell->fields & kDioramaVoxelCell_Transform)
+      APPEND(" transform:%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
+          (double)cell->transform.px, (double)cell->transform.py, (double)cell->transform.pz,
+          (double)cell->transform.dx, (double)cell->transform.dy, (double)cell->transform.dz,
+          (double)cell->transform.sx, (double)cell->transform.sy, (double)cell->transform.sz);
+    APPEND("\n");
+  }
+  for (unsigned i = 0; i < room->voxel.object_count && i < kDioramaVoxelObjectMax; ++i) {
+    const DioramaVoxelObject *object = &room->voxel.objects[i];
+    APPEND("voxel-object%s = source:%04X", TerrainSuffix(object->terrain_mask), object->source);
+    if (object->selector_fields & kDioramaVoxelObject_Parent) APPEND(" parent:%04X", object->parent);
+    if (object->selector_fields & kDioramaVoxelObject_Animation) APPEND(" animation:%04X", object->animation);
+    if (object->fields & kDioramaVoxelObject_Mode) {
+      static const char *const names[] = {"auto", "flat", "extruded"};
+      APPEND(" mode:%s", names[object->mode < 3 ? object->mode : 0]);
+    }
+    if (object->fields & kDioramaVoxelObject_Offset) APPEND(" offset:%.9g", (double)object->offset);
+    if (object->fields & kDioramaVoxelObject_Thickness) APPEND(" thickness:%.9g", (double)object->thickness);
+    if (object->fields & kDioramaVoxelObject_Width) APPEND(" width:%.9g", (double)object->width_scale);
+    APPEND("\n");
+  }
+
 #undef APPEND
   *total_io = total;
 }

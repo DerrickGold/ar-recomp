@@ -64,6 +64,9 @@ vec4 sample_source_lod(vec2 uv, float lod) {
 }
 ''' + text[pos:]
         result.append(text)
+    # The preview uses the same bounded fractional visibility policy as the
+    # native depth pass. The WebGL adapter supplies only its GL bindings.
+    result.append(shader_source(ROOT / 'src/shaders/diorama_alpha_common.glsl'))
     return result
 
 
@@ -80,7 +83,7 @@ def build(output, compiler='emcc', scene=None):
                '-I', str(ROOT / 'snesrecomp-go/runtime/src/core'),
                'tools/action_editor/compositor_preview.c',
                'tools/action_editor/room_preview.c', 'tools/action_editor/room_scene.c',
-               'tools/action_editor/receiver_preview.c',
+               'tools/action_editor/receiver_preview.c', 'tools/action_editor/voxel_pick.c',
                'tools/action_editor/object_preview.c', 'src/diorama/diorama_object_snapshot.c',
                    *(ROOT / 'tools/action_editor/environment_sources.txt').read_text().splitlines(),
                'src/action/action_scene_snapshot.c', 'src/action/action_room_scene.c',
@@ -96,6 +99,7 @@ def build(output, compiler='emcc', scene=None):
                '-sSTACK_SIZE=1048576', '-sINITIAL_MEMORY=134217728', '-sALLOW_MEMORY_GROWTH=0',
                *['-Wl,--export=DioramaPreview_' + x for x in exports],
                *['-Wl,--export=RoomPreview_' + x for x in ('LoadObjects', 'ClearObjects', 'ObjectInfo')],
+               *['-Wl,--export=RoomPreview_' + x for x in ('VoxelPick', 'VoxelTile', 'VoxelGroup', 'VoxelTransformHandles', 'VoxelBendHandles', 'VoxelObjects', 'SetInspection', 'SceneryError')],
                *['-Wl,--export=RoomPreview_' + x for x in
                  ('Load', 'Configure', 'CloudOpenings', 'Policy', 'Set3DMode', 'SetView', 'Measure', 'Render', 'Reset', 'Width', 'Height', 'CameraX', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'ShowBackdrop', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'RecipeError', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'LoadPlayer', 'ReceiverStyle', 'PickReceiver', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],
                '-o', str(wasm)]

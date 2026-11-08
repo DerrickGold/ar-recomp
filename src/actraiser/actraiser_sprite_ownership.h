@@ -39,6 +39,10 @@ typedef struct ActRaiserSpriteOwnership {
   /* Verified visual props, paired with the exact completed OAM build. */
   uint16_t prop_owner[kActRaiserSpriteSlots];
   uint8_t prop_shape[kActRaiserSpriteSlots];
+  /* All non-player action compositions are eligible for explicit visual
+   * authoring. These immutable facts alone do not activate modeling. */
+  uint16_t visual_owner[kActRaiserSpriteSlots], visual_source[kActRaiserSpriteSlots];
+  uint16_t visual_animation[kActRaiserSpriteSlots];
   /* Native composition origin before viewport clipping, from the same OAM
    * emission. Large props keep stable sections as their visible parts change. */
   int16_t prop_origin_x[kActRaiserSpriteSlots], prop_origin_y[kActRaiserSpriteSlots];
@@ -47,6 +51,14 @@ typedef struct ActRaiserSpriteOwnership {
   uint8_t wall_torch_part_count;
   ActRaiserWallTorchPart wall_torch_parts[kActRaiserWallTorchPartLimit];
 } ActRaiserSpriteOwnership;
+
+static inline unsigned ActRaiserSpriteOwnership_VisualTag(
+    const ActRaiserSpriteOwnership *ownership,uint16_t owner) {
+  if(ownership && ownership->valid && owner)
+    for(unsigned i=0;i<kActRaiserSpriteSlots;++i)
+      if(ownership->visual_owner[i]==owner)return i+1;
+  return 0;
+}
 
 /* A transient capture tag, independent of color, tile identity and object
  * address layout. All parts of one verified prop share its first OAM slot.
@@ -82,6 +94,7 @@ enum {
   kActRaiserSpriteProp_TempleSpikeRail,
   /* Native animated flame attached to the room's rear wall, never extruded. */
   kActRaiserSpriteProp_WallTorch,
+  kActRaiserSpriteProp_Generic,
 };
 void ActRaiserSpriteOwnership_RecordActionVisual(uint16_t source,uint16_t record,
     uint16_t animation,uint8_t bank,uint16_t composition,

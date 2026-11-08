@@ -5,27 +5,40 @@
 #include "action/action_voxel_sprites.h"
 #include "actraiser/actraiser_sprite_ownership.h"
 
-static bool VoxelSpriteFace(const DioramaViewGeometry *g, unsigned *count,
+static bool VoxelSpriteFace(const DioramaCapture *capture,const DioramaViewGeometry *g,
+    const ActionVoxelSprite *p,float ax,float ay,bool sample_alpha,unsigned *count,
     const float x[4],const float y[4],const float depth[4],
     const float u[4],const float v[4],float shade,float ambient) {
   if (*count == kVoxelMaxVisibleFaces) return false;
   VoxelSide face = {0};
+  DioramaVoxelPickFace pick={.kind=kDioramaVoxelFace_Object,.priority=p->priority,
+      .plane=-1,.cell_x=-1,.cell_y=-1,.owner=p->owner,.sample_alpha=sample_alpha};
+  const float origin=p->x-p->component_x;
+  const float width=(p->presentation_fields&kDioramaVoxelObject_Width)?p->width_scale:1;
+  const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
+  const float oy=capture->camera_y-capture->authentic_y0;
   for (unsigned i=0; i<4; ++i) {
     const float scale = 1+depth[i]/fmaxf(1,g->camera.distance);
-    const float wx=(x[i]/SR_PPU_SURFACE_MAX_WIDTH-g->u0)/(g->u1-g->u0)-.5f;
+    const float px=origin+(x[i]-origin)*width;
+    const float wx=(px/SR_PPU_SURFACE_MAX_WIDTH-g->u0)/(g->u1-g->u0)-.5f;
     const float wy=.5f-(y[i]/SR_PPU_SURFACE_MAX_HEIGHT-g->v0)/(g->v1-g->v0);
-    if (!VoxelProject(g,wx*g->aspect_x*scale,wy*g->height_scale*scale,-depth[i],
-                      &face.v[i].position, &face.distance, &face.depths[i])) return true;
+    if (!VoxelProjectWithW(g,wx*g->aspect_x*scale,wy*g->height_scale*scale,-depth[i],
+                      &face.v[i].position, &face.distance, &face.depths[i],&face.clip_w[i])) return true;
     face.v[i].tex_coord=(ArRenderPointF){u[i]/kVoxelSpriteAtlasWidth,v[i]/kVoxelSpriteAtlasHeight};
     face.v[i].color=(ArRenderColorF){shade*ambient,shade*ambient,shade*ambient,1};
+    pick.screen_xy[2*i]=face.v[i].position.x;pick.screen_xy[2*i+1]=face.v[i].position.y;
+    pick.world_xy[2*i]=ox+p->x+u[i]-ax;pick.world_xy[2*i+1]=oy+p->y+v[i]-ay;
+    pick.depth[i]=face.depths[i];pick.clip_w[i]=face.clip_w[i];
   }
+  if(g->options->voxel_observe_face)
+    g->options->voxel_observe_face(g->options->voxel_observer_userdata,&pick);
   s_voxel_sides[(*count)++]=face;
   return true;
 }
 
-static bool VoxelSpriteSpikes(const DioramaViewGeometry *g,unsigned *count,
+static bool VoxelSpriteSpikes(const DioramaCapture *capture,const DioramaViewGeometry *g,unsigned *count,
     const ActionVoxelSprite *p,float ax,float ay,unsigned y0,unsigned y1,
-    float full,float recess,bool front) {
+    float start,float full,float recess,bool front) {
   if (y1<=y0) return true;
   const float pixel_depth=g->aspect_x/((g->u1-g->u0)*SR_PPU_SURFACE_MAX_WIDTH);
   /* Match the static spike treatment: three rows of crossed native profiles.
@@ -33,12 +46,13 @@ static bool VoxelSpriteSpikes(const DioramaViewGeometry *g,unsigned *count,
    * higher-priority actor. Texture coordinates follow that same clipping. */
   for (unsigned column=0; column<p->width; column+=16) {
     const unsigned width=p->width-column<16?p->width-column:16;
-    const float half_x=width*.35355339f, half_z=fminf(full/6,half_x*pixel_depth);
+    const float half_x=width*.35355339f, half_z=fminf((full-start)/6,half_x*pixel_depth);
     if (half_z<=0) continue;
     for (unsigned row=0; row<3; ++row) for (unsigned diagonal=0; diagonal<2; ++diagonal) {
-      const float middle=full*(row+.5f)/3;
+      const float middle=start+(full-start)*(row+.5f)/3;
       const float z0=middle+(diagonal?half_z:-half_z), z1=middle+(diagonal?-half_z:half_z);
-      const float near=front?0:recess, far=front?recess:full;
+      const float near=front?start:fmaxf(start,recess), far=front?fminf(full,recess):full;
+      if(far<=near)continue;
       const float a=(near-z0)/(z1-z0), b=(far-z0)/(z1-z0);
       const float t0=fmaxf(0,fminf(a,b)), t1=fminf(1,fmaxf(a,b));
       if (t1<=t0) continue;
@@ -46,7 +60,7 @@ static bool VoxelSpriteSpikes(const DioramaViewGeometry *g,unsigned *count,
       const float x1=p->x+column+width*.5f-half_x+2*half_x*t1;
       const float u0=ax+column+.5f+(width-1)*t0, u1=ax+column+.5f+(width-1)*t1;
       const float d0=z0+(z1-z0)*t0, d1=z0+(z1-z0)*t1;
-      if (!VoxelSpriteFace(g,count,(float[]){x0,x1,x1,x0},
+      if (!VoxelSpriteFace(capture,g,p,ax,ay,true,count,(float[]){x0,x1,x1,x0},
           (float[]){p->y+y0,p->y+y0,p->y+y1,p->y+y1},
           (float[]){d0,d1,d1,d0},(float[]){u0,u1,u1,u0},
           (float[]){ay+y0+.5f,ay+y0+.5f,ay+y1-.5f,ay+y1-.5f},
@@ -56,43 +70,53 @@ static bool VoxelSpriteSpikes(const DioramaViewGeometry *g,unsigned *count,
   return true;
 }
 
-static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaViewGeometry *g,
+static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaCapture *capture,const DioramaViewGeometry *g,
     const DioramaScene *scene,const ArRenderOutputFrame *output,unsigned priority,bool front) {
   const ActionVoxelSpriteFrame *frame=scene->voxel_sprites;
   if (!frame || !frame->count || !ArRenderTexture_IsValid(scene->voxel_sprite_atlas) ||
       !ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number)) return true;
   unsigned count=0;
-  const float full=ActionVoxel_Depth(scene->voxel_geometry);
+  const float default_depth=ActionVoxel_Depth(scene->voxel_geometry);
   const float recess=ActionVoxel_PlayRecess(scene->voxel_geometry);
   for (unsigned i=0; i<frame->count && i<kVoxelSpriteLimit; ++i) {
     const ActionVoxelSprite *p=&frame->sprites[i];
-    if (p->priority!=priority || !p->width || p->width>kVoxelSpriteWidth ||
+    if (!ActionVoxelSprite_IsModeled(p) || p->priority!=priority || !p->width || p->width>kVoxelSpriteWidth ||
         !p->height || p->height>kVoxelSpriteHeight ||
         p->solid_y+p->solid_height>p->height) continue;
     const float ax=(i%4)*kVoxelSpriteCellWidth+1, ay=(i/4)*kVoxelSpriteCellHeight+1;
-    const bool wall_torch=p->shape==kActRaiserSpriteProp_WallTorch;
+    const bool attached_torch=p->shape==kActRaiserSpriteProp_WallTorch &&
+        p->presentation_mode!=kDioramaVoxelObject_Extruded;
+    const bool wall_torch=attached_torch &&
+        (!(p->presentation_fields&kDioramaVoxelObject_Thickness) || p->thickness==0);
+    const float start=p->depth_offset+(attached_torch?default_depth:0);
+    const float full=start+((p->presentation_fields&kDioramaVoxelObject_Thickness)?p->thickness:default_depth);
     /* Native flame artwork shares the sconce/glow's BG1 plane. Keep the same
      * native priority slot and exact-owner handoff, but emit only one flat
      * rear face; a front cap would recreate the floating duplicate. */
-    if (wall_torch && front) continue;
-    const float cap=front?0:full;
-    if (!VoxelSpriteFace(g,&count,
+    const unsigned caps=wall_torch || full==start?1:2;
+    for(unsigned end=0;end<caps;++end) {
+    const float cap=wall_torch?start:end?full:start;
+    if(front!=(cap<recess))continue;
+    if (!VoxelSpriteFace(capture,g,p,ax,ay,true,&count,
         (float[]){p->x,p->x+p->width,p->x+p->width,p->x},
         (float[]){p->y,p->y,p->y+p->height,p->y+p->height},
         (float[]){cap,cap,cap,cap},
         (float[]){ax,ax+p->width,ax+p->width,ax},
         (float[]){ay,ay,ay+p->height,ay+p->height},wall_torch||front?1:.88f,p->ambient)) return false;
+    }
     if (wall_torch) continue;
-    if (!VoxelSpriteSpikes(g,&count,p,ax,ay,0,p->solid_y,full,recess,front) ||
-        !VoxelSpriteSpikes(g,&count,p,ax,ay,p->solid_y+p->solid_height,p->height,
-            full,recess,front)) return false;
+    if (!VoxelSpriteSpikes(capture,g,&count,p,ax,ay,0,p->solid_y,start,full,recess,front) ||
+        !VoxelSpriteSpikes(capture,g,&count,p,ax,ay,p->solid_y+p->solid_height,p->height,
+            start,full,recess,front)) return false;
     if (!p->solid_height) continue;
     for (unsigned axis=0; axis<2; ++axis) for (unsigned side=0; side<2; ++side) {
       /* Walking surfaces stay below the player even if their front rim is
        * higher priority. Other sides split at the native actor plane. */
       const bool top=axis==0 && side==0;
       if (front && top) continue;
-      const float near=top?0:front?0:recess, far=top?full:front?recess:full;
+      const float near=top?start:front?start:fmaxf(start,recess);
+      const float far=top?full:front?fminf(full,recess):full;
+      if(far<=near)continue;
       const unsigned first_row=axis?0:p->solid_y, rows=axis?p->width:p->solid_y+p->solid_height;
       const unsigned first_col=axis?p->solid_y:0, cols=axis?p->solid_y+p->solid_height:p->width;
       for (unsigned row=first_row; row<rows; ++row) for (unsigned col=first_col; col<cols;) {
@@ -103,7 +127,9 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaViewGeometry *g
           const int ny=(int)y+(axis?0:(side?1:-1));
           const bool filled=y>=p->solid_y && y<p->solid_y+p->solid_height &&
               (p->rows[y]&(UINT64_C(1)<<x))!=0;
-          const bool neighbor=ny>=p->solid_y && ny<p->solid_y+p->solid_height &&
+          const bool neighbor=ny<0 ? (p->join_top&(UINT64_C(1)<<x)) :
+              ny>=p->height ? (p->join_bottom&(UINT64_C(1)<<x)) :
+              ny>=p->solid_y && ny<p->solid_y+p->solid_height &&
               (nx<0 ? (p->join_left&(UINT32_C(1)<<ny)) :
                nx>=p->width ? (p->join_right&(UINT32_C(1)<<ny)) :
                (p->rows[ny]&(UINT64_C(1)<<nx))!=0);
@@ -116,7 +142,7 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaViewGeometry *g
         const float y0=axis?begin:edge, y1=axis?col:edge;
         const float u0=ax+(axis?row+.5f:begin), u1=ax+(axis?row+.5f:col);
         const float v0=ay+(axis?begin:row+.5f), v1=ay+(axis?col:row+.5f);
-        if (!VoxelSpriteFace(g,&count,
+        if (!VoxelSpriteFace(capture,g,p,ax,ay,false,&count,
             (float[]){p->x+x0,p->x+x1,p->x+x1,p->x+x0},
             (float[]){p->y+y0,p->y+y1,p->y+y1,p->y+y0},
             (float[]){near,near,far,far},(float[]){u0,u1,u1,u0},
@@ -129,6 +155,7 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaViewGeometry *g
   for (unsigned i=0;i<count;++i) {
     const VoxelSide *face=&s_voxel_sides[s_voxel_order[i]];
     memcpy(s_voxel_vertices+i*4,face->v,sizeof(face->v));
+    memcpy(s_voxel_clip_w+i*4,face->clip_w,sizeof(face->clip_w));
     if(g->depth_sink)memcpy(s_voxel_depths+i*4,face->depths,sizeof(face->depths));
   }
   /* The existing screen-space receiver map works with arbitrary atlas UVs.
@@ -138,7 +165,7 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaViewGeometry *g
           (float)output->viewport.y/output->output_height,
           (float)output->viewport.w/output->output_width,
           (float)output->viewport.h/output->output_height}};
-  return RenderShadedDioramaDepthGeometry(device,scene->voxel_sprite_atlas,
-      s_voxel_vertices,s_voxel_depths,count*4,VoxelQuadIndices(),count*6,kArRenderBlendMode_Alpha,
+  return RenderShadedDioramaDepthGeometryWithW(device,scene->voxel_sprite_atlas,
+      s_voxel_vertices,s_voxel_depths,s_voxel_clip_w,count*4,VoxelQuadIndices(),count*6,kArRenderBlendMode_Alpha,
       NULL,(ArRenderRectF){0,0,1,1},&light,g->depth_sink,DioramaPlaneForObjectPriority(priority),false);
 }

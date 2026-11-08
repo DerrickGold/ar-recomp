@@ -1,5 +1,30 @@
 /* Immutable native-art geometry shared by the game, editor and compositor. */
 #include "action_voxel_internal.h"
+#include <stdlib.h>
+
+const DioramaVoxelEdits *ActionVoxel_Edits(const ActionVoxelGeometry *c) {
+  return c ? &c->edits : NULL;
+}
+uint16_t *ActionVoxel_RecordOwners(const DioramaVoxelEdits *edits,int x,int y,int w,int h) {
+  if(!edits || edits->cell_count>kDioramaVoxelCellMax || w<=0 || h<=0 ||
+      (size_t)w*h>kVoxelAuthoredCellMax)return NULL;
+  uint16_t *owners=calloc((size_t)w*h,sizeof(*owners));if(!owners)return NULL;
+  for(unsigned i=0;i<edits->cell_count;++i) {
+    const DioramaVoxelCell *cell=&edits->cells[i];
+    const int x0=cell->x>x?cell->x:x,y0=cell->y>y?cell->y:y;
+    const int right=cell->x+(int)DioramaVoxelCell_Width(cell),bottom=cell->y+(int)DioramaVoxelCell_Height(cell);
+    const int x1=right<x+w?right:x+w,y1=bottom<y+h?bottom:y+h;
+    for(int yy=y0;yy<y1;++yy)for(int xx=x0;xx<x1;++xx)owners[(size_t)(yy-y)*w+xx-x]=i+1;
+  }
+  return owners;
+}
+bool ActionVoxel_HasObjectEdits(const ActionVoxelGeometry *c) {
+  return c && c->edits.object_count;
+}
+const DioramaVoxelObject *ActionVoxel_ObjectEdit(const ActionVoxelGeometry *c,
+    uint16_t source, uint16_t parent, uint16_t animation) {
+  return DioramaVoxelEdits_Object(ActionVoxel_Edits(c), source, parent, animation);
+}
 #include "diorama/diorama_capture_blend.h"
 #include "snes_bgr555.h"
 #include <math.h>
@@ -113,6 +138,7 @@ void ActionVoxel_Release(const ActionVoxelGeometry *geometry) {
   ActionVoxelGeometry *c = (ActionVoxelGeometry *)geometry;
   if (c && atomic_fetch_sub_explicit(&c->references, 1, memory_order_acq_rel) == 1) {
     free(c->front);
+    free(c->semantic_cells);
     free(c->cutouts);
     free(c->branch_pixels);
     free(c->front_recess);
@@ -123,6 +149,11 @@ void ActionVoxel_Release(const ActionVoxelGeometry *geometry) {
     free(c->rear_relief);
     free(c->soft_surfaces);
     free(c->rear_fills);
+    free(c->authored);
+    free(c->authored_at);
+    free(c->authored_art);
+    free(c->authored_cap_art);
+    free(c->authored_contours);
     free(c);
   }
 }
@@ -177,6 +208,185 @@ const uint8_t *ActionVoxel_PixelRecessRows(const ActionVoxelGeometry *c,int tile
   if(x<0 || y<0 || x>=c->width/8 || y>=c->height/8)return NULL;
   const unsigned owner=c->pixel_recess_cells[(size_t)y*(c->width/8)+(size_t)x];
   return owner ? c->pixel_recess_rows[owner-1] : NULL;
+}
+const VoxelAuthoredCell *ActionVoxel_AuthoredCells(const ActionVoxelGeometry *c, unsigned *count) {
+  if (count) *count = c ? c->authored_count : 0;
+  return c ? c->authored : NULL;
+}
+const VoxelAuthoredCell *ActionVoxel_AuthoredCellAt(const ActionVoxelGeometry *c,int x,int y) {
+  if(!c || !c->authored_count || !c->authored_at)return NULL;
+  x-=c->origin_x/16;y-=c->origin_y/16;
+  if(x<0 || y<0 || x>=c->width/16 || y>=c->height/16)return NULL;
+  const unsigned at=c->authored_at[(size_t)y*(c->width/16)+x];
+  return at && at<=c->authored_count?&c->authored[at-1]:NULL;
+}
+unsigned ActionVoxel_AuthoredArtCount(const ActionVoxelGeometry *c) {
+  return c?c->authored_art_count:0;
+}
+const uint16_t *ActionVoxel_AuthoredCapArt(const ActionVoxelGeometry *c,unsigned *count) {
+  if(count)*count=c?c->authored_cap_art_count:0;
+  return c?c->authored_cap_art:NULL;
+}
+const uint16_t *ActionVoxel_AuthoredArt(const ActionVoxelGeometry *c,unsigned id) {
+  return c && id<c->authored_art_count?c->authored_art[id]:NULL;
+}
+const char *ActionVoxel_BuildError(const ActionVoxelGeometry *c) {
+  return c && c->build_error==1?"Voxel edit exceeds the 32,768-cell room limit":
+      c && c->build_error==2?"Voxel edit exceeds 8,192 unique native artwork squares; reduce unique face artwork":
+      c && c->build_error==3?"Voxel geometry allocation failed":
+      c && c->build_error==4?"Voxel shape or face settings are invalid":
+      c && c->build_error==5?"Voxel edit exceeds 262,144 silhouette edges; simplify transparent face artwork":
+      c && c->build_error==9?"Native move/resize requires the complete classified object (at most 4,096 cells) with one shared transform":
+      c && c->build_error==10?"Reset backing-only overrides before moving or resizing this native structural group":
+      c && c->build_error==11?"Native gates, water, rear trim and crossed scenery do not support structural move/resize yet":"Voxel geometry could not be compiled";
+}
+void ActionVoxel_AuthoredDepths(const VoxelAuthoredCell *a,unsigned q,float y,float *front,float *back) {
+  if(!a || q>=4 || !front || !back)return;
+  float t=a->shape_h?fmaxf(0,fminf(1,(y-a->shape_y)/a->shape_h)):0;
+  if(a->shape==kDioramaVoxelShape_Box)t=0;
+  else if(a->shape==kDioramaVoxelShape_Curve)t=t*t*(3-2*t);
+  *front=a->front[q]+(a->front_end[q]-a->front[q])*t;
+  *back=fmaxf(*front,a->back[q]+(a->back_end[q]-a->back[q])*t);
+}
+void ActionVoxel_BendOffset(const DioramaVoxelBend *bend,float source_x,float source_y,
+    float *dx,float *dy,float *dz) {
+  if(!dx || !dy || !dz)return;
+  *dx=*dy=*dz=0;
+  if(!bend || (bend->axis!=kDioramaVoxelBend_X && bend->axis!=kDioramaVoxelBend_Y) ||
+      bend->anchor==bend->tip)return;
+  const float source=bend->axis==kDioramaVoxelBend_X?source_x:source_y;
+  if(!isfinite(source))return;
+  float t=fmaxf(0,fminf(1,(source-bend->anchor)/(bend->tip-bend->anchor)));
+  t=t*t*(3-2*t);
+  *dx=bend->dx*t;*dy=bend->dy*t;*dz=bend->dz*t;
+}
+void ActionVoxel_AuthoredBend(const VoxelAuthoredCell *a,float source_x,float source_y,
+    float *dx,float *dy,float *dz) {
+  ActionVoxel_BendOffset(a?&a->bend:NULL,source_x,source_y,dx,dy,dz);
+}
+bool ActionVoxel_TransformValid(const DioramaVoxelTransform *t) {
+  return t && t->px>=-8192 && t->px<=8192 && t->py>=-8192 && t->py<=8192 &&
+      t->pz>=-2 && t->pz<=2 && t->dx>=-256 && t->dx<=256 && t->dy>=-256 && t->dy<=256 &&
+      t->dz>=-1.2f && t->dz<=1.2f && t->sx>=.125f && t->sx<=4 &&
+      t->sy>=.125f && t->sy<=4 && t->sz>=.125f && t->sz<=4;
+}
+void ActionVoxel_TransformPoint(const DioramaVoxelTransform *t,float x,float y,float z,
+    float *out_x,float *out_y,float *out_z) {
+  if(!out_x || !out_y || !out_z)return;
+  if(ActionVoxel_TransformValid(t)) {
+    x=(t->sx==1?x:t->px+(x-t->px)*t->sx)+t->dx;
+    y=(t->sy==1?y:t->py+(y-t->py)*t->sy)+t->dy;
+    z=(t->sz==1?z:t->pz+(z-t->pz)*t->sz)+t->dz;
+  }
+  *out_x=x;*out_y=y;*out_z=z;
+}
+const VoxelAuthoredContour *ActionVoxel_AuthoredContours(const ActionVoxelGeometry *c,
+    const VoxelAuthoredCell *a,unsigned *count) {
+  if(count)*count=c && a?a->contour_count:0;
+  return c && a && a->contour_count?c->authored_contours+a->contour_start:NULL;
+}
+bool ActionVoxel_AuthoredContourExposed(const ActionVoxelGeometry *c,const VoxelAuthoredCell *a,
+    int x,int y,unsigned side) {
+  if(!a || x<0 || y<0 || x>=16 || y>=16 || side>=4 || !(a->pixels[0][y*16+x]&0x8000))return false;
+  const int dx[]={0,1,0,-1},dy[]={-1,0,1,0};int nx=x+dx[side],ny=y+dy[side];
+  const VoxelAuthoredCell *b=a;
+  if(nx<0 || ny<0 || nx>=16 || ny>=16) {
+    b=ActionVoxel_AuthoredCellAt(c,a->x/16+(nx<0?-1:nx>=16),a->y/16+(ny<0?-1:ny>=16));
+    if(!b || !b->surface || !(b->faces&~kDioramaVoxelFaceMask_Back))return true;
+    nx=(nx+16)%16;ny=(ny+16)%16;
+  }
+  if(!(b->pixels[0][ny*16+nx]&0x8000))return true;
+  const unsigned q=(y/8)*2+x/8,nq=(ny/8)*2+nx/8;
+  for(unsigned end=0;end<2;++end) {
+    const float sx=a->x+x+(side==1)+(!(side&1)?end:0);
+    const float sy=a->y+y+(side==2)+((side&1)?end:0);
+    float adx,ady,adz,bdx,bdy,bdz;
+    ActionVoxel_AuthoredBend(a,sx,sy,&adx,&ady,&adz);
+    ActionVoxel_AuthoredBend(b,sx,sy,&bdx,&bdy,&bdz);
+    const float ax=a->x+8+a->offset_x+(sx-a->x-8)*a->width/16+adx;
+    const float bx=b->x+8+b->offset_x+(sx-b->x-8)*b->width/16+bdx;
+    float af,ab,bf,bb;ActionVoxel_AuthoredDepths(a,q,sy,&af,&ab);ActionVoxel_AuthoredDepths(b,nq,sy,&bf,&bb);
+    float atx,aty,atz,btx,bty,btz,unused;
+    ActionVoxel_TransformPoint(&a->transform,ax,sy+ady,af+adz,&atx,&aty,&atz);
+    ActionVoxel_TransformPoint(&b->transform,bx,sy+bdy,bf+bdz,&btx,&bty,&btz);
+    if(fabsf(atx-btx)>.00001f || fabsf(aty-bty)>.00001f || btz>atz+.00001f)return true;
+    ActionVoxel_TransformPoint(&a->transform,ax,sy+ady,ab+adz,&unused,&unused,&atz);
+    ActionVoxel_TransformPoint(&b->transform,bx,sy+bdy,bb+bdz,&unused,&unused,&btz);
+    if(btz<atz-.00001f)return true;
+  }
+  return false;
+}
+bool ActionVoxel_AuthoredSurfaceAt(const ActionVoxelGeometry *c,int x,int y) {
+  const VoxelAuthoredCell *a=ActionVoxel_AuthoredCellAt(c,(int)floorf(x/16.f),(int)floorf(y/16.f));
+  return a && a->surface;
+}
+bool ActionVoxel_HasHiddenNativeFronts(const ActionVoxelGeometry *c) {
+  return c && c->hidden_native_front_count;
+}
+bool ActionVoxel_HasNativeTransforms(const ActionVoxelGeometry *c) {
+  return c && c->native_transform_count;
+}
+bool ActionVoxel_HasTransformedBacks(const ActionVoxelGeometry *c) {
+  return c && c->transformed_rear_count;
+}
+#include "action_voxel_groups.inc"
+bool ActionVoxel_CellOwnsArtwork(const DioramaVoxelCell *cell) {
+  if(!cell)return false;
+  uint32_t fields=cell->fields &
+      ~(cell->faces==kDioramaVoxelFaceMask_All?kDioramaVoxelCell_Faces:0u);
+  if(ActionVoxel_CellKeepsNativeIdentity(cell))fields&=~kDioramaVoxelCell_Transform;
+  return fields && !(fields==kDioramaVoxelCell_Faces &&
+      cell->faces==(kDioramaVoxelFaceMask_All&~kDioramaVoxelFaceMask_Front));
+}
+bool ActionVoxel_CellUsesNativeTransform(const DioramaVoxelCell *cell) {
+  return cell && (cell->fields&kDioramaVoxelCell_Transform) &&
+      !(cell->fields&~(kDioramaVoxelCell_Transform|kDioramaVoxelCell_Faces));
+}
+bool ActionVoxel_CellKeepsNativeIdentity(const DioramaVoxelCell *cell) {
+  if(!ActionVoxel_CellUsesNativeTransform(cell) || !ActionVoxel_TransformValid(&cell->transform))return false;
+  const DioramaVoxelTransform *t=&cell->transform;
+  const unsigned faces=cell->fields&kDioramaVoxelCell_Faces?cell->faces:kDioramaVoxelFaceMask_All;
+  /* Other visibility masks still require the native owned-face renderer. */
+  return t->dx==0 && t->dy==0 && t->dz==0 && t->sx==1 && t->sy==1 && t->sz==1 &&
+      (faces==kDioramaVoxelFaceMask_All ||
+       faces==(kDioramaVoxelFaceMask_All&~kDioramaVoxelFaceMask_Front));
+}
+bool ActionVoxel_CellGeometry(const ActionVoxelGeometry *c,int x,int y,VoxelCellGeometry *out) {
+  if (!c || !c->ready || !out || x<c->origin_x/16 || y<c->origin_y/16 ||
+      x>=(c->origin_x+c->width)/16 || y>=(c->origin_y+c->height)/16) return false;
+  *out=(VoxelCellGeometry){.width=16,.faces=kDioramaVoxelFaceMask_All};
+  const VoxelAuthoredCell *a=ActionVoxel_AuthoredCellAt(c,x,y);
+  if(a) {
+    memcpy(out->front,a->front,sizeof(out->front));memcpy(out->back,a->back,sizeof(out->back));
+    out->width=a->width;out->offset_x=a->offset_x;out->authored=true;
+    out->faces=a->faces;out->shape=a->shape;out->shape_y=a->shape_y;out->shape_h=a->shape_h;
+    out->front_end=a->front_end[0];out->back_end=a->back_end[0];out->bend=a->bend;out->transform=a->transform;return true;
+  }
+  for (unsigned q=0;q<4;++q) {
+    const int tx=x*2+(q&1),ty=y*2+(q>>1),mx=tx*8-c->origin_x,my=ty*8-c->origin_y;
+    unsigned kind=0;bool branch=false;
+    for(int yy=0;yy<8;++yy)for(int xx=0;xx<8;++xx) {
+      const size_t at=(size_t)(my+yy)*c->width+mx+xx;
+      const unsigned k=c->front[at]&kVoxelKindMask;
+      if(k==kVoxelSolid || !kind)kind=k;
+      branch|=c->branch_pixels && (c->branch_pixels[at>>3]&(1u<<(at&7)));
+    }
+    const bool modeled=kind && kind!=kVoxelRearOnly && kind!=kVoxelFlatParapet;
+    out->front[q]=modeled?ActionVoxel_FrontRecess(c,tx,ty):ActionVoxel_Depth(c);
+    out->back[q]=ActionVoxel_Depth(c);
+    if(kind==kVoxelForeground || kind==kVoxelThin || kind==kVoxelFoliage) {
+      const bool thin=c->thin_trim_cells && c->thin_trim_cells[(size_t)(my/8)*(c->width/8)+mx/8];
+      out->back[q]=out->front[q]+ActionVoxel_LocalTrimDepth(c,thin);
+    }
+    if(branch)out->back[q]=ActionVoxel_BranchBackDepth(c);
+    const VoxelTrunkCurve *curve=ActionVoxel_ColumnCurveForCell(c,tx,ty);
+    if(curve)out->front[q]=ActionVoxel_ColumnFrontDepth(c,curve,ty*8+4);
+    curve=ActionVoxel_TrunkCurveForCell(c,tx,ty);
+    if(curve) {out->front[q]=ActionVoxel_TrunkFrontDepth(c,curve,ty*8+4);
+      out->back[q]=ActionVoxel_TrunkBackDepth(c,curve,ty*8+4);}
+  }
+  out->front_end=out->back_end=out->back[0];
+  return true;
 }
 float ActionVoxel_TrimBackDepth(const ActionVoxelGeometry *c) {
   return ActionVoxel_SceneryRecess(c)+ActionVoxel_TrimDepth(c);
@@ -368,6 +578,9 @@ static uint32_t BackingColor(unsigned color, unsigned subtract, unsigned brightn
   }
   return 0xff000000u | rgb;
 }
+uint32_t ActionVoxel_AuthoredColor(unsigned color,const ActionRoomSceneFrameState *frame) {
+  return color&0x8000 ? BackingColor(color,frame?BackingSubtract(frame):0,frame?frame->brightness:15) : 0;
+}
 static void BuildBacking(const ActionVoxelGeometry *c, const ActionRoomSceneFrameState *f, uint32_t backing[512]) {
   const unsigned subtract = BackingSubtract(f);
   for (unsigned i = 0; i < 16 * 32; ++i) {
@@ -490,6 +703,19 @@ bool ActionVoxel_Split(const ActionVoxelGeometry *c, int ox, int oy, int width, 
       if(rear_column && (source>>24)==255)rear[at]=0;
     }
   }
+  /* Moving a native solid owns its copied rear artwork too. Clear only that
+   * semantic copy before independent world backing repairs are applied. */
+  const int transformed_x0=(int)floorf(ox/16.f),transformed_y0=(int)floorf(oy/16.f);
+  const int transformed_x1=(int)ceilf((ox+width)/16.f),transformed_y1=(int)ceilf((oy+h)/16.f);
+  for(int cy=transformed_y0;c->transformed_rear_count && cy<transformed_y1;++cy)
+    for(int cx=transformed_x0;cx<transformed_x1;++cx) {
+      const VoxelAuthoredCell *a=ActionVoxel_AuthoredCellAt(c,cx,cy);
+      if(!a || !ActionVoxel_TransformValid(&a->transform))continue;
+      const int x0=a->x-ox,y0=a->y-oy;
+      for(int y=y0<0?-y0:0;y<16 && y0+y<h;++y)
+        for(int x=x0<0?-x0:0;x<16 && x0+x<width;++x)
+          if(a->native_rear_rows[y]&(1u<<(15-x)))rear[(size_t)(y0+y)*output_pitch+x0+x]=0;
+    }
   /* Sparse, world-anchored fills are compiled from nearby compatible native
    * artwork. They stay valid when the donor is outside the capture rectangle. */
   const unsigned subtract = BackingSubtract(frame);
@@ -504,6 +730,21 @@ bool ActionVoxel_Split(const ActionVoxelGeometry *c, int ox, int oy, int width, 
             (!fill->preserve_existing || !(rear[(size_t)(y0+y)*output_pitch+x0+x] >> 24)))
           rear[(size_t)(y0 + y) * output_pitch + x0 + x] =
               BackingColor(color, subtract, frame->brightness);
+      }
+  }
+  const int authored_x0=(int)floorf(ox/16.f),authored_y0=(int)floorf(oy/16.f);
+  const int authored_x1=(int)ceilf((ox+width)/16.f),authored_y1=(int)ceilf((oy+h)/16.f);
+  for(int cy=authored_y0;c->authored_count && cy<authored_y1;++cy)
+    for(int cx=authored_x0;cx<authored_x1;++cx) {
+    const VoxelAuthoredCell *a=ActionVoxel_AuthoredCellAt(c,cx,cy);
+    if(!a || a->native_front_hidden || (a->native_transform_requested && !a->native_transform))continue;
+    const int x0=a->x-ox,y0=a->y-oy;
+    if(x0>=width || y0>=h || x0+16<=0 || y0+16<=0)continue;
+    for(int y=y0<0?-y0:0;y<16 && y0+y<h;++y)
+      for(int x=x0<0?-x0:0;x<16 && x0+x<width;++x) {
+        const size_t at=(size_t)(y0+y)*output_pitch+x0+x;
+        if(!(a->native_rear_rows[y]&(1u<<(15-x))))rear[at]=ActionVoxel_AuthoredColor(a->pixels[3][y*16+x],frame);
+        if(a->surface)foreground[at]=0;
       }
   }
   return true;

@@ -11,7 +11,20 @@ typedef struct VoxelRearFill {
 struct ActionVoxelGeometry {
   atomic_uint references;
   uint64_t revision;
+  DioramaVoxelEdits edits;
+  VoxelAuthoredCell *authored;
+  unsigned authored_count;
+  unsigned hidden_native_front_count, native_transform_count, transformed_rear_count;
+  uint16_t *authored_at; /* One-based cell owner; O(1) world lookup. */
+  uint16_t (*authored_art)[256];
+  unsigned authored_art_count, authored_art_capacity;
+  uint16_t *authored_cap_art; /* Unique atlas IDs used by surviving automatic caps. */
+  unsigned authored_cap_art_count;
+  VoxelAuthoredContour *authored_contours;
+  unsigned authored_contour_count,authored_contour_capacity;
+  unsigned build_error;
   unsigned char *front;
+  unsigned char *semantic_cells; /* Native roles per16px cell, before authored overlays. */
   unsigned char *cutouts; /* Optional BG1 matte mask, bit 7 leftmost, width/8 bytes per row. */
   unsigned char *branch_pixels; /* Optional one-bit depth tag per world pixel. */
   unsigned char *front_recess; /* Optional recession tag per 8px world cell. */

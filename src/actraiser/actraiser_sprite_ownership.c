@@ -32,6 +32,7 @@ void ActRaiserSpriteOwnership_Record(ActRaiserSpriteRole role,
     s_build.slots[slot] = (uint8_t)role;
     s_build.prop_owner[slot] = 0;
     s_build.prop_shape[slot] = 0;
+    s_build.visual_owner[slot]=s_build.visual_source[slot]=s_build.visual_animation[slot]=0;
     s_build.prop_origin_x[slot] = s_build.prop_origin_y[slot] = 0;
   }
 }
@@ -143,6 +144,9 @@ void ActRaiserSpriteOwnership_RecordActionVisual(uint16_t source,uint16_t record
   }
   for (unsigned slot = first_byte / 4; slot < end_byte / 4; ++slot) {
     if (s_build.slots[slot] != kActRaiserSprite_Enemy) continue;
+    s_build.visual_owner[slot]=record;
+    s_build.visual_source[slot]=source;
+    s_build.visual_animation[slot]=animation;
     s_build.prop_owner[slot] = shape ? record : 0;
     s_build.prop_shape[slot] = shape;
     s_build.prop_origin_x[slot] = origin_x;
@@ -195,6 +199,8 @@ void ActRaiserSpriteOwnership_Complete(const uint8_t *shadow) {
   for(unsigned i=0;i<kActRaiserSpriteSlots;++i) {
     const unsigned tag=ActRaiserSpriteOwnership_PropTag(&s_build,s_build.prop_owner[i]);
     if(tag)used[tag]=true;
+    const unsigned visual=ActRaiserSpriteOwnership_VisualTag(&s_build,s_build.visual_owner[i]);
+    if(visual)used[visual]=true;
   }
   for(unsigned i=0;i<s_build.wall_torch_part_count;++i) {
     ActRaiserWallTorchPart *part=&s_build.wall_torch_parts[i];

@@ -2433,6 +2433,188 @@ static void TestLivePresentationAnimation(Ppu *ppu, const ActionRoomScene *scene
   }
 }
 
+
+/* Authored records are immutable geometry inputs even when native map/ring
+ * words stay unchanged. Donor artwork may live outside BG1's ordinary use. */
+static void TestLiveVoxelAuthoringCache(Ppu *ppu, const ActionRoomScene *scene) {
+  const uint8_t group = scene->group, room = scene->map;
+  DioramaRoomOverride terrain = {.used=true, .map_group=group, .map_number=room};
+  uint64_t revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, NULL);
+  CHECK(DioramaLayerOrder_ParseLine(&terrain,
+      "voxel-object = source:1234 mode:flat", NULL));
+  uint64_t next = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+  CHECK(next != revision);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == next);
+  CHECK(DioramaLayerOrder_ParseLine(&terrain,
+      "voxel-object = source:1234 mode:extruded thickness:.1", NULL));
+  revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+  CHECK(revision != next);
+  CHECK(DioramaLayerOrder_ParseLine(&terrain,
+      "voxel-cell = cell:0,0 width:8 backing:fill top-art:1,01FF,01FF,01FF,01FF,0,0,16", NULL));
+  next = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+  CHECK(next != revision);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == next);
+  ppu->vram[0x1ff * 16] ^= 1;
+  revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+  CHECK(revision != next);
+  ppu->vram[0x1ff * 16] ^= 1;
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) != revision);
+  CHECK(DioramaLayerOrder_ParseLine(&terrain,
+      "voxel-cell = cell:0,0 width:8 backing:fill top-art:1,0200,0200,0200,0200,0,0,16", NULL));
+  revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == revision);
+  ppu->vram[0x3000] ^= 1;
+  next = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+  CHECK(next != revision);
+  ppu->vram[0x3000] ^= 1;
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) != next);
+
+  /* A group transform is persisted presentation state: each change must
+   * publish new immutable geometry while queued frames retain their pivot. */
+  CHECK(DioramaLayerOrder_ParseLine(&terrain,
+      "voxel-cell = cell:0,0 width:8 top-art:1,0200,0200,0200,0200,0,0,16 "
+      "transform:8,8,.3,4,-2,.1,.5,2,1.5",NULL));
+  revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);
+  const ActionVoxelGeometry *retained_transform=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,room));
+  VoxelCellGeometry transformed;
+  CHECK(ActionVoxel_CellGeometry(retained_transform,0,0,&transformed));
+  CHECK(transformed.transform.px==8 && transformed.transform.dx==4 && transformed.transform.sx==.5f);
+  terrain.voxel.cells[terrain.voxel.cell_count-1].transform.dx=8;
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain)!=revision);
+  CHECK(ActionVoxel_CellGeometry(retained_transform,0,0,&transformed) && transformed.transform.dx==4);
+  CHECK(ActionVoxel_CellGeometry(ActRaiserActionBg_VoxelGeometry(group,room),0,0,&transformed) && transformed.transform.dx==8);
+  ActionVoxel_Release(retained_transform);
+
+  /* Every newly exposed face owns its donor dependency, including characters
+   * outside the default BG1 bank. Changing a donor must invalidate without
+   * mutating native VRAM/palette or reusing the old immutable geometry. */
+  static const char *const faces[] = {"front-art", "left-art", "right-art", "bottom-art"};
+  for (unsigned face = 0; face < sizeof(faces) / sizeof(*faces); ++face) {
+    for (unsigned bank = 0; bank < 2; ++bank) {
+      char line[160];
+      const unsigned ch = bank ? 0x200 : 0x1ff, address = bank ? 0x3000 : ch * 16;
+      snprintf(line, sizeof(line),
+          "voxel-cell = cell:0,0 width:8 %s:1,%04X,%04X,%04X,%04X,0,0,16",
+          faces[face], ch, ch, ch, ch);
+      CHECK(DioramaLayerOrder_ParseLine(&terrain, line, NULL));
+      revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+      CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == revision);
+      ppu->vram[address] ^= 1;
+      next = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+      CHECK(next != revision);
+      ppu->vram[address] ^= 1;
+      CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) != next);
+    }
+  }
+
+  size_t offset = 0, bytes = 0;
+  if (ActionVoxel_AnimationMatches(scene, scene->characters, &offset, &bytes) && bytes) {
+    uint8_t characters[kActionRoomSceneCharacterBytes];
+    CHECK(ActionRoomScene_BuildCharacters(scene, 0, 0, characters, sizeof(characters)));
+    for (size_t i = offset; i < offset + bytes; i += 2)
+      ppu->vram[i / 2] = characters[i] | (characters[i + 1] << 8);
+    char line[160];
+    const unsigned word = (unsigned)(offset / 32);
+    snprintf(line, sizeof(line),
+        "voxel-cell = cell:0,0 width:8 backing:fill top-art:0,%04X,%04X,%04X,%04X,0,0,16",
+        word, word, word, word);
+    CHECK(DioramaLayerOrder_ParseLine(&terrain, line, NULL));
+    revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+    bool changed = false;
+    for (unsigned phase = 1; phase < ActionRoomScene_CharacterAnimationPhaseCount(scene); ++phase) {
+      CHECK(ActionRoomScene_BuildCharacters(scene, 0, phase, characters, sizeof(characters)));
+      if (!memcmp(characters + offset, scene->characters + offset, bytes)) continue;
+      for (size_t i = offset; i < offset + bytes; i += 2)
+        ppu->vram[i / 2] = characters[i] | (characters[i + 1] << 8);
+      next = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+      CHECK(next != revision);
+      CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == next);
+      changed = true;
+      break;
+    }
+    CHECK(changed); /* Owned face pixels must not borrow a canonical phase. */
+
+    /* A later broad reset hides the earlier donor without deleting its undo
+     * history. An out-of-room donor is also inactive. Neither may disable the
+     * whole-room native-animation cache on subsequent ordinary frames. */
+    CHECK(DioramaLayerOrder_ParseLine(&terrain,
+        "voxel-cell = cell:0,0 size:2,2 auto:1", NULL));
+    snprintf(line, sizeof(line),
+        "voxel-cell = cell:511,511 front-art:0,%04X,%04X,%04X,%04X,0,0,16",
+        word, word, word, word);
+    CHECK(DioramaLayerOrder_ParseLine(&terrain, line, NULL));
+    CHECK(terrain.voxel.cell_count == 3);
+    revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+    for (unsigned phase = 0; phase < ActionRoomScene_CharacterAnimationPhaseCount(scene); ++phase) {
+      CHECK(ActionRoomScene_BuildCharacters(scene, 0, phase, characters, sizeof(characters)));
+      for (size_t i = offset; i < offset + bytes; i += 2)
+        ppu->vram[i / 2] = characters[i] | (characters[i + 1] << 8);
+      CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == revision);
+    }
+    /* Moving the original single-cell edit after the reset makes its donor
+     * active again; exact artwork invalidation must resume. */
+    snprintf(line, sizeof(line),
+        "voxel-cell = cell:0,0 width:8 top-art:0,%04X,%04X,%04X,%04X,0,0,16",
+        word, word, word, word);
+    CHECK(DioramaLayerOrder_ParseLine(&terrain, line, NULL));
+    CHECK(ActionRoomScene_BuildCharacters(scene, 0, 0, characters, sizeof(characters)));
+    for (size_t i = offset; i < offset + bytes; i += 2)
+      ppu->vram[i / 2] = characters[i] | (characters[i + 1] << 8);
+    revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+    changed = false;
+    for (unsigned phase = 1; phase < ActionRoomScene_CharacterAnimationPhaseCount(scene); ++phase) {
+      CHECK(ActionRoomScene_BuildCharacters(scene, 0, phase, characters, sizeof(characters)));
+      if (!memcmp(characters + offset, scene->characters + offset, bytes)) continue;
+      for (size_t i = offset; i < offset + bytes; i += 2)
+        ppu->vram[i / 2] = characters[i] | (characters[i + 1] << 8);
+      CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) != revision);
+      changed = true;
+      break;
+    }
+    CHECK(changed);
+    /* Show-all resets and a pure Front hide keep native live artwork. They
+     * must mask earlier authored donors without treating the retained native
+     * pixels as baked art, even when the selected cell itself is animated. */
+    int animated_x=-1,animated_y=-1;
+    const unsigned width=ActionRoomScene_TileWidth(scene,1),height=ActionRoomScene_TileHeight(scene,1);
+    for(unsigned y=0;y<height && animated_x<0;++y)for(unsigned x=0;x<width;++x) {
+      uint16_t native;CHECK(ActionRoomScene_LookupTile(scene,1,x,y,&native,NULL));
+      const size_t at=(native&1023u)*32;
+      if(at>=offset && at<offset+bytes){animated_x=x/2;animated_y=y/2;break;}
+    }
+    CHECK(animated_x>=0);
+    DioramaLayerOrder_ClearRoom(&terrain);
+    terrain.used=true;terrain.map_group=group;terrain.map_number=room;
+    snprintf(line,sizeof(line),
+        "voxel-cell = cell:%d,%d size:2,2 top-art:0,%04X,%04X,%04X,%04X,0,0,16",
+        animated_x,animated_y,word,word,word,word);
+    CHECK(DioramaLayerOrder_ParseLine(&terrain,line,NULL));
+    const char *visibility[]={"all","back+top+bottom+left+right"};
+    for(unsigned kind=0;kind<2;++kind) {
+      snprintf(line,sizeof(line),"voxel-cell = cell:%d,%d size:3,3 faces:%s",
+          animated_x,animated_y,visibility[kind]);
+      CHECK(DioramaLayerOrder_ParseLine(&terrain,line,NULL));
+      CHECK(ActionVoxel_AnimationIsPresentationOnly(scene,scene,&terrain,NULL,0));
+      revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);
+      for(unsigned phase=0;phase<ActionRoomScene_CharacterAnimationPhaseCount(scene);++phase) {
+        CHECK(ActionRoomScene_BuildCharacters(scene,0,phase,characters,sizeof(characters)));
+        for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
+        CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain)==revision);
+      }
+    }
+    /* Adding backing ownership to the same Front-hidden record makes its
+     * pixels authored again; do not overgeneralize the native-only shortcut. */
+    terrain.voxel.cells[terrain.voxel.cell_count-1].fields|=kDioramaVoxelCell_Backing;
+    terrain.voxel.cells[terrain.voxel.cell_count-1].backing=kDioramaVoxelBacking_Fill;
+    CHECK(!ActionVoxel_AnimationIsPresentationOnly(scene,scene,&terrain,NULL,0));
+  }
+  next = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, NULL) != next);
+  DioramaLayerOrder_ClearRoom(&terrain);
+  ActRaiserActionBg_PrepareVoxel(false, NULL);
+  fprintf(stderr, "[voxel-author-cache] %02x:%02x: edits, donor banks and animation invalidation passed\n", group, room);
+}
+
 /* Optional stock-ROM integration oracle. The normal CTest run stays ROM-free. */
 static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t map_number) {
   fprintf(stderr,"[voxel-publication] %02x:%02x terrain=%u\n",group,map_number,voxel_terrain);
@@ -2673,6 +2855,7 @@ static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t ma
     ActionVoxel_WaterSurfaces(split,&count);CHECK(count==4);
     ActionVoxel_Release(split);ActionVoxel_Release(closed);
   }
+  if (group == 3 && map_number == 1) TestLiveVoxelAuthoringCache(ppu, scene);
   ActRaiserActionBg_Shutdown();BindFakePpu(NULL);free(ppu);free(scene);free(rom);
 }
 
@@ -2701,6 +2884,8 @@ int main(int argc, char **argv) {
     for(unsigned room=4;room<=7;++room)TestLiveVoxelPublication(argv[1],4,room);
     for(unsigned room=4;room<=8;++room)TestLiveVoxelPublication(argv[1],5,room);
   }
+  if(argc==3 && !strcmp(argv[2],"--voxel-edits"))
+    TestLiveVoxelPublication(argv[1],3,1);
   if(argc==3 && !strcmp(argv[2],"--desert-animation"))
     for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain)
       for(unsigned room=1;room<=2;++room)TestLiveVoxelPublication(argv[1],3,room);

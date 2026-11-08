@@ -65,6 +65,8 @@ static bool Initialize(void) {
   return s_capture.directory && s_capture.directory[0] && !s_capture.failed;
 }
 
+bool ActionObjectSnapshotCapture_Enabled(void) { return Initialize(); }
+
 void ActionObjectSnapshotCapture_Capture(const FrameSlot *slot) {
   if (!Initialize() || !slot || !slot->diorama_active) return;
   const unsigned frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);

@@ -3025,6 +3025,7 @@ static void PublishDioramaView(const DioramaCapture *capture,
     out_projection->aspect_x = geometry->aspect_x;
     out_projection->height_scale = geometry->height_scale;
     out_projection->auto_distance = geometry->auto_distance;
+    out_projection->camera_distance = geometry->camera.distance;
     out_projection->between_backgrounds_world_y_offset =
         -0.5f * geometry->bg2_world_y_offset;
     out_projection->between_backgrounds_capture_offset = (ArRenderPointF){0};
@@ -3397,8 +3398,10 @@ static void PrepareHollowMesh(const DioramaCapture *capture,
 
 #include "diorama_trunk_edges.inc"
 #include "diorama_voxel_edges.inc"
+#include "diorama_voxel_authored.inc"
 #include "diorama_voxel_sprites.inc"
 #include "diorama_trunk_life.inc"
+#include "diorama_voxel_observe.inc"
 
 static void PrepareDioramaLayerMesh(const DioramaCapture *capture,
                                     const DioramaViewGeometry *geometry,
@@ -3442,6 +3445,7 @@ static void PrepareDioramaLayerMesh(const DioramaCapture *capture,
       mesh->index_count = DioramaCoverage_FilterGridIndices(
           mesh->indices, mesh->index_count, coverage);
   }
+  ObserveVoxelLayerMesh(capture, geometry, layer, mesh);
 }
 
 /* Fold at the authentic bottom; keep the continuation coplanar through
@@ -3960,7 +3964,9 @@ static PresentationOutcome DrawVoxelPartitionedFace(ArRenderDevice *device,const
   const unsigned count=kind!=kVoxelFaceRelief
       ? BuildVoxelWaterfallFaces(capture,geometry,layer,kind==kVoxelFaceWaterRear)
       : BuildVoxelFrontFaces(capture,geometry,layer);
-  if(!count)return kind==kVoxelFaceWaterRear?kPresentationOutcome_Complete:kPresentationOutcome_CoreFailure;
+  if(!count)return kind==kVoxelFaceWaterRear ||
+      (kind==kVoxelFaceRelief && ActionVoxel_HasHiddenNativeFronts(layer->voxel_geometry))
+      ?kPresentationOutcome_Complete:kPresentationOutcome_CoreFailure;
   DioramaFaceSource source={0};PresentationOutcome outcome=kPresentationOutcome_Complete;
   DioramaLayerDraw depth_layer=*layer;depth_layer.depth_sink=geometry->depth_sink;
   layer=&depth_layer;
@@ -4014,6 +4020,10 @@ static PresentationOutcome DrawResolvedDioramaLayer(
     return kPresentationOutcome_Complete;
   const DioramaLayerDesc *description = DioramaDescForPlane(resolved->plane);
   if (!description)
+    return kPresentationOutcome_Complete;
+  const DioramaVoxelInspection inspection=ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number)
+      ? scene->render->voxel_inspection : kDioramaVoxelInspect_All;
+  if(inspection==kDioramaVoxelInspect_Backing && DioramaPlaneIsObjectPriority(description->plane))
     return kPresentationOutcome_Complete;
   /* Rooted forest effects sit over the completed walking surface and before
    * actors. Submitting them with the recessed backdrop would let the front
@@ -4168,21 +4178,31 @@ static PresentationOutcome DrawResolvedDioramaLayer(
           description->plane==SR_PPU_OVERLAY_BG1?1:0))return kPresentationOutcome_CoreFailure;
   if(layer.voxel_depth>0&&description->plane==kDioramaPlane_Bg1Far){
     const bool voxel_front_phase=voxel_phase==kVoxelDrawFrontCaps;
-    if(!voxel_front_phase&&!DrawVoxelRearTrims(device,capture,geometry,&layer,textures[kDioramaPlane_Bg1Hi]))
+    if(inspection!=kDioramaVoxelInspect_Backing&&!voxel_front_phase&&!DrawVoxelRearTrims(device,capture,geometry,&layer,textures[kDioramaPlane_Bg1Hi]))
       return kPresentationOutcome_CoreFailure;
-    if(!voxel_front_phase&&!DrawVoxelHighDecks(device,capture,geometry,&layer,textures[kDioramaPlane_Bg1Hi]))
+    if(inspection!=kDioramaVoxelInspect_Backing&&!voxel_front_phase&&!DrawVoxelHighDecks(device,capture,geometry,&layer,textures[kDioramaPlane_Bg1Hi]))
       return kPresentationOutcome_CoreFailure;
     const float split=fmaxf(0,layer.voxel_recess-.01f);
     const float near_depth=voxel_front_phase?0:split;
     const float far_depth=voxel_front_phase?split:layer.voxel_depth;
-    if(!DrawVoxelEdges(device,capture,geometry,&layer,near_depth,far_depth))return kPresentationOutcome_CoreFailure;
+    if(!DrawVoxelAuthored(device,capture,geometry,&layer,voxel_front_phase))
+      return kPresentationOutcome_CoreFailure;
+    if(inspection!=kDioramaVoxelInspect_Backing&&!DrawVoxelEdges(device,capture,geometry,&layer,near_depth,far_depth))return kPresentationOutcome_CoreFailure;
     /* The low face keeps its native slot before OBJ2. Only the solid
      * near-side contact caps draw again after the inset actors. */
     if(voxel_front_phase)return kPresentationOutcome_Complete;
   }
-  if(layer.voxel_depth>0&&description->plane==kDioramaPlane_Bg1Hi&&
+  if(inspection!=kDioramaVoxelInspect_Backing&&layer.voxel_depth>0&&description->plane==kDioramaPlane_Bg1Hi&&
       !DrawVoxelEdges(device,capture,geometry,&layer,0,layer.voxel_depth))
     return kPresentationOutcome_CoreFailure;
+  if(layer.voxel_depth>0&&description->plane==kDioramaPlane_Bg1Hi&&
+      !DrawVoxelAuthored(device,capture,geometry,&layer,false))return kPresentationOutcome_CoreFailure;
+  /* Inspection removes the forward artwork, not its native priority slots.
+   * Cutaway keeps contact caps; backing isolation retains only the rear
+   * surface (including authored repairs), with no invented replacement art. */
+  if(inspection!=kDioramaVoxelInspect_All &&
+      (description->plane==kDioramaPlane_Bg1Far || description->plane==kDioramaPlane_Bg1Hi))
+    return kPresentationOutcome_Complete;
   PrepareDioramaLayerMesh(capture, geometry, aperture, &layer, &mesh);
   if((description->plane==SR_PPU_OVERLAY_BG2||description->plane==kDioramaPlane_Bg2Hi||description->plane==kDioramaPlane_Bg2Far)&&
       DioramaHeat_Active(&scene->background_heat))
@@ -4205,7 +4225,8 @@ static PresentationOutcome DrawResolvedDioramaLayer(
           gates[i].high_priority==(description->plane==kDioramaPlane_Bg1Hi);
   }
   const bool relief_front=layer.voxel_depth>0 &&
-      (ActionVoxel_SceneryRecess(layer.voxel_geometry)>0 || ActionVoxel_HasColumns(layer.voxel_geometry) || gate_front) &&
+      (ActionVoxel_SceneryRecess(layer.voxel_geometry)>0 || ActionVoxel_HasColumns(layer.voxel_geometry) || gate_front ||
+       ActionVoxel_HasHiddenNativeFronts(layer.voxel_geometry)) &&
       (description->plane==kDioramaPlane_Bg1Far || description->plane==kDioramaPlane_Bg1Hi);
   const PresentationOutcome face = waterfall_count || relief_front
       ? DrawVoxelPartitionedFace(device,capture,geometry,&layer,
@@ -4214,7 +4235,9 @@ static PresentationOutcome DrawResolvedDioramaLayer(
   outcome = PresentationOutcome_Combine(outcome, face);
   if (!PresentationOutcome_IsUsable(face))
     return outcome;
-  if(layer.voxel_depth>0 && forest && description->plane==SR_PPU_OVERLAY_BG1 &&
+  if(layer.voxel_depth>0 && description->plane==SR_PPU_OVERLAY_BG1 &&
+      !DrawVoxelNativeTransformedBacking(device,capture,geometry,&layer))return kPresentationOutcome_CoreFailure;
+  if(inspection!=kDioramaVoxelInspect_Backing&&layer.voxel_depth>0 && forest && description->plane==SR_PPU_OVERLAY_BG1 &&
       !DrawVoxelEdges(device,capture,geometry,&layer,0,layer.voxel_depth))
     return kPresentationOutcome_CoreFailure;
   if(layer.voxel_depth>0 && (description->plane==SR_PPU_OVERLAY_BG2 ||
@@ -4443,6 +4466,21 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
   for (int plane = 0; plane < kDioramaPlane_Count; ++plane)
     textures[plane] = capture->textures ? capture->textures[plane]
                                         : ArRenderTexture_Invalid();
+  /* Room-owned geometry can enter a high-priority band whose original
+   * captured pixels are empty. Supply transparent source storage for that
+   * band; its immutable owned artwork still draws in the ordinary slot.
+   * A content-bearing upload failure is never replaced by this fallback. */
+  DioramaCapture owned_capture;
+  const uint8_t *owned_pixels[kDioramaPlane_Count];
+  if(ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number) &&
+      (scene->render->visible_planes&(1u<<kDioramaPlane_Bg1Hi)) &&
+      !capture->pixels[kDioramaPlane_Bg1Hi] && VoxelOwnsHighArt(scene->voxel_geometry)) {
+    if(!EnsureVoxelEmptySource(device))return kPresentationOutcome_CoreFailure;
+    memcpy(owned_pixels,capture->pixels,sizeof(owned_pixels));
+    owned_pixels[kDioramaPlane_Bg1Hi]=(const uint8_t *)s_voxel_empty_pixels;
+    textures[kDioramaPlane_Bg1Hi]=s_voxel_empty_source;
+    owned_capture=*capture;owned_capture.pixels=owned_pixels;owned_capture.textures=textures;capture=&owned_capture;
+  }
   const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   const ArRenderColorF navy = {20.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f,
                                1.0f};
@@ -4485,7 +4523,7 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
   illuminated.scenery_lightmap = ArRenderTexture_Invalid();
   uint32_t bloom_planes=0;
   ArRenderTexture bloom_light=ArRenderTexture_Invalid();
-  const bool bloom=PrepareNativeBloom(device,capture,&illuminated,&geometry,textures,resolved,
+  const bool bloom=scene->render->voxel_inspection==kDioramaVoxelInspect_All && PrepareNativeBloom(device,capture,&illuminated,&geometry,textures,resolved,
       resolved_count,&output_frame,out_projection,&bloom_planes,&bloom_light);
   uint8_t sky_group,sky_room,sky_bg;
   /* A named native BG backdrop belongs to that screen too. Seed the
@@ -4618,9 +4656,9 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
     }
     const DioramaScene *draw_scene=subscreen_active?&subscreen_scene:scene;
     const int prop_priority=DioramaPlaneObjectPriority(resolved_layer->plane);
-    if (prop_priority>=0 && resolved_layer->alpha &&
+    if (scene->render->voxel_inspection!=kDioramaVoxelInspect_Backing && prop_priority>=0 && resolved_layer->alpha &&
         (scene->render->visible_planes & (1u<<resolved_layer->plane)) &&
-        !DrawVoxelSprites(device,&geometry,draw_scene,&output_frame,(unsigned)prop_priority,false)) goto failed;
+        !DrawVoxelSprites(device,capture,&geometry,draw_scene,&output_frame,(unsigned)prop_priority,false)) goto failed;
     if(rear_water && resolved_layer->plane==kDioramaPlane_Bg1Far) {
       /* Rear water sits over the recessed wall, behind front rock and actors.
        * The native high-priority curtain keeps its own foreground slot. */
@@ -4650,9 +4688,9 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
     outcome = PresentationOutcome_Combine(outcome, layer);
     if (!PresentationOutcome_IsUsable(layer))
       goto failed;
-    if (prop_priority>=0 && resolved_layer->alpha &&
+    if (scene->render->voxel_inspection!=kDioramaVoxelInspect_Backing && prop_priority>=0 && resolved_layer->alpha &&
         (scene->render->visible_planes & (1u<<resolved_layer->plane)) &&
-        !DrawVoxelSprites(device,&geometry,draw_scene,&output_frame,(unsigned)prop_priority,true)) goto failed;
+        !DrawVoxelSprites(device,capture,&geometry,draw_scene,&output_frame,(unsigned)prop_priority,true)) goto failed;
     if(resolved_layer->plane==kDioramaPlane_Obj2&&ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number)&&ActionVoxel_PlayRecess(scene->voxel_geometry)>0){
       for(int i=0;i<resolved_count;++i)if(resolved[i].plane==kDioramaPlane_Bg1Far){
         const PresentationOutcome front=DrawResolvedDioramaLayer(device,capture,draw_scene,&geometry,&aperture,textures,
@@ -4693,6 +4731,7 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
 }
 
 void Diorama_ResetCompositorResources(ArRenderDevice *device) {
+  ResetVoxelAuthoredAtlas(device);
   DioramaAstralRift_Reset(device);
   /* Materials borrow the map's native handle, so release their states first. */
   DioramaEffectBackend_Reset(device);

@@ -124,6 +124,16 @@ function copyTiles() {
   refreshStampControls();refreshEditorFeedback();
   tileActionStatus(`Copied ${w}×${h} tiles. Choose Paste over, or Stamp to place copies.`);return true;
 }
+/* Sampling is a clipboard operation, not a map selection or placement. Copy
+ * every displayed word/mask so later edits cannot modify the donor tile. */
+function sampleStampAt(x,y) {
+  if(!L||mode!=='2d')return false;
+  const tile=displayedCell(room,bgIndex,L,x,y);if(!tile)return false;
+  tileClipboard={key:keyOf(room,bgIndex),w:1,h:1,
+    cells:[{...tile,words:[...tile.words],bands:[...tile.bands]}],label:`Sampled tile ${x}, ${y}`};
+  startStamp();refreshStampControls();
+  tileActionStatus(`Sampled tile ${x}, ${y}. Click a destination to paint it; Esc finishes.`);return true;
+}
 function stampTiles(x,y) {
   const clip=tileClipboard,key=keyOf(room,bgIndex),target=stampBucket(room,bgIndex);
   if(!clip||clip.key!==key) {

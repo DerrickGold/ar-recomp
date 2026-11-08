@@ -54,8 +54,14 @@ void main() {
   vec2 uv = vec2(v_uv.x, u_flip_source ? 1.0-v_uv.y : v_uv.y);
   o_color = texture(u_texture, uv) * v_color;
 }`;
+    this.materialSources = [basic, ...shaderSources.slice(0, 7)];
+    this.alphaSource = shaderSources[7] || null;
+    this.depthPrograms = null;
+    this.depthQueue = [];
+    this.depthActive = false;
+    this.depthSerial = 0;
     this.programs = [this.program(basic)];
-    for (const source of shaderSources) {
+    for (const source of shaderSources.slice(0, 7)) {
       try { this.programs.push(this.program(source)); }
       catch (error) { this.programs.push(null); this.warnings.push(error.message); }
     }
@@ -82,21 +88,35 @@ void main() {
     ];
     this.imports = {};
     for (const name of ['create', 'destroy', 'update', 'target', 'viewport', 'clip',
-      'clear', 'geometry', 'effect', 'available']) this.imports[name] = this[name].bind(this);
+      'clear', 'geometry', 'effect', 'available', 'depth_begin', 'depth_clear', 'depth_finish', 'depth_geometry']) this.imports[name] = this[name].bind(this);
   }
 
-  program(fragmentSource) {
+  program(fragmentSource, depth = false) {
+    if (depth) {
+      const alpha = this.alphaSource.replace(/layout\(location=2\) flat in/, 'flat in').replaceAll('alpha.options', 'u_alpha_options');
+      fragmentSource = fragmentSource.replace(/(?:layout\(location\s*=\s*0\)\s*)?out vec4 o_color;/, 'layout(location=0) out vec4 o_color;').replace(/void\s+main\s*\(/, 'void material_main(');
+      fragmentSource += `\nuniform vec4 u_alpha_options;
+uniform bool u_depth_native;
+uniform sampler2D previous_key, opaque_depth, opaque_order;
+${alpha}
+void main() {
+  if (u_depth_native) { material_main(); if (o_color.a <= .5/255.0) discard; return; }
+  alpha_filter(); material_main(); alpha_output();
+}`;
+    }
     const gl = this.gl;
     const sources = [[gl.VERTEX_SHADER, `#version 300 es
 precision highp float;
 layout(location=0) in vec2 position;
 layout(location=1) in vec4 color;
 layout(location=2) in vec2 tex_coord;
+${depth ? "layout(location=3) in vec3 depth_info; flat out float v_ordinal;" : ""}
 uniform vec2 u_view_size;
 out vec4 v_color; out vec2 v_uv;
 void main() {
  gl_Position = vec4(position.x/u_view_size.x*2.0-1.0,
                     1.0-position.y/u_view_size.y*2.0,0.0,1.0);
+${depth ? " gl_Position.z=depth_info.x*2.0-1.0; gl_Position*=depth_info.y; v_ordinal=depth_info.z;" : ""}
  v_color=color; v_uv=tex_coord;
 }`], [gl.FRAGMENT_SHADER, fragmentSource]];
     const shaders = [];
@@ -120,6 +140,11 @@ void main() {
         program,
         size: gl.getUniformLocation(program, 'u_view_size'),
         flip: gl.getUniformLocation(program, 'u_flip_source'),
+        alphaOptions: gl.getUniformLocation(program, 'u_alpha_options'),
+        depthNative: gl.getUniformLocation(program, 'u_depth_native'),
+        previousKey: gl.getUniformLocation(program, 'previous_key'),
+        opaqueDepth: gl.getUniformLocation(program, 'opaque_depth'),
+        opaqueOrder: gl.getUniformLocation(program, 'opaque_order'),
         texture: gl.getUniformLocation(program, 'u_texture'),
         illumination: gl.getUniformLocation(program, 'u_illumination'),
       attributes: gl.getUniformLocation(program, 'u_attributes'),
@@ -130,6 +155,7 @@ void main() {
   }
 
   create(width, height, usage, filter, blend) {
+    if (!this.flushDepth()) return 0;
     const gl = this.gl;
     let id = this.textures.findIndex((t, i) => i > 0 && !t);
     if (id < 0) id = this.textures.length;
@@ -142,7 +168,7 @@ void main() {
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
       const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.textures[this.targetId]?.fbo || null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.currentFramebuffer());
       if (!ok) { gl.deleteFramebuffer(fbo); gl.deleteTexture(texture); return 0; }
     }
     if (gl.getError() !== gl.NO_ERROR) {
@@ -156,14 +182,17 @@ void main() {
   }
 
   destroy(id) {
+    this.flushDepth();
     const entry = this.textures[id];
     if (!entry) return;
     this.gl.deleteTexture(entry.texture);
     if (entry.fbo) this.gl.deleteFramebuffer(entry.fbo);
+    if (entry.worldDepth) this.gl.deleteTexture(entry.worldDepth);
     this.textures[id] = null;
   }
 
   update(id, x, y, width, height, pointer, pitch) {
+    if (!this.flushDepth()) return 0;
     const gl = this.gl, entry = this.textures[id];
     if (!entry || entry.fbo) return 0;
     const size = width * height * 4;
@@ -207,23 +236,27 @@ void main() {
   }
 
   target(id) {
+    if (!this.flushDepth()) return 0;
     if (id && !this.textures[id]?.fbo) return 0;
     this.targetId = id;
-    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.textures[id]?.fbo || null);
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.currentFramebuffer());
     this.applyViewport();
     return 1;
   }
   viewport(set, x, y, w, h) {
+    if (!this.flushDepth()) return 0;
     this.viewportBox = set ? [x, y, w, h] : null;
     this.applyViewport();
     return 1;
   }
   clip(set, x, y, w, h) {
+    if (!this.flushDepth()) return 0;
     this.clipBox = set ? [x, y, w, h] : null;
     this.applyViewport();
     return 1;
   }
   clear(r, g, b, a) {
+    if (!this.flushDepth()) return 0;
     const gl = this.gl;
     gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(r, g, b, a);
@@ -240,13 +273,23 @@ void main() {
     gl.blendFuncSeparate(...this.blendFactors[mode]);
   }
 
-  geometry(id, vertices, vertexCount, indices, indexCount, blend, u, v, filter = -1) {
+  geometry(id, vertices, vertexCount, indices, indexCount, blend, u, v, filter = -1, depth = null) {
+    if (!depth && !this.flushDepth()) return 0;
     const gl = this.gl;
     if (gl.isContextLost() || (id && id === this.targetId)) return 0;
     const entry = this.textures[id];
-    const shader = this.programs[this.effectKind + 1];
+    const shader = (depth ? this.depthPrograms : this.programs)[this.effectKind + 1];
     if (!shader || (id && !entry)) return 0;
     gl.useProgram(shader.program);
+    if (depth) {
+      gl.uniform4fv(shader.alphaOptions, depth.options);
+      gl.uniform1i(shader.depthNative, depth.native ? 1 : 0);
+      for (const [slot, uniform, texture] of [[4, shader.previousKey, depth.previous], [5, shader.opaqueDepth, depth.opaque], [6, shader.opaqueOrder, depth.order]]) {
+        gl.uniform1i(uniform, slot); gl.activeTexture(gl.TEXTURE0+slot);
+        gl.bindTexture(gl.TEXTURE_2D, texture || this.white); gl.bindSampler(slot, this.samplers[0]);
+      }
+    } else { gl.disable(gl.DEPTH_TEST); gl.depthMask(false); }
+
     const [width, height] = this.extent();
     gl.uniform2f(shader.size, this.viewportBox?.[2] ?? width, this.viewportBox?.[3] ?? height);
     gl.uniform1i(shader.flip, entry?.fbo ? 1 : 0);
@@ -274,24 +317,217 @@ void main() {
     // A filter of -1 keeps the texture's own; 0/1 override it for this draw.
     const linear = filter >= 0 ? filter === 1 : !!entry?.filter;
     gl.bindSampler(0, this.samplers[(linear ? 4 : 0) + (u === 2 ? 2 : 0) + (v === 2 ? 1 : 0)]);
-    this.blend(blend);
+    this.blend(depth?.peel || depth?.opaquePass ? 0 : blend);
     gl.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    const vb = vertexCount * 32, ib = indexCount * 4;
+    const stride = depth ? 44 : 32;
+    for (const [index, count, offset] of [[0, 2, 0], [1, 4, 8], [2, 2, 24]]) gl.vertexAttribPointer(index, count, gl.FLOAT, false, stride, offset);
+    if (depth) { gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 3, gl.FLOAT, false, stride, 32); }
+    else gl.disableVertexAttribArray(3);
+    const vb = vertexCount * stride, ib = indexCount * 4;
     if (vb > this.vertexCapacity) {
       this.vertexCapacity = 2 ** Math.ceil(Math.log2(vb));
       gl.bufferData(gl.ARRAY_BUFFER, this.vertexCapacity, gl.STREAM_DRAW);
     }
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Uint8Array(this.memory.buffer, vertices, vb));
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, depth ? vertices : new Uint8Array(this.memory.buffer, vertices, vb));
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
     if (ib > this.indexCapacity) {
       this.indexCapacity = 2 ** Math.ceil(Math.log2(ib));
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this.indexCapacity, gl.STREAM_DRAW);
     }
-    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, new Uint8Array(this.memory.buffer, indices, ib));
+    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, depth ? indices : new Uint8Array(this.memory.buffer, indices, ib));
     gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_INT, 0);
     this.stats.draws++;
     return 1;
+  }
+
+  currentFramebuffer() {
+    return this.textures[this.targetId]?.fbo || (this.depthActive ? this.depthCanvas?.fbo : null) || null;
+  }
+  depthTexture(width, height, format) {
+    const gl=this.gl, texture=gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D,texture);gl.texStorage2D(gl.TEXTURE_2D,1,format,width,height);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+    return texture;
+  }
+  releaseDepthTarget(entry) {
+    const gl=this.gl;
+    if(entry.worldDepth)gl.deleteTexture(entry.worldDepth);
+    if(entry.texture)gl.deleteTexture(entry.texture);
+    if(entry.fbo)gl.deleteFramebuffer(entry.fbo);
+  }
+  releaseDepthScratch() {
+    const gl=this.gl,s=this.depthScratch;if(!s)return;
+    for(const t of [...s.layers,...s.keys,s.order,s.depth])gl.deleteTexture(t);
+    gl.deleteFramebuffer(s.fbo);this.depthScratch=null;
+  }
+  ensureDepthTarget() {
+    const gl=this.gl,entry=this.textures[this.targetId]||this.depthCanvas;
+    if(!entry?.fbo)return null;
+    if(!entry.worldDepth)entry.worldDepth=this.depthTexture(entry.width,entry.height,gl.DEPTH_COMPONENT32F);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,entry.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.TEXTURE_2D,entry.worldDepth,0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    if(entry.depthSerial!==this.depthSerial) {
+      gl.disable(gl.SCISSOR_TEST);gl.depthMask(true);gl.clearDepth(1);gl.clear(gl.DEPTH_BUFFER_BIT);
+      entry.depthSerial=this.depthSerial;this.applyViewport();
+    }
+    return gl.checkFramebufferStatus(gl.FRAMEBUFFER)===gl.FRAMEBUFFER_COMPLETE?entry:null;
+  }
+  ensureDepthScratch(width,height) {
+    const gl=this.gl;
+    if(this.depthScratch?.width===width && this.depthScratch?.height===height)return this.depthScratch;
+    this.releaseDepthScratch();
+    this.depthScratch={width,height,fbo:gl.createFramebuffer(),
+      layers:Array.from({length:4},()=>this.depthTexture(width,height,gl.RGBA16F)),
+      keys:Array.from({length:2},()=>this.depthTexture(width,height,gl.RG32F)),
+      order:this.depthTexture(width,height,gl.R32F),depth:this.depthTexture(width,height,gl.DEPTH_COMPONENT32F)};
+    return this.depthScratch;
+  }
+  depth_begin() {
+    if(this.depthActive)return 0;
+    const gl=this.gl;
+    if(!this.alphaSource || !gl.getExtension('EXT_color_buffer_float')) {
+      this.warnings.push('Voxel preview needs WebGL2 floating-point color targets for shared depth and transparency.');return 0;
+    }
+    try {
+      if(!this.depthPrograms) {
+        const programs=[];
+        try {for(const source of this.materialSources)programs.push(this.program(source,true));}
+        catch(error){for(const p of programs)gl.deleteProgram(p.program);throw error;}
+        this.depthPrograms=programs;
+      }
+      if(this.depthCanvas?.width!==this.canvas.width || this.depthCanvas?.height!==this.canvas.height) {
+        if(this.depthCanvas)this.releaseDepthTarget(this.depthCanvas);
+        this.depthCanvas={width:this.canvas.width,height:this.canvas.height,fbo:gl.createFramebuffer(),
+          texture:this.depthTexture(this.canvas.width,this.canvas.height,gl.RGBA8)};
+        gl.bindFramebuffer(gl.FRAMEBUFFER,this.depthCanvas.fbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,this.depthCanvas.texture,0);
+      }
+      /* The main target is a texture during the scope, permitting the same
+       * opaque/ordinal MRT pass as every intermediate compositor target. */
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,this.depthCanvas.fbo);
+      gl.disable(gl.SCISSOR_TEST);
+      gl.blitFramebuffer(0,0,this.canvas.width,this.canvas.height,0,0,this.canvas.width,this.canvas.height,gl.COLOR_BUFFER_BIT,gl.NEAREST);
+      this.depthActive=true;this.depthSerial++;this.depthQueue=[];this.depthVertices=0;this.depthIndices=0;
+      gl.bindFramebuffer(gl.FRAMEBUFFER,this.currentFramebuffer());this.applyViewport();return 1;
+    } catch(error) { this.warnings.push(`Voxel shared-depth initialization failed: ${error.message}`);return 0; }
+  }
+  depth_clear() {
+    if(!this.depthActive || !this.flushDepth())return 0;
+    const entry=this.ensureDepthTarget();if(!entry)return 0;
+    const gl=this.gl;gl.disable(gl.SCISSOR_TEST);gl.depthMask(true);gl.clearDepth(1);gl.clear(gl.DEPTH_BUFFER_BIT);
+    this.applyViewport();return 1;
+  }
+  depth_finish(success) {
+    if(!this.depthActive)return 1;
+    const ok=success?this.flushDepth():true;this.depthQueue=[];
+    const gl=this.gl;
+    if(success&&ok) {
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,this.depthCanvas.fbo);gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);
+      gl.disable(gl.SCISSOR_TEST);
+      gl.blitFramebuffer(0,0,this.canvas.width,this.canvas.height,0,0,this.canvas.width,this.canvas.height,gl.COLOR_BUFFER_BIT,gl.NEAREST);
+    }
+    this.depthActive=false;gl.disable(gl.DEPTH_TEST);gl.depthMask(false);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,this.currentFramebuffer());this.applyViewport();return ok?1:0;
+  }
+  depth_geometry(id,vertices,nv,indices,ni,blend,u,v,filter,depths,clipW,mode) {
+    if(!this.depthActive || nv<=0 || ni<=0 || ni%3 || nv>131072 || ni>393216 || mode<0 || mode>3)return 0;
+    if(this.depthQueue.length===256 || this.depthVertices+nv>131072 || this.depthIndices+ni>393216)
+      if(!this.flushDepth())return 0;
+    const source=new Float32Array(this.memory.buffer,vertices,nv*8),z=new Float32Array(this.memory.buffer,depths,nv);
+    const w=clipW?new Float32Array(this.memory.buffer,clipW,nv):null;
+    const index=new Int32Array(this.memory.buffer,indices,ni),expanded=new Float32Array(ni*11);
+    const sequential=new Uint32Array(ni),ordinal=this.depthIndices/3;
+    for(let i=0;i<ni;i++) {
+      const at=index[i];if(at<0||at>=nv||!Number.isFinite(z[at])||(w&&!(w[at]>0)))return 0;
+      expanded.set(source.subarray(at*8,at*8+8),i*11);
+      expanded[i*11+8]=mode===3?1:z[at];expanded[i*11+9]=w?w[at]:1;
+      expanded[i*11+10]=ordinal+Math.floor(i/3);sequential[i]=i;
+    }
+    const draw={id,vertices:expanded,indices:sequential,nv:ni,ni,blend,u,v,filter,mode,
+      effectKind:this.effectKind,uniforms:this.uniforms.slice(),illuminationId:this.illuminationId,
+      actorTextureIds:this.actorTextureIds?.slice(),viewport:this.viewportBox?.slice(),clip:this.clipBox?.slice()};
+    if(mode===3 || mode===2) {
+      if(!this.flushDepth())return 0;
+      const target=this.ensureDepthTarget();if(!target)return 0;
+      const gl=this.gl;gl.enable(gl.DEPTH_TEST);gl.depthFunc(mode===3?gl.ALWAYS:gl.LEQUAL);gl.depthMask(mode===3);
+      const ok=this.replayDepth(draw,{native:true,options:[0,0,blend,0]});
+      gl.disable(gl.DEPTH_TEST);gl.depthMask(false);return ok;
+    }
+    this.depthQueue.push(draw);this.depthVertices+=nv;this.depthIndices+=ni;return 1;
+  }
+  replayDepth(draw,depth) {
+    const gl=this.gl;
+    this.effectKind=draw.effectKind;this.uniforms.set(draw.uniforms);
+    this.illuminationId=draw.illuminationId;this.actorTextureIds=draw.actorTextureIds;
+    this.viewportBox=draw.viewport;this.clipBox=draw.clip;this.applyViewport();
+    gl.bindBuffer(gl.UNIFORM_BUFFER,this.uniformBuffer);gl.bufferSubData(gl.UNIFORM_BUFFER,0,this.uniforms);
+    return this.geometry(draw.id,draw.vertices,draw.nv,draw.indices,draw.ni,draw.blend,draw.u,draw.v,draw.filter,depth);
+  }
+  flushDepth() {
+    if(!this.depthQueue?.length)return true;
+    const gl=this.gl,draws=this.depthQueue;this.depthQueue=[];this.depthVertices=this.depthIndices=0;
+    const state={effectKind:this.effectKind,uniforms:this.uniforms.slice(),illuminationId:this.illuminationId,
+      actorTextureIds:this.actorTextureIds,viewport:this.viewportBox,clip:this.clipBox};
+    let target=null,ok=false;
+    try {
+      target=this.ensureDepthTarget();if(!target)throw new Error('Depth target is incomplete');
+      const scratch=this.ensureDepthScratch(target.width,target.height);
+      gl.bindFramebuffer(gl.FRAMEBUFFER,target.fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,scratch.order,0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
+      gl.disable(gl.SCISSOR_TEST);gl.clearBufferfv(gl.COLOR,1,new Float32Array([-1,0,0,0]));
+      gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
+      for(const draw of draws)if(!this.replayDepth(draw,{opaquePass:true,options:[0,0,draw.blend===3?2:draw.blend?1:0,draw.mode===0?1:0]}))throw new Error('Opaque draw failed');
+      gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,null,0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      /* Exactly four nearest fractional layers, followed by the native
+       * painter tail and a back-to-front premultiplied resolve. */
+      for(let layer=0;layer<4;layer++) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER,scratch.fbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,scratch.layers[layer],0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,scratch.keys[layer&1],0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.TEXTURE_2D,scratch.depth,0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
+        if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw new Error('Fractional target is incomplete');
+        gl.disable(gl.SCISSOR_TEST);gl.clearBufferfv(gl.COLOR,0,new Float32Array(4));
+        gl.clearBufferfv(gl.COLOR,1,new Float32Array([-1,0,0,0]));gl.clearDepth(1);gl.clear(gl.DEPTH_BUFFER_BIT);
+        for(const draw of draws)if(!this.replayDepth(draw,{peel:true,options:[1,layer?1:0,draw.blend===3?2:draw.blend?1:0,draw.mode===0?1:0],
+          previous:layer?scratch.keys[(layer-1)&1]:null,opaque:target.worldDepth,order:scratch.order}))throw new Error('Fractional draw failed');
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER,target.fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.TEXTURE_2D,null,0);
+      gl.disable(gl.DEPTH_TEST);gl.depthMask(false);
+      for(const draw of draws)if(!this.replayDepth(draw,{options:[2,1,draw.blend===3?2:draw.blend?1:0,draw.mode===0?1:0],
+        previous:scratch.keys[1],opaque:target.worldDepth,order:scratch.order}))throw new Error('Fractional tail failed');
+      this.resolveDepthLayers(scratch);
+      ok=true;
+    } catch(error) {this.warnings.push(`Voxel shared-depth draw failed: ${error.message}`);}
+    finally {
+      if(target){gl.bindFramebuffer(gl.FRAMEBUFFER,target.fbo);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.TEXTURE_2D,target.worldDepth,0);gl.drawBuffers([gl.COLOR_ATTACHMENT0]);}
+      this.effectKind=state.effectKind;this.uniforms.set(state.uniforms);this.illuminationId=state.illuminationId;
+      this.actorTextureIds=state.actorTextureIds;this.viewportBox=state.viewport;this.clipBox=state.clip;
+      gl.bindBuffer(gl.UNIFORM_BUFFER,this.uniformBuffer);gl.bufferSubData(gl.UNIFORM_BUFFER,0,this.uniforms);
+      gl.disable(gl.DEPTH_TEST);gl.depthMask(false);this.applyViewport();
+    }
+    return ok;
+  }
+  resolveDepthLayers(scratch) {
+    const gl=this.gl,shader=this.programs[0],w=scratch.width,h=scratch.height;
+    gl.useProgram(shader.program);gl.uniform2f(shader.size,w,h);gl.uniform1i(shader.flip,0);gl.uniform1i(shader.texture,0);
+    gl.viewport(0,0,w,h);gl.disable(gl.SCISSOR_TEST);this.blend(2);
+    const vertices=new Float32Array([0,0,1,1,1,1,0,1,w,0,1,1,1,1,1,1,w,h,1,1,1,1,1,0,0,h,1,1,1,1,0,0]);
+    gl.bindVertexArray(this.vertexArray);gl.bindBuffer(gl.ARRAY_BUFFER,this.vertexBuffer);
+    if(this.vertexCapacity<vertices.byteLength){this.vertexCapacity=256;gl.bufferData(gl.ARRAY_BUFFER,this.vertexCapacity,gl.STREAM_DRAW);}
+    for(const [index,count,offset]of[[0,2,0],[1,4,8],[2,2,24]])gl.vertexAttribPointer(index,count,gl.FLOAT,false,32,offset);
+    gl.disableVertexAttribArray(3);gl.bufferSubData(gl.ARRAY_BUFFER,0,vertices);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.indexBuffer);
+    if(this.indexCapacity<24){this.indexCapacity=32;gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,this.indexCapacity,gl.STREAM_DRAW);}
+    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER,0,new Uint32Array([0,1,2,0,2,3]));
+    gl.activeTexture(gl.TEXTURE0);gl.bindSampler(0,this.samplers[0]);
+    for(let layer=3;layer>=0;layer--){gl.bindTexture(gl.TEXTURE_2D,scratch.layers[layer]);gl.drawElements(gl.TRIANGLES,6,gl.UNSIGNED_INT,0);this.stats.draws++;}
   }
 
   effect(kind, pointer, count) {
@@ -313,7 +549,10 @@ void main() {
   dispose() {
     const gl = this.gl;
     for (let id = 1; id < this.textures.length; id++) this.destroy(id);
-    for (const p of this.programs) if (p) gl.deleteProgram(p.program);
+    this.depth_finish(0);
+    this.releaseDepthScratch();
+    if (this.depthCanvas) this.releaseDepthTarget(this.depthCanvas);
+    for (const p of [...this.programs, ...(this.depthPrograms || [])]) if (p) gl.deleteProgram(p.program);
     for (const s of this.samplers) gl.deleteSampler(s);
     for (const b of [this.vertexBuffer, this.indexBuffer, this.uniformBuffer]) gl.deleteBuffer(b);
     gl.deleteVertexArray(this.vertexArray);

@@ -705,6 +705,8 @@ static struct {
    * another phase's front/matte mask. Each entry owns a separate reference. */
   const ActionVoxelGeometry *castle_phases[4];
   uint64_t terrain_key;
+  int authored_bounds[4];
+  bool authored_records[kDioramaVoxelCellMax];
   bool source_valid, terrain_valid, animation_safe;
 } s_voxel;
 static void ResetVoxelCastlePhases(void) {
@@ -1293,6 +1295,8 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
   ActRaiserActionBgLayerSnapshot live;
   ActionBgMapView map;
   if (!enabled || !ActionVoxel_Room(group, room) ||
+      (terrain && (terrain->voxel.cell_count > kDioramaVoxelCellMax ||
+                   terrain->voxel.object_count > kDioramaVoxelObjectMax)) ||
       !SyncFrameIdentity(g_ram, kActRaiserWramSize) || !EnsureRoomScene(group, room) ||
       !QueryPpuState(&ppu) || ppu.bg_mode != 1 || (ppu.flags & SR_PPU_STATE_FORCED_BLANK) ||
       ActRaiser_IsDeathHeimCompletionScene(group, room,
@@ -1367,7 +1371,52 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
   }
   /* BG2 animation must not rebuild the castle. Capture only character slots
    * referenced by BG1 definitions or authored terrain, with bounds checks. */
+  uint64_t key = UINT64_C(14695981039346656037);
+  const unsigned terrain_layers = ActionVoxel_BackgroundWater(ActionVoxel_ProfileForRoom(group,room)) ? 2 : 1;
+  if (terrain) for (unsigned layer = 0; layer < terrain_layers; ++layer) {
+    const DioramaStampLayerOverride *stamps = &terrain->stamp_layers[layer];
+    key = VoxelHash(key, &stamps->set_bounds, sizeof(stamps->set_bounds));
+    if (stamps->set_bounds) {
+      const int16_t bounds[] = {stamps->x0, stamps->y0, stamps->x1, stamps->y1};
+      key = VoxelHash(key, bounds, sizeof(bounds));
+    }
+    key = VoxelHash(key, stamps->cells, stamps->count * sizeof(*stamps->cells));
+    key = VoxelHash(key, terrain->pixel_layers[layer].edits,
+                     terrain->pixel_layers[layer].count * sizeof(DioramaPixelEdit));
+  }
+  if (terrain && (terrain->voxel.cell_count || terrain->voxel.object_count))
+    key = DioramaVoxelEdits_Hash(key, &terrain->voxel);
+  const bool terrain_changed = !s_voxel.terrain_valid || key != s_voxel.terrain_key;
+  changed |= terrain_changed;
+  const DioramaStampLayerOverride *stamps = terrain ? &terrain->stamp_layers[0] : NULL;
+  const int authored_bounds[] = {
+      stamps && stamps->set_bounds ? stamps->x0 : 0,
+      stamps && stamps->set_bounds ? stamps->y0 : 0,
+      stamps && stamps->set_bounds ? stamps->x1 : bg->pages_wide * 16,
+      stamps && stamps->set_bounds ? stamps->y1 : bg->pages_high * 16};
+  if (new_room || terrain_changed ||
+      memcmp(authored_bounds, s_voxel.authored_bounds, sizeof(authored_bounds))) {
+    /* Region history is not visible geometry. Resolve the same last-covering
+     * owner grid as the compiler once per edit/bounds change, so an older
+     * animated donor hidden by a later reset cannot force per-frame rebuilds.
+     * No owner grid is allocated or scanned on ordinary animation frames. */
+    memset(s_voxel.authored_records, 0, sizeof(s_voxel.authored_records));
+    if (terrain && terrain->voxel.cell_count) {
+      const int columns = authored_bounds[2] - authored_bounds[0];
+      const int rows = authored_bounds[3] - authored_bounds[1];
+      uint16_t *owners = ActionVoxel_RecordOwners(&terrain->voxel,
+          authored_bounds[0], authored_bounds[1], columns, rows);
+      if (!owners) { ResetVoxel(); return; }
+      for (size_t i = 0; i < (size_t)columns * rows; ++i)
+        if (owners[i] && ActionVoxel_CellOwnsArtwork(&terrain->voxel.cells[owners[i] - 1]))
+          s_voxel.authored_records[owners[i] - 1] = true;
+      free(owners);
+    }
+    memcpy(s_voxel.authored_bounds, authored_bounds, sizeof(authored_bounds));
+  }
   bool used[kActionRoomSceneCharacterBytes / 32] = {false};
+  bool extra_used[kActionRoomSceneExtraCharacterBytes / 32] = {false};
+  bool authored_animation = false;
   size_t animation_offset = 0, animation_bytes = 0;
   const ActionRoomScene *reference = s_observer.room_scene;
   const unsigned phase_count=ActionRoomScene_CharacterAnimationPhaseCount(reference);
@@ -1387,6 +1436,23 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
       const unsigned character = terrain->stamp_layers[0].cells[i].words[q] & 1023;
       if (character < sizeof(used) / sizeof(*used)) used[character] = true;
     }
+  if (terrain) for (unsigned i = 0; i < terrain->voxel.cell_count; ++i) {
+    if (!s_voxel.authored_records[i]) continue;
+    const DioramaVoxelCell *cell = &terrain->voxel.cells[i];
+    const DioramaVoxelArt *arts[] = {&cell->backing_art, &cell->top_art, &cell->side_art,
+        &cell->front_art, &cell->left_art, &cell->right_art, &cell->bottom_art};
+    for (unsigned a = 0; a < sizeof(arts) / sizeof(*arts); ++a) {
+      if (!(cell->fields & (kDioramaVoxelCell_BackArt << a)) || !arts[a]->set) continue;
+      for (unsigned q = 0; q < 4; ++q) {
+        const unsigned ch = arts[a]->words[q] & 1023u;
+        if (ch < sizeof(used) / sizeof(*used)) {
+          used[ch] = true;
+          authored_animation |= have_animation && ch * 32 >= animation_offset &&
+              ch * 32 < animation_offset + animation_bytes;
+        } else if (ch >= 0x200 && ch < 0x300) extra_used[ch - 0x200] = true;
+      }
+    }
+  }
   bool animation_changed = false;
   for (unsigned ch = 0; ch < sizeof(used) / sizeof(*used); ++ch) if (used[ch]) {
     for (unsigned byte = 0; byte < 32; ++byte) {
@@ -1399,6 +1465,20 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
       else changed |= different;
       source->characters[ch * 32 + byte] = value;
     }
+  }
+  /* The scene codec retains the native supplementary upload at byte $6000.
+   * Its authored word range is $200-$2FF (the editor normalizes its binding).
+   * Only selected donor characters are read, so unchanged rooms retain the
+   * existing character-copy cost and animation cache behavior. */
+  for (unsigned ch = 0; ch < sizeof(extra_used) / sizeof(*extra_used); ++ch) if (extra_used[ch]) {
+    for (unsigned byte = 0; byte < 32; ++byte) {
+      const size_t word = 0x3000u + ch * 16 + byte / 2;
+      if (word >= vram.element_count) { ResetVoxel(); return; }
+      const uint8_t value = vram.data[word] >> ((byte & 1) * 8);
+      changed |= source->extra_characters[ch * 32 + byte] != value;
+      source->extra_characters[ch * 32 + byte] = value;
+    }
+    source->have_extra_characters = true;
   }
   for (unsigned i = 0; i < 256; ++i) {
     const uint8_t value = palette.data[i / 2] >> ((i & 1) * 8);
@@ -1430,20 +1510,6 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
         s_voxel.tiles[y * width + x] = vram.data[address];
       }
   }
-  uint64_t key = UINT64_C(14695981039346656037);
-  const unsigned terrain_layers = ActionVoxel_BackgroundWater(ActionVoxel_ProfileForRoom(group,room)) ? 2 : 1;
-  if (terrain) for (unsigned layer = 0; layer < terrain_layers; ++layer) {
-    const DioramaStampLayerOverride *stamps = &terrain->stamp_layers[layer];
-    key = VoxelHash(key, &stamps->set_bounds, sizeof(stamps->set_bounds));
-    if (stamps->set_bounds) {
-      const int16_t bounds[] = {stamps->x0, stamps->y0, stamps->x1, stamps->y1};
-      key = VoxelHash(key, bounds, sizeof(bounds));
-    }
-    key = VoxelHash(key, stamps->cells, stamps->count * sizeof(*stamps->cells));
-    key = VoxelHash(key, terrain->pixel_layers[layer].edits,
-                     terrain->pixel_layers[layer].count * sizeof(DioramaPixelEdit));
-  }
-  changed |= !s_voxel.terrain_valid || key != s_voxel.terrain_key;
   s_voxel.source_valid = s_voxel.terrain_valid = true;
   s_voxel.terrain_key = key;
   const bool known_animation = have_animation && ActionVoxel_AnimationMatches(reference,source->characters,
@@ -1472,7 +1538,11 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
     }
     changed |= animation_changed || castle_phase>=0;
   } else if (changed || !known_animation) s_voxel.animation_safe = false;
-  if (!castle_animation && known_animation && !s_voxel.animation_safe && (changed || animation_changed)) {
+  /* Authored faces own decoded pixels. Unlike a live captured face, those
+   * pixels cannot borrow a canonical animation frame without freezing art. */
+  if (authored_animation) s_voxel.animation_safe = false;
+  if (!castle_animation && !authored_animation && known_animation &&
+      !s_voxel.animation_safe && (changed || animation_changed)) {
     s_voxel.animation_safe = ActionVoxel_AnimationIsPresentationOnly(source,reference,terrain,s_voxel.tiles,width);
     changed |= s_voxel.animation_safe; /* Replace geometry compiled from an unknown frame. */
   }

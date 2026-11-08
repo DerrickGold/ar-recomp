@@ -24,6 +24,11 @@ if [ "$WASM" = on ] && ! command -v "${EMCC:-emcc}" >/dev/null 2>&1; then
   echo "[action-editor] use ACTION_EDITOR_WASM=off for a JavaScript-only build, or auto to build shared previews when available" >&2
   exit 1
 fi
+SHARED_PREVIEWS=off
+if [ "$WASM" = on ] || { [ "$WASM" = auto ] && command -v "${EMCC:-emcc}" >/dev/null 2>&1; }; then
+  "${PYTHON:-python3}" tools/action_editor/build_preview.py --check-compiler
+  SHARED_PREVIEWS=on
+fi
 "${PYTHON:-python3}" tools/generate_effect_defaults.py --check
 
 TMP="$(mktemp -d)"
@@ -36,7 +41,7 @@ trap 'rm -rf "$TMP"' EXIT
    -o "$TMP/export"
 "$TMP/export" "$ROM" "$TMP/rooms.json"
 
-if [ "$WASM" = on ] || { [ "$WASM" = auto ] && command -v "${EMCC:-emcc}" >/dev/null 2>&1; }; then
+if [ "$SHARED_PREVIEWS" = on ]; then
   "${PYTHON:-python3}" tools/action_editor/build_preview.py "$TMP/action-preview.wasm"
   "${PYTHON:-python3}" tools/action_editor/build_compositor.py "$(dirname "$OUT")/ar-renderer-preview.html"
   "${PYTHON:-python3}" tools/action_editor/build.py "$TMP/rooms.json" "$OUT" "$LAYERS" --settings "$VIEW_SETTINGS" --wasm "$TMP/action-preview.wasm" --compositor-href ar-renderer-preview.html --compositor-wasm "$(dirname "$OUT")/ar-renderer-preview.wasm"

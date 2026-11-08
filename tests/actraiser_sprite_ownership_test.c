@@ -253,6 +253,8 @@ static void TestVoxelProps(void) {
       CHECK(o.slots[slot]==kActRaiserSprite_Enemy);
       CHECK(o.prop_owner[slot]==(short_log?0xee0:0));
       CHECK(o.prop_shape[slot]==(short_log?kActRaiserSpriteProp_Log:0));
+      CHECK(o.visual_owner[slot]==0xee0 && o.visual_source[slot]==source && o.visual_animation[slot]==0x4000);
+      CHECK(ActRaiserSpriteOwnership_VisualTag(&o,0xee0)==11);
       CHECK(o.world_x[slot]==1040 && o.world_y[slot]==(int)y);
     }
   }
@@ -271,6 +273,7 @@ static void TestVoxelProps(void) {
     /* Scenario 6 is the unchanged bridge log: the positive control. */
     CHECK(o.valid && o.prop_shape[3]==(scenario==6?kActRaiserSpriteProp_Log:0));
     CHECK(o.prop_owner[3]==(scenario==6?record:0));
+    if(scenario==4 || scenario==5)CHECK(!o.visual_owner[3] && !o.visual_source[3]);
   }
   for(unsigned scenario=0;scenario<7;++scenario) {
     const unsigned room=scenario==1?4:5;
@@ -314,6 +317,8 @@ static void TestVoxelProps(void) {
   ActRaiserSpriteOwnership_RecordActionVisual(0xe3a1,0xba0,0x4000,0x7e,0x48e4,0,0,16,32);
   ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(5,6,shadow);
   CHECK(!ActRaiserSpriteOwnership_Presented(5,6).prop_owner[4]);
+  CHECK(ActRaiserSpriteOwnership_Presented(5,6).visual_owner[4]==0xba0);
+  CHECK(ActRaiserSpriteOwnership_Presented(5,6).visual_source[4]==0xe3a1);
   /* Wall flames attach by their native source family, independently of the
    * animation picture/composition and regional art selection. Nearby static
    * scenery, fire enemies and reused/player slots remain normal native OBJ. */

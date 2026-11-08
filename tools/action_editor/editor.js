@@ -56,6 +56,7 @@ $('#importIni').onchange = async event => {
   const file = event.target.files && event.target.files[0];
   event.target.value = '';
   if (!file) return;
+  if(!VoxelEditor.guard('loading scenery'))return;
   if ((editorHasUnexportedChanges()||BackgroundPolicyEditor.pending()) && !confirm('Loading another scenery INI replaces unsaved scenery edits. Effects stay loaded. Continue?'))
     return;
   try {
@@ -151,7 +152,11 @@ function updateLegend() {
       ? '<b>native stable frame</b> &nbsp; camera sliders or arrows move the view'
         + '<br>frame slider drives CHR, page-cycle, and persistent raster phases'
     : mode === 'shared'
-      ? '<b>drag / arrows</b> pan the room &nbsp; use view controls for zoom and orbit'
+      ? VoxelEditor.editing()&&VoxelEditor.mode()===2
+        ? '<b>click</b> select a face &nbsp; <b>Shift-click</b> add / remove selection'
+          + '<br><b>yellow handle</b> change depth &nbsp; <b>Alt-drag / arrows</b> pan'
+          + '<br><b>Shift + middle-drag</b> rotate &nbsp; <b>wheel</b> zoom &nbsp; <b>Escape</b> clear selection'
+        : '<b>drag / arrows</b> pan &nbsp; <b>Shift + middle-drag</b> rotate &nbsp; <b>wheel</b> zoom'
         + '<br>Frame controls scrub animation in either direction; map edits apply live.'
     : '<b>drag</b> orbit &nbsp; <b>shift-drag / arrows</b> move native camera'
       + '<br><b>wheel</b> zoom &nbsp; <b>r</b> reset orbit';
@@ -334,6 +339,47 @@ $('#editOutlines').onclick = () => {
   if(showEditOutlines)returnToEditedTiles();
   $('#editOutlines').classList.toggle('on',showEditOutlines);refreshEditorFeedback();draw();
 };
+/* Immediate plane controls share the project history. One slider drag is one
+ * operation; snapshots cover only plane settings, never unrelated room drafts. */
+let planeGesture=null;
+const clonePlaneState=value=>JSON.parse(JSON.stringify(value));
+function planeState(target) {
+  const config=roomConfig(target);
+  return clonePlaneState({planes:config.planes,virtual:config.virtual});
+}
+function beginPlaneGesture(control,label) {
+  if(planeGesture&&(planeGesture.control!==control||planeGesture.target!==room||
+      planeGesture.token!==planeToken||planeGesture.bg!==bgIndex))finishPlaneGesture();
+  if(planeGesture)return;
+  commitOp();
+  planeGesture={control,label,target:room,room:roomKey(room),profile:terrainProfile,
+    bg:bgIndex,token:planeToken,before:planeState(room)};
+}
+function finishPlaneGesture() {
+  if(!planeGesture)return;
+  const gesture=planeGesture;planeGesture=null;
+  const after=planeState(gesture.target);
+  if(JSON.stringify(gesture.before)===JSON.stringify(after))return;
+  const {room,profile,bg,token,before,label}=gesture;
+  undoStack.push({label,planes:{room,profile,bg,token,before,after}});
+  if(undoStack.length>kMaxUndo)undoStack.shift();
+  redoStack.length=0;refreshHistoryButtons();
+}
+function restorePlaneHistory(operation,which) {
+  const index=DATA.rooms.findIndex(target=>roomKey(target)===operation.room);
+  if(index<0||!operation[which])return false;
+  terrainProfile=operation.profile;room=terrainRoom(DATA.rooms[index],terrainProfile);
+  const state=clonePlaneState(operation[which]),config=roomConfig(room);
+  config.planes=state.planes;config.virtual=state.virtual;
+  $('#room').value=String(index);setLayer(operation.bg);
+  planeToken=operation.token;markEditorChanged();glDirty=true;
+  refreshVirtualControls();refreshPlaneControls();refreshFramingControls();draw();return true;
+}
+for(const id of ['virtualZ','virtualOrder','virtualAlpha','planeZ','planeOrder',
+    'planeAlpha','planeDepth','planeCopies']) {
+  for(const event of ['change','blur'])$('#'+id).addEventListener(event,finishPlaneGesture);
+}
+for(const event of ['pointerup','pointercancel','blur'])window.addEventListener(event,finishPlaneGesture);
 let syncingVirtualControls = false;
 function refreshVirtualControls() {
   if (!room) return;
@@ -350,23 +396,27 @@ function refreshVirtualControls() {
 }
 $('#virtualZ').oninput = event => {
   if (syncingVirtualControls) return;
+  beginPlaneGesture('virtualZ','far-plane depth');
   const v=roomConfig(room).virtual[bgIndex]; v.setZ=true; v.z=Number(event.target.value)/100;
   markEditorChanged(); glDirty=true; refreshVirtualControls(); draw();
 };
 $('#virtualOrder').oninput = event => {
   if (syncingVirtualControls) return;
+  beginPlaneGesture('virtualOrder','far-plane priority');
   const v=roomConfig(room).virtual[bgIndex]; v.setOrder=true; v.order=Number(event.target.value);
   markEditorChanged(); glDirty=true; refreshVirtualControls(); draw();
 };
 $('#virtualAlpha').oninput = event => {
   if (syncingVirtualControls) return;
+  beginPlaneGesture('virtualAlpha','far-plane opacity');
   const v=roomConfig(room).virtual[bgIndex]; v.setAlpha=true; v.alpha=Number(event.target.value);
   markEditorChanged(); glDirty=true; refreshVirtualControls(); draw();
 };
 $('#virtualReset').onclick = () => {
+  beginPlaneGesture('virtualReset','reset far-plane settings');
   const v=roomConfig(room).virtual[bgIndex];
   v.setZ=v.setOrder=v.setAlpha=false;
-  markEditorChanged(); glDirty=true; refreshVirtualControls(); draw();
+  markEditorChanged(); glDirty=true; refreshVirtualControls(); draw();finishPlaneGesture();
 };
 let syncingPlaneControls=false;
 function selectedPlaneEdit() {
@@ -431,29 +481,31 @@ function planeChanged() {
   markEditorChanged();glDirty=true;refreshPlaneControls();refreshFramingControls();draw();
 }
 $('#planeSelect').onchange=event=>{
+  finishPlaneGesture();
   planeToken=event.target.value;
   const nextBg=planeToken.startsWith('bg2')?1:0;
   if(nextBg!==bgIndex&&room.bg[nextBg])setLayer(nextBg);
   else {refreshPlaneControls();draw();}
 };
 $('#planeZ').oninput=event=>{
-  if(syncingPlaneControls)return;const p=selectedPlaneEdit();
+  if(syncingPlaneControls)return;beginPlaneGesture('planeZ','plane depth');const p=selectedPlaneEdit();
   p.setZ=true;p.z=Number(event.target.value)/100;planeChanged();
 };
 $('#planeOrder').oninput=event=>{
-  if(syncingPlaneControls)return;const p=selectedPlaneEdit();
+  if(syncingPlaneControls)return;beginPlaneGesture('planeOrder','plane priority');const p=selectedPlaneEdit();
   p.setOrder=true;p.order=Number(event.target.value);planeChanged();
 };
 $('#planeAlpha').oninput=event=>{
-  if(syncingPlaneControls)return;const p=selectedPlaneEdit();
+  if(syncingPlaneControls)return;beginPlaneGesture('planeAlpha','plane opacity');const p=selectedPlaneEdit();
   p.setAlpha=true;p.alpha=Number(event.target.value);planeChanged();
 };
 $('#planeStrategy').onchange=event=>{
-  if(syncingPlaneControls)return;setPlaneStrategy(selectedPlaneEdit(),event.target.value);
-  planeChanged();
+  if(syncingPlaneControls)return;beginPlaneGesture('planeStrategy','plane shape');
+  setPlaneStrategy(selectedPlaneEdit(),event.target.value);planeChanged();finishPlaneGesture();
 };
 $('#planeDepth').oninput=event=>{
   if(syncingPlaneControls)return;
+  beginPlaneGesture('planeDepth','plane shape depth');
   const p=selectedPlaneEdit(),strategy=strategyOfPlane(p);
   const value=Number(event.target.value)/100;
   if(value===0){clearPlaneShape(p);planeChanged();return;}
@@ -466,6 +518,7 @@ $('#planeDepth').oninput=event=>{
 };
 $('#planeCopies').oninput=event=>{
   if(syncingPlaneControls)return;
+  beginPlaneGesture('planeCopies','plane copies');
   const p=selectedPlaneEdit(),strategy=strategyOfPlane(p),value=Number(event.target.value);
   if(strategy==='voxel'){p.setVoxelCopies=true;p.voxelCopies=value;}
   else if(strategy==='stack'){
@@ -475,15 +528,20 @@ $('#planeCopies').oninput=event=>{
   planeChanged();
 };
 $('#planeDirection').onchange=event=>{
-  if(syncingPlaneControls)return;const p=selectedPlaneEdit();
-  p.setStackDirection=true;p.stackDirection=event.target.value;planeChanged();
+  if(syncingPlaneControls)return;beginPlaneGesture('planeDirection','plane direction');const p=selectedPlaneEdit();
+  p.setStackDirection=true;p.stackDirection=event.target.value;planeChanged();finishPlaneGesture();
 };
 $('#planeResetLayout').onclick=()=>{
-  const p=selectedPlaneEdit();p.setZ=p.setOrder=p.setAlpha=false;planeChanged();
+  beginPlaneGesture('planeResetLayout','reset plane layout');
+  const p=selectedPlaneEdit();p.setZ=p.setOrder=p.setAlpha=false;planeChanged();finishPlaneGesture();
 };
-$('#planeResetShape').onclick=()=>{clearPlaneShape(selectedPlaneEdit());planeChanged();};
+$('#planeResetShape').onclick=()=>{
+  beginPlaneGesture('planeResetShape','reset plane shape');
+  clearPlaneShape(selectedPlaneEdit());planeChanged();finishPlaneGesture();
+};
 $('#planeResetAll').onclick=()=>{
-  roomConfig(room).planes[planeToken]=emptyPlane();planeChanged();
+  beginPlaneGesture('planeResetAll','reset plane settings');
+  roomConfig(room).planes[planeToken]=emptyPlane();planeChanged();finishPlaneGesture();
 };
 $('#undoBtn').onclick = undo;
 $('#redoBtn').onclick = redo;
@@ -527,6 +585,16 @@ window.addEventListener('keydown', e => {
   const accel = e.metaKey || e.ctrlKey;
   if(accel&&e.key.toLowerCase()==='s'){e.preventDefault();ProjectEditor.save();return;}
   if(EffectEditor.modalOpen())return;
+  const historyKey=accel&&['z','y'].includes(e.key.toLowerCase());
+  const nativeText=e.target.isContentEditable||e.target.tagName==='TEXTAREA'||
+    e.target.tagName==='INPUT'&&!['number','range','checkbox','radio','button','submit'].includes(e.target.type);
+  if(historyKey&&!nativeText) {
+    // Immediate controls remain focused after edits, including controls moved
+    // into Settings. Their Undo belongs to the project/draft, while text
+    // editors keep the browser's ordinary text-editing Undo.
+    if(!tileMenu.hidden||!$('#settingsMenu').hidden||exportDialog.open||$('#docsDlg').open)return;
+    e.preventDefault();e.key.toLowerCase()==='y'||e.shiftKey?redo():undo();return;
+  }
   if(!tileMenu.hidden||exportDialog.open||$('#docsDlg').open||EditorLayout.modalOpen())return;
   if (['SELECT','INPUT','TEXTAREA'].includes(e.target.tagName)||e.target.isContentEditable) return;
   if(e.key==='Escape'&&brush==='framing') {
@@ -537,10 +605,6 @@ window.addEventListener('keydown', e => {
   }
   if(accel&&e.key.toLowerCase()==='c'&&mode==='2d'){e.preventDefault();if(brush==='effects'||EffectEditor.hasMapSelection())EffectEditor.copyEffects();else copyTiles();return;}
   if(accel&&e.key.toLowerCase()==='v'){e.preventDefault();if(!EffectEditor.startEffectPaste())startStamp();return;}
-  if (accel && (e.key === 'z' || e.key === 'Z')) {
-    e.preventDefault(); e.shiftKey ? redo() : undo(); return;
-  }
-  if (accel && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
   if (e.key>='1' && e.key<='3') setBand(Number(e.key)-1);
   if (e.key === 'f') { fitView(); draw(); }
   /* It is easy to orbit until nothing is on screen, and without this there is
@@ -575,6 +639,9 @@ function setMode(m) {
   $('#modeNative').classList.toggle('on', m==='native');
   $('#mode3d').classList.toggle('on', m==='3d');
   $('#modeShared').classList.toggle('on', m==='shared');
+  $('#otherViews').classList.toggle('active',m==='native'||m==='3d');
+  $('#otherViewsLabel').textContent=m==='native'?'Original frame':m==='3d'?'Depth inspection':'More views';
+  $('#viewControls').hidden=m==='shared';
   $('#sharedGl').style.display = m==='shared' ? 'block' : 'none';
   $('#sharedControls').hidden = m!=='shared';
   $('#hud').classList.toggle('shared', m==='shared');
@@ -589,8 +656,11 @@ function setMode(m) {
   glc.style.display = m==='3d' ? 'block' : 'none';
   refreshNativeCameraControls();invalidateGameComposite();
   refreshEditorFeedback();glDirty = true; draw();
+  VoxelEditor.refresh();
 }
 function setLayer(i) {
+  if(i!==bgIndex&&!VoxelEditor.guard('changing background layers'))return;
+  finishPlaneGesture();
   if(EffectEditor.modalOpen())EffectEditor.finishModal(false);
   finishFramingDrag();
   if(i!==0&&brush==='framing')$('#bSelect').onclick();
@@ -616,6 +686,7 @@ function setLayer(i) {
   refreshTilePalette();
   BackgroundPolicyEditor.refresh();
   BackgroundReset.refresh();
+  VoxelEditor.refresh();
   fitView(); tally(); draw();
 }
 const sel = $('#room');
@@ -633,7 +704,9 @@ DATA.rooms.forEach((r, i) => {
     + `${r.raster ? `/R${r.raster}` : ''}]`;
   sel.appendChild(o);
 });
-sel.onchange = () => { room = terrainRoom(DATA.rooms[Number(sel.value)]);
+sel.onchange = () => {
+  if(!VoxelEditor.guard('changing rooms')){sel.value=String(DATA.rooms.findIndex(r=>sceneIdentity(r)===sceneIdentity(room)));return;}
+  VoxelEditor.clearLoaded();room = terrainRoom(DATA.rooms[Number(sel.value)]);
   nativeCamera.x=nativeCamera.y=0;nativeDecodedKey='';native2dCache=null;setLayer(0); };
 const terrainSelect = $('#terrain');
 TERRAIN_PROFILES.forEach(profile => {
@@ -654,6 +727,8 @@ function refreshTerrainControls() {
     : 'This layout and its metatile definitions match US.');
 }
 terrainSelect.onchange = () => {
+  if(!VoxelEditor.guard('changing terrain')){terrainSelect.value=String(terrainProfile);return;}
+  VoxelEditor.clearLoaded();
   commitOp();
   terrainProfile = Number(terrainSelect.value);
   room = terrainRoom(DATA.rooms[Number(sel.value)]);
@@ -667,6 +742,7 @@ new ResizeObserver(() => {
   if (!fitted) fitView();
   draw();
 }).observe($('.view'));
+VoxelEditor.init();
 loadIniText(sourceIniText,sourceIniName);
 setLayer(0);
 setBand(2);

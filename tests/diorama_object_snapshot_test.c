@@ -47,6 +47,9 @@ static DioramaObjectSnapshotView Fixture(void) {
   v.voxel_sprites.sprites[0]=(ActionVoxelSprite){.owner=0x09a0,.shape=4,.priority=2,
     .width=3,.height=2,.owner_tag=5,.component_x=-4,.component_y=1,
     .solid_y=1,.solid_height=1,.join_left=2,.join_right=1,.x=2,.y=2,.ambient=.625f,
+    .source=0xe2d1,.parent_source=0xa686,.animation=0x4000,.generation=0xfedcba98,
+    .presentation_mode=kDioramaVoxelObject_Extruded,.presentation_fields=15,
+    .depth_offset=-.1f,.thickness=.3f,.width_scale=.5f,.join_top=5,.join_bottom=7,
     .rows={5,7}};
   v.voxel_sprites.sprites[1]=(ActionVoxelSprite){.owner=0x0aa0,.shape=3,.priority=0,
     .width=64,.height=32,.owner_tag=128,.component_x=64,.component_y=0,
@@ -89,6 +92,10 @@ int main(void) {
   }
   assert(v->voxel_sprites.count==2 && v->voxel_sprites.sprites[1].rows[31]==UINT64_MAX);
   assert(v->voxel_sprites.sprites[1].owner_tag==128 && v->voxel_sprites.sprites[1].x==-10);
+  assert(v->voxel_sprites.sprites[0].source==0xe2d1 && v->voxel_sprites.sprites[0].parent_source==0xa686);
+  assert(v->voxel_sprites.sprites[0].depth_offset==-.1f && v->voxel_sprites.sprites[0].width_scale==.5f);
+  assert(v->voxel_sprites.sprites[0].join_top==5 && v->voxel_sprites.sprites[0].join_bottom==7);
+  assert(v->voxel_sprites.sprites[0].generation==0xfedcba98);
   assert(v->atlas_height==136 && v->atlas_pitch==264);
   assert(v->actor_count==2 && v->actors[0].generation==0xabcdef01 && v->actors[0].wake.x==430.5f);
   assert(v->actors[0].player && v->actors[1].vx==-32768 && v->actors[1].flip==255);
@@ -103,16 +110,17 @@ int main(void) {
   for(size_t n=0;n<size;n+=113)Rejected(n,&owned);
   Rejected(size+1,&owned);
   const struct {size_t offset;uint32_t value;} bad[]={
-    {4,2},{16,64},{20,8},{24,9},{28,3},{32,3},{36,65536},{40,399},
+    {4,3},{16,64},{20,8},{24,9},{28,3},{32,3},{36,65536},{40,399},
     {68,641},{72,353},{76,2},{80,16},{84,17},{88,81},{92,34},{120,1},
-    {128,0},{132,9},{136,4},{140,65},{144,33},{148,129},
+    {128,0},{132,10},{136,4},{140,65},{144,33},{148,129},
     {176,0x7fc00000},{180,0x3f000000},{184,0x7f800000},
-    {188,8}, /* p0 width3 cannot own bit3. */
-    {128+2*316+16*4,4}, /* native actor priority */
-    {128+2*316+17*4,2}, /* native actor visible */
-    {128+2*316+25*4,0x7fc00000}, /* native actor wake strength */
-    {128+2*316+2*108,8}, /* too many runs for13pixels */
-    {128+2*316+2*108+4,0}, /* zero-length run */
+    {200,3},{204,16},{216,0}, /* mode, flags and explicit zero width */
+    {220,8},{240,8}, /* p0 width3 cannot own bit3 in joins or rows. */
+    {128+2*368+16*4,4}, /* native actor priority */
+    {128+2*368+17*4,2}, /* native actor visible */
+    {128+2*368+25*4,0x7fc00000}, /* native actor wake strength */
+    {128+2*368+2*108,8}, /* too many runs for13pixels */
+    {128+2*368+2*108+4,0}, /* zero-length run */
   };
   for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);++i)BadWord(size,bad[i].offset,bad[i].value,&owned);
   memcpy(packet,original,size);
@@ -125,6 +133,26 @@ int main(void) {
   assert(DioramaObjectSnapshot_Encode(&torch,packet,sizeof(packet),&torch_size));
   assert(torch_size==size && DioramaObjectSnapshot_Decode(packet,torch_size,&owned));
   assert(owned.view.voxel_sprites.sprites[0].shape==8);
+  torch.voxel_sprites.sprites[0].shape=kActionVoxelSpriteGenericShape;
+  assert(DioramaObjectSnapshot_Encode(&torch,packet,sizeof(packet),&torch_size));
+  assert(DioramaObjectSnapshot_Decode(packet,torch_size,&owned));
+  assert(owned.view.voxel_sprites.sprites[0].shape==kActionVoxelSpriteGenericShape);
+  /* Version 1's fixed 316-byte prop contract remains readable: its first
+   * 60 bytes are followed directly by 32 silhouette rows. No authored facts
+   * or joins existed there. Keep original actor/plane payloads byte-exact. */
+  memcpy(packet,original,128);
+  for(unsigned i=0;i<2;++i) {
+    memcpy(packet+128+i*316,original+128+i*368,60);
+    memcpy(packet+128+i*316+60,original+128+i*368+112,256);
+  }
+  memcpy(packet+128+2*316,original+128+2*368,size-128-2*368);
+  const size_t legacy_size=size-104;
+  Put(4,1);Put(8,legacy_size);Rehash(legacy_size);
+  assert(DioramaObjectSnapshot_Decode(packet,legacy_size,&owned));
+  assert(!owned.view.voxel_sprites.sprites[0].source && owned.view.voxel_sprites.sprites[0].width_scale==1);
+  assert(!owned.view.voxel_sprites.sprites[0].generation);
+  assert(owned.view.voxel_sprites.sprites[1].rows[31]==UINT64_MAX);
+  assert(owned.view.actors[0].generation==source.actors[0].generation);
 
   /* All validation failures are transactional on the encoder too. */
   memset(packet,0xa5,32);again=9;

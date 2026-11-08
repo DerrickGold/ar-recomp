@@ -11,6 +11,7 @@ function exportedRoomCopied(snapshot) {
     $('#exportStatus').textContent='Copied. Replace this section in diorama-layers.ini, save it, and restart the game.';
 }
 function openRoomExport() {
+  if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('exporting scenery'))return;
   closeTileMenu();
   $('#exportTitle').textContent=`Export ${roomSectionHeader(room)}`;
   $('#exportInstructions').textContent=`Replace the existing ${roomSectionHeader(room)} section with this block, up to the next [section] header. If repeated, replace all copies with one block; if missing, append it. Keep camera-specific sections.`;
@@ -49,6 +50,7 @@ async function copyRoomExport() {
 }
 function downloadFullIni() {
   try {
+    if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('exporting scenery'))return;
     const text=mergeDioramaIni();
     const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));
     const a=document.createElement('a');

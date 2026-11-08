@@ -8,6 +8,9 @@
 #include "room_preview_native.h"
 #include "receiver_preview.h"
 #include "object_preview.h"
+#include "voxel_pick.h"
+#include "action/action_voxel.h"
+#include "render/scene3d_math.h"
 #include "action/action_effect_source.h"
 #include "action/action_effect_mask_texture.h"
 #include "diorama/diorama_snapshot.h"
@@ -27,12 +30,17 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdarg.h>
 
 ArRenderDevice *DioramaPreview_Device(void);
 uint8_t *DioramaPreview_Input(void);
 unsigned DioramaPreview_Capacity(void);
 void DioramaPreview_Reset(void);
 bool DioramaPreview_Begin(int width, int height);
+#ifdef __EMSCRIPTEN__
+const struct DioramaDepthSink *DioramaPreview_DepthBegin(void);
+#endif
 
 /* Map guides use the material's actual layout, without a second JS sampler.
  * Results are borrowed through the existing synchronous transport buffer:
@@ -68,12 +76,21 @@ static EditorRoomCamera s_camera;
 static DioramaCameraPose s_baseline = {.distance = 3.25f};
 static int s_aspect_mode = 1;
 static bool s_dynamic_camera = true;
+static DioramaVoxelInspection s_voxel_inspection;
 
 /* 0 native 4:3, 1 fixed wide ratio, 2 Auto/custom monitor, 3 Stretch.
  * Capture budgets are independent of the display crop, just as in the game. */
 int RoomPreview_Set3DMode(int mode) {
   if (!s_room || mode < kAction3D_Off || mode > kAction3D_Voxel) return 0;
-  EditorRoomScene_Set3DMode(s_room, (Action3DMode)mode);
+  if(EditorRoomScene_3DMode(s_room)!=(Action3DMode)mode) {
+    EditorRoomScene_Set3DMode(s_room, (Action3DMode)mode);
+    s_cached=false;
+  }
+  return 1;
+}
+int RoomPreview_SetInspection(int mode) {
+  if (mode < kDioramaVoxelInspect_All || mode > kDioramaVoxelInspect_Cutaway) return 0;
+  s_voxel_inspection=(DioramaVoxelInspection)mode;
   return 1;
 }
 int RoomPreview_SetView(float distance, float yaw, float pitch, int aspect_mode, int dynamic_camera) {
@@ -154,6 +171,7 @@ static unsigned s_effect_vertices;
 static EditorReceiverPreviewSettings s_receivers;
 static bool s_receiver_rim;
 static DioramaProjection s_receiver_projection;
+#include "room_preview_voxel.inc"
 static ActionReceiverLighting s_receiver;
 int RoomPreview_LoadPlayer(unsigned size) {
   return size<=DioramaPreview_Capacity() && EditorReceiverPreview_Load(DioramaPreview_Input(),size);
@@ -356,6 +374,7 @@ uint32_t RoomPreview_EffectHash(void) { return EditorRoomScene_EffectHash(s_room
 uint32_t RoomPreview_Hash(void) { return EditorRoomScene_Hash(s_room); }
 unsigned RoomPreview_Width(void) { return s_room ? EditorRoomScene_Width(s_room) : 0; }
 unsigned RoomPreview_Height(void) { return s_room ? EditorRoomScene_Height(s_room) : 0; }
+const char *RoomPreview_SceneryError(void) { return s_room ? EditorRoomScene_SceneryError(s_room) : "No room is loaded."; }
 int RoomPreview_CameraX(void) { return s_cached ? s_x : 0; }
 unsigned RoomPreview_Uploads(void) { return s_uploads; }
 void RoomPreview_ClearObjects(void) {
@@ -399,6 +418,7 @@ unsigned RoomPreview_ObjectInfo(void) {
   memcpy(DioramaPreview_Input(),info,sizeof(info));return sizeof(info)/sizeof(*info);
 }
 void RoomPreview_Reset(void) {
+  s_voxel_pick_valid=false;s_voxel_face_count=0;s_voxel_pick_overflow=false;
   ArRenderDevice *device = DioramaPreview_Device();
   EditorObjectPreview_Reset(&s_objects,device);
 #ifndef __EMSCRIPTEN__
@@ -434,6 +454,7 @@ int RoomPreview_Configure(unsigned size) {
   DioramaPreview_Input()[size] = 0;
   if (!EditorRoomScene_Configure(s_room, (char *)DioramaPreview_Input())) return 0;
   s_cached = false;
+  s_voxel_pick_valid=false;
   return 1;
 }
 /* Two 49-word records: 17 layer fields followed by four 8-word bands.
@@ -809,6 +830,7 @@ int RoomPreview_RenderFlat(int x, int y, uint32_t frame, int width, int height, 
 
 int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     int width, int height, float distance, float yaw, float pitch, int skybox, int pixel_aspect) {
+  s_voxel_pick_valid=false;s_voxel_face_count=0;s_voxel_pick_overflow=false;
   if (!s_room || !(distance >= 0.5f && distance <= 2.5f) || !(yaw >= -0.7f && yaw <= 0.7f) ||
       !(pitch >= -0.7f && pitch <= 0.7f) || skybox < 0 || skybox > 2 ||
       pixel_aspect < 0 || pixel_aspect > 1 || extra < 0 || extra > 128 ||
@@ -818,6 +840,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   EditorRoomScene_EnableEffects(s_room,s_effects_enabled);
   s_receiver_projection.valid=false;
   DioramaView view = PreviewView(width, height, pixel_aspect, distance, yaw, pitch);
+  s_voxel_view_x=view.viewport.x;s_voxel_view_y=view.viewport.y;
   const DioramaView baseline = PreviewView(width, height, pixel_aspect, 1, 0, 0);
   EditorRoomCamera camera;
   if (!EditorRoomScene_ResolveCamera(s_room, x, y, frame, extra, vertical, &baseline, skybox, &camera)) return 0;
@@ -850,6 +873,10 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   DioramaScene scene = *EditorRoomScene_Scene(s_room);
   scene.native_bloom_clock = (uint16_t)frame;
   DioramaRenderOptions options = *scene.render;
+  options.voxel_observe_face=ObserveVoxelFace;
+  options.voxel_observer_userdata=NULL;
+  options.voxel_inspection=EditorRoomScene_3DMode(s_room)==kAction3D_Voxel
+      ? s_voxel_inspection : kDioramaVoxelInspect_All;
   if (!s_show_backdrop) options.visible_planes &= ~(UINT32_C(1) << kDioramaPlane_Backdrop);
   options.rim_light=s_receiver_rim;
   options.resolve_skybox = ResolveSkybox;
@@ -907,17 +934,20 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   }
   DioramaProjection projection;
   DioramaAstralRift_Attach(s_effects_enabled, DioramaPreview_Device(), &scene);
-#ifndef __EMSCRIPTEN__
   /* Match production's ActionVoxel contract. The specialized curved-tree
    * enclosure keeps its established multi-plane visibility policy. */
   if (EditorRoomScene_3DMode(s_room)==kAction3D_Voxel && scene.voxel_geometry) {
+#ifdef __EMSCRIPTEN__
+    scene.depth_sink=DioramaPreview_DepthBegin();
+#else
     scene.depth_sink=DioramaDepthGpu_Begin(DioramaPreview_Device());
+#endif
     if (!scene.depth_sink) return 0;
   }
-#endif
   if (!PresentationOutcome_IsUsable(Diorama_Composite(
       DioramaPreview_Device(), &capture, &view, &scene, &projection)) || !effects.valid) return 0;
   s_receiver_projection=projection;
+  s_voxel_pick_valid=EditorRoomScene_3DMode(s_room)==kAction3D_Voxel;
   if (!s_effects_enabled) return 1;
   effects.projection.diorama_projection = &projection;
   if(s_source_draw) {

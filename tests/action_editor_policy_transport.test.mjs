@@ -1,5 +1,6 @@
 /* Policy transport integration with real C/WASM and stubbed graphics services. */
 import assert from 'node:assert/strict';
+import {attachDepthImports} from './action_editor_depth_imports.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 const [htmlFile,wasmFile]=process.argv.slice(2);
@@ -16,6 +17,7 @@ const imports={create:()=>++allocations,destroy:()=>{allocations--;},update:()=>
   const elements=new Map();
   function element(id) {
     if(!elements.has(id))elements.set(id,{value:'0',textContent:'',listeners:{},
+      classList:{toggle(){}},setAttribute(){},
       addEventListener(name,callback){this.listeners[name]=callback;},
       replaceChildren(){},append(){}});
     return elements.get(id);
@@ -27,7 +29,7 @@ const imports={create:()=>++allocations,destroy:()=>{allocations--;},update:()=>
     window:{__ROOM_PREVIEW_WASM__:fs.readFileSync(wasmFile).toString('base64')},
     document:{querySelector:element,createElement:()=>({}),addEventListener(){}},$:element,
     ActionWebGL2Backend:class {
-      constructor(){this.imports=imports;this.gl={MAX_TEXTURE_SIZE:1,getParameter:()=>16384};}
+      constructor(){this.imports=attachDepthImports({...imports},()=>this.memory);this.gl={MAX_TEXTURE_SIZE:1,getParameter:()=>16384};}
       dispose(){}
     },
     WebAssembly,Uint8Array,Uint32Array,Int32Array,DataView,TextEncoder,TextDecoder,
@@ -45,6 +47,7 @@ const imports={create:()=>++allocations,destroy:()=>{allocations--;},update:()=>
     draw:readyResolve,refreshEditorFeedback(){},
   });
   vm.runInContext('function roomSectionIni(){return currentIni;}',context);
+  vm.runInContext('let previewMode=1;const VoxelEditor={mode:()=>previewMode,previewSection:(_room,section)=>section};',context);
   vm.runInContext(fs.readFileSync('tools/action_editor/shared_preview.js','utf8'),context);
   vm.runInContext(fs.readFileSync('tools/action_editor/bg_policy_editor.js','utf8'),context);
   vm.runInContext(fs.readFileSync('tools/action_editor/shared_room_preview.js','utf8'),context);
@@ -55,6 +58,21 @@ const imports={create:()=>++allocations,destroy:()=>{allocations--;},update:()=>
     })]);
   } finally {clearTimeout(readyTimeout);}
   const run=code=>vm.runInContext(code,context);
+  assert.equal(run('SharedRoomPreview.inspection()'),0,'normal rendering is the initial preview');
+  run('SharedRoomPreview.setInspection(1)');
+  assert.equal(run('SharedRoomPreview.inspection()'),1);
+  assert.equal(element('#sharedInspection').value,'1');
+  for(const invalid of [-1,3,1.5,'bad'])
+    assert.throws(()=>run(`SharedRoomPreview.setInspection(${JSON.stringify(invalid)})`),/inspection mode/);
+  assert.equal(run('SharedRoomPreview.focusVoxelSelection(null)'),false);
+  run("SharedRoomPreview.setCameraPreset('left')");
+  assert.equal(Number(element('#sharedYaw').value),-.3);
+  run("SharedRoomPreview.setCameraPreset('right')");
+  assert.equal(Number(element('#sharedYaw').value),.3);
+  run("SharedRoomPreview.setCameraPreset('front')");
+  assert.equal(Number(element('#sharedYaw').value),0);
+  assert.throws(()=>run("SharedRoomPreview.setCameraPreset('invalid')"),/camera preset/);
+  run('SharedRoomPreview.setInspection(0)');
   const outputSize=(choice,width=3440,height=1440,areaWidth=1200,areaHeight=700)=>
     JSON.parse(run(`JSON.stringify(sharedPreviewOutputSize(${JSON.stringify(choice)},${width},${height},${areaWidth},${areaHeight}))`));
   for(const [aspect,width,height] of [[4/3,960,720],[16/9,960,540],[16/10,960,600],
@@ -83,6 +101,8 @@ const imports={create:()=>++allocations,destroy:()=>{allocations--;},update:()=>
   const authored='[layers:07:03]\nbg1-policy = edge:world horizontal:available bands:0\n';
   run(`SharedRoomPreview.validateScenery(${JSON.stringify(authored)});currentIni=${JSON.stringify(authored)};SharedRoomPreview.invalidate();`);
   const before=read();assert.equal(before[0].edge,'world');assert.equal(before[0].horizontal.mode,'available');
+  run('previewMode=2');assert.equal(read()[0].edge,'mirror','Voxel keeps its semantic background policy before a render');
+  run('previewMode=1');assert.deepEqual(read(),before,'ordinary Diorama restores authored policy before a render');
   run(`SharedRoomPreview.validatePolicyDocument(${JSON.stringify(authored)})`);
   assert.deepEqual(read(),before,'all-terrain import validation restores the selected room and edits');
   const invalid='[layers:01:01]\nbg2-policy = bands:1\nbg2-policy-band = index:0 anchor:world rows:0,65535 edge:mirror motion:normal horizontal:inherit\n';

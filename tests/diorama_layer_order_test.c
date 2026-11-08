@@ -148,7 +148,8 @@ static void TestNonOrderEditDoesNotReorder(void) {
       {"both", kDioramaPlane_Bg2Hi, true, true},
   };
   for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
-    DioramaLayerOrderTable table;
+    /* Large fixed room manifests must not double this test's stack frame. */
+    static DioramaLayerOrderTable table;
     memset(&table, 0, sizeof(table));
     DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
     DioramaPlaneOverride *o = &room->planes[cases[c].plane];
@@ -819,7 +820,7 @@ static void TestVoxelResolve(void) {
 
   /* `slices:` with no `voxel:` is inert rather than inventing a depth -- but it
    * still marks the room active so the value survives a round trip. */
-  DioramaLayerOrderTable lone;
+  static DioramaLayerOrderTable lone;
   memset(&lone, 0, sizeof(lone));
   DioramaRoomOverride *r2 = DioramaLayerOrder_FindOrAdd(&lone, 0x02, 0x01);
   r2->planes[SR_PPU_OVERLAY_BG1].set_voxel_copies = true;
@@ -2133,7 +2134,335 @@ static void TestTrunkSettings(void) {
   CHECK(!DioramaTrunk_ResolveForMode(kAction3D_Voxel,6,6,&room).enabled);
 }
 
+
+static void TestVoxelAuthoringCodec(void) {
+  DioramaRoomOverride room = {.used=true, .map_group=2, .map_number=1};
+  const char *error = NULL;
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "voxel-cell:all = cell:-1,511 front:-0.4 back:0.8 width:24 offset:-4 backing:fill "
+      "back-art:1,8410,8411,C412,C413,8,0,8 top-art:0,0010,0011,0012,0013,0,0,16 side-art:auto", &error));
+  CHECK(error == NULL && room.voxel.cell_count == 1);
+  CHECK(room.voxel.cells[0].fields == 255 && room.voxel.cells[0].terrain_mask == 7);
+  CHECK(room.voxel.cells[0].backing_art.words[3] == 0xC413 && !room.voxel.cells[0].side_art.set);
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "voxel-object:jp+eu = source:A123 parent:9123 animation:0000 mode:extruded "
+      "offset:-0.4 thickness:0.8 width:0.125", &error));
+  CHECK(room.voxel.object_count == 1 && room.voxel.objects[0].fields == 15);
+  CHECK(DioramaLayerOrder_RoomIsActive(&room));
+  char text[2048];
+  CHECK(DioramaLayerOrder_FormatRoom(&room, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, "voxel-cell:us+jp+eu =") != NULL);
+  DioramaRoomOverride copy = {.used=true, .map_group=2, .map_number=1};
+  char *line = strtok(text, "\n");
+  while (line) {
+    if (line[0] != '[') CHECK(DioramaLayerOrder_ParseLine(&copy, line, &error));
+    line = strtok(NULL, "\n");
+  }
+  CHECK(!memcmp(&room.voxel, &copy.voxel, sizeof(room.voxel)));
+  const char *invalid[] = {
+    "voxel-cell = cell:0,0",
+    "voxel-cell = cell:0,0 front:nan",
+    "voxel-cell = cell:0,0 back:inf",
+    "voxel-cell = cell:0,0 front:.3 back:.2",
+    "voxel-cell = cell:0,0 width:0",
+    "voxel-cell = cell:0,0 offset:33",
+    "voxel-cell = cell:0,0 front:.9",
+    "voxel-cell = cell:0,0 width:1 width:2",
+    "voxel-cell = cell:0,0 auto:1 width:2",
+    "voxel-cell = cell:0,0 top-art:2,0000,0000,0000,0000,0,0,16",
+    "voxel-cell = cell:0,0 top-art:0,10000,0000,0000,0000,0,0,16",
+    "voxel-cell = cell:0,0 top-art:0,0000,0000,0000,0000,0,0,12",
+    "voxel-cell = cell:0,0 top-art:0,0000,0000,0000,0000,9,0,8",
+    "voxel-cell = cell:512,0 width:12",
+    "voxel-cell = cell:0,-513 width:12",
+    "voxel-cell = cell:0,0 backing:invalid",
+    "voxel-cell = cell:0,0 unsupported:1",
+    "voxel-cell:moon = cell:0,0 auto:1",
+    "voxel-object = source:0000 mode:flat",
+    "voxel-object = source:10000 mode:flat",
+    "voxel-object = source:ZZZZ mode:flat",
+    "voxel-object = source:1234",
+    "voxel-object = source:1234 mode:unknown",
+    "voxel-object = source:1234 parent:1 parent:2 mode:flat",
+    "voxel-object = source:1234 mode:flat mode:extruded",
+    "voxel-object = source:1234 thickness:-.1",
+    "voxel-object = source:1234 width:4.1",
+    "voxel-object = source:1234 offset:-.5",
+    "voxel-object = source:1234 width:nan"
+  };
+  for (unsigned i = 0; i < sizeof(invalid) / sizeof(*invalid); ++i) {
+    CHECK(!DioramaLayerOrder_ParseLine(&copy, invalid[i], &error));
+    CHECK(error != NULL && !memcmp(&room.voxel, &copy.voxel, sizeof(room.voxel)));
+  }
+  const uint64_t hash = DioramaVoxelEdits_Hash(1, &copy.voxel);
+  copy.voxel.cells[0].side_art.words[0] = 0x9999; /* auto art has no latent dependency. */
+  CHECK(DioramaVoxelEdits_Hash(1, &copy.voxel) == hash);
+  copy.voxel.cells[0].backing_art.words[0] ^= 1;
+  CHECK(DioramaVoxelEdits_Hash(1, &copy.voxel) != hash);
+  copy.voxel = room.voxel;
+  copy.voxel.objects[0].width_scale = 1;
+  CHECK(DioramaVoxelEdits_Hash(1, &copy.voxel) != hash);
+}
+
+static void TestVoxelAuthoringRegionsAndLimits(void) {
+  DioramaRoomOverride room = {.used=true, .map_group=2, .map_number=1}, resolved = {0};
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-cell:all = cell:1,2 front:.1 width:24", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-cell:jp = cell:1,2 auto:1", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-object:all = source:1234 mode:extruded", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-object:all = source:1234 parent:2345 mode:flat", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-object:jp = source:1234 mode:auto", NULL));
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 0, &resolved));
+  CHECK(resolved.voxel.cell_count == 1 && resolved.voxel.cells[0].fields == 5);
+  CHECK(DioramaVoxelEdits_Object(&resolved.voxel, 0x1234, 0x2345, 0)->mode == kDioramaVoxelObject_Flat);
+  CHECK(DioramaVoxelEdits_Object(&resolved.voxel, 0x1234, 0, 0)->mode == kDioramaVoxelObject_Extruded);
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 1, &resolved));
+  CHECK(resolved.voxel.cell_count == 1 && !resolved.voxel.cells[0].fields);
+  CHECK(resolved.voxel.object_count == 2);
+  CHECK(DioramaVoxelEdits_Object(&resolved.voxel, 0x1234, 0x2345, 0)->mode == kDioramaVoxelObject_Auto);
+  CHECK(!DioramaVoxelEdits_Object(&resolved.voxel, 0, 0, 0));
+  CHECK(!DioramaVoxelEdits_Cell(&resolved.voxel, 9, 9));
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 2, &resolved));
+  CHECK(resolved.voxel.cell_count == 1 && resolved.voxel.cells[0].width == 24);
+  DioramaLayerOrder_ClearRoom(&resolved);
+  DioramaLayerOrder_ClearRoom(&room);
+  room.used = true;
+  char line[128];
+  for (unsigned i = 0; i < kDioramaVoxelCellMax; ++i) {
+    snprintf(line, sizeof(line), "voxel-cell = cell:%u,0 width:12", i);
+    CHECK(DioramaLayerOrder_ParseLine(&room, line, NULL));
+  }
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "voxel-cell = cell:256,0 width:12", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-cell = cell:0,0 width:8", NULL));
+  CHECK(room.voxel.cell_count == kDioramaVoxelCellMax && DioramaVoxelEdits_Cell(&room.voxel, 0, 0)->width == 8);
+  for (unsigned i = 1; i <= kDioramaVoxelObjectMax; ++i) {
+    snprintf(line, sizeof(line), "voxel-object = source:%04X mode:flat", i);
+    CHECK(DioramaLayerOrder_ParseLine(&room, line, NULL));
+  }
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "voxel-object = source:FFFF mode:flat", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-object = source:0001 mode:extruded", NULL));
+  CHECK(room.voxel.object_count == kDioramaVoxelObjectMax);
+  CHECK(DioramaVoxelEdits_Object(&room.voxel, 1, 0, 0)->mode == kDioramaVoxelObject_Extruded);
+  DioramaLayerOrder_ClearRoom(&room);
+  CHECK(!room.voxel.cell_count && !room.voxel.object_count);
+}
+
+static void TestVoxelCompactRegionsAndShapes(void) {
+  DioramaRoomOverride room = {.used=true, .map_group=2, .map_number=3}, copy = {0}, resolved = {0};
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "voxel-cell:all = cell:-8,-4 size:32,24 front:-.2 back:.6 width:12 offset:2 "
+      "backing:replace back-art:0,0010,4011,8012,C013,0,0,16 "
+      "top-art:auto side-art:1,0200,0201,0202,0203,8,8,8 "
+      "front-art:0,0020,4021,8022,C023,0,0,8 left-art:auto "
+      "right-art:1,0230,4231,8232,C233,8,0,8 bottom-art:auto "
+      "faces:front+top+left shape:curve front-end:.4 back-end:.8", NULL));
+  const DioramaVoxelCell *c = &room.voxel.cells[0];
+  CHECK(room.voxel.cell_count == 1 && c->fields == 65535);
+  CHECK(c->w == 32 && c->h == 24 && c->shape_y == -64 && c->shape_h == 384);
+  CHECK(c->faces == (kDioramaVoxelFaceMask_Front | kDioramaVoxelFaceMask_Top | kDioramaVoxelFaceMask_Left));
+  CHECK(DioramaVoxelEdits_Cell(&room.voxel, 23, 19) == c);
+  CHECK(!DioramaVoxelEdits_Cell(&room.voxel, 24, 19));
+  CHECK(!DioramaVoxelEdits_Cell(&room.voxel, -9, -4));
+  /* One compact record covers 768 cells; serialization retains its domain. */
+  char text[2048];
+  CHECK(DioramaLayerOrder_FormatRoom(&room, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, "size:32,24") && strstr(text, "shape-span:-64,384"));
+  char *line = strtok(text, "\n");
+  while (line) {
+    if (line[0] != '[') CHECK(DioramaLayerOrder_ParseLine(&copy, line, NULL));
+    line = strtok(NULL, "\n");
+  }
+  CHECK(!memcmp(&room.voxel, &copy.voxel, sizeof(room.voxel)));
+  const char *invalid[] = {
+    "voxel-cell = cell:0,0 size:0,1 front:.1",
+    "voxel-cell = cell:511,511 size:2,1 front:.1",
+    "voxel-cell = cell:-512,-512 size:1025,1 front:.1",
+    "voxel-cell = cell:0,0 size:1,1 size:1,1 auto:1",
+    "voxel-cell = cell:0,0 faces:front+front",
+    "voxel-cell = cell:0,0 faces:front+",
+    "voxel-cell = cell:0,0 faces:front+invalid",
+    "voxel-cell = cell:0,0 faces:auto",
+    "voxel-cell = cell:0,0 faces:all faces:none",
+    "voxel-cell = cell:0,0 shape:invalid",
+    "voxel-cell = cell:0,0 shape-span:0,16 front:.1",
+    "voxel-cell = cell:0,0 shape:box shape-span:0,16",
+    "voxel-cell = cell:0,0 shape:curve shape-span:8191,2",
+    "voxel-cell = cell:0,0 shape:curve shape-span:-8193,16",
+    "voxel-cell = cell:0,0 shape:curve shape-span:0,0",
+    "voxel-cell = cell:0,0 shape:curve shape-span:0,16 shape-span:0,16",
+    "voxel-cell = cell:0,0 front-end:.2",
+    "voxel-cell = cell:0,0 shape:box front-end:.2",
+    "voxel-cell = cell:0,0 shape:taper front-end:.4 back-end:.3",
+    "voxel-cell = cell:0,0 shape:curve back-end:nan",
+    "voxel-cell = cell:0,0 front-art:2,0000,0000,0000,0000,0,0,16",
+    "voxel-cell = cell:0,0 left-art:0,0000,0000,0000,0000,9,0,8",
+    "voxel-cell = cell:0,0 right-art:0,0000,0000,0000,0000,0,0,9",
+    "voxel-cell = cell:0,0 bottom-art:auto bottom-art:auto",
+  };
+  for (unsigned i = 0; i < sizeof(invalid) / sizeof(*invalid); ++i) {
+    CHECK(!DioramaLayerOrder_ParseLine(&copy, invalid[i], NULL));
+    CHECK(!memcmp(&room.voxel, &copy.voxel, sizeof(room.voxel)));
+  }
+  const uint64_t hash = DioramaVoxelEdits_Hash(1, &room.voxel);
+#define CHECK_VOXEL_HASH_CHANGE(field, value) do { \
+    copy.voxel = room.voxel; copy.voxel.cells[0].field = (value); \
+    CHECK(DioramaVoxelEdits_Hash(1, &copy.voxel) != hash); \
+  } while (0)
+  CHECK_VOXEL_HASH_CHANGE(w, 31);
+  CHECK_VOXEL_HASH_CHANGE(h, 23);
+  CHECK_VOXEL_HASH_CHANGE(front_art.words[0], 0x30);
+  CHECK_VOXEL_HASH_CHANGE(left_art.set, true);
+  CHECK_VOXEL_HASH_CHANGE(right_art.words[0], 0x234);
+  CHECK_VOXEL_HASH_CHANGE(bottom_art.set, true);
+  CHECK_VOXEL_HASH_CHANGE(faces, kDioramaVoxelFaceMask_All);
+  CHECK_VOXEL_HASH_CHANGE(shape, kDioramaVoxelShape_Taper);
+  CHECK_VOXEL_HASH_CHANGE(shape_y, -48);
+  CHECK_VOXEL_HASH_CHANGE(shape_h, 400);
+  CHECK_VOXEL_HASH_CHANGE(front_end, .3f);
+  CHECK_VOXEL_HASH_CHANGE(back_end, .7f);
+#undef CHECK_VOXEL_HASH_CHANGE
+  /* Partial overlays are complete records. A reset masks the older region;
+   * a different-sized record at the same origin does not erase its remainder. */
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-cell:all = cell:-8,-4 size:2,2 width:8", NULL));
+  CHECK(room.voxel.cell_count == 2 && DioramaVoxelEdits_Cell(&room.voxel, -7, -3)->width == 8);
+  CHECK(DioramaVoxelEdits_Cell(&room.voxel, -7, -3)->fields == kDioramaVoxelCell_Width);
+  CHECK(DioramaVoxelEdits_Cell(&room.voxel, -6, -3)->shape == kDioramaVoxelShape_Curve);
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-cell:jp = cell:-7,-3 auto:1", NULL));
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 1, &resolved));
+  CHECK(resolved.voxel.cell_count == 3 && !DioramaVoxelEdits_Cell(&resolved.voxel, -7, -3)->fields);
+  CHECK(DioramaVoxelEdits_Cell(&resolved.voxel, -8, -3)->width == 8);
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 0, &resolved));
+  CHECK(resolved.voxel.cell_count == 2 && DioramaVoxelEdits_Cell(&resolved.voxel, -7, -3)->width == 8);
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "voxel-cell:all = cell:-8,-4 size:32,24 shape:taper shape-span:-64,384 front-end:.6", NULL));
+  CHECK(room.voxel.cell_count == 3);
+  CHECK(DioramaVoxelEdits_Cell(&room.voxel, -7, -3)->shape == kDioramaVoxelShape_Taper);
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 1, &resolved));
+  CHECK(DioramaVoxelEdits_Cell(&resolved.voxel, -7, -3)->shape == kDioramaVoxelShape_Taper);
+  DioramaLayerOrder_ClearRoom(&room);
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-cell = cell:-512,-512 size:1024,1024 auto:1", NULL));
+  CHECK(DioramaVoxelEdits_Cell(&room.voxel, 511, 511) && room.voxel.cell_count == 1);
+  DioramaLayerOrder_ClearRoom(&room);
+  CHECK(DioramaLayerOrder_ParseLine(&room, "voxel-cell = cell:1,2 faces:none shape:box", NULL));
+  CHECK(!room.voxel.cells[0].faces && !room.voxel.cells[0].shape);
+  copy.voxel = room.voxel;
+  copy.voxel.cells[0].w = copy.voxel.cells[0].h = 0;
+  CHECK(DioramaVoxelEdits_Hash(1, &copy.voxel) == DioramaVoxelEdits_Hash(1, &room.voxel));
+  DioramaLayerOrder_ClearRoom(&room);
+  DioramaLayerOrder_ClearRoom(&copy);
+  DioramaLayerOrder_ClearRoom(&resolved);
+}
+
+static void TestVoxelAnchoredBendCodec(void) {
+  DioramaRoomOverride room={.used=true,.map_group=1,.map_number=1},copy={0},regional={0};
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "voxel-cell:all = cell:2,3 size:4,2 bend:x,32,96,24,-12,-.3",NULL));
+  CHECK(room.voxel.cells[0].fields==kDioramaVoxelCell_Bend);
+  CHECK(room.voxel.cells[0].bend.axis==kDioramaVoxelBend_X);
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "voxel-cell:jp = cell:2,3 size:4,2 shape:curve shape-span:48,32 "
+      "front:.1 back:.3 bend:y,8192,-8192,-256,256,1.2",NULL));
+  char text[2048];
+  CHECK(DioramaLayerOrder_FormatRoom(&room,text,sizeof(text))<sizeof(text));
+  char *line=strtok(text,"\n");
+  while(line) {
+    if(line[0]!='[')CHECK(DioramaLayerOrder_ParseLine(&copy,line,NULL));
+    line=strtok(NULL,"\n");
+  }
+  CHECK(!memcmp(&room.voxel,&copy.voxel,sizeof(room.voxel)));
+  CHECK(DioramaLayerOrder_ForTerrain(&room,0,&regional));
+  CHECK(regional.voxel.cell_count==1 && regional.voxel.cells[0].bend.anchor==32);
+  CHECK(DioramaLayerOrder_ForTerrain(&room,1,&regional));
+  CHECK(regional.voxel.cell_count==1 && regional.voxel.cells[0].bend.tip==-8192);
+  const char *invalid[]={
+    "bend:x,0,0,1,2,.3", "bend:z,0,16,1,2,.3", "bend:x,0,16,1,2",
+    "bend:x,0,16,1,2,.3,4", "bend:x,0,16,1,2,", "bend:x,0,16,,2,.3",
+    "bend:x,0.5,16,1,2,.3", "bend:x,-8193,16,1,2,.3", "bend:y,0,8193,1,2,.3",
+    "bend:x,0,16,257,0,0", "bend:y,0,16,0,-257,0", "bend:y,0,16,0,0,1.201",
+    "bend:x,0,16,nan,0,0", "bend:x,0,16,0,inf,0", "bend:y,0,16,0,0,nan",
+    "bend:x,0,16,0,0,0 bend:y,0,16,0,0,0", "auto:1 bend:y,0,16,0,0,0"
+  };
+  for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);++i) {
+    snprintf(text,sizeof(text),"voxel-cell = cell:2,3 %s",invalid[i]);
+    CHECK(!DioramaLayerOrder_ParseLine(&copy,text,NULL));
+    CHECK(!memcmp(&room.voxel,&copy.voxel,sizeof(room.voxel)));
+  }
+  const uint64_t hash=DioramaVoxelEdits_Hash(1,&room.voxel);
+#define CHECK_BEND_HASH(field,value) do { copy.voxel=room.voxel; \
+    copy.voxel.cells[0].bend.field=value;CHECK(DioramaVoxelEdits_Hash(1,&copy.voxel)!=hash); } while(0)
+  CHECK_BEND_HASH(axis,kDioramaVoxelBend_Y);CHECK_BEND_HASH(anchor,31);CHECK_BEND_HASH(tip,95);
+  CHECK_BEND_HASH(dx,23);CHECK_BEND_HASH(dy,-11);CHECK_BEND_HASH(dz,-.2f);
+#undef CHECK_BEND_HASH
+  copy.voxel=room.voxel;copy.voxel.cells[0].fields=0;
+  const uint64_t inactive=DioramaVoxelEdits_Hash(1,&copy.voxel);
+  copy.voxel.cells[0].bend.dx=200;CHECK(DioramaVoxelEdits_Hash(1,&copy.voxel)==inactive);
+  DioramaLayerOrder_ClearRoom(&room);DioramaLayerOrder_ClearRoom(&copy);DioramaLayerOrder_ClearRoom(&regional);
+}
+
+static void TestVoxelGroupTransformCodec(void) {
+  DioramaRoomOverride room={.used=true,.map_group=1,.map_number=1},copy={0},regional={0};
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "voxel-cell:all = cell:2,3 size:4,2 transform:64,64,.15,24,-12,-.3,.5,2,1.5",NULL));
+  CHECK(room.voxel.cells[0].fields==kDioramaVoxelCell_Transform);
+  CHECK(room.voxel.cells[0].transform.px==64 && room.voxel.cells[0].transform.sx==.5f);
+  /* A carved face retains the shared source pivot, not its own tile center. */
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "voxel-cell:jp = cell:3,3 front-art:0,0001,0002,0003,0004,4,4,8 "
+      "bend:y,48,80,0,8,.1 transform:64,64,.15,24,-12,-.3,.5,2,1.5",NULL));
+  char text[2048];CHECK(DioramaLayerOrder_FormatRoom(&room,text,sizeof(text))<sizeof(text));
+  char *line=strtok(text,"\n");
+  while(line){if(line[0]!='[')CHECK(DioramaLayerOrder_ParseLine(&copy,line,NULL));line=strtok(NULL,"\n");}
+  CHECK(!memcmp(&room.voxel,&copy.voxel,sizeof(room.voxel)));
+  CHECK(DioramaLayerOrder_ForTerrain(&room,0,&regional));
+  CHECK(regional.voxel.cell_count==1 && DioramaVoxelEdits_Cell(&regional.voxel,3,3)->transform.px==64);
+  CHECK(DioramaLayerOrder_ForTerrain(&room,1,&regional));
+  CHECK(regional.voxel.cell_count==2 && DioramaVoxelEdits_Cell(&regional.voxel,3,3)->front_art.words[0]==1);
+  CHECK(DioramaVoxelEdits_Cell(&regional.voxel,3,3)->transform.py==64);
+  const char *invalid[]={
+    "transform:0,0,0,0,0,0,1,1", "transform:0,0,0,0,0,0,1,1,1,1",
+    "transform:0,0,0,0,0,0,1,,1", "transform:8193,0,0,0,0,0,1,1,1",
+    "transform:0,-8193,0,0,0,0,1,1,1", "transform:0,0,2.01,0,0,0,1,1,1",
+    "transform:0,0,0,257,0,0,1,1,1", "transform:0,0,0,0,-257,0,1,1,1",
+    "transform:0,0,0,0,0,-1.201,1,1,1", "transform:0,0,0,0,0,0,0,1,1",
+    "transform:0,0,0,0,0,0,1,-1,1", "transform:0,0,0,0,0,0,1,1,4.01",
+    "transform:0,0,0,0,0,0,.124,1,1", "transform:nan,0,0,0,0,0,1,1,1",
+    "transform:0,0,0,0,inf,0,1,1,1", "transform:0,0,0,0,0,0,1,1,nan",
+    "auto:1 transform:0,0,0,0,0,0,1,1,1",
+    "transform:0,0,0,0,0,0,1,1,1 transform:0,0,0,0,0,0,1,1,1"
+  };
+  for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);++i) {
+    snprintf(text,sizeof(text),"voxel-cell = cell:2,3 %s",invalid[i]);
+    CHECK(!DioramaLayerOrder_ParseLine(&copy,text,NULL));
+    CHECK(!memcmp(&room.voxel,&copy.voxel,sizeof(room.voxel)));
+  }
+  const uint64_t hash=DioramaVoxelEdits_Hash(1,&room.voxel);
+#define CHECK_TRANSFORM_HASH(field,value) do { copy.voxel=room.voxel; \
+    copy.voxel.cells[0].transform.field=value;CHECK(DioramaVoxelEdits_Hash(1,&copy.voxel)!=hash); } while(0)
+  CHECK_TRANSFORM_HASH(px,63);CHECK_TRANSFORM_HASH(py,63);CHECK_TRANSFORM_HASH(pz,.1f);
+  CHECK_TRANSFORM_HASH(dx,23);CHECK_TRANSFORM_HASH(dy,-11);CHECK_TRANSFORM_HASH(dz,-.2f);
+  CHECK_TRANSFORM_HASH(sx,1);CHECK_TRANSFORM_HASH(sy,1);CHECK_TRANSFORM_HASH(sz,1);
+#undef CHECK_TRANSFORM_HASH
+  copy.voxel=room.voxel;copy.voxel.cells[0].fields=0;
+  const uint64_t inactive=DioramaVoxelEdits_Hash(1,&copy.voxel);
+  copy.voxel.cells[0].transform.dx=200;CHECK(DioramaVoxelEdits_Hash(1,&copy.voxel)==inactive);
+  CHECK(DioramaLayerOrder_ParseLine(&room,"voxel-cell:jp = cell:3,3 auto:1",NULL));
+  CHECK(DioramaLayerOrder_ForTerrain(&room,1,&regional));
+  CHECK(!DioramaVoxelEdits_Cell(&regional.voxel,3,3)->fields);
+  CHECK(DioramaVoxelEdits_Cell(&regional.voxel,2,3)->transform.sx==.5f);
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "voxel-cell:all = cell:2,3 size:4,2 transform:-8192,8192,-2,-256,256,1.2,.125,4,1",NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "voxel-cell:all = cell:2,3 size:4,2 transform:64,64,.15,0,0,0,1,1,1",NULL));
+  CHECK(DioramaLayerOrder_ForTerrain(&room,1,&regional));
+  CHECK(DioramaVoxelEdits_Cell(&regional.voxel,3,3)->fields==kDioramaVoxelCell_Transform);
+  DioramaLayerOrder_ClearRoom(&room);DioramaLayerOrder_ClearRoom(&copy);DioramaLayerOrder_ClearRoom(&regional);
+}
+
 int main(void) {
+  TestVoxelGroupTransformCodec();
+  TestVoxelAnchoredBendCodec();
+  TestVoxelAuthoringCodec();
+  TestVoxelAuthoringRegionsAndLimits();
+  TestVoxelCompactRegionsAndShapes();
   TestTrunkSettings();
   TestNativeBloom();
   TestSceneryGrade();

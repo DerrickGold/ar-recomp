@@ -1,5 +1,6 @@
 """Keep the browser backend tied to production shader inputs and offline packing."""
 from pathlib import Path
+import os
 import re
 import subprocess
 import sys
@@ -9,14 +10,18 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools/action_editor'))
-from build_compositor import shader_variants, SHADERS
+from build_compositor import shader_variants, shader_source, SHADERS
 from build_preview import compiler_environment
 from build import build_document
 
 
 class CompositorBuildTest(unittest.TestCase):
+    def test_webgl_depth_contract(self):
+        subprocess.run(['node', str(ROOT / 'tests/action_editor_webgl_depth.test.mjs')],
+                       cwd=ROOT, check=True)
+
     def test_supported_compilers_and_workspace_cache(self):
-        for version in ('5.0.7', '6.0.12', '6.0.12-git'):
+        for version in ('5.0.7', '6.0.12', '6.0.12-git', '6.0.13', '6.0.13-git'):
             with self.subTest(version=version), patch.dict('os.environ', {}, clear=True), \
                     patch('build_preview.subprocess.check_output', return_value=
                           f'emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) {version}\n') as probe:
@@ -29,16 +34,39 @@ class CompositorBuildTest(unittest.TestCase):
             self.assertEqual(compiler_environment('emcc')['EM_CACHE'], '/custom-cache')
 
     def test_unvalidated_compilers_report_how_to_select_supported_sdk(self):
-        for banner in ('emcc (Emscripten) 6.0.13\n', 'emcc (Emscripten) 6.0.12.1\n',
+        for banner in ('emcc (Emscripten) 6.0.14\n', 'emcc (Emscripten) 6.0.12.1\n',
                        'clang version 6.0.12\n', ''):
             with self.subTest(banner=banner), \
                     patch('build_preview.subprocess.check_output', return_value=banner):
-                with self.assertRaisesRegex(RuntimeError, r'5\.0\.7 or 6\.0\.12.*Set EMCC'):
+                with self.assertRaisesRegex(RuntimeError, r'5\.0\.7 or 6\.0\.12 or 6\.0\.13.*Set EMCC'):
                     compiler_environment('emcc')
+
+    def test_unvalidated_compiler_stops_before_room_export(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compiler, native, rom = root / 'emcc', root / 'cc', root / 'ar.sfc'
+            compiler.write_text('#!/bin/sh\nprintf "emcc (Emscripten) 6.0.14\\n"\n')
+            native.write_text('#!/bin/sh\necho "native compiler must not run" >&2\nexit 99\n')
+            compiler.chmod(0o755)
+            native.chmod(0o755)
+            rom.touch()
+            env = dict(os.environ, EMCC=str(compiler), CC=str(native),
+                       PYTHON=sys.executable, ACTION_EDITOR_WASM='on')
+            run = subprocess.run(['sh', str(ROOT / 'tools/action_editor/build.sh'),
+                                  str(rom), str(root / 'editor.html')],
+                                 cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 1)
+            self.assertIn('found emcc (Emscripten) 6.0.14', run.stderr)
+            self.assertIn('Set EMCC', run.stderr)
+            self.assertNotIn('Traceback', run.stderr)
+            self.assertNotIn('native compiler must not run', run.stderr)
+            self.assertNotIn('[export]', run.stdout)
+            self.assertFalse((root / 'editor.html').exists())
 
     def test_generated_shaders(self):
         sources = shader_variants()
-        self.assertEqual(len(sources), 7)
+        self.assertEqual(len(sources), 8)
+        self.assertEqual(sources[-1], (ROOT / 'src/shaders/diorama_alpha_common.glsl').read_text())
         for name, source in zip(SHADERS, sources):
             self.assertTrue(source.startswith('#version 300 es\nprecision highp float;'))
             self.assertNotIn('layout(set', source)
@@ -47,7 +75,7 @@ class CompositorBuildTest(unittest.TestCase):
             self.assertLess(source.index('uniform sampler2D u_texture'),
                             source.index('vec4 sample_source('))
             self.assertNotIn('#include', source)
-            original = (ROOT / f'src/shaders/{name}.frag.glsl').read_text()
+            original = shader_source(ROOT / f'src/shaders/{name}.frag.glsl')
             # The adaptation only adds a coordinate shim; production shader
             # math after the first function is unchanged.
             first = re.search(r'^(?:void|vec[234]|float)\s+\w+\s*\(', original, re.M).start()

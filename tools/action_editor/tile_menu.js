@@ -3,7 +3,7 @@
 const tileMenu=$('#tileMenu');
 tileMenu.hidden=true;
 const effectMenuNames=['AddEffect','LightBox','EditEffect','DeleteEffect','CopyEffect','PasteEffect','Preview','PreviewPlayer','Settings'];
-const tileMenuButtons=[...effectMenuNames,'Priority','Far','ResetBand','Pixels','Fill','FlipH','FlipV','MirrorH','MirrorV','Copy','Paste','Stamp','Delete','Reset','Remove','Deselect']
+const tileMenuButtons=[...effectMenuNames,'Priority','Far','ResetBand','Pixels','Fill','FlipH','FlipV','MirrorH','MirrorV','Copy','Sample','Paste','Stamp','Delete','Reset','Remove','Deselect']
   .map(name=>$(`#tileAction${name}`));
 let tileMenuTarget=null;
 const macControlClick=ev=>ev.button===0&&ev.ctrlKey&&/Mac/.test(window.navigator?.platform||'');
@@ -67,6 +67,7 @@ function openTileMenu(cx,cy,clientX,clientY) {
   $('#tileActionReset').textContent=positions.length===1?'Reset tile to default':'Reset selected tiles to default';
   for(const axis of ['H','V'])$(`#tileActionMirror${axis}`).disabled=!selectedTileRectangle(positions);
   $('#tileActionPixels').disabled=!tile;
+  $('#tileActionSample').disabled=!tile;
   $('#tileActionRemove').disabled=$('#removeStamps').disabled;
   $('#tileActionStamp').disabled=!sameClipboard;
   $('#tileActionPaste').disabled=!sameClipboard||cx < -512||cy < -512||
@@ -136,6 +137,7 @@ $('#tileActionPaste').onclick=()=>runTileAction(({cx,cy})=>{
 $('#tileActionStamp').onclick=()=>runTileAction(({cx,cy})=>{
   startStamp();stampHover=[cx,cy];draw();tileActionStatus('Click to stamp copied tiles; Esc finishes.');
 });
+$('#tileActionSample').onclick=()=>runTileAction(({cx,cy})=>sampleStampAt(cx,cy));
 $('#tileActionDelete').onclick=()=>runTileAction(()=>deleteSelectedTiles());
 $('#tileActionReset').onclick=()=>runTileAction(()=>resetSelectedTiles());
 $('#tileActionRemove').onclick=()=>runTileAction(()=>{
@@ -175,7 +177,7 @@ tileMenu.addEventListener('keydown',ev=>{
   else return;
   ev.preventDefault();ev.stopPropagation();enabled[next]?.focus();
 });
-window.addEventListener('mousedown',ev=>{
+for(const name of ['pointerdown','mousedown'])window.addEventListener(name,ev=>{
   if(!tileMenu.hidden&&!tileMenu.contains(ev.target))closeTileMenu();
 },true);
 window.addEventListener('wheel',ev=>{

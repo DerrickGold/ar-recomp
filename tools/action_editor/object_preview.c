@@ -1,4 +1,6 @@
 #include "object_preview.h"
+#include "action/action_voxel.h"
+#include "actraiser/actraiser_sprite_ownership.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,8 +23,109 @@ bool EditorObjectPreview_Adopt(EditorObjectPreview *p,DioramaObjectSnapshot *nex
   if(!working)return false;
   DioramaObjectSnapshot_Release(&p->snapshot);
   p->snapshot=*next;memset(next,0,sizeof(*next));
+  /* Version 1 captures preceded family facts on independent compositions.
+   * Join only within this immutable frame, never retain the actor address as
+   * the saved authoring selector. */
+  for(unsigned i=0;i<p->snapshot.view.voxel_sprites.count;++i) {
+    ActionVoxelSprite *prop=&p->snapshot.view.voxel_sprites.sprites[i];
+    for(unsigned j=0;j<p->snapshot.view.actor_count;++j) {
+      const ActionEffectActor *actor=&p->snapshot.view.actors[j];
+      if(actor->address!=prop->owner || (prop->source && actor->source!=prop->source) ||
+          (prop->generation && actor->generation!=prop->generation))continue;
+      prop->source=actor->source;prop->parent_source=actor->parent_source;
+      prop->animation=actor->animation;prop->generation=actor->generation;break;
+    }
+  }
   p->pixels=working;p->atlas_dirty=true;
   return true;
+}
+static bool UnlistedProp(const DioramaObjectSnapshotView *v,unsigned i) {
+  const uint16_t owner=v->voxel_sprites.sprites[i].owner;
+  for(unsigned j=0;j<v->actor_count;++j)if(v->actors[j].address==owner)return false;
+  for(unsigned j=0;j<i;++j)if(v->voxel_sprites.sprites[j].owner==owner)return false;
+  return true;
+}
+unsigned EditorObjectPreview_ItemCount(const EditorObjectPreview *p) {
+  if(!p || !p->snapshot.storage)return 0;
+  const DioramaObjectSnapshotView *v=&p->snapshot.view;
+  unsigned count=v->actor_count;
+  for(unsigned i=0;i<v->voxel_sprites.count;++i)if(UnlistedProp(v,i))++count;
+  return count;
+}
+bool EditorObjectPreview_Item(const EditorObjectPreview *p,const DioramaScene *scene,
+    unsigned index,EditorObjectPreviewItem *out) {
+  if(!p || !out || index>=EditorObjectPreview_ItemCount(p))return false;
+  const DioramaObjectSnapshotView *v=&p->snapshot.view;
+  *out=(EditorObjectPreviewItem){.index=index,.visible=true,.width_scale=1};
+  if(index<v->actor_count) {
+    const ActionEffectActor *a=&v->actors[index];
+    out->owner=a->address;out->source=a->source;out->parent=a->parent_source;
+    out->animation=a->animation;out->priority=a->priority;out->visible=a->visible;
+    out->player=a->player;
+    const float radius=a->body_radius?a->body_radius:8;
+    out->capture_x=a->x-v->world_x-radius;out->capture_y=a->y-v->world_y-radius;
+    out->width=2*radius;out->height=fmaxf(2*radius,a->feet_y-a->y+radius);
+  } else {
+    unsigned at=v->actor_count;
+    for(unsigned i=0;i<v->voxel_sprites.count;++i)
+      if(UnlistedProp(v,i) && at++==index){out->owner=v->voxel_sprites.sprites[i].owner;break;}
+  }
+  bool bounds=false;
+  ActionVoxelSprite resolved={.source=out->source,.parent_source=out->parent,
+      .animation=out->animation,.shape=kActionVoxelSpriteGenericShape};
+  for(unsigned i=0;i<v->voxel_sprites.count;++i) {
+    const ActionVoxelSprite *prop=&v->voxel_sprites.sprites[i];
+    if(prop->owner!=out->owner)continue;
+    if(!bounds) {
+      resolved=*prop;out->owner_tag=prop->owner_tag;out->priority=prop->priority;
+      out->capture_x=prop->x;out->capture_y=prop->y;
+      out->width=prop->width;out->height=prop->height;
+    } else {
+      const float x0=fminf(out->capture_x,prop->x),y0=fminf(out->capture_y,prop->y);
+      out->width=fmaxf(out->capture_x+out->width,prop->x+prop->width)-x0;
+      out->height=fmaxf(out->capture_y+out->height,prop->y+prop->height)-y0;
+      out->capture_x=x0;out->capture_y=y0;
+    }
+    bounds=true;
+  }
+  ActionVoxelSprite_Resolve(&resolved,scene?ActionVoxel_Edits(scene->voxel_geometry):NULL);
+  out->source=resolved.source;out->parent=resolved.parent_source;out->animation=resolved.animation;
+  out->shape=resolved.shape;out->mode=resolved.presentation_mode;
+  out->offset=resolved.depth_offset;out->width_scale=resolved.width_scale;
+  out->thickness=(resolved.presentation_fields&kDioramaVoxelObject_Thickness)?resolved.thickness:
+      (resolved.shape==kActRaiserSpriteProp_WallTorch && resolved.presentation_mode!=kDioramaVoxelObject_Extruded)?0:
+      scene?ActionVoxel_Depth(scene->voxel_geometry):0;
+  const bool supported=scene && ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number);
+  out->can_extrude=bounds && out->source && supported;
+  out->active=bounds && supported && ActionVoxelSprite_IsModeled(&resolved);
+  return true;
+}
+bool EditorObjectPreview_ItemPixel(const EditorObjectPreview *p,unsigned index,int x,int y) {
+  EditorObjectPreviewItem item;
+  if(!EditorObjectPreview_Item(p,NULL,index,&item))return false;
+  const DioramaObjectSnapshotView *v=&p->snapshot.view;
+  if(x<0 || y<0 || x>=v->width || y>=v->height)return false;
+  for(unsigned i=0;i<v->voxel_sprites.count;++i) {
+    const ActionVoxelSprite *prop=&v->voxel_sprites.sprites[i];
+    if(prop->owner!=item.owner || !prop->owner_tag || !v->attributes[prop->priority])continue;
+    const int px=x-(int)prop->x,py=y-(int)prop->y;
+    if(px<0 || py<0 || px>=prop->width || py>=prop->height || !(prop->rows[py]&(UINT64_C(1)<<px)))continue;
+    if(v->attributes[prop->priority][(size_t)y*v->attribute_pitch[prop->priority]+x]>>24==prop->owner_tag)
+      return true;
+  }
+  return false;
+}
+bool EditorObjectPreview_ItemInk(const EditorObjectPreview *p,unsigned index,int x,int y) {
+  EditorObjectPreviewItem item;
+  if(!EditorObjectPreview_Item(p,NULL,index,&item))return false;
+  const DioramaObjectSnapshotView *v=&p->snapshot.view;
+  for(unsigned i=0;i<v->voxel_sprites.count;++i) {
+    const ActionVoxelSprite *prop=&v->voxel_sprites.sprites[i];
+    const int px=x-(int)prop->x,py=y-(int)prop->y;
+    if(prop->owner==item.owner && px>=0 && py>=0 && px<prop->width && py<prop->height &&
+        (prop->rows[py]&(UINT64_C(1)<<px)))return true;
+  }
+  return false;
 }
 void EditorObjectPreview_Reset(EditorObjectPreview *p,ArRenderDevice *device) {
   if(!p)return;
@@ -94,7 +197,7 @@ bool EditorObjectPreview_Capture(EditorObjectPreview *p,ArRenderDevice *device,
   scene->voxel_sprites=NULL;scene->voxel_sprite_atlas=ArRenderTexture_Invalid();
   bool modeled[4]={false};
   /* Atlas handoff must succeed before any native winner is removed. */
-  if(voxel && source->voxel_sprites.count) {
+  if(voxel && ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number) && source->voxel_sprites.count) {
     if(!Texture(device,&p->atlas,kVoxelSpriteAtlasWidth,kVoxelSpriteAtlasHeight))return false;
     if(p->atlas_dirty) {
       if(!ArRenderDevice_UpdateTexture(device,p->atlas,NULL,source->atlas,source->atlas_pitch*4))return false;
@@ -103,6 +206,8 @@ bool EditorObjectPreview_Capture(EditorObjectPreview *p,ArRenderDevice *device,
     p->props=source->voxel_sprites;
     for(unsigned i=0;i<p->props.count;++i) {
       ActionVoxelSprite *prop=&p->props.sprites[i];prop->x+=dx;prop->y+=dy;
+      ActionVoxelSprite_Resolve(prop,ActionVoxel_Edits(scene->voxel_geometry));
+      if(!ActionVoxelSprite_IsModeled(prop))continue;
       modeled[prop->priority]=true;
       uint32_t *color=p->pixels+2*prop->priority*kArea;
       ActionVoxelSprite_RemoveNative(prop,width,height,color,kWidth,color+kArea,kWidth);

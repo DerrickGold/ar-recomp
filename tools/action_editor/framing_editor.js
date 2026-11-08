@@ -1,7 +1,7 @@
 /* Designer framing is independent of the authoring rectangle and gameplay
  * camera. Match BG1 terrain families so different boss layouts can be tuned. */
 const roomFraming=r=>stampBucket(r,0).framing||{x:0,y:0};
-let showFramingGuide=true;
+let showFramingGuide=false;
 let framingPixelAspect=window.__ACTION_VIEW__?.pixelAspect||'crt';
 let framingProjection=window.__ACTION_VIEW__?'diorama':'native';
 let framingDistance=window.__ACTION_VIEW__?.distance??3.25;

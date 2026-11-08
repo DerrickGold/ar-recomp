@@ -79,6 +79,7 @@ function commitOp() {
     }
   }
   if (!changed) return;                 /* a gesture that altered nothing */
+  if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.pending())VoxelEditor.clearPreviewHistory();
   markEditorChanged();
   undoStack.push(op);
   if (undoStack.length > kMaxUndo) undoStack.shift();
@@ -89,6 +90,8 @@ function setKey(target, k, value) {
   if (value === undefined) delete target[k]; else target[k] = value;
 }
 function applySide(op, which) {
+  if(op.voxel)return VoxelEditor.restore(op.voxel,which);
+  if(op.planes)return restorePlaneHistory(op.planes,which);
   if(op.backgroundReset)return BackgroundReset.restore(op.backgroundReset,which);
   if(op.palette)return PaletteEditor.restore(op.palette,which);
   if(op.trunk)return TrunkEditor.restore(op.trunk,which);
@@ -145,32 +148,67 @@ function applySide(op, which) {
   markEditorChanged(); refreshPixelEditor(); tally(); draw();
   return true;
 }
-function undo() {
+function finishHistoryGesture() {
+  if(typeof finishVoxelFacePaletteForHistory==='function'&&!finishVoxelFacePaletteForHistory())return false;
+  if(typeof VoxelEditor!=='undefined')VoxelEditor.endGesture();
+  if(typeof finishPlaneGesture==='function')finishPlaneGesture();
+  if(typeof finishPixelStroke==='function')finishPixelStroke();
   finishFramingDrag();
-  if (pendingOp) commitOp();
-  const op = undoStack.pop();
-  if (!op) return;
-  redoStack.push(op);
-  applySide(op, 'before');
-  refreshHistoryButtons();
+  if(drag?.effects)EmitterMapTools.finish();
+  // A history command terminates its input gesture. Further mousemoves must
+  // not silently repaint data after its pending operation has been consumed.
+  drag=null;
+  if(pendingOp)commitOp();
+  return true;
+}
+function historyDraftsReady(action,op) {
+  if(op?.policy&&typeof BackgroundPolicyEditor!=='undefined'&&BackgroundPolicyEditor.pendingTargets().some(item=>item.key===op.policy.room+':'+op.policy.bg)) {
+    BackgroundPolicyEditor.reviewPending();
+    tileActionStatus(`Apply or discard the background policy preview before ${action}.`);return false;
+  }
+  return typeof VoxelEditor==='undefined'||VoxelEditor.guard(action);
+}
+function restoreHistory(source,destination,side) {
+  const op=source.at(-1);if(!op)return false;
+  try {
+    if(applySide(op,side)===false){tileActionStatus(`Could not ${side==='before'?'undo':'redo'} ${op.label}: its saved target is unavailable.`);return false;}
+    source.pop();destination.push(op);refreshHistoryButtons();return true;
+  } catch(error) {
+    tileActionStatus(`Could not ${side==='before'?'undo':'redo'} ${op.label}: ${error.message}`);
+    refreshHistoryButtons();return false;
+  }
+}
+function undo() {
+  if(!finishHistoryGesture())return;
+  if(typeof VoxelEditor!=='undefined'&&VoxelEditor.undoPreview())return;
+  if(!historyDraftsReady('undoing applied edits',undoStack.at(-1)))return;
+  if(typeof VoxelEditor!=='undefined')VoxelEditor.clearPreviewHistory();
+  restoreHistory(undoStack,redoStack,'before');
 }
 function redo() {
-  finishFramingDrag();
-  const op = redoStack.pop();
-  if (!op) return;
-  undoStack.push(op);
-  applySide(op, 'after');
-  refreshHistoryButtons();
+  if(!finishHistoryGesture())return;
+  if(typeof VoxelEditor!=='undefined'&&VoxelEditor.redoPreview())return;
+  if(!historyDraftsReady('redoing applied edits',redoStack.at(-1)))return;
+  if(typeof VoxelEditor!=='undefined')VoxelEditor.clearPreviewHistory();
+  restoreHistory(redoStack,undoStack,'after');
 }
 function refreshHistoryButtons() {
   refreshEditorFeedback();
   const u = $('#undoBtn'), r = $('#redoBtn');
   if (!u || !r) return;
   u.disabled = !undoStack.length; r.disabled = !redoStack.length;
+  if(typeof VoxelEditor!=='undefined') {
+    if(VoxelEditor.canUndoPreview()){u.disabled=false;u.title='Undo voxel preview';}
+    if(VoxelEditor.canRedoPreview()){r.disabled=false;r.title='Redo voxel preview';}
+  }
   u.title = undoStack.length
     ? `Undo ${undoStack[undoStack.length-1].label} (${undoStack.length})` : 'Nothing to undo';
   r.title = redoStack.length
     ? `Redo ${redoStack[redoStack.length-1].label}` : 'Nothing to redo';
+  if(typeof VoxelEditor!=='undefined') {
+    if(VoxelEditor.canUndoPreview())u.title='Undo voxel preview';
+    if(VoxelEditor.canRedoPreview())r.title='Redo voxel preview';
+  }
 }
 
 /* ---- painting ---------------------------------------------------------- */

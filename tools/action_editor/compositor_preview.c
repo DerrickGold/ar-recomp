@@ -3,6 +3,8 @@
 #include "diorama/diorama_snapshot.h"
 #include "diorama/diorama_effect_backend.h"
 #include "diorama/diorama_performance.h"
+#include "diorama/diorama_depth_pass.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -18,6 +20,13 @@ IMPORT(geometry) extern int WebGeometry(int t, const void *v, int nv, const void
                                       int blend, int u, int vv, int filter);
 IMPORT(effect) extern int WebEffect(int kind, const float *params, int count);
 IMPORT(available) extern int WebAvailable(int kind);
+IMPORT(depth_begin) extern int WebDepthBegin(void);
+IMPORT(depth_clear) extern int WebDepthClear(void);
+IMPORT(depth_finish) extern int WebDepthFinish(int success);
+IMPORT(depth_geometry) extern int WebDepthGeometry(int texture, const void *vertices,
+    int vertex_count, const void *indices, int index_count, int blend,
+    int address_u, int address_v, int filter, const float *depths,
+    const float *clip_w, int mode);
 
 static uint8_t s_input[kDioramaSnapshotCapacity];
 static uint8_t *s_packet;
@@ -26,6 +35,7 @@ static ArRenderDevice s_device;
 static ArRenderTargetState s_state;
 static ArRenderTextureDesc s_textures[128];
 static int s_width, s_height;
+static bool s_depth_active, s_depth_failed;
 
 ArRenderDevice *DioramaPreview_Device(void) { return &s_device; }
 
@@ -194,6 +204,8 @@ bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *d) { (void)d; retu
 bool DioramaEffectBackend_Unbind(ArRenderDevice *d) { (void)d; return WebEffect(-1,NULL,0) != 0; }
 void DioramaEffectBackend_Reset(ArRenderDevice *d) { (void)DioramaEffectBackend_Unbind(d); }
 
+#include "compositor_preview_depth.inc"
+
 uint8_t *DioramaPreview_Input(void) { return s_input; }
 unsigned DioramaPreview_Capacity(void) { return sizeof(s_input); }
 int DioramaPreview_Width(void) { return s_scene.view.viewport.w; }
@@ -213,6 +225,7 @@ int DioramaPreview_Init(int maximum_texture_size) {
   return ArRenderDevice_Init(&s_device,&kOps,&s_state,caps);
 }
 void DioramaPreview_Reset(void) {
+  if (s_depth_active) (void)DepthFinish(NULL, &s_device, false);
   Diorama_ResetCompositorResources(&s_device);
   DioramaSnapshot_ReleaseTextures(&s_scene,&s_device);
   free(s_packet);

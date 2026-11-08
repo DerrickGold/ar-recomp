@@ -1,30 +1,38 @@
 <div class="app" id="editorApp">
 <aside class="side" id="editorSidebar" aria-label="Editor settings">
-  <h1>Action Layer Editor</h1>
-  <p class="sub">Classify background tiles into depth bands for the Diorama 3D
-    presentation.</p>
-
-  <button id="collapseSidebarSections" class="section-toggle">Collapse sections</button>
-  <details class="side-section" data-settings="room" open><summary>Room, terrain &amp; background</summary>
-  <h2>Room</h2>
+  <h1>Action Editor</h1>
+  <p class="sub">Artwork, depth &amp; atmosphere</p>
+  <details class="side-section" data-settings="room" open><summary>Room &amp; region</summary>
+  <label class="palette-label" for="room">Room</label>
   <select id="room" style="width:100%"></select>
-  <p class="hint" id="roomSceneInfo"></p>
   <p class="hint" id="roomPreviewInfo" hidden><strong>Native artwork preview.</strong>
     View the enhanced completion ocean scene in game. Enable Death Heim completion
     scene under Action 3D &gt; Scene.</p>
-  <h2>Terrain variant</h2>
+  <label class="palette-label" for="terrain">Region / terrain</label>
   <select id="terrain" style="width:100%"></select>
-  <p class="hint" id="terrainInfo"></p>
-  <p class="hint">Matching terrain shares tile edits. Different layouts have
-    their own edits; the hint above shows which regions share this BG.</p>
-  <div style="display:flex;gap:5px;margin-top:6px">
+  <div class="room-backgrounds" style="display:flex;gap:5px;margin-top:12px" aria-label="Background layer">
     <button id="bg1" class="on" style="flex:1">BG1</button>
     <button id="bg2" style="flex:1">BG2</button>
   </div>
+  <details class="room-details"><summary>Room details &amp; reset</summary>
+  <p class="hint" id="roomSceneInfo"></p>
+  <p class="hint" id="terrainInfo"></p>
+  <p class="hint">Matching terrain shares tile edits. Different layouts have their own edits.</p>
   <p><button id="resetBackground">Reset background to native</button></p>
   <p class="hint" id="resetBackgroundScope"></p>
   <p class="hint" id="resetBackgroundStatus" role="status"></p>
   </details>
+  </details>
+
+  <nav class="workspace-shortcuts" aria-label="Level tools">
+    <h2>Level tools</h2>
+    <button data-open-settings="paint">Tiles &amp; depth <span>›</span></button>
+    <button data-open-settings="policy">Background <span>›</span></button>
+    <button data-open-settings="effects">Environment &amp; lighting <span>›</span></button>
+    <button data-open-settings="framing">Framing &amp; coverage <span>›</span></button>
+    <button data-open-settings="camera">Animation &amp; camera <span>›</span></button>
+    <p class="hint">Find every control in <b>Settings</b>.</p>
+  </nav>
 
   <details class="side-section bg-policy" data-settings="policy"><summary>Background policy</summary>
     <p class="hint" id="bgPolicyDrafts" hidden></p>
@@ -43,7 +51,7 @@
     <button id="bgPolicyApply">Apply policy</button><button id="bgPolicyDiscard">Discard draft</button><button id="bgPolicyReset">Reset to room defaults</button>
     <button id="bgPolicyPainted">Use painted scenery (disable fill)</button>
     <button id="bgPolicyPreview">Preview policy in shared renderer</button>
-    <label class="hint"><input id="bgPolicyGuides" type="checkbox" checked> Show policy guides on map</label>
+    <label class="hint"><input id="bgPolicyGuides" type="checkbox"> Show policy guides on map</label>
     <p class="hint" id="bgPolicyStatus" role="status"></p>
     <p class="hint">Green: extent caps; white: authentic view; purple: row bands. Available is shown at the renderer’s 128 px limit. Actual coverage also depends on scenery and view budgets. Policies are saved with tiles in the project and apply in game with Diorama enabled.</p>
   </details>
@@ -98,7 +106,7 @@
   </details>
   <details class="side-section" data-settings="framing"><summary>Saved Diorama framing &amp; coverage</summary>
   <button id="framingAdjust" style="width:100%">Adjust frame on map</button>
-  <p class="hint"><label><input id="showFraming" type="checkbox" checked> Show viewport guides on BG1</label></p>
+  <p class="hint"><label><input id="showFraming" type="checkbox"> Show viewport guides on BG1</label></p>
   <div class="framing-guides">
     <label style="color:#65dce9"><input id="framing169" type="checkbox" checked> 16:9</label>
     <label style="color:#c49aff"><input id="framing1610" type="checkbox" checked> 16:10</label>
@@ -113,7 +121,7 @@
     <input id="framingDistance" type="number" min="0" max="20" step="0.25" value="3.25" title="Saved baseline distance. Zero selects the game's automatic fit." disabled></div>
   <p class="hint" id="framingViewportInfo"></p>
   <details class="coverage-panel" open><summary>Diorama map coverage</summary>
-    <p class="hint"><label><input id="showCoverage" type="checkbox" checked> Show game view and exposed room borders</label></p>
+    <p class="hint"><label><input id="showCoverage" type="checkbox"> Show game view and exposed room borders</label></p>
     <div class="ctl"><label for="coverageAspect">Preview aspect</label><select id="coverageAspect"><option value="auto">Auto (editor window)</option><option value="1.6">16:10</option><option value="1.7777777777777777">16:9</option><option value="1.3333333333333333">4:3</option><option value="2.3333333333333335">21:9</option><option value="3.5555555555555554">32:9</option><option value="custom">Custom monitor</option><option value="stretch">Stretch</option></select></div>
     <p id="coverageSummary" class="coverage-summary" role="status" aria-live="polite"></p>
     <p id="coverageMissing" class="hint"></p>
@@ -189,7 +197,7 @@
   <p class="hint">Right-click to add effects or preview here. Drag placed sources; click linked terrain guides to configure their field. Moon and sky effects appear on BG2. Double-click or right-click any marker to configure it.</p>
   <button id="emitterAdd">Add effect…</button>
   <p><button id="emitterMapEdit">Edit emitters on map</button> <button id="emitterMapPlace">Place on map</button> <button id="lightBoxDraw">Draw light box</button> <button id="particleAreaDraw">Draw particle region</button></p>
-  <label><input id="effectGuides" type="checkbox" checked> Show effect markers on map</label>
+  <label><input id="effectGuides" type="checkbox"> Show effect markers on map</label>
   <p class="hint">In Edit emitters, click an area to select it; drag its centre or body to move it; drag a corner to resize. The round handle turns directional light. Shift-click resets a handle/control; Ctrl/Cmd-click selects several. Alt snaps position to 16 pixels or angle to 15°. Esc returns to tile selection.</p>
   <p><button id="floorMistDraw">Paint ground mist</button> <button id="floorMistErase">Erase mist areas</button></p>
   <label><input id="effectCollision" type="checkbox"> Show collision support on map</label>
@@ -379,63 +387,46 @@
 </aside>
 
 <div class="main">
-  <div class="bar">
-    <button id="sidebarToggle" aria-expanded="true" aria-controls="editorSidebar">Hide sidebar</button>
-    <button id="toolbarToggle" aria-expanded="true" aria-controls="toolbarExtras selectionTools changeReview sharedControls">Hide tools</button>
-    <button id="editorSettingsOpen">Settings…</button>
-    <button id="mode2d" class="on">Map editor</button>
-    <button id="modeNative">Original game frame</button>
-    <button id="mode3d" title="Free authoring view for inspecting depth. Use Shared renderer for game framing and camera limits.">Depth inspection</button>
-    <button id="modeShared" disabled>Shared renderer</button>
-    <span id="toolbarExtras" class="toolbar-extras">
-    <button id="frameTool" aria-pressed="false" title="Adjust the saved native viewport on the map">Frame</button>
-    <button id="coverageQuick" class="on" aria-pressed="true" title="Show the game camera footprint and exposed room borders">Coverage</button>
-    <button id="undoBtn" disabled>Undo</button>
-    <button id="redoBtn" disabled>Redo</button>
-    <button id="navFit" title="Fit the whole layer (f)">Fit</button>
-    <button id="navOut" title="Zoom out">&minus;</button>
-    <button id="navIn"  title="Zoom in">+</button>
-    <button id="navReset" title="Reset the 3D camera (r)">Reset cam</button>
-    <button id="actorBtn" class="on" title="Show a reference sprite at object depth">Actor</button>
-    <button id="bothBtn" class="on" title="Show the other background layer too">Both BGs</button>
-    <span id="iniName" style="color:var(--faint);font-family:var(--mono);font-size:10px"></span>
-    <span class="spacer"></span>
-    <button id="tint">Band tint</button>
-    <button id="compareOriginal">Compare original tiles</button>
-    </span>
-    <label for="projectLoad" class="file-btn" title="Open one project ZIP, or select both INI files together">Load project</label>
-    <input id="projectLoad" type="file" accept=".zip,.ini,application/zip,text/plain" multiple hidden>
-    <a id="projectSave" class="file-btn" role="button" tabindex="0" download="action-project.zip" title="Download all scenery and effects in one ZIP (Ctrl/Cmd-S)">Save project</a>
-    <span id="saveState" class="save-state" role="status">Loaded INI</span>
-    <button id="docs">Docs</button>
-  </div>
-  <p class="project-status" id="projectStatus" role="status" aria-live="polite">Save project downloads both INIs together. Load project opens that ZIP or both INIs selected together.</p>
-  <div class="selection-tools" id="selectionTools">
-    <div class="selection-summary"><b id="selectionSummary">No tiles selected</b>
-      <span id="selectionApplied"></span><span id="selectionScope"></span></div>
-    <div class="selection-actions">
-      <button id="selectQuick" class="on" title="Select without painting">Select</button>
-      <button id="tilePaletteOpen" aria-pressed="false" title="Browse all loaded tiles, including unused artwork">Tiles…</button>
-      <button id="selectionBand0" disabled aria-pressed="false">Far</button>
-      <button id="selectionBand1" disabled aria-pressed="false">Normal</button>
-      <button id="selectionBand2" disabled aria-pressed="false">Priority</button>
-    <button id="deselect" disabled title="Clear highlights, keep edits (Esc or Ctrl/Cmd-D)">Deselect</button>
-    <button id="selectRectQuick" title="Drag a rectangle, or click a start tile then Shift-click its opposite corner">Select rectangle</button>
-    <button id="copyTilesQuick" disabled title="Copy the selected rectangle (Ctrl/Cmd-C)">Copy</button>
-    <button id="stampQuick" disabled title="Click to paste repeatedly (Ctrl/Cmd-V; Esc to finish)">Stamp</button>
-    <button id="pixelSelectionBlackQuick" disabled title="Fill transparent pixels black on all selected tiles (Diorama only)">Fill transparency black</button>
-      <button id="selectionPaste" disabled title="Paste with its top-left corner at the selection">Paste over</button>
-      <button id="selectionPixels" disabled title="Edit the focused tile in this selection; use Fill transparency black for the whole range">Pixels…</button>
-      <button id="flipSelectedH" disabled title="Flip each selected tile horizontally, keeping tile positions">Flip H</button>
-      <button id="flipSelectedV" disabled title="Flip each selected tile vertically, keeping tile positions">Flip V</button>
-      <button id="mirrorSelectedH" disabled title="Reverse left/right tile order AND flip each tile horizontally: A B C → flipped C B A. Requires a complete rectangle.">Mirror range H</button>
-      <button id="mirrorSelectedV" disabled title="Reverse top/bottom tile order AND flip each tile vertically. Requires a complete rectangle.">Mirror range V</button>
-      <button id="selectionPreview" disabled>View selection in 3D</button>
+  <header class="bar workspace-bar" aria-label="Editor toolbar">
+    <button id="sidebarToggle" aria-expanded="true" aria-controls="editorSidebar" title="Show or hide the room panel">Room</button>
+    <div class="workspace-modes" role="group" aria-label="Editor view">
+      <button id="mode2d" class="on">Map</button>
+      <button id="modeShared" disabled title="Preview with the game renderer; edit Voxel depth and objects">3D preview</button>
     </div>
-    <div class="selection-detail"><span id="selectionSource"></span>
-      <b id="activeTool"></b><span id="toolFeedback"></span></div>
-  </div>
-  <div class="change-review" id="changeReview"><span id="changeSummary"></span>
+    <details id="otherViews" class="toolbar-popover">
+      <summary id="otherViewsLabel">More views</summary>
+      <div class="toolbar-popup">
+        <button id="modeNative">Original game frame</button>
+        <button id="mode3d" title="Free authoring view for inspecting depth">Depth inspection</button>
+        <label><input id="showSceneInfo" type="checkbox"> Show scene details</label>
+      </div>
+    </details>
+    <details id="viewControls" class="toolbar-popover">
+      <summary>View</summary>
+      <div class="toolbar-popup">
+        <div class="popup-row"><button id="navFit" title="Fit the whole layer (F)">Fit map</button><button id="navOut" title="Zoom out">−</button><button id="navIn" title="Zoom in">+</button><button id="navReset" title="Reset the 3D camera (R)">Reset camera</button></div>
+        <div id="toolbarExtras" class="popup-row">
+          <button id="frameTool" aria-pressed="false" title="Adjust the saved native viewport on the map">Adjust framing</button>
+          <button id="coverageQuick" aria-pressed="false" title="Show the game camera footprint and exposed room borders">Coverage guides</button>
+        </div>
+        <div class="popup-row"><button id="actorBtn" class="on" title="Show a reference sprite at object depth">Actor</button><button id="bothBtn" class="on" title="Show the other background layer too">Both BGs</button><button id="tint">Band tint</button></div>
+        <button data-open-settings="framing">Framing &amp; coverage settings…</button>
+        <button data-open-settings="effects">Effects &amp; markers…</button>
+        <button id="toolbarToggle" aria-expanded="true" aria-controls="toolbarExtras selectionTools">Hide editing toolbar</button>
+      </div>
+    </details>
+    <span class="spacer"></span>
+    <div class="workspace-history" role="group" aria-label="History"><button id="undoBtn" disabled title="Undo (Ctrl/Cmd-Z)" aria-label="Undo">↶</button><button id="redoBtn" disabled title="Redo (Ctrl/Cmd-Shift-Z)" aria-label="Redo">↷</button></div>
+    <a id="projectSave" class="file-btn primary-action" role="button" tabindex="0" download="action-project.zip" title="Save all scenery and effects (Ctrl/Cmd-S)">Save project</a>
+    <span id="saveState" class="save-state" role="status">Loaded INI</span>
+    <details id="projectMenu" class="toolbar-popover popup-end">
+      <summary>Project</summary>
+      <div class="toolbar-popup">
+        <button id="projectOpen" type="button">Open project…</button>
+        <input id="projectLoad" type="file" accept=".zip,.ini,application/zip,text/plain" multiple hidden>
+        <p class="hint">Open a project ZIP or both INIs together. Save project downloads all scenery and effects in one ZIP.</p>
+        <details class="popup-section"><summary>Review tile changes</summary>
+        <div class="change-review" id="changeReview"><span id="changeSummary"></span>
     <label for="highlightBy">Highlight</label>
     <select id="highlightBy" title="Bands use the currently applied state. Mixed tiles match any of their four 8px quadrants.">
       <option value="modified">Modified tiles</option>
@@ -449,7 +440,69 @@
     <button id="nextChange" disabled>Next edit</button>
     <button id="selectChanges" disabled>Select edited tiles</button>
   </div>
-  <div id="sharedControls" class="bar" hidden>
+        <button id="compareOriginal">Compare original tiles</button>
+        </details>
+        <button data-open-settings="files">Import / export individual INIs…</button>
+        <span id="iniName" class="hint"></span>
+        <button id="docs">Editor guide…</button>
+      </div>
+    </details>
+    <button id="editorSettingsOpen">Settings…</button>
+  </header>
+  <p class="project-status" id="projectStatus" role="status" aria-live="polite"></p>
+  <div class="selection-tools" id="selectionTools">
+    <div class="selection-summary"><b id="selectionSummary">No tiles selected</b><span id="selectionApplied"></span><span id="selectionScope"></span></div>
+    <div class="selection-actions">
+      <button id="selectQuick" class="on" title="Select without painting">Select</button>
+      <button id="selectRectQuick" title="Drag a rectangle, or Shift-click its opposite corner">Rectangle</button>
+      <button id="tilePaletteOpen" aria-pressed="false" title="Browse all loaded tiles, including unused artwork">Tiles…</button>
+      <button id="selectionPixels" disabled title="Edit the focused tile">Pixels…</button>
+      <div class="workspace-modes" role="group" aria-label="Selected tile depth band"><button id="selectionBand0" disabled aria-pressed="false">Far</button><button id="selectionBand1" disabled aria-pressed="false">Normal</button><button id="selectionBand2" disabled aria-pressed="false">Priority</button></div>
+      <details id="selectionActionsMenu" class="toolbar-popover popup-end">
+        <summary>More actions</summary>
+        <div class="toolbar-popup">
+          <div class="popup-row"><button id="copyTilesQuick" disabled title="Copy selected rectangle (Ctrl/Cmd-C)">Copy</button><button id="selectionPaste" disabled title="Paste at the selection">Paste over</button><button id="stampQuick" disabled title="Click to paste repeatedly (Ctrl/Cmd-V)">Stamp</button></div>
+          <button id="pixelSelectionBlackQuick" disabled title="Fill transparent pixels on selected tiles (Diorama only)">Fill transparency black</button>
+          <div class="popup-row"><button id="flipSelectedH" disabled title="Flip artwork without moving tiles">Flip H</button><button id="flipSelectedV" disabled>Flip V</button></div>
+          <div class="popup-row"><button id="mirrorSelectedH" disabled title="Reverse tile order and flip artwork">Mirror range H</button><button id="mirrorSelectedV" disabled>Mirror range V</button></div>
+          <button id="selectionPreview" disabled>View selection in 3D</button>
+          <button id="selectionVoxel" disabled>Edit selection in Voxel 3D</button>
+          <button data-open-settings="selection">Advanced selection…</button>
+          <button id="deselect" disabled title="Clear selection, keep edits (Esc)">Deselect</button>
+          <p class="hint" id="selectionSource"></p>
+        </div>
+      </details>
+    </div>
+    <div class="selection-detail"><b id="activeTool"></b><span id="toolFeedback"></span></div>
+  </div>
+  <div id="sharedControls" class="bar shared-toolbar" hidden>
+    <label>Mode <select id="voxelMode"><option value="2">Voxel 3D (WIP)</option><option value="1">Diorama (shipped)</option></select></label>
+    <button id="voxelEdit" type="button" aria-pressed="false">Edit Voxel</button>
+    <details id="sharedObjectsMenu" class="toolbar-popover">
+      <summary>Objects</summary>
+      <div class="toolbar-popup">
+        <button id="sharedLoadObjects" type="button">Load native objects…</button>
+        <input id="sharedObjectFile" type="file" accept=".arobj" hidden>
+        <p class="hint">Import a captured game frame to preview enemies and moving props.</p>
+        <span id="sharedObjectStatus" role="status"></span>
+        <div class="popup-row"><button id="sharedResetObjects" type="button" disabled>Captured camera</button><button id="sharedClearObjects" type="button" disabled>Clear native objects</button></div>
+        <hr>
+        <button id="sharedPlacePlayer" type="button" aria-pressed="false">Place player</button>
+        <button id="sharedPlayerSettings" type="button">Player settings…</button>
+      </div>
+    </details>
+    <details id="sharedViewMenu" class="toolbar-popover">
+      <summary>View</summary>
+      <div class="toolbar-popup view-popup">
+        <h3>Camera</h3>
+        <div class="popup-row" aria-label="Camera presets"><button id="sharedPresetfront" type="button">Front</button><button id="sharedPresetleft" type="button">Left</button><button id="sharedPresetright" type="button">Right</button></div>
+        <label title="1 matches the saved game camera">Zoom <input id="sharedDistance" type="range" min="0.5" max="2.5" step="0.01" value="1"></label>
+        <label>Rotate <input id="sharedYaw" aria-label="Camera yaw" type="range" min="-0.7" max="0.7" step="0.01" value="0"></label>
+        <label>Tilt <input id="sharedPitch" aria-label="Camera pitch" type="range" min="-0.7" max="0.7" step="0.01" value="0"></label>
+        <button data-open-settings="camera">Animation &amp; camera position…</button>
+        <label>Inspect Voxel <select id="sharedInspection"><option value="0">Full scene</option><option value="1">Backplanes only</option><option value="2">Cutaway + actors</option></select></label>
+        <p class="hint">Preview only. Backplanes hides caps and actors; cutaway removes front faces while keeping caps and native sprite priority.</p>
+        <h3>Display</h3>
     <div class="shared-output-controls">
       <label for="sharedAspect">Aspect ratio</label>
       <select id="sharedAspect" title="Preview a monitor shape using the shared compositor. Auto follows the editor window shape, independent of open tools.">
@@ -468,36 +521,167 @@
       </span>
       <span id="sharedOutputSize" title="Preview resolution is capped at 960 pixels on its longest side. Monitor dimensions set the aspect ratio; pixel aspect and extra tile coverage remain separate."></span>
     </div>
-    <button id="sharedPlacePlayer" type="button" aria-pressed="false">Place player</button>
-    <button id="sharedPlayerSettings" type="button">Player settings…</button>
-    <button id="sharedLoadObjects" type="button">Load native objects…</button>
-    <input id="sharedObjectFile" type="file" accept=".arobj" hidden>
-    <button id="sharedResetObjects" type="button" disabled>Captured camera</button>
-    <button id="sharedClearObjects" type="button" disabled>Clear native objects</button>
-    <span id="sharedObjectStatus" role="status"></span>
-    <label>Pixels <select id="sharedPixels"><option value="0">Square</option><option value="1">CRT 4:3</option></select></label>
-    <label title="Captured pixels per side, independent of the display crop. Game default: 120.">Capture width margin <input id="sharedExtra" type="number" min="0" max="128" step="8" value="120" style="width:55px"></label>
-    <label>Capture row budget <select id="sharedVertical"><option value="0">0</option><option value="32">32</option><option value="64" selected>64</option></select></label>
-    <label><input id="sharedEffects" type="checkbox" checked> Environmental effects</label>
-    <label>Background mode <select id="sharedSky"><option value="0">Plane only</option><option value="1" selected>Skybox only</option><option value="2">Both</option></select></label>
-    <label title="Solid color behind the tile planes, matching the game's Show backdrop setting. Hidden in Skybox only mode."><input id="sharedBackdrop" type="checkbox"> Show backdrop</label>
-    <label title="Multiplier relative to the saved game camera baseline. 1 matches normal gameplay.">Inspect zoom <input id="sharedDistance" type="range" min="0.5" max="2.5" step="0.01" value="1" style="width:80px"></label>
-    <label>Yaw <input id="sharedYaw" type="range" min="-0.7" max="0.7" step="0.01" value="0" style="width:65px"></label>
-    <label>Pitch <input id="sharedPitch" type="range" min="-0.7" max="0.7" step="0.01" value="0" style="width:65px"></label>
-    <button id="sharedResetView">Reset to game view</button>
-    <span id="sharedRoomStatus" role="status">Starting renderer…</span>
+
+        <label><input id="sharedEffects" type="checkbox" checked> Environmental effects</label>
+        <details class="popup-section"><summary>Advanced display &amp; capture</summary>
+          <label>Pixel shape <select id="sharedPixels"><option value="0">Square</option><option value="1">CRT 4:3</option></select></label>
+          <label>Background <select id="sharedSky"><option value="0">Plane only</option><option value="1" selected>Skybox only</option><option value="2">Both</option></select></label>
+          <label title="Solid color behind tile planes. Hidden in Skybox only mode."><input id="sharedBackdrop" type="checkbox"> Show backdrop</label>
+          <label title="Captured pixels per side; game default 120">Capture width margin <input id="sharedExtra" type="number" min="0" max="128" step="8" value="120"></label>
+          <label>Capture row budget <select id="sharedVertical"><option value="0">0</option><option value="32">32</option><option value="64" selected>64</option></select></label>
+        </details>
+      </div>
+    </details>
+    <button id="sharedResetView">Reset view</button>
+    <span id="sharedRoomStatus" class="renderer-status" role="status">Starting renderer…</span>
   </div>
   <div class="view">
     <canvas id="map2d" tabindex="0" aria-label="Tile map. Right-click or Shift-F10 for tile actions."></canvas>
     <canvas id="gl" tabindex="0" aria-label="Diorama preview. Right-click or Shift-F10 for editor settings."></canvas>
-    <canvas id="sharedGl" tabindex="0" style="display:none" aria-label="Shared level renderer. Drag to pan; arrows move the camera. Shift-click or Shift-drag to place the player."></canvas>
+    <canvas id="sharedGl" tabindex="0" style="display:none" aria-label="Shared level renderer. Shift and middle drag rotates; wheel zooms. In Voxel editing, Shift-click changes selection and Alt-drag pans. Outside Voxel editing, drag pans and Shift-drag places the player. Arrows move the camera."></canvas>
+    <svg id="voxelOverlay" hidden aria-hidden="true" preserveAspectRatio="xMidYMid meet"></svg>
+    <section id="voxelPanel" class="pixel-inspector voxel-inspector" aria-label="Voxel visual editor" hidden>
+      <div class="inspector-header"><b>Voxel touch-up</b><span id="voxelDraft"></span></div>
+      <p class="voxel-preservation">Visual only · collision and sprite priority stay native.</p>
+      <div class="voxel-selection"><b id="voxelSelection"></b><span id="voxelTarget"></span></div>
+      <p class="hint" id="voxelEmpty">Click a face, or select a rectangle in Map and choose Edit selection in Voxel 3D. Hidden cells can be selected by coordinates below.</p>
+      <label>Select <select id="voxelSelectScope"><option value="whole">Whole object</option><option value="tile">Individual tile</option></select></label>
+      <label>Tool <select id="voxelTool"><option value="select">Depth / select</option><option value="transform">Move / resize group</option><option value="attached">Attached pull</option><option value="sample">Sample settings</option><option value="paint">Paint sampled settings</option></select></label>
+      <fieldset id="voxelTransformFields" hidden><legend>Move / resize group</legend>
+        <p class="hint" id="voxelTransformHint">Move or resize the selection around one shared pivot. Its native collision stays fixed.</p>
+        <div class="voxel-transform-grid">
+          <label>X (pixels)<input id="voxelTransformDx" aria-label="Group X offset in pixels" type="number" min="-256" max="256" step="1" value="0"></label>
+          <label>Y (pixels)<input id="voxelTransformDy" aria-label="Group Y offset in pixels" type="number" min="-256" max="256" step="1" value="0"></label>
+          <label>Z (depth)<input id="voxelTransformDz" aria-label="Group depth offset" type="number" min="-1.2" max="1.2" step="0.025" value="0"></label>
+          <label>Width X (%)<input id="voxelTransformSx" aria-label="Group width X percent" type="number" min="12.5" max="400" step="5" value="100"></label>
+          <label>Height Y (%)<input id="voxelTransformSy" aria-label="Group height Y percent" type="number" min="12.5" max="400" step="5" value="100"></label>
+          <label>Depth Z (%)<input id="voxelTransformSz" aria-label="Group depth Z percent" type="number" min="12.5" max="400" step="5" value="100"></label>
+        </div>
+        <label class="voxel-check"><input id="voxelTransformLock" type="checkbox"> Keep proportions</label>
+        <details id="voxelTransformOptions"><summary>Pivot &amp; reset</summary>
+          <label>Resize around <select id="voxelTransformPivot"><option value="bottom">Bottom center</option><option value="center">Center</option><option value="custom" disabled>Saved pivot</option></select></label>
+          <p class="hint" id="voxelTransformSummary"></p>
+          <p class="hint">Bottom center keeps the base planted. Changing pivot preserves the current shape. Positive X moves right, Y down, and Z farther away. Dashed handles are screen controls for axes aimed at the camera.</p>
+          <button id="voxelTransformReset">Reset move / resize</button>
+        </details>
+      </fieldset>
+      <fieldset id="voxelPullFields" hidden><legend>Attached limb</legend>
+        <label>Attached side <select id="voxelPullAnchor"><option value="left">Left edge</option><option value="right">Right edge</option><option value="top">Top edge</option><option value="bottom">Bottom edge</option></select></label>
+        <p class="hint">Select the whole limb, choose the edge joined to the trunk, then drag X, Y or Z at the free end. The base stays attached and thickness is preserved. Native collision stays fixed.</p>
+        <p class="hint" id="voxelPullSpan"></p>
+        <details id="voxelPullNumbers"><summary>Exact tip position</summary>
+          <label>X shift (pixels) <input id="voxelPullX" type="number" min="-256" max="256" step="1" value="0"></label>
+          <label>Y shift (pixels) <input id="voxelPullY" type="number" min="-256" max="256" step="1" value="0"></label>
+          <label>Z shift (depth) <input id="voxelPullZ" type="number" min="-1.2" max="1.2" step="0.025" value="0"></label>
+          <p class="hint">Positive X moves right, Y down, and Z farther away. X/Y drag snaps to native pixels; Z uses Depth snap. A dashed “control” handle is a screen control for an axis aimed at the camera.</p>
+        </details>
+        <button id="voxelPullReset">Reset tip position</button>
+      </fieldset>
+      <fieldset id="voxelTileFields" hidden><legend id="voxelTileLegend">Depth</legend>
+        <div id="voxelDepthControls">
+        <label>Front depth <input id="voxelTileFrontRange" aria-label="Front depth slider" type="range" min="-0.4" max="0.8" step="0.005"><input id="voxelTileFront" aria-label="Front depth" type="number" min="-0.4" max="0.8" step="0.005"></label>
+        <label>Back depth <input id="voxelTileBackRange" aria-label="Back depth slider" type="range" min="-0.4" max="0.8" step="0.005"><input id="voxelTileBack" aria-label="Back depth" type="number" min="-0.4" max="0.8" step="0.005"></label>
+        <label class="voxel-check"><input id="voxelKeepThickness" type="checkbox"> Move both planes together</label>
+        <p class="hint voxel-depth-help">Drag the yellow handle to push/pull the selected front or back face. Positive depth moves farther away.</p>
+        </div>
+        <details id="voxelConversion"><summary>Convert selected tiles</summary>
+          <label>Preset <select id="voxelPreset"><option value="" disabled selected>Choose a preset…</option><option value="slab">Solid slab</option><option value="flat">Flat at back plane</option><option value="recess">Recess both planes</option><option value="thin">Thin face</option></select></label>
+          <label>Depth / amount <input id="voxelPresetDepth" type="number" min="0.005" max="0.8" step="0.025" value="0.1"></label>
+          <p class="hint">Changing the preset or amount previews it immediately. Flat collapses thickness; slab builds toward the camera; recess preserves thickness.</p>
+        </details>
+        <details id="voxelShapeControls"><summary>Taper &amp; curve <span id="voxelShapeSummary"></span></summary>
+          <label>Shape <select id="voxelShape"><option value="box">Straight</option><option value="taper">Linear taper</option><option value="curve">Smooth curve</option></select></label>
+          <label>Front at bottom <input id="voxelFrontEnd" type="number" min="-0.4" max="0.8" step="0.025"></label>
+          <label>Back at bottom <input id="voxelBackEnd" type="number" min="-0.4" max="0.8" step="0.025"></label>
+          <p class="hint" id="voxelShapeDomain">A connected profile spans the selection from top to bottom. Later artwork edits keep that span.</p>
+        </details>
+        <details id="voxelPlacement"><summary>Width &amp; placement <span id="voxelPlacementSummary"></span></summary>
+          <p class="hint">Visual size and offset in native pixels. Collision stays in its original position.</p>
+          <label>Width <input id="voxelTileWidthRange" aria-label="Tile width slider" type="range" min="1" max="64" step="1"><input id="voxelTileWidth" aria-label="Tile width in pixels" type="number" min="1" max="64" step="1"></label>
+          <label>Horizontal offset <input id="voxelTileOffset" type="number" min="-32" max="32" step="1"></label>
+        </details>
+        <details id="voxelRepair"><summary>Repair backing <span id="voxelBackingSummary"></span></summary>
+          <p class="hint">Fill gaps on the room’s original background plane, or replace its artwork. Back depth controls the selected shape’s extent.</p>
+          <label>Backing <select id="voxelBacking"><option value="auto">Automatic</option><option value="none">None</option><option value="fill">Fill missing backing</option><option value="replace">Replace backing</option></select></label>
+          <div class="voxel-art"><b>Backing art</b><span id="voxelBackArtLabel"></span><button id="voxelBackArt" aria-label="Choose backing artwork">Choose tile…</button><button id="voxelBackAuto" aria-label="Restore automatic backing artwork">Auto</button></div>
+        </details>
+        <details id="voxelSurfaceArt"><summary>Surface artwork <span id="voxelArtSummary"></span></summary>
+          <p class="hint">Choose native artwork, crop a clean patch, or assemble four tile pieces. Sides supplies the default for left and right.</p>
+          <div class="voxel-art"><b>Front</b><span id="voxelFrontArtLabel"></span><button id="voxelFrontArt" aria-label="Choose front artwork">Choose tile…</button><button id="voxelFrontAuto" aria-label="Restore automatic front artwork">Auto</button></div>
+          <div class="voxel-art"><b>Top / floor</b><span id="voxelTopArtLabel"></span><button id="voxelTopArt" aria-label="Choose top / floor artwork">Choose tile…</button><button id="voxelTopAuto" aria-label="Restore automatic top / floor artwork">Auto</button></div>
+          <div class="voxel-art"><b>Sides</b><span id="voxelSideArtLabel"></span><button id="voxelSideArt" aria-label="Choose shared side artwork">Choose tile…</button><button id="voxelSideAuto" aria-label="Restore automatic shared side artwork">Auto</button></div>
+          <div class="voxel-art"><b>Left</b><span id="voxelLeftArtLabel"></span><button id="voxelLeftArt" aria-label="Choose left artwork">Choose tile…</button><button id="voxelLeftAuto" aria-label="Restore automatic left artwork">Auto</button></div>
+          <div class="voxel-art"><b>Right</b><span id="voxelRightArtLabel"></span><button id="voxelRightArt" aria-label="Choose right artwork">Choose tile…</button><button id="voxelRightAuto" aria-label="Restore automatic right artwork">Auto</button></div>
+          <div class="voxel-art"><b>Bottom</b><span id="voxelBottomArtLabel"></span><button id="voxelBottomArt" aria-label="Choose bottom artwork">Choose tile…</button><button id="voxelBottomAuto" aria-label="Restore automatic bottom artwork">Auto</button></div>
+        </details>
+        <details id="voxelFaceVisibility"><summary>Visible faces <span id="voxelFacesSummary"></span></summary>
+          <div class="voxel-check-grid"><label><input id="voxelFaceFront" type="checkbox" checked> Front</label><label><input id="voxelFaceBack" type="checkbox" checked> Back</label><label><input id="voxelFaceTop" type="checkbox" checked> Top</label><label><input id="voxelFaceBottom" type="checkbox" checked> Bottom</label><label><input id="voxelFaceLeft" type="checkbox" checked> Left</label><label><input id="voxelFaceRight" type="checkbox" checked> Right</label></div>
+          <p class="hint">Hide unwanted faces without changing collision. Use Map selection or coordinates to recover fully hidden cells.</p>
+        </details>
+      </fieldset>
+      <fieldset id="voxelObjectFields" hidden><legend>Object shape</legend>
+        <label>Shape <select id="voxelObjectMode"><option value="auto">Automatic</option><option value="flat">Flat native sprite</option><option value="extruded">Extruded sprite</option></select></label>
+        <p class="hint" id="voxelObjectTransformHint"></p>
+        <label>Depth offset <input id="voxelObjectOffsetRange" aria-label="Object depth slider" type="range" min="-0.4" max="0.8" step="0.005"><input id="voxelObjectOffset" aria-label="Object depth" type="number" min="-0.4" max="0.8" step="0.005"></label>
+        <label>Thickness <input id="voxelObjectThicknessRange" aria-label="Object thickness slider" type="range" min="0" max="0.8" step="0.005"><input id="voxelObjectThickness" aria-label="Object thickness" type="number" min="0" max="0.8" step="0.005"></label>
+        <p class="hint">Changes apply to matching objects, including later spawns.</p>
+        <details id="voxelObjectPlacement"><summary>Width <span id="voxelObjectWidthSummary"></span></summary>
+          <label>Width scale <input id="voxelObjectWidthRange" aria-label="Object width slider" type="range" min="0.125" max="4" step="0.025"><input id="voxelObjectWidth" aria-label="Object width scale" type="number" min="0.125" max="4" step="0.025"></label>
+        </details>
+        <details id="voxelObjectIdentity"><summary>Object family details</summary><p class="hint" id="voxelObjectScope"></p></details>
+      </fieldset>
+      <details id="voxelCopyControls"><summary>Copy &amp; paint settings <span id="voxelSampleSummary">No sample</span></summary>
+        <div class="voxel-button-row"><button id="voxelSample">Sample selection</button><button id="voxelPaste">Apply sample</button><button id="voxelMatchDepth">Match depth</button></div>
+        <div class="voxel-check-grid"><label><input id="voxelCopyDepth" type="checkbox" checked> Depth</label><label><input id="voxelCopyPlacement" type="checkbox"> Tile width / offset</label><label><input id="voxelCopyBacking" type="checkbox"> Backing</label><label><input id="voxelCopyArt" type="checkbox"> Artwork</label><label><input id="voxelCopyFaces" type="checkbox"> Visibility</label><label><input id="voxelCopyShape" type="checkbox"> Shape</label><label><input id="voxelCopyTransform" type="checkbox"> Group move / resize</label></div>
+        <p class="hint">Sample a face, choose fields, then apply to a selection or paint across faces. Each brush stroke is one preview Undo step.</p>
+      </details>
+      <details id="voxelEditBrowser"><summary>Authored edits <span id="voxelBudget"></span></summary>
+        <select id="voxelNavigate" aria-label="Authored region"></select><div class="voxel-button-row"><button id="voxelPrevious" aria-label="Previous authored region">Previous</button><button id="voxelNext" aria-label="Next authored region">Next</button></div>
+        <label class="voxel-check"><input id="voxelHighlightEdits" type="checkbox" checked> Highlight edits in Map</label>
+        <p class="hint">Connected tiles with matching settings share a compact region. The budget covers all terrains.</p>
+      </details>
+      <details id="voxelObjectBrowser"><summary>Captured objects <span id="voxelObjectCount">No capture</span></summary>
+        <label class="palette-label" for="voxelObjects">Select an object</label><select id="voxelObjects"><option value="">No capture loaded</option></select>
+        <p class="hint">A capture contains frozen native poses from one area and frame.</p>
+        <button id="voxelLoadObjects" type="button">Load object capture…</button>
+      </details>
+      <details id="voxelSelectionHelp"><summary>Selection &amp; snapping</summary>
+        <div class="voxel-button-row"><button id="voxelSelectWhole">Select whole object</button><button id="voxelGrow">Grow</button><button id="voxelShrink">Shrink</button></div>
+        <p class="hint">Whole object follows native stump, wood, floor or block ownership. Ambiguous areas keep the clicked tile selected. Grow/Shrink adds/removes one cell border; use Individual tile and Shift-click, or a Map rectangle, to refine the group.</p>
+        <label>Pick <select id="voxelPick"><option value="3">Tiles and objects</option><option value="1">BG1 tiles</option><option value="2">Native objects</option></select></label>
+        <label>Depth snap <select id="voxelSnap"><option value="0.025">0.025</option><option value="0.01">0.01</option><option value="0.05">0.05</option><option value="0">Free</option></select></label>
+        <p class="hint">Shift-click adds/removes selection. Shift + middle drag rotates; wheel zooms. Alt-drag pans. Escape clears selection. A numeric change updates every selected item; depth dragging keeps their relative depths.</p>
+        <div class="voxel-coordinate-grid"><label>Cell X <input id="voxelCellX" type="number" min="-512" max="511" value="0"></label><label>Cell Y <input id="voxelCellY" type="number" min="-512" max="511" value="0"></label><label>Columns <input id="voxelCellW" type="number" min="1" max="1024" value="1"></label><label>Rows <input id="voxelCellH" type="number" min="1" max="1024" value="1"></label></div>
+        <div class="voxel-button-row"><button id="voxelSelectCells">Select cells</button><button id="voxelFocus">Focus selection</button></div>
+        <p class="hint" id="voxelSelectionDetails"></p>
+      </details>
+      <details id="voxelResetControls"><summary>Reset a property</summary><label>Property <select id="voxelResetProperty"><option value="depth">Both depths / object depth</option><option value="front">Front depth</option><option value="back">Back depth</option><option value="front-end">Bottom front depth</option><option value="back-end">Bottom back depth</option><option value="width">Width</option><option value="offset">Offset</option><option value="backing">Backing</option><option value="art">All artwork</option><option value="faces">Visibility</option><option value="shape">Shape</option><option value="bend">Attached pull</option><option value="transform">Group move / resize</option><option value="mode">Object mode</option><option value="thickness">Object thickness</option></select></label><button id="voxelResetOne">Use material default</button><p class="hint">Removes only the chosen override. Other edits stay in the preview.</p></details>
+      <div class="voxel-button-row"><button id="voxelUndo" disabled>Undo preview</button><button id="voxelRedo" disabled>Redo preview</button></div>
+      <p id="voxelStatus" role="status"></p>
+      <div class="voxel-actions"><button id="voxelApply" disabled>Apply</button><button id="voxelDiscard" disabled>Discard</button><button id="voxelReset" disabled>Reset selected</button></div>
+    </section>
     <div class="hud" id="hud"></div>
-    <div class="legend" id="legend"></div>
+    <details class="canvas-help"><summary>Controls</summary><div class="legend" id="legend"></div></details>
     <section id="tilePalette" class="pixel-inspector tile-palette" aria-label="Loaded tile palette" hidden>
-      <div class="inspector-header"><b>Tile palette</b><button id="tilePaletteClose">Close</button></div>
+      <div class="inspector-header"><b id="paletteTitle">Tile palette</b><button id="tilePaletteClose">Close</button></div>
+      <div id="paletteFaceControls" hidden>
+        <p class="hint" id="paletteFaceTarget"></p>
+        <div class="palette-face-pick"><button id="palettePickFace" aria-pressed="false">Pick 3D face</button><button id="palettePickMap" aria-pressed="false">Pick map tile</button>
+          <label>Source <select id="paletteFaceBg"><option value="0">BG1</option><option id="paletteFaceBg2" value="1">BG2</option></select></label></div>
+        <div id="paletteFaceSamples" class="palette-face-samples" hidden>
+          <figure><div class="palette-face-source"><canvas id="paletteFaceSource" width="16" height="16" tabindex="0" aria-describedby="paletteFaceCropHelp"></canvas><span id="paletteFaceCrop"></span></div><figcaption>Source tile</figcaption></figure>
+          <figure><canvas id="paletteFacePreview" width="16" height="16" aria-label="Chosen face artwork preview"></canvas><figcaption>Face artwork</figcaption></figure>
+        </div>
+        <div class="palette-face-crop-controls"><label>Crop <select id="paletteFaceSize"><option value="16">Full 16×16</option><option value="8">8×8 patch</option></select></label>
+          <label>X <input id="paletteFaceX" type="number" min="0" max="8" step="1" value="0"></label><label>Y <input id="paletteFaceY" type="number" min="0" max="8" step="1" value="0"></label><button id="paletteFaceCenter">Center 8×8</button></div>
+        <div class="palette-filters"><button id="paletteFaceFlipH" title="Mirror the chosen artwork horizontally using native tile flip flags">Flip H</button><button id="paletteFaceFlipV" title="Mirror the chosen artwork vertically using native tile flip flags">Flip V</button><button id="paletteFaceApply" disabled>Apply artwork</button></div>
+        <p class="hint" id="paletteFaceCropInfo"></p><p class="hint" id="paletteFaceCropHelp">An 8×8 patch can cross tile-piece boundaries. Click the source or use its arrow keys to move the crop; Shift moves 4 pixels. Enter applies.</p>
+        <p class="hint" id="paletteFaceStatus" role="status" aria-live="polite"></p>
+      </div>
       <label class="palette-label" for="paletteSource">Artwork source</label>
       <select id="paletteSource"></select>
       <p class="hint" id="paletteSourceInfo"></p>
+      <button id="palettePickStamp" title="Choose a visible map tile without changing the current selection">Pick tile from map</button>
       <div class="palette-filters">
         <select id="paletteKind" aria-label="Tile size"><option value="metatile">16×16 tiles</option><option value="character">8×8 pieces</option></select>
         <select id="paletteUsage" aria-label="Source map usage"><option value="all">All tiles</option><option value="unused">Unused in source</option><option value="used">Used in source</option></select>
@@ -505,6 +689,8 @@
       <div id="paletteComposer" hidden>
         <label class="palette-label" for="paletteRow">Color palette for pieces</label>
         <select id="paletteRow" aria-label="Character color palette"></select>
+        <label id="paletteFacePieceModeRow" class="palette-label" hidden>Use pieces <select id="paletteFacePieceMode"><option value="piece">Repeat one 8×8 piece</option><option value="assemble">Assemble four pieces</option></select></label>
+        <div id="palettePieceFlips" class="palette-filters" hidden><label><input id="palettePieceFlipH" type="checkbox"> Flip pieces H</label><label><input id="palettePieceFlipV" type="checkbox"> Flip pieces V</label></div>
         <p class="hint">Choose a quarter, then an 8×8 piece. Advances left to right, then to the next row.</p>
         <div id="paletteQuarters" class="palette-quarters">
           <button id="paletteQuarter0" aria-label="Top left quarter" aria-pressed="true"><canvas id="paletteQuarterCanvas0" width="8" height="8"></canvas></button>
@@ -517,14 +703,15 @@
       <p class="hint" id="paletteCount"></p>
       <p class="hint">Hover or focus a tile for a larger preview.</p>
       <div id="paletteGrid" class="palette-grid" aria-label="Available tile artwork"></div>
-      <div class="palette-stamp">
+      <div id="paletteStamp" class="palette-stamp">
         <canvas id="paletteStampPreview" width="64" height="64" aria-label="Current stamp preview"></canvas>
         <div><b id="paletteStampInfo">Choose a tile</b>
           <div class="palette-filters"><button id="flipClipboardH" disabled aria-pressed="false" title="Reverse the copied tile columns and flip each tile horizontally">Mirror stamp H</button><button id="flipClipboardV" disabled aria-pressed="false" title="Reverse the copied tile rows and flip each tile vertically">Mirror stamp V</button></div>
         </div>
       </div>
-      <p class="hint">Click a tile, then click the map to place it. Keep clicking to repeat; Esc finishes. Palette choices and stamp mirroring are previews until placed. Undo reverses placements.</p>
+      <p class="hint" id="paletteStampHint">Click a tile, then click the map to place it. Keep clicking to repeat; Esc finishes. Palette choices and stamp mirroring are previews until placed. Undo reverses placements.</p>
     </section>
+    <div id="palettePicking" class="palette-picking" hidden><span id="palettePickingText" role="status" aria-live="polite"></span><button id="palettePickCancel">Cancel sampling</button></div>
     <section id="pixelInspector" class="pixel-inspector" aria-label="Tile pixel editor" hidden>
     <div class="inspector-header"><b>Tile pixels</b>
       <button id="pixelInspectorClose" aria-label="Close pixel editor">Close</button></div>
@@ -590,6 +777,7 @@
   <button id="tileActionCopy" role="menuitem" tabindex="-1">Copy selected tiles</button>
   <button id="tileActionPaste" role="menuitem" tabindex="-1">Paste over here</button>
   <button id="tileActionStamp" role="menuitem" tabindex="-1">Stamp copied tiles…</button>
+  <button id="tileActionSample" role="menuitem" tabindex="-1">Use this tile as paint brush</button>
   <button id="tileActionDelete" role="menuitem" tabindex="-1"
     title="Clear selected tile artwork. Added edge tiles are removed.">Delete tile</button>
   <button id="tileActionReset" role="menuitem" tabindex="-1"
@@ -603,7 +791,8 @@
 <div id="settingsMenu" class="tile-menu" role="menu" aria-label="Editor settings" hidden></div>
 <dialog id="settingsDlg" aria-labelledby="settingsTitle" aria-describedby="settingsHint">
   <div class="dlg-h"><h3 id="settingsTitle">Editor settings</h3><span class="spacer"></span><button id="settingsClose">Done</button></div>
-  <p class="hint settings-hint" id="settingsHint">These are the sidebar controls. Changes apply as you edit; sections with Apply buttons keep their usual drafts.</p>
+  <p class="hint settings-hint" id="settingsHint">Choose a section or search for a control. Sections with Apply buttons keep a preview until applied.</p>
+  <div class="settings-search"><label for="settingsSearch">Find a setting</label><input id="settingsSearch" type="search" placeholder="Try lighting, animation, palette…" autocomplete="off"><span id="settingsEmpty" role="status" hidden>No matching settings.</span></div>
   <div class="settings-workspace"><nav id="settingsNav" aria-label="Settings sections"></nav>
     <div id="settingsContent" class="dlg-b"></div></div>
 </dialog>
@@ -838,6 +1027,8 @@
 <script src="effect_editor.js"></script>
 <script src="effect_geometry.js"></script>
 <script src="effect_handles.js"></script>
+<script src="voxel_records.js"></script>
+<script src="voxel_editor.js"></script>
 <script src="shared_room_preview.js"></script>
 <script src="bg_policy_editor.js"></script>
 <script src="palette_editor.js"></script>

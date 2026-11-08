@@ -1,6 +1,7 @@
 /* Real serialized room surfaces through the shared compositor's browser ABI.
  * Pixel agreement is a separate WebGL2/native image comparison. */
 import assert from 'node:assert/strict';
+import {attachDepthImports} from './action_editor_depth_imports.mjs';
 import fs from 'node:fs';
 const [wasmPath, ...scenes] = process.argv.slice(2);
 assert(wasmPath && scenes.length, 'usage: wasm test.wasm scene.ardi [...]');
@@ -45,6 +46,7 @@ const imports = {
   },
   available() { return shaderSupport ? 1 : 0; },
 };
+attachDepthImports(imports,()=>api.memory);
 const wasi = {fd_close:()=>0,fd_seek:()=>0,fd_write:()=>0,
   proc_exit:code=>{throw new Error(`Unexpected WASI exit ${code}`);}};
 const module = await WebAssembly.compile(fs.readFileSync(wasmPath));

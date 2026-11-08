@@ -13,6 +13,7 @@
 #include "diorama/diorama_camera_policy.h"
 #include "deterministic_hash.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,6 +33,7 @@ struct EditorRoomScene {
   RoomLayer layers[2];
   DioramaLayerOrderTable *table;
   DioramaRoomOverride terrain;
+  char scenery_error[192];
   ActionRoomSceneFrameState frame;
   ActionEnvironmentScene environment;
   ActionSceneryCaptureCache scenery_cache;
@@ -716,13 +718,19 @@ bool EditorRoomScene_BgPolicy(const EditorRoomScene *r, int x, int y,
 
 bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
   if (!r || !text) return false;
+  r->scenery_error[0] = 0;
   DioramaLayerOrderTable *table = calloc(1, sizeof(*table));
   DioramaRoomOverride *terrain = calloc(1, sizeof(*terrain));
-  if (!table || !terrain) { free(table); free(terrain); return false; }
+  if (!table || !terrain) {
+    snprintf(r->scenery_error,sizeof(r->scenery_error),"Not enough memory to preview these scenery edits. Previous scene retained.");
+    free(table); free(terrain); return false;
+  }
   DioramaRoomOverride *current = NULL;
   bool ok = true;
+  unsigned line_number = 0;
   for (const char *at = text; *at && ok;) {
-    char line[512];
+    char line[2048];
+    ++line_number;
     size_t n = strcspn(at, "\n");
     if (n >= sizeof(line)) { ok = false; break; }
     memcpy(line, at, n); line[n] = 0; at += n; if (*at) ++at;
@@ -742,6 +750,8 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
       }
     } else if (current && !DioramaLayerOrder_ParseLine(current, s, NULL)) ok = false;
   }
+  if(!ok)snprintf(r->scenery_error,sizeof(r->scenery_error),
+      "Invalid or oversized scenery record at line %u. Previous scene retained.",line_number);
   const uint8_t section = ActRaiser_IsDeathHeimCompletionScene(
       r->assets.scene.group, r->assets.scene.map, 7,
       r->assets.frame.bgsc_override[0], r->assets.frame.bgsc_override[1]) &&
@@ -749,10 +759,16 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
       ? kDioramaLayerSection_DeathHeimCompletion : kDioramaLayerSection_Room;
   const DioramaRoomOverride *base = DioramaLayerOrder_FindSection(table,
       r->scene.map_group, r->scene.map_number, section);
-  if (ok && base) ok = DioramaLayerOrder_ForTerrain(base, r->assets.terrain_profile, terrain);
+  if (ok && base) {
+    ok = DioramaLayerOrder_ForTerrain(base, r->assets.terrain_profile, terrain);
+    if(!ok)snprintf(r->scenery_error,sizeof(r->scenery_error),"Scenery edits exceed this terrain's record capacity. Previous scene retained.");
+  }
   ActionBgPlan policy;
-  if (ok) ok = EditorRoomScene_BgPolicy(r, 0, 0, 0, true, &policy, NULL) &&
+  if (ok) {
+    ok = EditorRoomScene_BgPolicy(r, 0, 0, 0, true, &policy, NULL) &&
       (r->scene.voxel_geometry || DioramaTrunk_ApplyBgPolicyForMode(r->mode,r->assets.scene.group,r->assets.scene.map,terrain,&policy));
+    if(!ok)snprintf(r->scenery_error,sizeof(r->scenery_error),"Row bands must stay ordered and separate throughout camera travel, within screen or background height. Previous scene retained.");
+  }
   uint8_t *bands[2] = {0};
   for (unsigned bg = 0; ok && bg < 2; ++bg) {
     if (!DioramaLayerOrder_VirtualLayerHasClassification(&terrain->virtual_layers[bg])) continue;
@@ -780,6 +796,11 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
     if(CastleAnimation(r))target=castle_base=ActionVoxel_Create();
     ok=target && ActionVoxel_Build(target,&r->assets.scene,terrain,
         ActionVoxel_SettingsForRoom(r->assets.scene.group,r->assets.scene.map));
+    if(!ok) {
+      const char *reason=target?ActionVoxel_BuildError(target):NULL;
+      snprintf(r->scenery_error,sizeof(r->scenery_error),"%s",reason&&*reason?reason:
+          "Unable to build the edited Voxel surfaces. Previous scene retained.");
+    }
   }
   if (ok) {
     if(castle_base) {
@@ -800,6 +821,8 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
     r->scene.trunk_settings.enabled &= r->mode == kAction3D_Voxel;
     r->raster_valid = false;
   } else {
+    if(!r->scenery_error[0])snprintf(r->scenery_error,sizeof(r->scenery_error),
+        "Unable to prepare these scenery edits. Previous scene retained.");
     ActionVoxel_Release(castle_base);
     free(trunk);free(bands[0]); free(bands[1]);
     DioramaLayerOrder_ClearTable(table); free(table);
@@ -807,6 +830,9 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
   }
   free(terrain);
   return ok;
+}
+const char *EditorRoomScene_SceneryError(const EditorRoomScene *r) {
+  return r?r->scenery_error:"No room is loaded.";
 }
 bool EditorRoomScene_PreviewBinding(EditorRoomScene *r,bool enabled,uint32_t source,int x,int y,unsigned start) {
   if(!r||x<-2048||x>16384||y<-2048||y>16384||start>65535)return false;
@@ -1286,7 +1312,8 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   const bool raster_follows_camera =
       ActionRoomScene_RasterCameraSensitivity(s, &request, r->raster_sensitivity) &&
       ActionRoomScene_RasterSubtexel(s, &request, r->raster_sensitivity, r->raster_subtexel);
-  r->capture = (DioramaCapture){.skybox = &r->skybox,.width = width, .height = height, .authentic_y0 = top,
+  r->capture = (DioramaCapture){.skybox = &r->skybox,.voxel_frame = &r->frame,
+    .width = width, .height = height, .authentic_y0 = top,
     .obj_apron = geometry.obj_apron, .bg_apron_mask = geometry.bg_apron_mask, .camera_y = y,
     .bg2_camera_x = f->layer_camera_x[1], .bg2_camera_y = f->layer_camera_y[1],
     .bg2_world_height = plan.layer[1].world_height, .bg2_vertical_ratio = s->video_profile[10],
@@ -1301,6 +1328,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
 }
 const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *r) { return &r->capture; }
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *r) { return &r->scene; }
+const DioramaRoomOverride *EditorRoomScene_Terrain(const EditorRoomScene *r) { return r ? &r->terrain : NULL; }
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *r) { return &r->surfaces; }
 bool EditorRoomScene_ConfigureEffects(EditorRoomScene *r, const char *text, size_t size, unsigned *line) {
   if (!r) return false;

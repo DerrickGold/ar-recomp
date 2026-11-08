@@ -7,6 +7,7 @@
 
 #include "diorama_planes.h"
 #include "diorama_bg_policy.h"
+#include "diorama_voxel_edit.h"
 #include "render/presentation_options.h"
 
 /* Pure per-room diorama authoring keyed by the game's (map group, map) pair.
@@ -294,6 +295,7 @@ typedef struct DioramaRoomOverride {
   DioramaSceneryGrade scenery_grade;
   DioramaNativeBloom native_bloom;
   DioramaTrunkSettings trunk;
+  DioramaVoxelEdits voxel;
   struct {
     bool set;
     int16_t x, y; /* view offset in native pixels, relative to native scroll */

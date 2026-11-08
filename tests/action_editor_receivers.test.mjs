@@ -1,6 +1,7 @@
 /* Real WASM, real ROM artwork, production receiver sampling and OBJ compositor.
  * Keep uploaded pixels to verify the complete transport, not just sampler math. */
 import assert from 'node:assert/strict';
+import {attachDepthImports} from './action_editor_depth_imports.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 const [htmlFile,wasmFile]=process.argv.slice(2);
@@ -26,10 +27,11 @@ const ar={
   target(id){target=id;return 1;},viewport(set,x,y,w,h){viewport=set?[x,y,w,h]:[0,0,0,0];return 1;},clip(){return 1;},clear(){return 1;},
   geometry(id,p,n,ip,ni){assert(!id||(textures.has(id)&&id!==target));
     const v=new Float32Array(api.memory.buffer,p,n*8).slice();assert(v.every(Number.isFinite));
-    draws.push({id,effect,target,viewport:[...viewport],params:effectParams,v,indices:new Int32Array(api.memory.buffer,ip,ni).slice()});return 1;},
+    draws.push({id,effect,target,depth:ar.depthSubmission||null,viewport:[...viewport],params:effectParams,v,indices:new Int32Array(api.memory.buffer,ip,ni).slice()});return 1;},
   effect(kind,p,n){if(kind>=0){assert.equal(effect,-1);assert(new Float32Array(api.memory.buffer,p,n).every(Number.isFinite));}
     effect=kind;effectParams=kind>=0?new Float32Array(api.memory.buffer,p,n).slice():null;return 1;},available(){return 1;}
 };
+attachDepthImports(ar,()=>api.memory);
 const wasi={fd_close:()=>0,fd_seek:()=>0,fd_write:()=>0,proc_exit:n=>{throw Error(`exit ${n}`);}};
 ({instance:{exports:api}}=await WebAssembly.instantiate(fs.readFileSync(wasmFile),{ar,wasi_snapshot_preview1:wasi}));
 api._initialize?.();assert.equal(api.DioramaPreview_Init(16384),1);
@@ -580,15 +582,24 @@ api.RoomPreview_SetReceivers(3,100,220,180,220);render(undefined,3101);
 assert.deepEqual(powder(),untouchedCover,'jumping feet clear the surface');
 assert.equal(creates,coverCreates,'ground cover allocates no additional textures');
 console.log('Ground snow: standing contact, actor occlusion order, jump, stable clocks and texture reuse passed.');
-const coverDraws=()=>draws.filter(d=>d.effect===-1&&d.target===0&&
-  (!d.id||isEffectAtlas(d.id)));
+// Voxel's native color-math scenery target also receives its attached broad
+// top. Count only targets resolved to the final output, excluding light maps.
+const coverDraws=()=>draws.filter(d=>d.effect===-1&&(!d.id||isEffectAtlas(d.id))&&
+  (d.target===0||draws.some(resolve=>resolve.target===0&&resolve.id===d.target&&resolve.effect===-1)));
 api.RoomPreview_SetReceivers(3,100,240,180,240);render(undefined,3200);
 const lipOnly=[...coverDraws().at(-1).v],lipPasses=coverDraws().length;
 configure(groundCoverRecipe+'ground-width=8\n');render(undefined,3200);
 const surfaceDraws=coverDraws(),actorIndex=draws.findIndex(d=>d.effect===5&&d.target===0);
 assert.equal(surfaceDraws.length,lipPasses+1,'top uses one existing scenery alpha batch');
-assert(actorIndex>=0&&draws.indexOf(surfaceDraws[0])<actorIndex&&
-  draws.indexOf(surfaceDraws.at(-1))>actorIndex,'broad top behind actors, shallow lip in front');
+const cap=surfaceDraws[0],lip=surfaceDraws.at(-1);
+assert(cap.target!==0&&textures.get(cap.target)?.usage===2,
+  'Voxel broad top belongs to the native color-math scenery target');
+assert(draws.some(d=>d.target===cap.target&&d.depth?.mode===0),
+  'the top shares its target with depth-tested native scenery');
+const resolveIndex=draws.findIndex(d=>d.target===0&&d.id===cap.target&&d.effect===-1);
+assert(actorIndex>=0&&resolveIndex>actorIndex&&resolveIndex>draws.indexOf(cap)&&
+  lip.target===0&&draws.indexOf(lip)>resolveIndex,
+  'native scenery resolves after its actor slot, then the shallow foreground lip');
 assert.deepEqual([...surfaceDraws.at(-1).v],lipOnly,'surface width cannot increase boot occlusion');
 const surfaceVertices=surfaceDraws.map(d=>[...d.v]);
 render(undefined,3260);assert.deepEqual(coverDraws().map(d=>[...d.v]),surfaceVertices);
@@ -598,7 +609,20 @@ const airborneSurface=coverDraws().map(d=>[...d.v]);
 api.RoomPreview_SetReceivers(0,0,0,0,0);render(undefined,3201);
 assert.deepEqual(coverDraws().map(d=>[...d.v]),airborneSurface,'jump clears both contact surfaces');
 assert.equal(creates,coverCreates,'top surface reuses existing textures');
-console.log('Ground top face: separate actor order, unchanged boot depth, stable contact/seek and texture reuse passed.');
+// Ordinary Diorama retains its previously shipped painter-order contract.
+assert.equal(api.RoomPreview_Set3DMode(1),1);
+assert.equal(api.RoomPreview_SetReceivers(3,100,240,180,240),1);
+configure(groundCoverRecipe);render(undefined,3200);
+const dioramaLipPasses=coverDraws().length;
+configure(groundCoverRecipe+'ground-width=8\n');render(undefined,3200);
+const dioramaCover=coverDraws(),dioramaActor=draws.findIndex(d=>d.effect===5&&d.target===0);
+assert.equal(dioramaCover.length,dioramaLipPasses+1);
+assert(dioramaCover.every(d=>d.target===0)&&dioramaActor>=0&&
+  draws.indexOf(dioramaCover[0])<dioramaActor&&draws.indexOf(dioramaCover.at(-1))>dioramaActor,
+  'ordinary Diorama keeps broad cover behind actors and the shallow lip in front');
+assert.equal(api.RoomPreview_Set3DMode(2),1);
+assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);
+console.log('Ground top face: Voxel native subscreen and ordinary Diorama ordering, unchanged boot depth, stable contact/seek and texture reuse passed.');
 // Volumetric cloud banks share the existing atlas/batch in the actual WASM
 // renderer, including background-only anchoring and deterministic scrubbing.
 configure('[effects]\nversion=1\n[emitter:05:01:0:cloud-bank:1]\nx=128\ny=128\nwidth=512\nheight=192\nanchor=bg2-point\nplacement=background\ntextured=1\nrolling=.8\nvolume=1\nstrands=6\ncolor=f4e7d1\ncolor-end=68748c\n');

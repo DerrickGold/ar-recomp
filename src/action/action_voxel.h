@@ -4,6 +4,116 @@
 #include "diorama/diorama_layer_order.h"
 #include <math.h>
 typedef struct ActionVoxelGeometry ActionVoxelGeometry;
+const DioramaVoxelEdits *ActionVoxel_Edits(const ActionVoxelGeometry *geometry);
+bool ActionVoxel_HasObjectEdits(const ActionVoxelGeometry *geometry);
+const DioramaVoxelObject *ActionVoxel_ObjectEdit(const ActionVoxelGeometry *geometry,
+    uint16_t source, uint16_t parent, uint16_t animation);
+/* Compiled sparse authored cells own their donor art, so scrolling a donor out
+ * of view cannot change a floor or side. RGB555 bit15 marks opaque ink. */
+typedef struct VoxelAuthoredCell {
+  int16_t x, y; /* Native pixel origin, not cell coordinates. */
+  uint8_t priority[4];
+  bool surface;
+  bool native_front_hidden; /* Visibility-only edit keeps semantic caps/art. */
+  bool native_transform; /* Affine-only record keeps compiled semantic faces. */
+  bool native_transform_requested; /* Includes identity metadata; still validates the group. */
+  bool native_front_art; /* Automatic front keeps native filtering/shading. */
+  uint16_t native_rear_rows[16]; /* Owned native rear copies; excludes plants/fills. */
+  float front[4], back[4], width, offset_x;
+  uint8_t faces, shape;
+  uint8_t automatic_art; /* Bit per art index: caps extend opaque contour ink. */
+  int16_t shape_y;
+  uint16_t shape_h;
+  float front_end[4], back_end[4];
+  DioramaVoxelBend bend;
+  DioramaVoxelTransform transform;
+  /* Deduplicated room-owned images: front/top/legacy side/back/left/right/bottom.
+   * Pointers are frozen after compilation; IDs identify bounded atlas slots. */
+  uint32_t art_id[7];
+  const uint16_t *pixels[7];
+  uint32_t contour_start;
+  uint16_t contour_count;
+} VoxelAuthoredCell;
+typedef struct VoxelAuthoredContour { uint8_t x,y,length,side; } VoxelAuthoredContour;
+typedef struct VoxelCellGeometry {
+  float front[4], back[4], width, offset_x;
+  bool authored;
+  uint8_t faces, shape;
+  int16_t shape_y;
+  uint16_t shape_h;
+  float front_end, back_end;
+  DioramaVoxelBend bend;
+  DioramaVoxelTransform transform;
+} VoxelCellGeometry;
+enum { kVoxelAuthoredCellMax = 32768, kVoxelAuthoredArtMax = 8192,
+       kVoxelAuthoredContourMax = 262144,
+       kVoxelAuthoredVisibleArtMax = 4096 };
+uint16_t *ActionVoxel_RecordOwners(const DioramaVoxelEdits *,int x16,int y16,int width16,int height16);
+const VoxelAuthoredCell *ActionVoxel_AuthoredCells(const ActionVoxelGeometry *, unsigned *count);
+const VoxelAuthoredCell *ActionVoxel_AuthoredCellAt(const ActionVoxelGeometry *, int x16, int y16);
+const uint16_t *ActionVoxel_AuthoredArt(const ActionVoxelGeometry *, unsigned id);
+unsigned ActionVoxel_AuthoredArtCount(const ActionVoxelGeometry *);
+const uint16_t *ActionVoxel_AuthoredCapArt(const ActionVoxelGeometry *,unsigned *count);
+const VoxelAuthoredContour *ActionVoxel_AuthoredContours(const ActionVoxelGeometry *,
+    const VoxelAuthoredCell *,unsigned *count);
+bool ActionVoxel_AuthoredContourExposed(const ActionVoxelGeometry *,const VoxelAuthoredCell *,
+    int x,int y,unsigned side);
+/* Shared native-Y profile evaluation: adjacent cells share the same domain,
+ * including endpoint clipping. No camera state enters the shape. */
+void ActionVoxel_AuthoredDepths(const VoxelAuthoredCell *, unsigned quadrant,
+    float world_y, float *front, float *back);
+/* Add these offsets after ordinary width/offset/depth shaping. Inputs remain
+ * original native source coordinates; use the same result on both depths. */
+void ActionVoxel_BendOffset(const DioramaVoxelBend *, float source_x,
+    float source_y, float *dx, float *dy, float *dz);
+void ActionVoxel_AuthoredBend(const VoxelAuthoredCell *, float source_x,
+    float source_y, float *dx, float *dy, float *dz);
+bool ActionVoxel_TransformValid(const DioramaVoxelTransform *);
+/* Transform a completed geometry point around its shared world-space pivot.
+ * NULL / absent (zero scale) metadata is identity; source UVs never change. */
+void ActionVoxel_TransformPoint(const DioramaVoxelTransform *, float x, float y,
+    float z, float *out_x, float *out_y, float *out_z);
+const char *ActionVoxel_BuildError(const ActionVoxelGeometry *);
+bool ActionVoxel_CellGeometry(const ActionVoxelGeometry *, int x16, int y16, VoxelCellGeometry *);
+bool ActionVoxel_AuthoredSurfaceAt(const ActionVoxelGeometry *, int world_x, int world_y);
+bool ActionVoxel_HasHiddenNativeFronts(const ActionVoxelGeometry *);
+bool ActionVoxel_HasNativeTransforms(const ActionVoxelGeometry *);
+bool ActionVoxel_HasTransformedBacks(const ActionVoxelGeometry *);
+/* Selection follows compiled native material roles, before authored geometry
+ * overrides. Coordinates/bounds use16px cells; oversized queries do not return
+ * a partial usable group. */
+typedef enum VoxelSemanticKind {
+  kVoxelSemantic_None, kVoxelSemantic_Rear, kVoxelSemantic_Foliage,
+  kVoxelSemantic_Scenery, kVoxelSemantic_Platform, kVoxelSemantic_Water,
+  kVoxelSemantic_Hazard, kVoxelSemantic_Gate, kVoxelSemantic_Column,
+  kVoxelSemantic_Branch, kVoxelSemantic_TreeWood, kVoxelSemantic_Stump,
+  kVoxelSemantic_Authored
+} VoxelSemanticKind;
+typedef enum ActionVoxelGroupStatus {
+  kActionVoxelGroup_Invalid, kActionVoxelGroup_Empty,
+  kActionVoxelGroup_TooLarge, kActionVoxelGroup_Complete,
+  kActionVoxelGroup_Ambiguous
+} ActionVoxelGroupStatus;
+typedef struct VoxelGroupCell { int16_t x,y; } VoxelGroupCell;
+typedef struct VoxelSemanticGroup {
+  VoxelSemanticKind kind;
+  const char *label;
+  int x,y,width,height;
+  unsigned count;
+} VoxelSemanticGroup;
+enum { kVoxelSemanticGroupMaxCells=4096,kVoxelSemanticPlatformMaxSpan=64 };
+ActionVoxelGroupStatus ActionVoxel_SemanticGroup(const ActionVoxelGeometry *,
+    int x16,int y16,VoxelSemanticGroup *,VoxelGroupCell *,unsigned capacity);
+/* NULL means a native semantic transform is supported; otherwise return a
+ * stable user-readable reason. No geometry or authored state is changed. */
+const char *ActionVoxel_TransformUnsupportedReason(const ActionVoxelGeometry *,int x16,int y16);
+/* Resolved reset / visibility-only records retain live native artwork. This
+ * predicate must follow ownership resolution, so an older donor stays hidden. */
+bool ActionVoxel_CellOwnsArtwork(const DioramaVoxelCell *);
+bool ActionVoxel_CellUsesNativeTransform(const DioramaVoxelCell *);
+/* Exact identity preserves native ownership for default faces/front-only hide. */
+bool ActionVoxel_CellKeepsNativeIdentity(const DioramaVoxelCell *);
+uint32_t ActionVoxel_AuthoredColor(unsigned rgb555, const ActionRoomSceneFrameState *frame);
 /* A profile owns material interpretation and presentation policy. It is
  * separate from room identity, native collision and source sprite priority. */
 typedef enum ActionVoxelProfile {
@@ -116,6 +226,11 @@ typedef struct VoxelEdge {
    * World coordinates select the source only; zero size keeps edge sampling. */
   short top_sample_x, top_sample_y;
   unsigned char top_sample_size;
+  uint16_t top_owned_art; /* One-based immutable donor; zero samples capture. */
+  uint16_t source_owned_art[2]; /* One-based front/rear native source patches. */
+  int16_t source_x[2], source_y[2]; /* World origin of each 16px source patch. */
+  int16_t fold_origin_y;
+  uint16_t fold_length; /* Original vertical span after native edge splitting. */
   unsigned char trunk_curve; /* One-based semantic lower-trunk owner; zero is unchanged. */
   unsigned char column_curve, neighbor_column_curve;
 } VoxelEdge;

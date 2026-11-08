@@ -1,8 +1,192 @@
 # Action-mode layer editor
 
+### Voxel 3D touch-up
+
+Use **3D preview → Mode → Voxel 3D (WIP) → Edit Voxel** to edit
+the level's visual geometry with the production renderer. These edits preserve
+native collision, gameplay and sprite priority. **Diorama (shipped)** in the
+same selector provides an ordinary Diorama comparison; voxel-only records do
+not alter that mode or Off.
+
+1. Choose the room and **Region / terrain**, then pan to the area to repair.
+   Open **View** for **Rotate**, **Tilt** and **Zoom** to check both sides.
+2. Click a rendered face. **Select → Whole object** follows its native
+   classification to select a connected stump, tree wood, platform or other
+   group. Its label and tile count show what was selected. Choose **Tile** for a
+   single face. The inspector docks on the opposite side to leave the selected
+   geometry visible. **Shift-click** adds or removes a group (or a tile in Tile mode);
+   **Pick** can restrict selection to BG1 tiles or native objects. **Alt-drag**
+   pans while editing; arrows still move the camera. Escape clears selection
+   without discarding the draft.
+3. Adjust the controls below. Changes immediately preview as a separate draft.
+   Several selections may be edited before applying; changing selection does
+   not lose the draft. New voxel edits affect the selected terrain only.
+4. Choose **Apply** to keep the whole draft as one undoable edit, or **Discard**
+   to restore the applied project settings. **Reset selected** previews removal
+   of those voxel overrides; Apply keeps the reset. The inspector's **Undo preview** /
+   **Redo preview** steps through draft operations, including complete brush strokes.
+   The main Undo/Redo buttons also act on the draft first, then on applied edits.
+5. Choose **Save project**, then keep the downloaded ZIP. To test in the game,
+   extract its `diorama-layers.ini` and `action-effects.ini` beside the active
+   `settings.ini`, restart the game, and enable **Voxel 3D (WIP)**. Apply updates
+   the editor project in memory; it does not write into a running game or save
+   a file by itself. **Project → Open project…** restores the saved authoring later.
+
+The inspector shows depth first. Expand **Width & placement**, **Repair backing**
+or **Surface artwork** for other tile edits. **Captured objects** and
+**Selection & snapping** expose object browsing and pick/drag options.
+**Settings…** searches all authoring sections; **More views** contains the
+original frame, depth inspection and optional scene diagnostics. **Project**
+also groups change review, individual INI files and the editor guide.
+
+Unapplied voxel drafts block room/terrain changes, scenery imports/exports,
+object-capture replacement and project load/save. The inspector directs you to
+Apply or Discard. Undo/Redo can step through the draft without applying it; closing
+the browser also warns about a draft.
+
+For a larger repair, select a rectangle in **Map**, then choose
+**More actions → Edit selection in Voxel 3D**. Coordinate selection under
+**Selection & snapping** also reaches hidden or unmodeled BG1 cells. Expand
+**Convert selected tiles** to start with a flat surface or a slab, then adjust its
+depth, backing and faces. Selecting a preset or changing its amount previews the
+result immediately. Amount changes replace the prior preview rather than adding
+another offset. These presets change visual geometry only.
+
+To resize a whole stump, leave **Select → Whole object**, click the stump and
+choose **Tool → Move / resize group**. Change **Width X**, **Height Y** or
+**Depth Z** as percentages of its original geometry. The shared **Bottom center**
+pivot keeps its base planted; **Center** is available under **Pivot & reset**.
+Changing the pivot preserves the current result. **Keep proportions** is off by
+default so narrowing a stump does not also shorten it or change its depth.
+Drag the X/Y/Z handles to move the group, or enter offsets in native pixels
+(X/Y) and scene depth (Z). Every member uses the same coordinate system, so
+resizing does not open gaps between its tiles. Existing per-tile artwork, depth,
+taper and attached-pull edits remain part of the shape.
+Moving or shrinking a group can expose space that its original artwork covered;
+neighboring ground is preserved, and newly exposed space may need artwork.
+Use **Repair backing** or convert the newly exposed cells when they need a fill.
+
+**Grow** and **Shrink**, Shift selection, Map rectangles and coordinate selection
+refine the group. Classification comes from the native material model, independent
+of tile numbering and of later Voxel edits. **Tree wood** includes connected bark,
+roots and branches; separately classified foliage is not silently included.
+Connected ground can span a large area. Groups exceeding 4,096 cells are refused
+with a request to select a smaller area; membership is never silently truncated.
+Continuous ground spanning much of a level is reported as ambiguous rather than
+silently selecting the whole floor. Select and convert a smaller area in Map
+when it needs to become an independent piece.
+Special native surfaces that cannot yet retain their geometry during a group
+transform explain the limitation and keep their existing tile controls.
+Native objects must be moved or resized as complete groups so their existing
+sides stay closed. For a partial limb, use **Attached pull**; for an independent
+piece, convert the selected tiles first. Already-converted surface selections
+can be transformed independently. Native objects with only a backing repair
+also disable group transforms until that repair can be handled independently;
+the editor keeps the repair rather than silently changing the object's shape.
+
+Group moves and resizes preview immediately and share Undo/Redo, Apply and Save.
+**Reset move / resize** removes only the group transform. **Copy & paint settings**
+has a separate **Group move / resize** checkbox, off by default. Its shared pivot
+is rebased when copied to another selection. Saved `voxel-cell` regions retain
+the atomic `transform:px,py,pz,dx,dy,dz,sx,sy,sz` token: pivot, translation and scale.
+It applies after material shaping and attached pull, keeping artwork coordinates
+and native priority intact. Moving or resizing scenery does not move collision,
+enemies or other gameplay objects.
+
+Use **Copy & paint settings** to sample the selected tile's settings. Choose which
+properties to copy, then choose **Apply sample** or select **Paint sampled settings**
+in the **Tool** selector to paint them across tiles.
+Unselected properties remain intact. A brush stroke is one draft undo step;
+connected taper/curve strokes retain a shared span. **Reset a property** removes
+just that override, whereas **Reset selected** restores the entire selected
+area to its automatic material. **Match depth** aligns selected cells to the
+sampled surface; **Move both planes together** moves front and back together. The
+depth handle follows the selected front or back face.
+
+For a branch or other attached limb, select its full set of tiles and choose
+**Tool → Attached pull**. Set **Attached side** to the edge joined to the trunk
+or wall. The fixed-base marker makes that choice visible. Drag the **X**, **Y**
+or **Z** handle at the free end: the selected geometry bends smoothly away
+from its stationary base, preserving thickness. **Exact tip position** accepts
+native-pixel X/Y shifts and scene-depth Z shifts; positive Y is down and positive
+Z is farther away. A dashed handle labeled **control** is a screen control for
+an axis aimed toward the camera. **Reset tip position** clears the movement while
+keeping the chosen base; **Reset a property → Attached pull** removes the whole
+attachment. Each drag is one preview Undo step, then **Apply → Save project**
+keeps the result. These are visual edits: native collision stays fixed, including
+on branches the player can stand on. Switch back to **Depth / select** for the
+ordinary front/back-depth handles.
+
+**Authored edits** navigates saved and draft regions and shows the compact
+record budget. Map highlights help locate those regions. The preview's
+**Full scene**, **Backplanes only** and **Cutaway + actors** inspection modes expose gaps behind the
+front geometry without saving a visibility change. Front/left/right camera
+presets and **Focus selection** help check joins from several angles. These
+are perspective views; inspection and camera positions are not authored edits.
+
+| Tile control | Effect |
+| --- | --- |
+| Front / Back depth | Recession in scene-depth units: positive moves farther from the player. Back must remain at or behind Front when both are authored. Drag the yellow depth handle to push/pull; **Depth snap** controls handle and depth-slider increments. Numeric fields permit precise values. |
+| Width / Horizontal offset | Adjust the selected 16 × 16 cell's visual width and horizontal placement in native pixels. They do not change the walkable collision footprint. |
+| Backing: Automatic | Retain the semantic material's existing backing. |
+| Backing: None | Remove the selected cell's generated backing. |
+| Backing: Fill missing backing | Fill transparent holes while retaining existing backing artwork. Use this behind a rock or an extended foreground cell when the original rear surface has a gap. |
+| Backing: Replace backing | Replace that cell's backing with the selected artwork, or the material's automatic backing art. |
+| Front / Backing / Top / Side art | **Choose tile…** opens the face-art picker. Choose a 16 × 16 tile, crop an 8 × 8 patch, assemble four native pieces, or sample from the map/3D view. Choices preview immediately. **Done** keeps them as one draft edit; **Cancel** restores the previous artwork. **Auto** restores inherited artwork. |
+| Left / Right / Bottom art | Independent artwork for each direction. Automatic inherits the shared side choice. |
+| Visible faces | Hide or restore front, back, top, underside, left and right faces without deleting the map tile or its native collision. |
+| Taper & curve | Vary front/back depth over a shared vertical span. Taper is linear; curve eases between its endpoints. Adjacent edited tiles share the span so their boundaries meet. |
+
+Hiding only Front on an otherwise automatic shape retains its existing sides
+and caps. Other partial visibility combinations use the editable contour model.
+Restoring all faces returns to the automatic shape, while retaining separately
+authored artwork, depth, width and bend settings.
+
+Face artwork selections retain native palette and flip bits. They do not modify
+the normal tile-stamp clipboard. **BG1** / **BG2** selects which current-room
+palette supplies the artwork; voxel geometry selection itself targets BG1 cells.
+Changing a numeric field sets it for every selected tile; dragging the depth
+handle preserves their relative depths. Depth, backing and face-art overrides
+are saved together in `diorama-layers.ini` as `voxel-cell` records. A record may
+cover a rectangle of cells. The room budget is 256 compact region records and
+64 object-family rules across terrain variants; it is not a 256-tile limit.
+
+The face-art picker previews choices on the original destination selection.
+Choosing another source, cropping, flipping or assembling artwork does not change
+the map clipboard. **Pick 3D face** or **Pick map tile** temporarily hides the
+picker so you can click visible artwork without changing the destination.
+**Center 8×8** can select a clean center square that crosses the source tile's
+four native pieces. Crop offsets are in native pixels. Whole-art flips preserve
+native palette/flip attributes and mirror the crop; assembled pieces can also
+be flipped individually. Sampling the map temporarily changes views and returns
+to the selected surface. Sampled native cap donors retain their actual crop.
+**Cancel** restores the draft and history from before opening the picker. Clicking
+another editing control finishes the artwork edit first, keeping later edits
+independent. Undo finishes the picker and reverses the artwork edit. The ordinary
+tile palette's **Pick tile from map** and the tile menu's **Use this tile as paint
+brush** sample displayed map artwork without painting the source.
+
+While editing Voxel geometry, **Shift + middle drag** rotates the camera, the
+**mouse wheel** zooms, and **Alt-drag** pans. Camera navigation does not create
+Undo entries. Property sliders group a drag into one edit; Undo also ends any
+active paint or depth gesture. Ctrl/Cmd-Z works while a numeric field, selector,
+slider or checkbox is focused. Text fields keep their native text Undo.
+
+Compact regions use last-covering-record precedence. A newer record is a
+complete visual override for its area; omitted properties inherit the material,
+not an older overlapping rectangle. An automatic/reset region masks earlier
+overrides. Splitting an edited taper/curve retains its original shape span so
+the remaining tiles do not acquire new seams. These records affect presentation
+only; native collision and actor priority remain unchanged.
+
+The curved Northwall interiors `06:06–07` use their dedicated **Tree enclosure**
+controls instead of individual voxel-cell geometry. The picker explains this
+and disables unsupported editing. Their connected wall/landing curvature cannot
+be replaced safely by isolated tile boxes.
+
 ### Native sprites and moving objects
 
-In the shared renderer, **Load native objects…** imports an `.arobj` frame for
+In **3D preview → Objects**, **Load native objects…** imports an `.arobj` frame for
 the selected room and region. It adds the native sprite artwork and priority,
 modeled props, and actor lighting facts to the existing scenery compositor.
 Voxel mode replaces only the captured pixels owned by successfully modeled
@@ -17,13 +201,60 @@ the captured object coverage is rejected instead of silently dropping sprites.
 Changing rooms clears the capture. Captures are diagnostic inputs and are not
 included in a saved scenery/effects project.
 
+With **Edit Voxel** enabled, click an object or select it from **Captured objects**. The inspector displays its native source family and captured parent/
+animation filters. The saved rule applies to matching objects in that room and
+terrain, including later spawns; it is not an individual placement edit and does
+not save a transient actor slot, move its gameplay position or change its AI.
+
+- **Automatic** keeps the existing material behavior: reviewed bridge logs can
+  remain modeled, attached torches retain their existing rear placement, and
+  other native sprites stay flat.
+- **Flat native sprite** restores the original captured pixels on their native
+  priority plane. Its depth, thickness and width controls are disabled.
+- **Extruded sprite** enables depth offset, thickness and width scale when the
+  capture contains safe independent artwork. Automatic reviewed props also
+  expose these controls when they already have modeled geometry. Native sprite
+  removal remains limited to the original pixels owned by that object.
+
+The player and objects without usable independent art remain available for
+inspection, with unsupported geometry controls disabled. Captures have a bounded
+atlas for 16 components, each up to 64 × 32 pixels; reviewed props take priority.
+Objects that exceed that budget or have fragmented native ownership retain
+their native sprites. Fresh captures include the emitted native sprite
+composition even where another actor hides part of it. Older version-1 `.arobj`
+files still load, but a fresh version-2 capture is needed to extrude previously
+flat generic actors. These files do not supply live, whole-level objects:
+choose another captured frame to inspect another pose or area.
+
 For acquisition, launch the game with `AR_EDITOR_OBJECT_CAPTURE_DIR` pointing
 to an existing fresh directory. Optional `AR_EDITOR_OBJECT_CAPTURE_FROM`,
 `AR_EDITOR_OBJECT_CAPTURE_TO`, and `AR_EDITOR_OBJECT_CAPTURE_EVERY` select
 native game frames. This opt-in export writes raw sprite winners and ownership,
-the matching prop atlas, actor facts and camera metadata before presentation
-hands modeled props to the Voxel renderer. Without the environment variable,
+the matching independent object atlas, actor facts and camera metadata before
+presentation hands modeled props to the Voxel renderer. Without the environment variable,
 the exporter is inactive.
+
+For example, from the checkout, create an empty output directory and capture a
+bounded native-frame interval using the current game build:
+
+```sh
+mkdir -p runs
+capture_dir="$(mktemp -d "$PWD/runs/editor-objects.XXXXXX")"
+AR_EDITOR_OBJECT_CAPTURE_DIR="$capture_dir" \
+AR_EDITOR_OBJECT_CAPTURE_FROM=1200 \
+AR_EDITOR_OBJECT_CAPTURE_TO=1500 \
+AR_EDITOR_OBJECT_CAPTURE_EVERY=30 \
+./build-release/ActRaiserRecomp /absolute/path/to/your-usa-rom.sfc --config config.ini
+```
+
+Replace the executable/ROM paths and frame interval with those for your run.
+Enable Action 3D and visit the target level during that native-frame interval;
+these counters are game frames, not elapsed seconds. The directory must not
+already contain `index.jsonl`. Its index records the room, terrain, camera and
+frame for each `.arobj`; select that room/terrain in the editor and use **Load
+native objects…** on the matching file. Stop the capture run when the needed
+poses are recorded, then launch normally without these variables. Keep the
+small set of captures needed for review separately from the saved project ZIP.
 
 The native room benchmark accepts `AR_BENCH_OBJECT_FRAME=frame.arobj` for a
 frozen pose, or `AR_BENCH_OBJECT_SEQUENCE=paths.txt` for one packet per output
@@ -58,12 +289,16 @@ store authoring data; ROM artwork and temporary preview camera/event controls
 remain supplied by the editor. To use a project in the game, extract both INIs
 beside `settings.ini` and restart the game.
 
+Unapplied voxel previews also require **Apply** or **Discard** before saving.
+Applied voxel cell/object rules travel in the same scenery INI and project ZIP;
+the `.arobj` preview captures remain separate diagnostic inputs.
+
 Unapplied background policy drafts in any room block a project save. The editor
 names every affected room/BG and opens a draft in the settings modal.
 Choose **Apply policy** to keep that draft or **Discard draft** to retain the
 already applied settings, then save again. Other rooms' tile edits stay intact.
 
-The sidebar's **Individual INI files** section retains **Load scenery INI**,
+**Project → Import / export individual INIs…** retains **Load scenery INI**,
 **Export level INI**, **Load effects INI**, **Export effects INI** and the effects
 document panel for working with one document at a time. Each individual import
 keeps the other document loaded. **Export level INI → Download full INI…**
@@ -71,14 +306,16 @@ downloads scenery from every room; **Export effects INI** downloads effects.
 
 ### Layout and settings
 
-**Hide sidebar** and **Hide tools** above the map independently collapse the left
-panel and the extra toolbar rows. **Show sidebar** / **Show tools** restore them;
-view switching, project load/save and **Settings…** remain available. Sidebar
-sections are collapsible, with **Collapse sections** / **Expand sections** for all
-sections together. Only the room picker is expanded initially.
+**Room** toggles the compact room panel. **Map** and **3D preview** are the main
+workspaces; **More views** contains **Original game frame**, **Depth inspection**
+and optional scene details. **View** groups camera/display options; the map's
+View menu can also hide the editing toolbar. **Objects** in 3D preview contains
+sprite capture and player preview actions. **Project** groups open/import,
+tile change review and the guide; **Save project** remains visible.
 
 Right-click the map and choose **Editor settings…** to open a modal containing
-every sidebar section. Right-click other previews or the sidebar to choose a
+every authoring section. Search by title or task, such as lighting, animation or
+palette. Right-click other previews or the sidebar to choose a
 section directly. **Settings…** in the top bar opens the same modal, even with
 the sidebar hidden. The dialog uses the same live controls: ordinary edits apply
 immediately; Background policy still requires **Apply policy** or **Discard
@@ -174,8 +411,9 @@ policy overrides and restores the room's built-in mirror policy.
 the selected BG in the current room across all terrain variants. It restores
 the ROM tiles, removing pasted/deleted tiles, pixel masks, added edge space,
 depth/shape settings and background-policy overrides, including camera-local
-overrides. For BG1 it also clears framing and scenery palette grading. The
-other BG, other rooms, backdrop/skybox preferences and environmental effects
+overrides. For BG1 it also clears voxel cell overrides, framing and scenery
+palette grading. Object-family rules, the other BG, other rooms,
+backdrop/skybox preferences and environmental effects
 stay intact. The whole reset is one Undo step; Save project keeps the result.
 
 Explicit painted tiles (including blank stamps) always take precedence at their
@@ -221,16 +459,16 @@ depth bands and authors those changes directly in `diorama-layers.ini`. The
 editor is the source of truth; the game only loads and renders the exported
 configuration.
 
-The effects workspace includes a shared WASM preview. **Shared renderer**
+The effects workspace includes a shared WASM preview. **3D preview**
 loads complete rooms directly into the production C PPU and Diorama compositor
 via WASM/WebGL2. No game capture or gameplay session is required. The original
 JavaScript view remains available as **Depth inspection**, a free authoring
 camera rather than a gameplay-framing preview.
 **Original game frame** remains a separate original-background comparison.
 
-Select **Shared renderer**, choose a room/terrain, then use **Camera & animation**
+Select **3D preview**, choose a room/terrain, then use **Camera & animation**
 to navigate and seek frames (0–65535) in either direction. Drag the preview or use
-arrows to pan. **Aspect ratio** above the shared view offers 4:3, 16:9, 16:10
+arrows to pan. **View → Aspect ratio** offers 4:3, 16:9, 16:10
 (Steam Deck), 21:9 and 32:9. **Auto (editor window)** follows the browser window
 shape; showing tools or switching modes does not change it. **Stretch** uses
 the game's stretched 16:9 crop. **Custom monitor…** accepts a
@@ -264,8 +502,9 @@ clips, bounded and named skyboxes,
 and Aitos's periodic waterfall page. The native forest, cave, marsh, castle and
 Aitos environmental kernels, exposure and camera-local waterfall sections also
 run in this view. Clock-based accent events and a placeable ROM player sprite
-are available. The preview omits other actors and HUD,
-gameplay-driven transitions, final CRT/heat and frame generation. The preview
+are available. Without an imported native object capture, the preview omits
+other actors. It also omits HUD, gameplay-driven transitions, final CRT/heat and
+frame generation. The preview
 camera uses the saved game baseline and production fit/clamping rules. **Reset
 to game view** clears inspection zoom/tilt. It does not replay transient reactive
 camera motion. Captures
@@ -1495,7 +1734,7 @@ sh tools/action_editor/build.sh
 sh tools/action_editor/build.sh ar.sfc out.html path/to/diorama-layers.ini
 ```
 
-The default build needs a C compiler, Python 3 and Emscripten **5.0.7 or 6.0.12**. Its
+The default build needs a C compiler, Python 3 and Emscripten **5.0.7, 6.0.12 or 6.0.13**. Its
 output is a self-contained HTML file that can open from `file://`. The default output is
 `build/action-editor/ar-action-layer-editor.html`, keeping the generated editor
 out of the source tree and Git. By default it embeds the repository ROM and
@@ -1511,14 +1750,14 @@ does not write game settings.
 
 ### Shared original-background comparison
 
-The build defaults to `ACTION_EDITOR_WASM=on`, requiring Emscripten **5.0.7 or 6.0.12**
+The build defaults to `ACTION_EDITOR_WASM=on`, requiring Emscripten **5.0.7, 6.0.12 or 6.0.13**
 and embedding both the original-background comparison and shared renderer WASM
 modules directly in the HTML. Opening the editor requires no compiler, server,
 adjacent files, or network access. `ACTION_EDITOR_WASM=off` builds the existing
 JavaScript-only editor with just a C compiler and Python 3.
 `ACTION_EDITOR_WASM=auto` builds shared previews when `emcc` is available;
-a different compiler version reports an error. Homebrew's `6.0.12-git` release
-banner is supported. `EMCC` selects the compiler and
+a different compiler version reports an error before room export. Homebrew's
+`6.0.12-git` and `6.0.13-git` release banners are supported. `EMCC` selects the compiler and
 `EM_CACHE` can override the workspace-local build cache.
 
 **Original game frame** uses shared C for original BG1/BG2 decoding, regional
@@ -1741,7 +1980,7 @@ a flat HUD or CRT processing. It cannot apply unsaved map edits. See the
 [compositor snapshot contract](compositor-snapshot.md) for supported inputs.
 
 ```sh
-# Build the browser compositor alone (Emscripten 5.0.7 or 6.0.12).
+# Build the browser compositor alone (Emscripten 5.0.7, 6.0.12 or 6.0.13).
 python3 tools/action_editor/build_compositor.py build/action-editor/ar-renderer-preview.html
 
 # Capture a real scene with isolated copies of the seed/settings/input replay.
@@ -2067,7 +2306,7 @@ The same tile and pixel-edit limits apply, with an atomic capacity check.
 
 **Coverage** asks the shared C compositor for the selected BG's viewport
 footprint, using the same camera stops, aspect fit, saved framing, base-plane
-depth/rake/bow and inspection pose as **Shared renderer**. There is no reference
+depth/rake/bow and inspection pose as **3D preview**. There is no reference
 room calibration or separate JavaScript projection. The query runs without PPU
 scanout, texture uploads or drawing and rounds outward to complete 16px cells.
 
@@ -2099,7 +2338,7 @@ gold rectangle to set the saved offsets, or use arrow keys for 1px nudges and
 Shift + arrows for 16px. Each drag is one Undo step; Esc cancels the current
 drag and returns to Select. The guide uses BG1 coordinates; the offset moves
 the whole scene. **Show viewport guides on BG1** toggles the overlay. Switch to
-**Shared renderer** to check the result with the game camera.
+**3D preview** to check the result with the game camera.
 
 The **16:9** (cyan) and **16:10** (purple) guides show the shared compositor's
 footprint at each aspect, including that aspect's camera stop. Toggle either
@@ -2130,7 +2369,7 @@ terrain shares the setting; different regional layouts can be tuned separately.
 The existing **Native frame controls → Camera X / Y** only move the preview and
 are not exported.
 
-In **Shared renderer** and game-camera map guides, horizontal panning uses the
+In **3D preview** and game-camera map guides, horizontal panning uses the
 game's baseline camera limits; vertical panning stops at the native room bounds.
 Further dragging or arrow input cannot zoom the scene. Aspect ratio, saved
 baseline, framing and actual pasted tiles determine the horizontal limits;
@@ -2232,7 +2471,8 @@ actor uses resolved OBJ2 geometry/order and is draggable in either view.
 | input | Map editor | Native frame | Diorama 3D |
 |---|---|---|---|
 | drag | paint | - | orbit |
-| shift/middle drag | pan | - | move native camera |
+| Shift-left drag | pan | - | move native camera |
+| middle drag (with or without Shift) | pan | - | orbit |
 | Shift-click | select range from start tile | - | - |
 | wheel | zoom | - | dolly |
 | arrows | pan | move camera | move camera |
@@ -2625,7 +2865,7 @@ projection stay in their adapters.
 ### Native final-battle nebula
 
 Room `07:08`'s environmental effects grade and bloom the original projected
-background. The regular **Environmental effects** switch in Shared renderer
+background. The regular **Environmental effects** switch in 3D preview
 controls the preview; **Settings → Native nebula glow** edits the material.
 Disabling environmental effects does not erase authored values. The editor
 initializes its preview switch from the game's environmental-effects setting.

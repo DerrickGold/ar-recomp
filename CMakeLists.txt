@@ -2649,6 +2649,19 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_action_editor_objects_test PRIVATE actraiser_math)
     add_test(NAME actraiser_action_editor_objects COMMAND actraiser_action_editor_objects_test)
 
+    add_executable(actraiser_action_editor_voxel_pick_test
+        tests/action_editor_voxel_pick_test.c tools/action_editor/voxel_pick.c)
+    target_include_directories(actraiser_action_editor_voxel_pick_test PRIVATE
+        src tests tools/action_editor ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_action_editor_voxel_pick_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_action_editor_voxel_pick COMMAND actraiser_action_editor_voxel_pick_test)
+
+    add_executable(actraiser_action_editor_depth_bridge_test tests/action_editor_depth_bridge_test.c)
+    target_include_directories(actraiser_action_editor_depth_bridge_test PRIVATE
+        src tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_action_editor_depth_bridge_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_action_editor_depth_bridge COMMAND actraiser_action_editor_depth_bridge_test)
+
     add_executable(actraiser_diorama_replay
         tools/action_editor/replay_compositor.c tools/action_editor/compositor_profile_stub.c
         src/diorama/diorama_snapshot.c src/render/cloud_material.c ${_diorama_compositor_sources}
@@ -2697,7 +2710,7 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_action_room_capture_test PRIVATE actraiser_math)
     add_executable(actraiser_action_room_gpu_compare
         tools/ppu_gpu/runner_events_stub.c
-        tools/action_editor/check_native_projection.c tools/action_editor/room_preview.c
+        tools/action_editor/check_native_projection.c tools/action_editor/room_preview.c tools/action_editor/voxel_pick.c
         ${AR_DIORAMA_DEPTH_GPU_SOURCES} src/platform/sdl/diorama_depth_sink_sdl.c
         tools/action_editor/receiver_preview.c
         tools/action_editor/object_preview.c src/diorama/diorama_object_snapshot.c

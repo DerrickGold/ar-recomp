@@ -130,9 +130,11 @@ function resetLoadedConfig() {
   for (const key of Object.keys(configRooms)) delete configRooms[key];
 }
 function loadIniText(text, name) {
+  if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('loading scenery'))throw Error('Unapplied voxel preview.');
   const policies=parseBgPolicyDocument(text);
   BackgroundPolicyEditor.clearDrafts();
   resetLoadedConfig();
+  if(typeof VoxelEditor!=='undefined')VoxelEditor.clearLoaded();
   for(const r of DATA.rooms)if(policies[roomKey(r)])roomConfig(r).policy=policies[roomKey(r)];
   sourceIniText = String(text || '');
   sourceIniName = name || 'diorama-layers.ini';
@@ -148,12 +150,16 @@ function loadIniText(text, name) {
     if (!active) continue;
     const eq = line.indexOf('=');
     if (eq < 0) continue;
-    const key=regionalKey(line.slice(0,eq).trim());
+    const rawKey=line.slice(0,eq).trim();
+    const key=regionalKey(rawKey.replace(/^(voxel-(?:cell|object)):all$/,'$1:us+jp+eu'));
     if(!key)continue;
     const [token,region]=key;
     const values = iniWords(line.slice(eq+1));
     if(region!==undefined)values.terrain=region;
     if(!terrainMask(values.terrain))continue;
+    if(token==='voxel-cell'||token==='voxel-object') {
+      VoxelEditor.importRecord(active,token,values,region);continue;
+    }
     if(token==='trunk') {
       if(region!==undefined||active.group!==6||![6,7].includes(active.map))throw Error('Trunk geometry belongs to Northwall’s two interior rooms.');
       roomConfig(active).trunk=parseTrunk(values);continue;
@@ -332,14 +338,15 @@ function virtualIniLines(r) {
   }
   return lines;
 }
-const roomIniLines = r => [...trunkIniLines(r),...bgPolicyIniLines(r),...sceneryGradeIniLines(r),...nativeBloomIniLines(r),...framingIniLines(r),...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r)];
+const roomIniLines = r => [...trunkIniLines(r),...bgPolicyIniLines(r),...sceneryGradeIniLines(r),...nativeBloomIniLines(r),...framingIniLines(r),...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r),...(typeof VoxelEditor==='undefined'?[]:VoxelEditor.lines(r))];
 function ownedIniLine(line) {
   const match=stripIniComment(line).match(/^([^=\s]+)\s*=/);
   if(!match)return false;
-  const key=regionalKey(match[1]);
+  const key=regionalKey(match[1].replace(/^(voxel-(?:cell|object)):all$/,'$1:us+jp+eu'));
   if(!key)return false;
   const [token,region]=key;
-  return /^bg[12]-policy(-band)?$/.test(token)&&region===undefined||
+  return /^voxel-(cell|object)$/.test(token)&&!!terrainMask(region)||
+    /^bg[12]-policy(-band)?$/.test(token)&&region===undefined||
     (token==='scenery-grade'||token==='native-bloom'||token==='trunk')&&region===undefined||
     EDITABLE_PLANE_TOKENS.has(token)&&region===undefined||
     token==='framing'&&!!terrainMask(region)||
@@ -785,4 +792,5 @@ function draw2d() {
   drawCoverageGuide();
   BackgroundPolicyEditor.drawGuides();
   EffectEditor.drawMapOverlay(ctx,view,r);
+  if(typeof VoxelEditor!=='undefined')VoxelEditor.drawMapOverlay(ctx,view);
 }

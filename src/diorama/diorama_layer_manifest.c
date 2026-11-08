@@ -99,10 +99,23 @@ bool DioramaLayerManifest_Load(void) {
     return false;
   }
   DioramaRoomOverride *room = NULL;
-  char line[512];
+  /* A compact voxel region can name seven native-art donors and a connected
+   * shape domain on one line. Keep the whole record atomic at this boundary. */
+  char line[2048];
   int rooms = 0, planes = 0, bad = 0, line_number = 0;
   while (fgets(line, sizeof line, file)) {
     line_number++;
+    if (strlen(line) == sizeof(line) - 1 && line[sizeof(line) - 2] != '\n') {
+      int ch;
+      while ((ch = fgetc(file)) != '\n' && ch != EOF) {}
+      fprintf(stderr, "[diorama-layers] %s:%d: line exceeds 2046 bytes -- line skipped\n",
+              kLayerManifestLeaf, line_number);
+      const char *start = line;
+      while (*start == ' ' || *start == '\t') ++start;
+      if (*start == '[') room = NULL;
+      ++bad;
+      continue;
+    }
     char *at = line;
     while (*at == ' ' || *at == '\t')
       at++;

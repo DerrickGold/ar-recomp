@@ -80,14 +80,35 @@ int main(void) {
   assert(edit);
   edit->planes[kDioramaPlane_Bg2Hi].set_z = true;
   edit->planes[kDioramaPlane_Bg2Hi].z = 0.5f;
+  assert(DioramaLayerOrder_ParseLine(edit,
+      "voxel-cell:all = cell:-512,-512 size:1024,1024 front:-.123456789 back:.678912345 "
+      "width:12.3456789 offset:-1.23456789 backing:replace "
+      "back-art:1,FFFF,FFFF,FFFF,FFFF,0,0,16 top-art:1,FFFF,FFFF,FFFF,FFFF,0,0,16 "
+      "side-art:1,FFFF,FFFF,FFFF,FFFF,0,0,16 front-art:1,FFFF,FFFF,FFFF,FFFF,0,0,16 "
+      "left-art:1,FFFF,FFFF,FFFF,FFFF,0,0,16 right-art:1,FFFF,FFFF,FFFF,FFFF,0,0,16 "
+      "bottom-art:1,FFFF,FFFF,FFFF,FFFF,0,0,16 faces:front+back+top+bottom+left "
+      "shape:curve shape-span:-8192,16384 front-end:.456789123 back-end:.789123456", NULL));
+  assert(DioramaLayerOrder_ParseLine(edit,
+      "voxel-object:jp = source:1234 mode:flat offset:.2", NULL));
   assert(DioramaLayerManifest_Save());
   size_t saved_size;
   char *saved = Read(&saved_size);
+  const char *voxel_line = strstr(saved, "voxel-cell");
+  assert(voxel_line && strchr(voxel_line, '\n') - voxel_line > 512);
   assert(strstr(saved, "# Authored notes stay here.\n[foreign]\nkeep = exact text\n\n"));
   assert(strstr(saved, "# Cliff face\n"));
   assert(DioramaLayerManifest_Load());
   room = DioramaLayerOrder_Find(view, 1, 0);
   assert(room && room->planes[kDioramaPlane_Bg2Hi].z == 0.5f);
+  assert(room->voxel.cell_count == 1 && room->voxel.object_count == 1);
+  assert(room->voxel.cells[0].w == 1024 && room->voxel.cells[0].h == 1024);
+  assert(room->voxel.cells[0].fields == 65535 && room->voxel.cells[0].shape_h == 16384);
+  assert(room->voxel.cells[0].bottom_art.words[3] == 0xFFFF);
+  const DioramaRoomOverride *voxel_region = DioramaLayerManifest_TerrainRoom(room, 0);
+  assert(voxel_region && voxel_region->voxel.cell_count == 1 && !voxel_region->voxel.object_count);
+  voxel_region = DioramaLayerManifest_TerrainRoom(room, 1);
+  assert(voxel_region && voxel_region->voxel.object_count == 1);
+  assert(DioramaVoxelEdits_Object(&voxel_region->voxel, 0x1234, 0, 0)->mode == kDioramaVoxelObject_Flat);
   assert(sr_access(kTemporary, 0) != 0);
 
   /* Temp-open and final-replace failures leave all hand-authored bytes intact. */
@@ -101,6 +122,20 @@ int main(void) {
   assert(sr_access(kTemporary, 0) != 0);
   s_fail_replace = false;
   free(saved);
+
+  /* An oversized physical line is skipped as one record, never parsed as a
+   * valid prefix followed by a second override from a later buffer chunk. */
+  char oversized[4096];
+  size_t oversized_size = (size_t)snprintf(oversized, sizeof(oversized),
+      "[layers:02:08]\nvoxel-cell = cell:0,0 width:8 ");
+  memset(oversized + oversized_size, ' ', 3000); oversized_size += 3000;
+  oversized_size += (size_t)snprintf(oversized + oversized_size, sizeof(oversized) - oversized_size,
+      "voxel-cell = cell:1,0 width:9\nvoxel-cell = cell:2,0 width:10\n");
+  Write(oversized, oversized_size);
+  assert(DioramaLayerManifest_Load());
+  room = DioramaLayerOrder_Find(view, 2, 8);
+  assert(room && room->voxel.cell_count == 1 && room->voxel.cells[0].x == 2);
+  assert(room->voxel.cells[0].width == 10);
 
   /* Large valid tile patches must load and save beyond the old 1 MiB read cap. */
   const size_t large_capacity = 16000u * 128;

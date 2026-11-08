@@ -5,15 +5,69 @@
  * when they come to wire the export into the engine. */
 $('#docsBody').innerHTML = `
 <h4>Arrange your workspace</h4>
-<p><b>Hide sidebar</b> and <b>Hide tools</b> collapse the left panel and extra
-toolbar rows independently. Their Show buttons restore them. Sidebar sections
-also collapse individually or together with <b>Collapse sections</b>.</p>
-<p>Right-click the map and choose <b>Editor settings…</b> for every sidebar
-section in a modal. Other previews and the sidebar offer those sections directly
-on right-click. <b>Settings…</b> above the map opens the same dialog, including
-when the sidebar is hidden. These are the same live controls; Apply buttons keep
+<p><b>Room</b> shows or hides the room panel. <b>Map</b> edits artwork and bands;
+<b>3D preview</b> shows the game renderer and Voxel tools. <b>More views</b>
+contains the original game frame, free depth inspection and scene details.</p>
+<p><b>View</b> groups camera and display controls. In 3D preview,
+<b>Objects</b> loads captured sprites or places a reference player.
+<b>Project</b> opens files, reviews tile changes and opens this guide.
+The <b>Controls</b> disclosure in the canvas lists the current gestures.</p>
+<p><b>Settings…</b> opens every authoring section, with search by task or setting
+name. Room-panel shortcuts and right-click menus lead to the same controls,
+including when the room panel is hidden. Apply buttons keep
 their existing drafts. <b>Done</b> or Escape closes settings without discarding
 edits. Map tools return to the canvas and effect controls open their inspector.</p>
+<h4>Touch up Voxel geometry</h4>
+<p>Choose <b>3D preview → Mode → Voxel 3D (WIP) → Edit Voxel</b>, then click a
+surface. <b>Select → Whole object</b> follows the native stump, tree wood, floor or
+block; <b>Individual tile</b> picks one tile. Shift-click adds/removes the chosen
+group or tile. Ambiguous areas keep just the clicked tile selected.
+Drag the yellow depth handle or adjust <b>Front depth</b> and
+<b>Back depth</b>. Expand <b>Width &amp; placement</b>, <b>Repair backing</b>
+or <b>Surface artwork</b> when needed. <b>Selection &amp; snapping</b> contains
+pick filters, <b>Grow</b>/<b>Shrink</b> by one cell border, and depth increments. Alt-drag pans, Shift + middle drag rotates,
+and the mouse wheel zooms while editing.</p>
+<p>Choose <b>Tool → Move / resize group</b> to move a whole selection with X/Y/Z
+handles or numeric offsets. <b>Width X</b>, <b>Height Y</b> and <b>Depth Z</b>
+resize around one shared pivot; they are independent unless <b>Keep proportions</b>
+is enabled. <b>Bottom center</b> keeps the base planted; <b>Center</b> resizes
+around the middle. Changing pivot preserves the current shape, and combining
+previously moved groups keeps their relative placements. <b>Reset move / resize</b>
+retains depth, artwork and attached pulls. Native structural objects must keep
+one shared transform across their complete group. For just a branch or a partial
+surface, use <b>Attached pull</b> or convert the selected tiles first.
+These are visual changes: native
+collision stays fixed. Apply and Save project retain the result.</p>
+<p>For a larger area, select a rectangle in <b>Map</b>, then choose
+<b>More actions → Edit selection in Voxel 3D</b>. Coordinate selection
+also reaches hidden cells. <b>Convert selected tiles</b> previews a flat surface or
+slab as soon as you choose a preset or change its amount.
+<b>Copy &amp; paint settings</b> copies only the properties you choose. Use
+<b>Apply sample</b> for a selection, or choose <b>Paint sampled settings</b> in
+the <b>Tool</b> selector for a brush stroke. <b>Reset a property</b> restores
+one setting. <b>Undo preview</b>/<b>Redo preview</b> includes whole brush strokes.</p>
+<p><b>Surface artwork</b> accepts native tiles, an 8×8 crop (including a clean
+center patch), or four assembled pieces with native flips. Sample from the
+map or a rendered surface. Choices preview immediately; <b>Done</b> keeps them
+as one draft edit, and <b>Cancel</b> restores the previous artwork.
+<b>Auto</b> removes that artwork override. <b>Visible faces</b> hides an
+individual face; <b>Taper &amp; curve</b> shapes several tiles together.</p>
+<p>To reposition an attached branch, select the whole limb and choose
+<b>Tool → Attached pull</b>. Choose its <b>Attached side</b>, then drag X, Y or Z
+at the free end. The base marker stays fixed and the limb keeps its thickness.
+<b>Exact tip position</b> has numeric offsets. A dashed <b>control</b> handle is a
+screen control when an axis points at the camera. <b>Reset tip position</b> keeps
+the chosen base. Native collision stays fixed; use <b>Apply → Save project</b>
+to retain the visual edit.</p>
+<p><b>Authored edits</b> finds edited regions and shows their record budget.
+Preview <b>Backplanes only</b>/<b>Cutaway + actors</b>, camera presets and <b>Focus selection</b>
+help inspect joins. These inspection choices do not change saved geometry.</p>
+<p><b>Objects → Load native objects…</b> loads a captured game frame for
+sprite inspection. Select a supported object and choose its shape, depth and
+thickness; changes apply to its matching family. These are frozen poses.
+Tile and object geometry edits stay in preview until <b>Apply</b>.
+<b>Discard</b> restores the applied state; <b>Save project</b> downloads your
+applied work. Visual edits preserve native collision and sprite priority.</p>
 <h4>Edit from the map</h4>
 <p>Choose <b>Select</b>, click a tile, or Shift-click another tile to select a
 range. The bar above the map shows the selection count, its <b>applied band</b>
@@ -26,7 +80,8 @@ work above the map or in its right-click menu. <b>Pixels…</b> opens a pixel
 inspector beside the map for the focused tile; double-clicking a tile opens it
 directly. Closing the inspector keeps the selection. <b>View selection in 3D</b>
 centers the Diorama camera on that area. Advanced paint/depth and edge-space
-controls are in expandable sidebar sections.</p>
+controls are in <b>Settings</b>. The <b>More actions</b> menu groups copy,
+paste, transforms and selection tools.</p>
 
 <h4>See what changed and keep your work</h4>
 <p><b>Blue</b> marks selected tiles; <b>gold</b> marks authored band edits,

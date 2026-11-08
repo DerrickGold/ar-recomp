@@ -7,7 +7,7 @@ import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-EMSCRIPTEN_VERSIONS = ("5.0.7", "6.0.12")
+EMSCRIPTEN_VERSIONS = ("5.0.7", "6.0.12", "6.0.13")
 EXPORTS = ["ActionPreview_" + name for name in
            ("Version", "Input", "Capacity", "Hash", "Reset", "Load", "Render")]
 
@@ -47,7 +47,17 @@ def build(output, compiler="emcc"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("output", type=Path)
+    parser.add_argument("output", type=Path, nargs="?")
     parser.add_argument("--compiler", default=os.environ.get("EMCC", "emcc"))
+    parser.add_argument("--check-compiler", action="store_true",
+                        help="Validate the selected compiler before exporting room data")
     args = parser.parse_args()
-    build(args.output, args.compiler)
+    if not args.check_compiler and args.output is None:
+        parser.error("output is required unless --check-compiler is used")
+    try:
+        if args.check_compiler:
+            compiler_environment(args.compiler)
+        else:
+            build(args.output, args.compiler)
+    except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
+        parser.exit(1, f"[action-editor] {error}\n")

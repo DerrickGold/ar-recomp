@@ -28,9 +28,16 @@ function sharedPreviewCanvasPoint(canvas,event) {
 }
 const SharedRoomPreview = (() => {
   const canvas=document.querySelector('#sharedGl'), label=document.querySelector('#sharedRoomStatus');
+  // Routine renderer metrics are optional; failures must stay visible even
+  // when the scene-details display is closed.
+  function previewStatus(message,error=false) {
+    label.textContent=message;label.classList.toggle('error',error);
+    label.setAttribute('role',error?'alert':'status');
+  }
   let backend=null, api=null, key='', configDirty=true, config='', lost=false, skyboxKey=0, effectsConfig=null, collision=null, eventConfig=null;
   let placingPlayer=false;
   let nativeObjects=null;
+  let inspection=0;
   function objectControls(info=null) {
     nativeObjects=info;
     $('#sharedResetObjects').disabled=!info;
@@ -42,7 +49,7 @@ const SharedRoomPreview = (() => {
       : '';
   }
   const measures=new Map();
-  let configVersion=0,configuredRevision=-1;
+  let configVersion=0,configuredRevision=-1,configuredMode=-1;
   const setting=id=>Number(document.querySelector('#shared'+id).value);
   const savedView=window.__ACTION_VIEW__||{};
   $('#sharedAspect').value=({'4:3':String(4/3),'16:9':String(16/9),'16:10':'1.6',Auto:'auto',Stretch:'stretch'})[savedView.aspect]||'1.6';
@@ -85,12 +92,19 @@ const SharedRoomPreview = (() => {
         visibleWidth:a[10],visibleHeight:a[11],viewport:{x:a[12],y:a[13],w:a[14],h:a[15]}};
       if(measures.size>=16)measures.clear();
       measures.set(signature,result);return result;
-    } catch(error) {label.textContent=error.message;return null;}
+    } catch(error) {previewStatus(error.message,true);return null;}
+  }
+  function sceneryError() {
+    const address=api?.RoomPreview_SceneryError?.();
+    if(!address)return '';
+    const bytes=new Uint8Array(api.memory.buffer);let end=address;
+    while(end<bytes.length&&end-address<2048&&bytes[end])++end;
+    return new TextDecoder().decode(bytes.subarray(address,end));
   }
   function send(bytes,call) {
     if(bytes.length>api.DioramaPreview_Capacity())throw Error('Room data exceeds renderer capacity.');
     new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),bytes.length).set(bytes);
-    if(!call(bytes.length))throw Error('Shared renderer rejected the room or its edits.');
+    if(!call(bytes.length))throw Error(call===api.RoomPreview_Configure&&sceneryError()||'Shared renderer rejected the room or its edits.');
   }
   function roomIni() {
     // Base is the current in-memory edit. Keep camera-local sections from the
@@ -104,7 +118,8 @@ const SharedRoomPreview = (() => {
       }
       if(keep)scoped.push(line);
     }
-    return roomSectionIni(room)+'\n'+scoped.join('\n');
+    const section=roomSectionIni(room);
+    return (typeof VoxelEditor==='undefined'?section:VoxelEditor.previewSection(room,section))+'\n'+scoped.join('\n');
   }
   function ensureRoom() {
     if(!api||lost)throw Error('Shared renderer is still loading or unavailable.');
@@ -114,8 +129,9 @@ const SharedRoomPreview = (() => {
       if(key!==next) {
         objectControls();
         send(SharedActionPreview.encode(DATA,BLOBS,room),api.RoomPreview_Load);
-        key=next;collision=null;eventConfig=null;config='';configDirty=true;skyboxKey=0;effectsConfig=null;
+        key=next;collision=null;eventConfig=null;config='';configDirty=true;skyboxKey=0;effectsConfig=null;configuredMode=-1;
       }
+      configureMode();
       if(configDirty) {
         const text=roomIni();
         if(config!==text) {
@@ -124,6 +140,13 @@ const SharedRoomPreview = (() => {
         }
         configDirty=false;
       }
+  }
+  function configureMode() {
+    const selected=typeof VoxelEditor==='undefined'?2:VoxelEditor.mode();
+    if(api.RoomPreview_Set3DMode&&!api.RoomPreview_Set3DMode(selected))throw Error('Invalid shared preview 3D mode.');
+    if(api.RoomPreview_SetInspection&&!api.RoomPreview_SetInspection(selected===2?inspection:0))throw Error('Invalid preview inspection mode.');
+    $('#sharedInspection').disabled=selected!==2;
+    if(configuredMode!==selected){configuredMode=selected;++configVersion;measures.clear();}
   }
   function collisionGrid() {
     ensureRoom();
@@ -178,14 +201,19 @@ const SharedRoomPreview = (() => {
       // Keeping the requested position would accumulate hidden overscroll.
       refreshNativeCameraControls();
       EffectEditor.updateCatalogue(api);EffectEditor.updateSources(api);
-      label.textContent=`Shared C · ${api.RoomPreview_Width()} × ${api.RoomPreview_Height()} room · `+
+      previewStatus(`Shared C · ${api.RoomPreview_Width()} × ${api.RoomPreview_Height()} room · `+
         `${api.RoomPreview_EffectCount()} sources · ${api.RoomPreview_EffectVertices()} effect vertices · ${backend.stats.draws} draws · ${uploads} uploads · ${backend.stats.creates} allocations · `+
-        `${(performance.now()-start).toFixed(1)} ms CPU`;
+        `${(performance.now()-start).toFixed(1)} ms CPU`);
       $('#hud').textContent=`Camera ${nativeCamera.x}, ${nativeCamera.y} · frame ${nativeFrame}. `+
         (nativeObjects?'Captured native object poses. Pan within the captured area; orbit to inspect priority and joins.':
           placingPlayer?'Click to place the player’s feet. Esc cancels.':
           'Drag to pan; arrows move. Shift-click/drag places the player; Alt+Shift places the comparison sprite.');
-    } catch(error) { label.textContent=error.message; }
+      if(typeof VoxelEditor!=='undefined') {
+        VoxelEditor.afterRender();
+        if(VoxelEditor.editing())$('#hud').textContent='Voxel touch-up · Click a face; Shift-click adds selection. Alt-drag pans. Preview → Apply → Save project. Native collision and sprite priority are preserved.';
+      }
+      return true;
+    } catch(error) { previewStatus(error.message,true);return false; }
   }
   $('#previewProbesHere').onclick=()=>{
     $('#previewPlayerX').value=nativeCamera.x+112;$('#previewEnemyX').value=nativeCamera.x+176;
@@ -199,15 +227,18 @@ const SharedRoomPreview = (() => {
   $('#sharedLoadObjects').onclick=()=>$('#sharedObjectFile').click();
   $('#sharedObjectFile').onchange=async event=>{
     const file=event.target.files[0];event.target.value='';if(!file)return;
+    if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('loading another object capture'))return;
     try {
       ensureRoom();
       if(file.size>api.DioramaPreview_Capacity())throw Error('Native object capture is too large.');
       const roomAtLoad=sceneKey(room),bytes=new Uint8Array(await file.arrayBuffer());
       if(sceneKey(room)!==roomAtLoad)throw Error('The room changed while loading. Select the file again.');
+      if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('loading another object capture'))return;
       api.RoomPreview_SetReceivers(0,0,0,0,0);
       send(bytes,api.RoomPreview_LoadObjects);
       if(api.RoomPreview_ObjectInfo()!==14)throw Error('Native object capture metadata is unavailable.');
       const info=Array.from(new Int32Array(api.memory.buffer,api.DioramaPreview_Input(),14));
+      if(typeof VoxelEditor!=='undefined')VoxelEditor.clearLoaded();
       objectControls(info);placementMode(false);
       $('#previewReceivers').checked=false;$('#previewEnemyEnabled').checked=false;
       $('#sharedExtra').value=String(info[12]);
@@ -215,9 +246,11 @@ const SharedRoomPreview = (() => {
       $('#sharedVertical').value=String(vertical>=64?64:vertical>=32?32:0);
       setNativeCamera('x',info[4]);setNativeCamera('y',info[5]);setNativeFrame(info[3]);
       setMode('shared');draw();
-    } catch(error) {label.textContent=`Cannot load native objects: ${error.message} Check the selected room and region.`;}
+    } catch(error) {previewStatus(`Cannot load native objects: ${error.message} Check the selected room and region.`,true);}
   };
   $('#sharedClearObjects').onclick=()=>{
+    if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('clearing native objects'))return;
+    if(typeof VoxelEditor!=='undefined')VoxelEditor.clearLoaded();
     api?.RoomPreview_ClearObjects();objectControls();draw();
   };
   $('#sharedResetObjects').onclick=()=>{
@@ -226,6 +259,7 @@ const SharedRoomPreview = (() => {
     setNativeFrame(nativeObjects[3]);draw();
   };
   function placementMode(enabled) {
+    if(enabled&&typeof VoxelEditor!=='undefined')VoxelEditor.deactivate();
     placingPlayer=enabled;canvas.style.cursor=enabled?'crosshair':'';
     $('#sharedPlacePlayer').setAttribute('aria-pressed',String(enabled));
     $('#sharedPlacePlayer').textContent=enabled?'Click scene…':'Place player';
@@ -244,7 +278,7 @@ const SharedRoomPreview = (() => {
         setMode('shared');
       }
       draw();
-    }catch(error){label.textContent=error.message;}
+    }catch(error){previewStatus(error.message,true);}
   }
   function placeAtPointer(event,enemy) {
     const point=sharedPreviewCanvasPoint(canvas,event);
@@ -269,17 +303,58 @@ const SharedRoomPreview = (() => {
     $('#sharedDistance').value='1';$('#sharedYaw').value=$('#sharedPitch').value='0';
     refreshNativeCameraControls();draw();
   };
+  function setInspection(value) {
+    value=Number(value);
+    if(!Number.isInteger(value)||value<0||value>2)throw Error('Choose a valid Voxel inspection mode.');
+    inspection=value;$('#sharedInspection').value=String(value);draw();
+  }
+  $('#sharedInspection').onchange=event=>setInspection(event.target.value);
+  function setCameraPreset(preset) {
+    const yaw={front:0,left:-.3,right:.3}[preset];
+    if(yaw===undefined)throw Error('Unknown camera preset.');
+    $('#sharedYaw').value=String(Math.max(-.7,Math.min(.7,yaw-(savedView.tiltY||0))));
+    $('#sharedPitch').value=String(Math.max(-.7,Math.min(.7,-(savedView.tiltX||0))));
+    refreshNativeCameraControls();draw();
+  }
+  for(const preset of ['front','left','right'])$('#sharedPreset'+preset).onclick=()=>setCameraPreset(preset);
+  function focusVoxelSelection(bounds) {
+    if(!bounds||![bounds.x,bounds.y,bounds.width,bounds.height].every(Number.isFinite)||bounds.width<0||bounds.height<0)return false;
+    const previous={...nativeCamera};
+    nativeCamera.x=Math.round(bounds.x+bounds.width/2-128);
+    nativeCamera.y=Math.round(bounds.y+bounds.height/2-112);
+    refreshNativeCameraControls();
+    if(render())return true;
+    // A finite sprite capture may not contain the newly centered view. Keep
+    // the valid captured pose rather than leave the preview in an error state.
+    nativeCamera.x=previous.x;nativeCamera.y=previous.y;refreshNativeCameraControls();render();
+    previewStatus('Selection is outside the available captured view. Clear native objects to explore the whole room.');
+    return false;
+  }
   for(const event of ['input','change','click'])document.addEventListener(event,e=>{
     const id=e.target.id;
     if(e.target.closest('#sharedControls')||id.startsWith('native')||id.startsWith('preview')||id==='sharedGl')return;
     configDirty=true;
   });
   document.addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey)configDirty=true;});
-  let drag=null;
+  let drag=null,capturedPointer=null;
+  function endPointerGesture(release=false) {
+    const pointer=capturedPointer;capturedPointer=null;drag=null;
+    if(typeof VoxelEditor!=='undefined')VoxelEditor.endGesture();
+    if(release&&pointer!==null&&canvas.hasPointerCapture?.(pointer))canvas.releasePointerCapture(pointer);
+  }
+  function capturePointer(event) {
+    capturedPointer=event.pointerId;canvas.focus();canvas.setPointerCapture(event.pointerId);
+  }
   canvas.addEventListener('pointerdown',e=>{
     if(e.button===2||macControlClick(e))return;
-    canvas.focus();canvas.setPointerCapture(e.pointerId);
-    if(placingPlayer||e.shiftKey) {
+    if(e.button===1&&e.shiftKey) {
+      endPointerGesture(true);capturePointer(e);e.preventDefault();
+      drag={orbit:true,x:e.clientX,y:e.clientY,yaw:setting('Yaw')||0,pitch:setting('Pitch')||0};return;
+    }
+    if(typeof VoxelEditor!=='undefined'&&VoxelEditor.pointerDown(e)){capturedPointer=e.pointerId;return;}
+    if(e.button!==0&&e.button!==1)return;
+    capturePointer(e);e.preventDefault();
+    if(e.button===0&&(placingPlayer||e.shiftKey)) {
       drag={receiver:true,enemy:e.altKey};e.preventDefault();
       placeAtPointer(e,drag.enemy);
       return;
@@ -287,6 +362,14 @@ const SharedRoomPreview = (() => {
     drag={x:e.clientX,y:e.clientY,cx:nativeCamera.x,cy:nativeCamera.y};
   });
   canvas.addEventListener('pointermove',e=>{
+    if(drag?.orbit) {
+      const clamp=(n,limit)=>Math.max(-limit,Math.min(limit,n));
+      drag.yaw=clamp(drag.yaw+clamp(e.clientX-drag.x,60)*.0035,.7);
+      drag.pitch=clamp(drag.pitch+clamp(e.clientY-drag.y,60)*.003,.7);
+      $('#sharedYaw').value=String(drag.yaw);$('#sharedPitch').value=String(drag.pitch);
+      drag.x=e.clientX;drag.y=e.clientY;e.preventDefault();refreshNativeCameraControls();draw();return;
+    }
+    if(typeof VoxelEditor!=='undefined'&&VoxelEditor.pointerMove(e))return;
     if(!drag)return;
     if(drag.receiver){placeAtPointer(e,drag.enemy);return;}
     const scale=224/Math.min(canvas.clientHeight,canvas.clientWidth/(canvas.width/canvas.height));
@@ -295,12 +378,25 @@ const SharedRoomPreview = (() => {
     if(nativeCamera.x!==requestedX){drag.cx=nativeCamera.x;drag.x=e.clientX;}
     setNativeCamera('y',Math.round(drag.cy-(e.clientY-drag.y)*scale));
   });
-  for(const name of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(name,()=>{drag=null;});
+  for(const name of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(name,event=>{
+    if(capturedPointer!==null&&event.pointerId!==undefined&&event.pointerId!==capturedPointer)return;
+    endPointerGesture(name!=='lostpointercapture');
+  });
+  window.addEventListener('blur',()=>endPointerGesture(true));
+  canvas.addEventListener('wheel',event=>{
+    event.preventDefault();endPointerGesture(true);
+    const unit=event.deltaMode===1?16:event.deltaMode===2?canvas.clientHeight||640:1;
+    const delta=Math.max(-1000,Math.min(1000,event.deltaY*unit));
+    $('#sharedDistance').value=String(Math.max(.5,Math.min(2.5,(setting('Distance')||1)*Math.exp(delta*.0012))));
+    refreshNativeCameraControls();draw();
+  },{passive:false});
+  canvas.addEventListener('auxclick',event=>{if(event.button===1)event.preventDefault();});
   canvas.addEventListener('keydown',e=>{
+    if(typeof VoxelEditor!=='undefined'&&VoxelEditor.keyDown(e))return;
     if(e.key==='Escape'&&placingPlayer){placementMode(false);draw();}
   });
   canvas.addEventListener('webglcontextlost',event=>{
-    event.preventDefault();lost=true;label.textContent='Graphics context lost. Effects and map edits are retained while the renderer recovers.';
+    event.preventDefault();endPointerGesture(true);lost=true;previewStatus('Graphics context lost. Effects and map edits are retained while the renderer recovers.',true);
   });
   canvas.addEventListener('webglcontextrestored',()=>{
     // Context loss invalidates every old GL object; recreate the backend and
@@ -310,7 +406,7 @@ const SharedRoomPreview = (() => {
     initialize();
   });
   async function initialize() {
-    if(!window.__ROOM_PREVIEW_WASM__) {label.textContent='Shared renderer was not bundled in this build.';return;}
+    if(!window.__ROOM_PREVIEW_WASM__) {previewStatus('Shared renderer was not bundled in this build.',true);return;}
     try {
       backend=new ActionWebGL2Backend(canvas,window.__ROOM_PREVIEW_SHADERS__);
       const module=await WebAssembly.compile(B64(window.__ROOM_PREVIEW_WASM__));
@@ -337,14 +433,13 @@ const SharedRoomPreview = (() => {
       const player=new Uint8Array(parts.reduce((size,part)=>size+part.length,0));
       let offset=0;for(const part of parts){player.set(part,offset);offset+=part.length;}
       send(player,api.RoomPreview_LoadPlayer);
-      $('#modeShared').disabled=false;label.textContent='Ready. Select Shared renderer to explore the level.';
+      $('#modeShared').disabled=false;previewStatus('Ready. Select 3D preview to explore the level.');
       refreshNativeCameraControls();draw();
-    }catch(error){label.textContent=error.message;api=null;backend?.dispose();}
+    }catch(error){previewStatus(error.message,true);api=null;backend?.dispose();}
   }
   function validateScenery(text) {
     ensureRoom();
-    try {send(new TextEncoder().encode(text),api.RoomPreview_Configure);}
-    catch {throw Error('Row bands must stay ordered and separate throughout camera travel, within 224 screen rows or the BG world height.');}
+    send(new TextEncoder().encode(text),api.RoomPreview_Configure);
     config=text;configDirty=true;
   }
   function validatePolicyDocument(text) {
@@ -357,6 +452,7 @@ const SharedRoomPreview = (() => {
         for(let terrain=0;terrain<3;terrain++) {
           const variant=terrainRoom(base,terrain);
           send(SharedActionPreview.encode(DATA,BLOBS,variant),api.RoomPreview_Load);
+          configureMode();
           try {send(new TextEncoder().encode(roomSectionHeader(base)+'\n'+bgPolicyPairLines(pair).join('\n')),api.RoomPreview_Configure);}
           catch {throw Error(`Background policy rejected for room ${base.group}:${base.map}, ${terrainLabel(variant)} terrain. Check band order, overlap and world row bounds.`);}
         }
@@ -400,7 +496,7 @@ const SharedRoomPreview = (() => {
   function syncSources() {
     if(!api||lost)return;
     try {ensureRoom();if(effectsConfig!==EffectEditor.text())validateEffects(EffectEditor.text());EffectEditor.updateCatalogue(api);}
-    catch(error){label.textContent=error.message;}
+    catch(error){previewStatus(error.message,true);}
   }
   function previewActorBinding(source,x,y,start) {
     ensureRoom();validateEffects(EffectEditor.text());
@@ -483,6 +579,21 @@ const SharedRoomPreview = (() => {
     for(let i=0;i<length;i+=6)openings.push({centre:values[i],width:values[i+1],power:values[i+2],offset:values[i+3],reach:values[i+4],endWidth:values[i+5]});
     return openings;
   }
+  function voxelQuery(name,...args) {
+    ensureRoom();
+    if(typeof api[name]!=='function')throw Error('Rebuild the editor renderer to enable voxel face picking.');
+    const length=api[name](...args);
+    if(!length)return null;
+    return JSON.parse(new TextDecoder().decode(new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),length)));
+  }
+  const voxelPick=(x,y,mask=3)=>voxelQuery('RoomPreview_VoxelPick',x,y,mask);
+  const voxelTile=(x,y,face=0)=>voxelQuery('RoomPreview_VoxelTile',x,y,face);
+  const voxelGroup=(x,y)=>voxelQuery('RoomPreview_VoxelGroup',x,y);
+  const voxelTransformHandles=(x,y,width,height,px,py,pz,dx,dy,dz,sx,sy,sz)=>
+    voxelQuery('RoomPreview_VoxelTransformHandles',x,y,width,height,px,py,pz,dx,dy,dz,sx,sy,sz);
+  const voxelBendHandles=(x,y,width,height,axis,anchor,tip,dx,dy,dz)=>
+    voxelQuery('RoomPreview_VoxelBendHandles',x,y,width,height,axis,anchor,tip,dx,dy,dz);
+  const voxelObjects=()=>voxelQuery('RoomPreview_VoxelObjects')||[];
   initialize();
-  return {measure,cloudOpenings,placePlayerAt,syncSources,validateScenery,validatePolicyDocument,policyPlan,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;measures.clear();}};
+  return {measure,cloudOpenings,voxelPick,voxelTile,voxelGroup,voxelTransformHandles,voxelBendHandles,voxelObjects,setInspection,inspection:()=>inspection,setCameraPreset,focusVoxelSelection,cancelPlacement:()=>placementMode(false),placePlayerAt,syncSources,validateScenery,validatePolicyDocument,policyPlan,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;measures.clear();}};
 })();

@@ -37,6 +37,28 @@ typedef struct SkyBatchProbe {
   unsigned attempts, sky_calls, effect_calls, actor_calls;
   unsigned fail_begin, fail_end, fail_draw;
 } SkyBatchProbe;
+typedef struct AuthoredCapProbe {
+  DioramaVoxelPickFace faces[512];
+  bool submitted[512], after_actor[512];
+  unsigned count, automatic_caps, explicit_caps, transparent_explicit, transparent_front;
+  unsigned priorities[2];
+  uint32_t atlas[512*16];
+  ArRenderTexture texture;
+  uint8_t automatic_art;
+  bool uploaded;
+} AuthoredCapProbe;
+typedef struct NativeAffineProbe {
+  DioramaVoxelPickFace faces[512];
+  ArRenderVertex2D vertices[512][4];
+  bool submitted[512],after_actor[512];
+  unsigned count;
+  uint32_t atlas[512*16];
+  uint32_t crisp_pixels[2048*64];
+  ArRenderTexture texture,native_texture,crisp_texture,face_textures[512];
+  unsigned crisp_height;
+  int source_shift;
+  bool uploaded,crisp_uploaded;
+} NativeAffineProbe;
 typedef struct Recorder {
   ArRenderTargetState state;
   ArRenderTextureDesc textures[128];
@@ -84,6 +106,8 @@ typedef struct Recorder {
   unsigned fold_faces;
   ArRenderTexture cap_texture;
   CapMesh *cap_mesh;
+  bool owned_cap;
+  uint32_t owned_cap_pixel;
   ArRenderTexture root_texture;
   RootMesh *root_mesh;
   const ActionVoxelGeometry *root_voxel;
@@ -95,6 +119,8 @@ typedef struct Recorder {
   unsigned perspective_count;
   ArRenderTexture cloud_textures[2];
   unsigned cloud_vertices[2], cloud_depth_vertices[2];
+  AuthoredCapProbe *authored_caps;
+  NativeAffineProbe *native_affine;
 } Recorder;
 
 static float Exposure(void *context,float u,float v,float inside_u,float inside_v) {
@@ -150,6 +176,14 @@ static bool Create(void *ctx, const ArRenderTextureDesc *desc, ArRenderTexture *
   r->live++;
   r->creates++;
   *texture = (ArRenderTexture){r->next};
+  if(r->owned_cap && desc->width==512 && desc->height==2048)r->cap_texture=*texture;
+  if(r->authored_caps && desc->width==512 && desc->height==2048)r->authored_caps->texture=*texture;
+  if(r->native_affine && desc->width==512 && desc->height==2048)r->native_affine->texture=*texture;
+  if(r->native_affine && desc->width==2048 && desc->usage==kArRenderTextureUsage_Static &&
+      desc->filter==kArRenderFilter_Linear) {
+    assert(desc->height>0 && desc->height<=64);
+    r->native_affine->crisp_texture=*texture;r->native_affine->crisp_height=desc->height;
+  }
   Record(1);
   Record(r->next);
   Record(desc->width);
@@ -173,6 +207,35 @@ static void Destroy(void *ctx, ArRenderTexture texture) {
 static bool Update(void *ctx, ArRenderTexture t, const ArRenderRectI *rect,
                    const void *pixels, int pitch) {
   Recorder *r=ctx;
+  if(r->native_affine && t.value==r->native_affine->crisp_texture.value) {
+    NativeAffineProbe *probe=r->native_affine;
+    const ArRenderRectI area=rect?*rect:(ArRenderRectI){0,0,2048,(int)probe->crisp_height};
+    assert(pixels && area.x==0 && area.w==2048 && area.y>=0 && area.y+area.h<=(int)probe->crisp_height && pitch==2048*4);
+    for(int y=0;y<area.h;++y)memcpy(probe->crisp_pixels+(area.y+y)*2048,
+        (const uint8_t *)pixels+y*pitch,2048*4);
+    probe->crisp_uploaded=true;++r->uploads;return true;
+  }
+  if(r->native_affine && r->textures[t.value].usage==kArRenderTextureUsage_Static &&
+      r->textures[t.value].width==SR_PPU_SURFACE_MAX_WIDTH && r->textures[t.value].height==SR_PPU_SURFACE_MAX_HEIGHT) {
+    assert(!rect && pixels && pitch==SR_PPU_SURFACE_MAX_WIDTH*4);
+    for(unsigned i=0;i<SR_PPU_SURFACE_MAX_WIDTH*SR_PPU_SURFACE_MAX_HEIGHT;++i)
+      assert(!((const uint32_t *)pixels)[i]);
+    ++r->uploads;return true;
+  }
+  if(r->native_affine && t.value==r->native_affine->texture.value) {
+    assert(rect && rect->x==0 && rect->y==0 && rect->w==512 && rect->h==16 && pitch==512*4);
+    assert(pixels);memcpy(r->native_affine->atlas,pixels,sizeof(r->native_affine->atlas));
+    r->native_affine->uploaded=true;++r->uploads;return true;
+  }
+  if(r->authored_caps && t.value==r->authored_caps->texture.value) {
+    assert(rect && rect->x==0 && rect->y==0 && rect->w==512 && rect->h==16 && pitch==512*4);
+    assert(pixels);memcpy(r->authored_caps->atlas,pixels,sizeof(r->authored_caps->atlas));
+    r->authored_caps->uploaded=true;++r->uploads;return true;
+  }
+  if(r->owned_cap && r->textures[t.value].width==512 && r->textures[t.value].height==2048) {
+    assert(rect && rect->x==0 && rect->y==0 && rect->w==512 && rect->h==16 && pitch==512*4);
+    assert(pixels && *(const uint32_t *)pixels==r->owned_cap_pixel);++r->uploads;return true;
+  }
   if(r->trunk && r->textures[t.value].width==32 && r->textures[t.value].height==32) {
     assert(!rect && pixels==r->trunk->bark && pitch==32*4);++r->uploads;return true;
   }
@@ -267,7 +330,7 @@ static bool Texture(void *ctx, ArRenderTexture t, const ArRenderRectF *src,
   assert(t.value < 128 && r->textures[t.value].width > 0);
   if(r->state.target.value && (r->water_texture.value || r->grass_texture.value ||
       r->fold_front_texture.value || r->cap_texture.value || r->root_texture.value ||
-      r->cloud_textures[0].value || r->perspective_capture || r->check_subscreen))
+      r->cloud_textures[0].value || r->perspective_capture || r->check_subscreen || r->authored_caps || r->native_affine))
     r->copied_sources[r->state.target.value]=r->copied_sources[t.value].value
         ?r->copied_sources[t.value]:t;
   Record(9);
@@ -279,11 +342,81 @@ static bool Texture(void *ctx, ArRenderTexture t, const ArRenderRectF *src,
   return !r->fail_draw;
 }
 
+static void AuthoredCapObserve(void *context,const DioramaVoxelPickFace *face) {
+  if(!face->authored)return;
+  AuthoredCapProbe *probe=context;
+  assert(probe->count<sizeof(probe->faces)/sizeof(*probe->faces));
+  assert(face->priority<2 && face->plane==(face->priority?kDioramaPlane_Bg1Hi:kDioramaPlane_Bg1Far));
+  probe->faces[probe->count++]=*face;
+}
+static void CheckAuthoredCapGeometry(AuthoredCapProbe *probe,const ArRenderVertex2D *vertices,int count,bool after_actor) {
+  assert(probe->uploaded && count%4==0);
+  for(int first=0;first<count;first+=4) {
+    const ArRenderVertex2D *v=vertices+first;
+    unsigned found=probe->count;
+    for(unsigned f=0;f<probe->count && found==probe->count;++f)if(!probe->submitted[f]) {
+      bool same=true;
+      for(unsigned j=0;j<4;++j)same&=fabsf(v[j].position.x-probe->faces[f].screen_xy[j*2])<.001f &&
+          fabsf(v[j].position.y-probe->faces[f].screen_xy[j*2+1])<.001f;
+      if(same)found=f;
+    }
+    assert(found<probe->count);probe->submitted[found]=true;probe->after_actor[found]=after_actor;
+    const DioramaVoxelPickFace *face=&probe->faces[found];++probe->priorities[face->priority];
+    const bool front=face->kind==kDioramaVoxelFace_Front;
+    const bool automatic=!front && (probe->automatic_art&(1u<<face->art_index));
+    if(!front) {
+      if(automatic)++probe->automatic_caps;else ++probe->explicit_caps;
+      /* Opposite depth vertices retain the same native contour texel only
+       * for automatic art. Explicit chosen alpha keeps its repeating UVs. */
+      if(automatic)for(unsigned i=0;i<2;++i) {
+        assert(fabsf(face->art_uv[i*2]-face->art_uv[(3-i)*2])<.0001f);
+        assert(fabsf(face->art_uv[i*2+1]-face->art_uv[(3-i)*2+1])<.0001f);
+      }
+    }
+    /* Sample the actual submitted atlas UVs, not merely an observer flag.
+     * A one-pixel diagonal has alpha holes throughout its native 16px art;
+     * none may puncture the automatic extrusion at any depth sample. */
+    for(unsigned iy=0;iy<5;++iy)for(unsigned ix=0;ix<5;++ix) {
+      const float x=(ix+.5f)/5,y=(iy+.5f)/5;
+      const float weights[]={(1-x)*(1-y),x*(1-y),x*y,(1-x)*y};
+      float u=0,w=0;
+      for(unsigned j=0;j<4;++j){u+=weights[j]*v[j].tex_coord.x;w+=weights[j]*v[j].tex_coord.y;}
+      const int px=(int)floorf(u*512),py=(int)floorf(w*2048);
+      assert(px>=0 && px<512 && py>=0 && py<16);
+      const bool opaque=(probe->atlas[py*512+px]>>24)!=0;
+      if(automatic)assert(opaque);
+      else if(!opaque) {
+        if(front)++probe->transparent_front;else ++probe->transparent_explicit;
+      }
+    }
+  }
+}
 static bool Geometry(void *ctx, ArRenderTexture t, const ArRenderVertex2D *v,
                      int nv, const int32_t *indices, int ni, const ArRenderDrawState *state) {
   Recorder *r = ctx;
   assert(!t.value || (t.value < 128 && r->textures[t.value].width > 0));
   const ArRenderTexture source=r->copied_sources[t.value].value?r->copied_sources[t.value]:t;
+  if(r->native_affine && (t.value==r->native_affine->texture.value ||
+      t.value==r->native_affine->crisp_texture.value ||
+      source.value==r->native_affine->native_texture.value)) {
+    NativeAffineProbe *probe=r->native_affine;
+    for(int first=0;first+3<nv;first+=4) {
+      unsigned found=probe->count;
+      for(unsigned f=0;f<probe->count && found==probe->count;++f)if(!probe->submitted[f]) {
+        bool same=true;for(unsigned j=0;j<4;++j)
+          same&=fabsf(v[first+j].position.x-probe->faces[f].screen_xy[j*2])<.001f &&
+              fabsf(v[first+j].position.y-probe->faces[f].screen_xy[j*2+1])<.001f;
+        if(same)found=f;
+      }
+      if(t.value==probe->texture.value || t.value==probe->crisp_texture.value)assert(found<probe->count);
+      if(found==probe->count)continue;
+      probe->submitted[found]=true;probe->after_actor[found]=r->actor_seen;
+      probe->face_textures[found]=t;
+      memcpy(probe->vertices[found],v+first,4*sizeof(*v));
+    }
+  }
+  if(r->authored_caps && t.value==r->authored_caps->texture.value)
+    CheckAuthoredCapGeometry(r->authored_caps,v,nv,r->actor_seen);
   for(unsigned high=0;high<2;++high)if(r->cloud_textures[high].value &&
       source.value==r->cloud_textures[high].value) {
     /* The semantic split supplies low cloud ink on the front output and
@@ -892,6 +1025,19 @@ static void PropActorSlot(void *userdata,int plane,const DioramaProjection *proj
 static bool PropLight(void *userdata,const DioramaProjection *projection,unsigned receiver) {
   (void)userdata;assert(projection && (receiver==2 || receiver==4));return true;
 }
+typedef struct PropObserved {
+  unsigned count;
+  DioramaVoxelPickFace first;
+} PropObserved;
+static void PropObserve(void *userdata,const DioramaVoxelPickFace *face) {
+  PropObserved *p=userdata;
+  if(face->kind!=kDioramaVoxelFace_Object || face->owner!=0xee0)return;
+  assert(face->plane==-1 && face->cell_x==-1 && face->cell_y==-1);
+  for(unsigned i=0;i<4;++i)assert(isfinite(face->depth[i]) && face->depth[i]>0 &&
+      face->depth[i]<1 && face->clip_w[i]>0 && isfinite(face->screen_xy[2*i]));
+  if(!p->count)p->first=*face;
+  ++p->count;
+}
 static unsigned VoxelSpriteFixture(unsigned scenario) {
   const unsigned kind=scenario/6;
   const bool rock=kind==1,temple=kind>=2;
@@ -952,7 +1098,7 @@ static unsigned VoxelSpriteFixture(unsigned scenario) {
   const DioramaCapture capture={.width=256,.height=224,.textures=textures,.pixels=pixels};
   const DioramaView view={.viewport={0,0,960,600},.visible_width=256,.distance_scale=1,
       .camera={.tilt_x=.18f,.tilt_y=scenario&1?.4f:-.4f}};
-  const DioramaRenderOptions options={.edge_aa=s_depth_fixture,.visible_planes=(1u<<kDioramaPlane_Count)-1,
+  DioramaRenderOptions options={.edge_aa=s_depth_fixture,.visible_planes=(1u<<kDioramaPlane_Count)-1,
       .depth_of_field=true};
   const DioramaDepthSink depth_sink={.submit=DepthGeometry,.userdata=&r};
   DioramaScene scene={.render=&options,.depth_sink=s_depth_fixture?&depth_sink:NULL,.map_group=voxel->active_group,.map_number=voxel->active_room,
@@ -988,6 +1134,40 @@ static unsigned VoxelSpriteFixture(unsigned scenario) {
     const DioramaDepthSink missing={0};scene.depth_sink=&missing;
     assert(Diorama_Composite(&device,&capture,&view,&scene,&projection)==kPresentationOutcome_CoreFailure);
     assert(!projection.valid && !r.state.target.value && r.bound_effect==-1);
+  }
+  if(!kind && !scenario) {
+    PropObserved observed={0};options.voxel_observe_face=PropObserve;options.voxel_observer_userdata=&observed;
+    scene.depth_sink=s_depth_fixture?&depth_sink:NULL;
+    ActionVoxelSprite *p=&props.sprites[0];
+    for(unsigned mode=0;mode<2;++mode) {
+      p->shape=kActionVoxelSpriteGenericShape;
+      p->presentation_mode=mode?kDioramaVoxelObject_Flat:kDioramaVoxelObject_Auto;
+      r.actor_seen=false;r.prop_before_actor=r.prop_after_actor=0;
+      DioramaProjection projection;r.projection=&projection;
+      assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
+      assert(!r.prop_before_actor && !r.prop_after_actor && !observed.count);
+    }
+    p->presentation_mode=kDioramaVoxelObject_Extruded;p->presentation_fields=15;
+    p->depth_offset=.12f;p->thickness=.04f;p->width_scale=1;
+    DioramaVoxelPickFace full_face={0};
+    for(unsigned narrower=0;narrower<2;++narrower) {
+      p->width_scale=narrower?.5f:1;
+      observed=(PropObserved){0};r.actor_seen=false;r.prop_before_actor=r.prop_after_actor=0;
+      DioramaProjection projection;r.projection=&projection;
+      assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
+      assert(r.prop_before_actor==24 && !r.prop_after_actor && observed.count==6);
+      assert(observed.first.world_xy[0]==104 && observed.first.world_xy[2]==120);
+      if(!narrower)full_face=observed.first;
+      else assert(fabsf(observed.first.screen_xy[2]-observed.first.screen_xy[0])<
+          fabsf(full_face.screen_xy[2]-full_face.screen_xy[0])*.6f);
+    }
+    p->depth_offset=-.12f;observed=(PropObserved){0};
+    r.actor_seen=false;r.prop_before_actor=r.prop_after_actor=0;
+    DioramaProjection projection;r.projection=&projection;
+    assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
+    /* The walking cap remains under actors; all other faces now sit wholly
+     * in front of the unchanged native actor plane. */
+    assert(r.prop_before_actor==4 && r.prop_after_actor==20 && observed.count==6);
   }
   ActionVoxel_Release(voxel);Diorama_ResetCompositorResources(&device);
   Destroy(&r,r.prop_texture);
@@ -1200,6 +1380,70 @@ static void CheckCapTiling(const CapMesh *mesh,const CapMesh *plain,int sx,int s
   assert(fabsf(area-expected)<expected*.0001f);
   assert(!mesh->after_actor[0] && after && joins && actor_joins && boundaries);
 }
+static unsigned AuthoredContourCapFixture(unsigned scenario) {
+  s_count=0;
+  AuthoredCapProbe probe={.automatic_art=(1u<<1)|(1u<<4)|(1u<<5)|(1u<<6)};
+  if(scenario==1)probe.automatic_art&=~(1u<<1); /* Explicit top alpha. */
+  if(scenario==2)probe.automatic_art&=~((1u<<4)|(1u<<5)|(1u<<6)); /* Shared side alpha. */
+  Recorder r={.width=960,.height=600,.bound_effect=-1,.authored_caps=&probe};
+  ArRenderDevice device;
+  assert(ArRenderDevice_Init(&device,&kOps,&r,(ArRenderCapabilities){.flags=UINT64_MAX}));
+  ArRenderTexture textures[kDioramaPlane_Count];
+  const uint8_t *pixels[kDioramaPlane_Count];const uint8_t present=255;
+  for(int i=0;i<kDioramaPlane_Count;++i) {
+    assert(Create(&r,&(ArRenderTextureDesc){.width=SR_PPU_SURFACE_MAX_WIDTH,
+        .height=SR_PPU_SURFACE_MAX_HEIGHT,.format=kArRenderPixelFormat_Argb8888,
+        .usage=kArRenderTextureUsage_Streaming},&textures[i]));pixels[i]=&present;
+  }
+  ActionVoxelGeometry *voxel=ActionVoxel_Create();assert(voxel);
+  voxel->active_group=voxel->active_room=1;voxel->profile=kActionVoxelProfile_FillmoreForest;
+  voxel->settings=ActionVoxel_SettingsForRoom(1,1);voxel->width=256;voxel->height=224;voxel->ready=true;
+  voxel->authored=calloc(1,sizeof(*voxel->authored));assert(voxel->authored);voxel->authored_count=1;
+  voxel->authored_at=calloc(16*14,sizeof(*voxel->authored_at));assert(voxel->authored_at);
+  voxel->authored_at[6*16+5]=1;
+  voxel->authored_art=calloc(2,sizeof(*voxel->authored_art));assert(voxel->authored_art);
+  voxel->authored_art_count=voxel->authored_art_capacity=2;
+  for(int y=0;y<16;++y)for(int x=0;x<16;++x) {
+    voxel->authored_art[0][y*16+x]=x==y?0x83e0:0;
+    voxel->authored_art[1][y*16+x]=(y&1)?0x801f:0;
+  }
+  uint16_t original[256];memcpy(original,voxel->authored_art[0],sizeof(original));
+  VoxelAuthoredCell *a=voxel->authored;
+  *a=(VoxelAuthoredCell){.x=80,.y=96,.width=16,.surface=true,
+      .faces=kDioramaVoxelFaceMask_All,.automatic_art=probe.automatic_art};
+  for(unsigned q=0;q<4;++q){a->front[q]=-.24f;a->back[q]=.3f;a->priority[q]=q&1;}
+  for(unsigned face=0;face<7;++face) {
+    const bool explicit_art=face==1?scenario==1:face>=4&&scenario==2;
+    a->art_id[face]=explicit_art?1:0;a->pixels[face]=voxel->authored_art[a->art_id[face]];
+  }
+  voxel->authored_contours=calloc(64,sizeof(*voxel->authored_contours));assert(voxel->authored_contours);
+  voxel->authored_contour_count=voxel->authored_contour_capacity=a->contour_count=64;
+  for(unsigned side=0;side<4;++side)for(unsigned pixel=0;pixel<16;++pixel)
+    voxel->authored_contours[side*16+pixel]=(VoxelAuthoredContour){pixel,pixel,1,side};
+  const DioramaCapture capture={.width=256,.height=224,.textures=textures,.pixels=pixels};
+  const DioramaView view={.viewport={0,0,960,600},.visible_width=256,.distance_scale=1,
+      .camera={.tilt_x=.15f,.tilt_y=s_depth_fixture?-.35f:.35f}};
+  const DioramaRenderOptions options={.edge_aa=s_depth_fixture,.visible_planes=(1u<<kDioramaPlane_Count)-1,
+      .voxel_observe_face=AuthoredCapObserve,.voxel_observer_userdata=&probe};
+  const DioramaDepthSink sink={.submit=DepthGeometry,.userdata=&r};
+  const DioramaScene scene={.render=&options,.depth_sink=s_depth_fixture?&sink:NULL,
+      .map_group=1,.map_number=1,.voxel_geometry=voxel};
+  DioramaProjection projection;r.projection=&projection;r.capture=&capture;
+  r.actor_texture=textures[kDioramaPlane_Obj2];
+  assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
+  assert(probe.uploaded && probe.automatic_caps && probe.transparent_front);
+  assert(probe.priorities[0] && probe.priorities[1]);
+  assert((probe.explicit_caps>0)==(scenario!=0));
+  assert((probe.transparent_explicit>0)==(scenario!=0));
+  for(unsigned i=0;i<probe.count;++i)assert(probe.submitted[i]);
+  assert(!memcmp(original,voxel->authored_art[0],sizeof(original)));
+  for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)
+    assert(probe.atlas[y*512+x]==ActionVoxel_AuthoredColor(original[y*16+x],NULL));
+  if(s_depth_fixture)assert(r.depth_draws && r.depth_actor_vertices);
+  ActionVoxel_Release(voxel);Diorama_ResetCompositorResources(&device);
+  for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
+  assert(!r.live);return s_count;
+}
 static unsigned VoxelCapFixture(unsigned scenario) {
   s_count=0;
   Recorder r={.width=960,.height=600,.bound_effect=-1};
@@ -1265,6 +1509,32 @@ static unsigned VoxelCapFixture(unsigned scenario) {
       assert(shared>mesh.count*3/4);
     }
   }
+  if(scenario<2) {
+    /* An authored neighbour can suppress the original shared donor pixels.
+     * The remaining automatic cap uses owned native art at exactly the same
+     * projected vertices, depth tiling and native actor-priority split. */
+    voxel->authored_art=malloc(sizeof(*voxel->authored_art));assert(voxel->authored_art);
+    voxel->authored_art_count=voxel->authored_art_capacity=1;
+    for(unsigned p=0;p<256;++p)voxel->authored_art[0][p]=0x83e0;
+    voxel->authored_cap_art=malloc(sizeof(*voxel->authored_cap_art));assert(voxel->authored_cap_art);
+    voxel->authored_cap_art[0]=0;voxel->authored_cap_art_count=1;
+    voxel->edges[0]=edge;voxel->edges[0].top_sample_size=4;voxel->edges[0].top_owned_art=1;
+    r.owned_cap=true;DioramaCapture owned_capture=capture;ActionRoomSceneFrameState color={.brightness=15};
+    owned_capture.voxel_frame=&color;
+    for(unsigned frame=0;frame<3;++frame) {
+      if(frame==2)color.brightness=7;
+      r.owned_cap_pixel=ActionVoxel_AuthoredColor(0x83e0,&color);mesh.count=0;r.actor_seen=false;
+      DioramaProjection projection;r.projection=&projection;
+      assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&owned_capture,&view,&scene,&projection)));
+      assert(mesh.count==tiled.count && r.uploads==(frame==2?2u:1u));
+      for(unsigned i=0;i<mesh.count;++i) {
+        assert(CapPointEqual(mesh.vertices[i].position,tiled.vertices[i].position));
+        assert(fabsf(mesh.vertices[i].tex_coord.x*512-(tiled.vertices[i].tex_coord.x*SR_PPU_SURFACE_MAX_WIDTH-(x+14)))<.0001f);
+        assert(fabsf(mesh.vertices[i].tex_coord.y*2048-(tiled.vertices[i].tex_coord.y*SR_PPU_SURFACE_MAX_HEIGHT-(y+6)))<.0001f);
+        if(i%4==0)assert(mesh.after_actor[i/4]==tiled.after_actor[i/4]);
+      }
+    }
+  }
   if(s_depth_fixture)assert(r.depth_draws && r.depth_actor_vertices);
   ActionVoxel_Release(voxel);Diorama_ResetCompositorResources(&device);
   for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
@@ -1273,13 +1543,138 @@ static unsigned VoxelCapFixture(unsigned scenario) {
 static ArRenderPointF RootExpectedPoint(const DioramaProjection *p,const DioramaCapture *capture,
     float world_x,float world_y,float depth) {
   /* Independently project native coordinates at the required physical depth.
-   * The fixture fixes camera distance, so no auto-fit assumption enters here. */
+   * Use the published resolved distance, including auto-fit and zoom. */
   const float x=world_x-capture->bg1_camera_x,y=world_y-capture->camera_y-1;
-  const float scale=1+depth/3.25f;
+  assert(isfinite(p->camera_distance) && p->camera_distance>=2);
+  const float scale=1+depth/p->camera_distance;
   Scene3DPoint point;
   assert(Scene3D_ProjectWorldPoint(p->matrix,(x/capture->width-.5f)*p->aspect_x*scale,
       (.5f-y/capture->height)*p->height_scale*scale,-depth,p->output_width,p->output_height,&point));
   return (ArRenderPointF){point.x,point.y};
+}
+/* The base remains attached to the native source plane. A shared domain bends
+ * across both cell axes, so editing four cells cannot produce four separate
+ * curves. The observer keeps source coordinates for picking and native UVs. */
+static unsigned AuthoredAnchoredBendFixture(unsigned scenario) {
+  const bool affine=scenario>=3;scenario%=3;
+  s_count=0;
+  AuthoredCapProbe probe={.automatic_art=(1u<<1)|(1u<<4)|(1u<<5)|(1u<<6)};
+  Recorder r={.width=960,.height=600,.bound_effect=-1,.authored_caps=&probe};
+  ArRenderDevice device;
+  assert(ArRenderDevice_Init(&device,&kOps,&r,(ArRenderCapabilities){.flags=UINT64_MAX}));
+  ArRenderTexture textures[kDioramaPlane_Count];
+  const uint8_t *pixels[kDioramaPlane_Count];const uint8_t present=255;
+  for(int i=0;i<kDioramaPlane_Count;++i) {
+    assert(Create(&r,&(ArRenderTextureDesc){.width=SR_PPU_SURFACE_MAX_WIDTH,
+        .height=SR_PPU_SURFACE_MAX_HEIGHT,.format=kArRenderPixelFormat_Argb8888,
+        .usage=kArRenderTextureUsage_Streaming},&textures[i]));pixels[i]=&present;
+  }
+  ActionVoxelGeometry *voxel=ActionVoxel_Create();assert(voxel);
+  voxel->active_group=voxel->active_room=1;voxel->profile=kActionVoxelProfile_FillmoreForest;
+  voxel->settings=ActionVoxel_SettingsForRoom(1,1);voxel->width=256;voxel->height=224;voxel->ready=true;
+  voxel->authored=calloc(4,sizeof(*voxel->authored));assert(voxel->authored);voxel->authored_count=4;
+  voxel->authored_at=calloc(16*14,sizeof(*voxel->authored_at));assert(voxel->authored_at);
+  voxel->authored_art=malloc(sizeof(*voxel->authored_art));assert(voxel->authored_art);
+  voxel->authored_art_count=voxel->authored_art_capacity=1;
+  for(unsigned i=0;i<256;++i)voxel->authored_art[0][i]=0x83e0;
+  for(unsigned i=0;i<4;++i) {
+    VoxelAuthoredCell *a=&voxel->authored[i];
+    *a=(VoxelAuthoredCell){.x=80+(i&1)*16,.y=96+(i>>1)*16,.width=16,.surface=true,
+        .faces=kDioramaVoxelFaceMask_All,.automatic_art=probe.automatic_art,
+        .bend={.axis=scenario?kDioramaVoxelBend_Y:kDioramaVoxelBend_X,
+          .anchor=scenario?128:80,.tip=scenario?96:112,
+          .dx=scenario==2&&(i&1)?-8:12,.dy=-6,.dz=.35f}};
+    if(affine)a->transform=(DioramaVoxelTransform){.px=96,.py=112,.pz=0,
+        .dx=18,.dy=9,.dz=-.07f,.sx=.5f,.sy=1.25f,.sz=.7f};
+    voxel->authored_at[(a->y/16)*16+a->x/16]=i+1;
+    for(unsigned q=0;q<4;++q){a->front[q]=-.2f;a->back[q]=.25f;a->priority[q]=q&1;}
+    for(unsigned face=0;face<7;++face)a->pixels[face]=voxel->authored_art[0];
+  }
+  voxel->authored_contours=calloc(32,sizeof(*voxel->authored_contours));assert(voxel->authored_contours);
+  voxel->authored_contour_capacity=32;
+  for(unsigned i=0;i<4;++i) {
+    VoxelAuthoredCell *a=&voxel->authored[i];a->contour_start=voxel->authored_contour_count;
+    for(unsigned side=0;side<4;++side)for(unsigned run=0;run<2;++run) {
+      const unsigned x=side==1?15:side==3?0:run*8,y=side==0?0:side==2?15:run*8;
+      if(!ActionVoxel_AuthoredContourExposed(voxel,a,x,y,side))continue;
+      assert(voxel->authored_contour_count<voxel->authored_contour_capacity);
+      voxel->authored_contours[voxel->authored_contour_count++]=(VoxelAuthoredContour){x,y,8,side};
+      ++a->contour_count;
+    }
+  }
+  const DioramaCapture capture={.width=256,.height=224,.textures=textures,.pixels=pixels};
+  const DioramaView view={.viewport={0,0,960,600},.visible_width=256,
+      .distance_scale=scenario==2?.8f:scenario==1?1.2f:1,
+      .camera={.tilt_x=.15f,.tilt_y=s_depth_fixture?-.35f:.35f,
+        .distance=scenario==2?1:scenario==1?3.25f:0}};
+  const DioramaRenderOptions options={.edge_aa=s_depth_fixture,.visible_planes=(1u<<kDioramaPlane_Count)-1,
+      .voxel_observe_face=AuthoredCapObserve,.voxel_observer_userdata=&probe};
+  const DioramaDepthSink sink={.submit=DepthGeometry,.userdata=&r};
+  const DioramaScene scene={.render=&options,.depth_sink=s_depth_fixture?&sink:NULL,
+      .map_group=1,.map_number=1,.voxel_geometry=voxel};
+  DioramaProjection projection;r.projection=&projection;r.capture=&capture;r.actor_texture=textures[kDioramaPlane_Obj2];
+  assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
+  if(scenario==1)assert(fabsf(projection.camera_distance-3.25f*1.2f)<.00001f);
+  if(scenario==2)assert(projection.camera_distance==2); /* Both pre/post-zoom minimum clamps. */
+  assert(r.actor_seen);
+  assert(probe.uploaded && probe.automatic_caps && !probe.transparent_front && !probe.transparent_explicit);
+  const float split=fmaxf(0,ActionVoxel_PlayRecess(voxel)-.01f);
+  unsigned anchors=0,tips=0,shared_x=0,shared_y=0,seam_caps=0,before=0,after=0;
+  for(unsigned f=0;f<probe.count;++f) {
+    const DioramaVoxelPickFace *face=&probe.faces[f];assert(probe.submitted[f]);
+    const VoxelAuthoredCell *a=ActionVoxel_AuthoredCellAt(voxel,face->cell_x,face->cell_y);assert(a);
+    if(face->kind!=kDioramaVoxelFace_Front) {
+      if((face->kind==kDioramaVoxelFace_Left || face->kind==kDioramaVoxelFace_Right) &&
+          fabsf(face->world_xy[0]-96)<.001f)++seam_caps;
+      if(!face->priority) {
+        if(probe.after_actor[f])++after;else ++before;
+        for(unsigned j=0;j<4;++j) {
+          const float plane=PlaneDepth(&projection,-split,(ArRenderPointF){face->screen_xy[j*2],face->screen_xy[j*2+1]});
+          if(probe.after_actor[f]?face->depth[j]>plane+.00001f:face->depth[j]<plane-.00001f)
+            fprintf(stderr,"bend split scenario=%u sink=%d face=%u kind=%d after=%d vertex=%u source=(%.6f,%.6f) split=%.6f depth=%.9f plane=%.9f\n",
+                scenario,s_depth_fixture,f,face->kind,probe.after_actor[f],j,face->world_xy[j*2],face->world_xy[j*2+1],split,face->depth[j],plane);
+          if(probe.after_actor[f])assert(face->depth[j]<=plane+.00001f);
+          else assert(face->depth[j]>=plane-.00001f);
+        }
+      }
+      continue;
+    }
+    for(unsigned j=0;j<4;++j) {
+      const float x=face->world_xy[j*2],y=face->world_xy[j*2+1];
+      const float source=scenario?y:x;
+      float t=fmaxf(0,fminf(1,(source-a->bend.anchor)/(a->bend.tip-a->bend.anchor)));t=t*t*(3-2*t);
+      float depth=-.2f+a->bend.dz*t,px=x+a->bend.dx*t,py=y+a->bend.dy*t;
+      if(affine){px=96+(px-96)*.5f+18;py=112+(py-112)*1.25f+9;depth=depth*.7f-.07f;}
+      const ArRenderPointF expected=RootExpectedPoint(&projection,&capture,px,py,depth);
+      if(fabsf(expected.x-face->screen_xy[j*2])>=.003f || fabsf(expected.y-face->screen_xy[j*2+1])>=.003f)
+        fprintf(stderr,"bend scenario=%u depth=%d face=%u vertex=%u source=(%.6f,%.6f) t=%.6f final-depth=%.6f expected=(%.6f,%.6f) actual=(%.6f,%.6f)\n",
+            scenario,s_depth_fixture,f,j,x,y,t,depth,expected.x,expected.y,face->screen_xy[j*2],face->screen_xy[j*2+1]);
+      assert(fabsf(expected.x-face->screen_xy[j*2])<.003f && fabsf(expected.y-face->screen_xy[j*2+1])<.003f);
+      assert(fabsf(face->depth[j]-PlaneDepth(&projection,-depth,expected))<.00001f);
+      assert(fabsf(face->art_uv[j*2]-(x-a->x))<.0001f && fabsf(face->art_uv[j*2+1]-(y-a->y))<.0001f);
+      if(fabsf(source-a->bend.anchor)<.001f)++anchors;
+      if(fabsf(source-a->bend.tip)<.001f)++tips;
+      for(unsigned other=0;other<f;++other) {
+        const DioramaVoxelPickFace *b=&probe.faces[other];if(b->kind!=kDioramaVoxelFace_Front ||
+            (b->cell_x==face->cell_x && b->cell_y==face->cell_y))continue;
+        const VoxelAuthoredCell *cell=ActionVoxel_AuthoredCellAt(voxel,b->cell_x,b->cell_y);assert(cell);
+        if(cell->bend.dx!=a->bend.dx)continue;
+        for(unsigned k=0;k<4;++k)if(fabsf(b->world_xy[k*2]-x)<.0001f && fabsf(b->world_xy[k*2+1]-y)<.0001f) {
+          assert(fabsf(b->screen_xy[k*2]-face->screen_xy[j*2])<.001f &&
+              fabsf(b->screen_xy[k*2+1]-face->screen_xy[j*2+1])<.001f);
+          assert(fabsf(b->depth[k]-face->depth[j])<.000001f);
+          shared_x+=b->cell_x!=face->cell_x;shared_y+=b->cell_y!=face->cell_y;
+        }
+      }
+    }
+  }
+  assert(anchors && tips && shared_y && (scenario==2 || shared_x));
+  assert((seam_caps>0)==(scenario==2));assert(before && after);
+  assert(probe.priorities[0] && probe.priorities[1]);
+  if(s_depth_fixture)assert(r.depth_draws && r.depth_actor_vertices);
+  ActionVoxel_Release(voxel);Diorama_ResetCompositorResources(&device);
+  for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
+  assert(!r.live);return s_count;
 }
 static bool RootHasPoint(const RootMesh *mesh,ArRenderPointF point,bool front) {
   for(unsigned i=0;i<mesh->count;++i)
@@ -1506,6 +1901,22 @@ static bool StumpHasPoint(const CapMesh *mesh,ArRenderPointF point) {
     if(CapPointEqual(mesh->vertices[i].position,point))return true;
   return false;
 }
+static float StumpNativeFrontArea(const RootMesh *mesh,const DioramaCapture *capture,int cell_x,int cell_y) {
+  float area=0;
+  for(unsigned face=0;face<mesh->count/4;++face)if(mesh->front[face]) {
+    float left=INFINITY,right=-INFINITY,top=INFINITY,bottom=-INFINITY;
+    for(unsigned j=0;j<4;++j) {
+      const ArRenderPointF uv=mesh->vertices[face*4+j].tex_coord;
+      const float x=uv.x*SR_PPU_SURFACE_MAX_WIDTH;
+      const float y=uv.y*SR_PPU_SURFACE_MAX_HEIGHT+capture->camera_y-capture->authentic_y0+1;
+      left=fminf(left,x);right=fmaxf(right,x);top=fminf(top,y);bottom=fmaxf(bottom,y);
+    }
+    const float width=fminf(right,(cell_x+1)*16)-fmaxf(left,cell_x*16);
+    const float height=fminf(bottom,(cell_y+1)*16)-fmaxf(top,cell_y*16);
+    if(width>0 && height>0)area+=width*height;
+  }
+  return area;
+}
 static unsigned VoxelStumpContourFixture(unsigned scenario) {
   s_count=0;
   Recorder r={.width=960,.height=600,.bound_effect=-1};ArRenderDevice device;
@@ -1545,9 +1956,10 @@ static unsigned VoxelStumpContourFixture(unsigned scenario) {
       .map_group=1,.map_number=1,.voxel_geometry=voxel};
   CapMesh mesh={0},contour={0};r.cap_mesh=&mesh;r.cap_texture=textures[kDioramaPlane_Bg1Far];
   r.actor_texture=textures[kDioramaPlane_Obj2];
+  RootMesh fronts={0};r.root_mesh=&fronts;r.root_texture=textures[kDioramaPlane_Bg1Far];r.capture=&capture;
   DioramaProjection projection;r.projection=&projection;
   for(unsigned frame=0;frame<2;++frame) {
-    voxel->patch_count=frame;mesh.count=0;r.actor_seen=false;
+    voxel->patch_count=frame;mesh.count=0;fronts.count=0;r.actor_seen=false;
     assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
     assert(projection.valid && mesh.count && r.actor_seen);
     if(!frame) {contour=mesh;continue;}
@@ -1577,10 +1989,36 @@ static unsigned VoxelStumpContourFixture(unsigned scenario) {
   }
   assert(visible_side && before_actor && after_actor);
   if(s_depth_fixture)assert(r.depth_draws && r.depth_actor_vertices);
+  /* A Front-only visibility edit must filter the original front mesh while
+   * retaining the stump's stepped contour and shared native donor texture.
+   * Restoring All removes that filter instead of compiling a box over it. */
+  assert(fabsf(StumpNativeFrontArea(&fronts,&capture,5,6)-256)<.01f);
+  assert(fabsf(StumpNativeFrontArea(&fronts,&capture,6,6)-256)<.01f);
+  voxel->authored=calloc(1,sizeof(*voxel->authored));
+  voxel->authored_at=calloc((size_t)voxel->width/16,voxel->height/16*sizeof(*voxel->authored_at));
+  assert(voxel->authored && voxel->authored_at);
+  voxel->authored[0]=(VoxelAuthoredCell){.x=80,.y=96,.width=16,.native_front_hidden=true,
+      .faces=kDioramaVoxelFaceMask_All&~kDioramaVoxelFaceMask_Front};
+  voxel->authored_at[6*(voxel->width/16)+5]=1;
+  for(unsigned frame=0;frame<2;++frame) {
+    voxel->authored_count=voxel->hidden_native_front_count=frame?0:1;
+    mesh.count=fronts.count=0;r.actor_seen=false;
+    assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
+    assert(mesh.count==contour.count && r.actor_seen);
+    for(unsigned i=0;i<mesh.count;++i) {
+      assert(CapPointEqual(mesh.vertices[i].position,contour.vertices[i].position));
+      assert(CapUvEqual(mesh.vertices[i].tex_coord,contour.vertices[i].tex_coord));
+      assert(!memcmp(&mesh.vertices[i].color,&contour.vertices[i].color,sizeof(ArRenderColorF)));
+      assert(mesh.after_actor[i/4]==contour.after_actor[i/4]);
+    }
+    assert(fabsf(StumpNativeFrontArea(&fronts,&capture,5,6)-(frame?256:0))<.01f);
+    assert(fabsf(StumpNativeFrontArea(&fronts,&capture,6,6)-256)<.01f);
+  }
   ActionVoxel_Release(voxel);Diorama_ResetCompositorResources(&device);
   for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
   assert(!r.live);return s_count;
 }
+#include "diorama_native_transform.inc"
 typedef struct SubscreenNested {
   ArRenderDevice *device;
   ArRenderTexture target;
@@ -1911,10 +2349,26 @@ static unsigned SkyBatchFixture(unsigned scenario) {
   for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
   assert(!r.live);return s_count;
 }
-unsigned DioramaFixture_Count(void) { return 382; }
+unsigned DioramaFixture_Count(void) { return 404; }
 const float *DioramaFixture_Trace(void) { return s_trace; }
 unsigned DioramaFixture_Run(unsigned scenario) {
   assert(scenario < DioramaFixture_Count());
+  if(scenario>=400) {
+    s_depth_fixture=scenario>=402;
+    return NativeAffineFixture((scenario-400)%2);
+  }
+  if(scenario>=394) {
+    s_depth_fixture=scenario>=397;
+    return AuthoredAnchoredBendFixture(3+(scenario-394)%3);
+  }
+  if(scenario>=388) {
+    s_depth_fixture=scenario>=391;
+    return AuthoredAnchoredBendFixture((scenario-388)%3);
+  }
+  if(scenario>=382) {
+    s_depth_fixture=scenario>=385;
+    return AuthoredContourCapFixture((scenario-382)%3);
+  }
   if(scenario>=374)return SkyBatchFixture(scenario-374);
   if(scenario>=370) {
     s_depth_fixture=scenario>=372;

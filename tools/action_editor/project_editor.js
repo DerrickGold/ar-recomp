@@ -10,13 +10,14 @@ const ProjectEditor=(()=>{
   function files() {
     return {'diorama-layers.ini':mergeDioramaIni(),'action-effects.ini':EffectEditor.text()};
   }
-  function dirty(){return editorHasUnexportedChanges()||EffectEditor.dirty()||BackgroundPolicyEditor.pending();}
+  function dirty(){return editorHasUnexportedChanges()||EffectEditor.dirty()||BackgroundPolicyEditor.pending()||(typeof VoxelEditor!=='undefined'&&VoxelEditor.pending());}
   function save(event) {
     // Pointer saves use the anchor's ordinary browser download. Keyboard/API
     // saves activate that same anchor once after preparing the current ZIP.
     if(activating)return downloadBytes;
     if(loading){event?.preventDefault();return;}
     try {
+      if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('saving your project'))throw Error('Apply or discard the voxel preview first.');
       if(EffectEditor.modalOpen())throw Error('Apply or cancel the effect draft before saving your project.');
       if(drag)throw Error('Finish the current map gesture before saving your project.');
       if(BackgroundPolicyEditor.pending()) {
@@ -45,6 +46,7 @@ const ProjectEditor=(()=>{
     } catch(error){event?.preventDefault();status(`Cannot save project: ${error.message}`,true);return null;}
   }
   function load(files,filename='action-project.zip') {
+    if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('loading a project'))throw Error('Apply or discard the voxel preview first.');
     for(const [key,limit] of Object.entries(ActionProjectArchive.limits)) {
       if(typeof files[key]!=='string')throw Error(`Project is missing ${key}.`);
       if(new TextEncoder().encode(files[key]).length>limit)throw Error(`${key} exceeds its project size limit.`);

@@ -1,7 +1,7 @@
 /* Coverage is measured by the shared C compositor, including finite-room
  * stops, capture fitting, saved framing and the selected preview pose. The
  * painting workspace remains freely pannable and never defines camera travel. */
-let showCoverageGuide=true;
+let showCoverageGuide=false;
 const coverageUnion=(a,b)=>({x0:Math.min(a.x0,b.x0),y0:Math.min(a.y0,b.y0),
   x1:Math.max(a.x1,b.x1),y1:Math.max(a.y1,b.y1)});
 const coverageShortage=(have,need)=>({left:Math.max(0,have.x0-need.x0),

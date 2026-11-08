@@ -33,6 +33,8 @@ unsigned RoomPreview_Width(void);
 unsigned RoomPreview_Height(void);
 int RoomPreview_CameraX(void);
 int RoomPreview_Set3DMode(int mode);
+int RoomPreview_SetInspection(int mode);
+const char *RoomPreview_SceneryError(void);
 int RoomPreview_SetView(float distance, float yaw, float pitch, int aspect_mode, int dynamic_camera);
 /* Five floats per opening in DioramaPreview_Input(): centre, width, power,
  * edge offset and reach, all relative to the authored region. */

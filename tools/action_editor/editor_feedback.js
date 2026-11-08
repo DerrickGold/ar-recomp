@@ -155,6 +155,7 @@ function refreshEditorFeedback() {
   const selected=positions.length>0;
   $('#selectionPixels').disabled=!selected||mode!=='2d';
   $('#selectionPreview').disabled=!selected;
+  $('#selectionVoxel').disabled=!selected||bgIndex!==0;
   $('#selectionPaste').disabled=!selected||mode!=='2d'||tileClipboard?.key!==keyOf(room,bgIndex);
   $('#selectionTools').hidden=mode!=='2d';
   $('#pixelSelectionBlackQuick').disabled=!selected||mode!=='2d';
@@ -197,7 +198,8 @@ function refreshEditorFeedback() {
   $('#editOutlines').setAttribute('aria-pressed',String(showEditOutlines));
   $('#editOutlines').title=`Show ${highlightLabel().toLowerCase()} on the map. Blue selection remains separate.`;
   const dirty=editorHasUnexportedChanges()||EffectEditor.dirty()||
-    typeof BackgroundPolicyEditor!=='undefined'&&BackgroundPolicyEditor.pending();
+    (typeof BackgroundPolicyEditor!=='undefined'&&BackgroundPolicyEditor.pending())||
+    (typeof VoxelEditor!=='undefined'&&VoxelEditor.pending());
   $('#saveState').textContent=dirty?'Unsaved changes':savepointKind==='saved'?'Matches saved project'
     :savepointKind==='project'?'Loaded project':savepointKind==='exported'?'Matches last export'
     :savepointKind==='copied'?'Matches last copy':'Loaded INI';
@@ -215,6 +217,7 @@ for(let value=0;value<3;value++)$(`#selectionBand${value}`).onclick=()=>{
 $('#selectionPixels').onclick=openPixelInspector;
 $('#pixelInspectorClose').onclick=()=>{pixelInspector.hidden=true;cvs.focus({preventScroll:true});};
 $('#selectionPreview').onclick=previewSelection;
+$('#selectionVoxel').onclick=()=>VoxelEditor.fromMapSelection();
 $('#selectionPaste').onclick=()=>{
   const point=selectionRect?[selectionRect.x0,selectionRect.y0]
     :activeSelectionPosition();if(!point)return;

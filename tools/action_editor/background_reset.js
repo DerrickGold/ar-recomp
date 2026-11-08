@@ -6,9 +6,9 @@ const BackgroundReset=(()=>{
   const clone=value=>JSON.parse(JSON.stringify(value));
   function ownsLine(line,bg) {
     if(!ownedIniLine(line))return false;
-    const key=regionalKey(stripIniComment(line).split('=')[0].trim())[0];
+    const key=regionalKey(stripIniComment(line).split('=')[0].trim().replace(/^(voxel-(?:cell|object)):all$/,'$1:us+jp+eu'))[0];
     return key===`bg${bg+1}`||key===`bg${bg+1}hi`||key.startsWith(`bg${bg+1}-`)||
-      bg===0&&(key==='framing'||key==='scenery-grade');
+      bg===0&&(key==='framing'||key==='scenery-grade'||key==='voxel-cell');
   }
   function scopedLines(target,bg) {
     const result=[];let active=false;
@@ -23,7 +23,7 @@ const BackgroundReset=(()=>{
     return result;
   }
   function refresh() {
-    $('#resetBackgroundScope').textContent=`BG${bgIndex+1} in this room, all terrain variants. Clears tile/pixel edits, added edge space, depth and policy overrides${bgIndex===0?', framing and palette grading':''}. Undo restores your edits. Other backgrounds and effects are kept.`;
+    $('#resetBackgroundScope').textContent=`BG${bgIndex+1} in this room, all terrain variants. Clears tile/pixel edits, added edge space, depth and policy overrides${bgIndex===0?', voxel cell edits, framing and palette grading':''}. Undo restores your edits. Objects, other backgrounds and effects are kept.`;
     $('#resetBackgroundStatus').textContent='';
   }
   function restore(op,which) {
@@ -39,7 +39,10 @@ const BackgroundReset=(()=>{
       setKey(cfg.planes,token,state?.planes[token]);
     cfg.virtual[op.bg]=state?.virtual??emptyVirtual();
     cfg.policy[op.bg]=state?.policy??emptyBgPolicy();
-    if(op.bg===0)setKey(cfg,'grade',state?.grade);
+    if(op.bg===0) {
+      setKey(cfg,'grade',state?.grade);
+      if(cfg.voxel)cfg.voxel.cells=state?.voxelCells??[[],[],[]];
+    }
     if(op.scoped.length) {
       // Preserve line positions and CRLF so successive BG resets can undo
       // independently without retaining full copies of the project INI.
@@ -58,6 +61,7 @@ const BackgroundReset=(()=>{
     return true;
   }
   function reset() {
+    if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('resetting the background'))return false;
     finishFramingDrag();commitOp();
     const bg=bgIndex,cfg=roomConfig(room),scoped=scopedLines(room,bg);
     const draft=BackgroundPolicyEditor.captureDraft(room,bg);
@@ -69,7 +73,8 @@ const BackgroundReset=(()=>{
     const before=clone({layers:Object.fromEntries(keys.map(key=>[key,
       {bands:store[key],pixels:pixelStore[key],scenery:stampStore[key]}])),
       planes:Object.fromEntries([`bg${bg+1}`,`bg${bg+1}hi`].map(token=>[token,cfg.planes[token]])),
-      virtual:cfg.virtual[bg],policy:cfg.policy[bg],grade:bg===0?cfg.grade:undefined,draft});
+      virtual:cfg.virtual[bg],policy:cfg.policy[bg],grade:bg===0?cfg.grade:undefined,
+      voxelCells:bg===0?cfg.voxel?.cells:undefined,draft});
     const op={room:roomKey(room),bg,profile:terrainProfile,keys,before,scoped};
     restore(op,'after');
     undoStack.push({label:`reset BG${bg+1} to native`,backgroundReset:op});

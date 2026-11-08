@@ -1,6 +1,7 @@
 /* Real editor materialization/projection, with a CPU texture recorder. No ROM,
  * window, or GPU is involved; uploaded words are checked against native winners. */
 #include "object_preview.h"
+#include "action/action_voxel_internal.h"
 #include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,9 +55,13 @@ static uint32_t s_atlas[kVoxelSpriteAtlasWidth*kVoxelSpriteAtlasHeight];
 static uint8_t s_packet[kDioramaObjectSnapshotCapacity];
 static const DioramaRenderOptions kRender={.visible_planes=(1u<<kDioramaPlane_Count)-1,
   .skybox=kDioramaSky_Off,.margin_fix=true};
+/* Synthetic geometry only: this test verifies native artwork ownership and
+ * current-project resolution, not the classification of a ROM room. */
+static ActionVoxelGeometry s_geometry={.ready=true,.active_group=2,.active_room=1,
+    .profile=kActionVoxelProfile_BloodpoolMarsh,.settings={.depth=.24f,.play_recess=.08f}};
 
 static DioramaScene Scene(void) {
-  return (DioramaScene){.render=&kRender,.map_group=2,.map_number=1};
+  return (DioramaScene){.render=&kRender,.map_group=2,.map_number=1,.voxel_geometry=&s_geometry};
 }
 static uint32_t Color(unsigned band,unsigned offset) {
   return UINT32_C(0xff102030)+band*UINT32_C(0x00010101)+offset;
@@ -83,11 +88,18 @@ static size_t MakePacket(void) {
   source.voxel_sprites.count=2;
   for(unsigned i=0;i<2;++i) {
     source.voxel_sprites.sprites[i]=(ActionVoxelSprite){.owner=(uint16_t)(0x09a0+i*64),
-      .shape=3,.priority=2,.width=3,.height=1,.owner_tag=(uint8_t)(i?9:7),
+      .shape=3,.source=0xb4c0+i,.animation=0x4000,.priority=2,.width=3,.height=1,.owner_tag=(uint8_t)(i?9:7),
       .solid_height=1,.x=200,.y=100,.ambient=1,.rows={7}};
     for(unsigned x=0;x<3;++x)
       s_atlas[kVoxelSpriteAtlasWidth+1+i*kVoxelSpriteCellWidth+x]=Color(2,x);
   }
+  source.actor_count=3;
+  source.actors[0]=(ActionEffectActor){.address=0x09a0,.source=0xb4c0,.parent_source=0xa686,
+      .animation=0x4000,.priority=2,.visible=true,.x=1016,.y=336};
+  source.actors[1]=(ActionEffectActor){.address=0x08a0,.source=0,.player=true,
+      .priority=2,.visible=true,.x=1000,.y=330,.feet_y=350,.body_radius=12};
+  source.actors[2]=(ActionEffectActor){.address=0x0aa0,.source=0xb499,
+      .priority=1,.visible=false,.x=1040,.y=340};
   size_t size=0;
   assert(DioramaObjectSnapshot_Encode(&source,s_packet,sizeof(s_packet),&size));
   return size;
@@ -133,6 +145,17 @@ int main(void) {
   s_packet[size-1]^=1;
   assert(object.snapshot.storage==retained && object.pixels==working);
   assert(object.snapshot.view.game_frame==1234);CheckSources(&object);
+  assert(EditorObjectPreview_ItemCount(&object)==4);
+  DioramaScene item_scene=Scene();EditorObjectPreviewItem item;
+  assert(EditorObjectPreview_Item(&object,&item_scene,0,&item));
+  assert(item.source==0xb4c0 && item.parent==0xa686 && item.owner_tag==7);
+  assert(item.capture_x==200 && item.capture_y==100 && item.width==3 && item.can_extrude && item.active);
+  assert(EditorObjectPreview_ItemPixel(&object,0,200,100));
+  assert(!EditorObjectPreview_ItemPixel(&object,0,201,100));
+  assert(!EditorObjectPreview_ItemPixel(&object,0,202,100));
+  assert(EditorObjectPreview_Item(&object,&item_scene,1,&item) && item.player && !item.can_extrude);
+  assert(EditorObjectPreview_Item(&object,&item_scene,2,&item) && !item.visible && !item.can_extrude);
+  assert(EditorObjectPreview_Item(&object,&item_scene,3,&item) && item.owner==0x09e0 && item.can_extrude);
 
   DioramaCapture capture={.width=496,.height=kHeight,.authentic_y0=64,.obj_apron=64,
     .bg1_camera_x=1010,.camera_y=308};
@@ -172,6 +195,28 @@ int main(void) {
   assert(object.props.sprites[1].x==210 && object.props.sprites[1].y==108);
   assert(!((const uint32_t *)pixels[DioramaPlaneForObjectPriority(2)])[target+1]);
   CheckSources(&object);
+
+  /* Re-resolve the imported pose using current authored rules. Flat restores
+   * native winners; generic Auto retains native artwork; explicit extrusion
+   * removes only this owner's original pixels and keeps source coordinates. */
+  s_geometry.edits.object_count=1;
+  DioramaVoxelObject *edit=&s_geometry.edits.objects[0];
+  *edit=(DioramaVoxelObject){.source=0xb4c0,.fields=15,.mode=kDioramaVoxelObject_Flat,
+      .offset=.12f,.thickness=.1f,.width_scale=.5f};
+  scene=Scene();
+  assert(EditorObjectPreview_Capture(&object,&device,&capture,&view,&scene,true,textures,pixels,&uploads));
+  assert(((const uint32_t *)pixels[DioramaPlaneForObjectPriority(2)])[108*kWidth+210]==Color(2,0));
+  assert(EditorObjectPreview_Item(&object,&scene,0,&item) && !item.active && item.mode==kDioramaVoxelObject_Flat);
+  object.snapshot.view.voxel_sprites.sprites[0].shape=kActionVoxelSpriteGenericShape;
+  edit->mode=kDioramaVoxelObject_Auto;
+  assert(EditorObjectPreview_Capture(&object,&device,&capture,&view,&scene,true,textures,pixels,&uploads));
+  assert(((const uint32_t *)pixels[DioramaPlaneForObjectPriority(2)])[108*kWidth+210]==Color(2,0));
+  edit->mode=kDioramaVoxelObject_Extruded;
+  assert(EditorObjectPreview_Capture(&object,&device,&capture,&view,&scene,true,textures,pixels,&uploads));
+  assert(!((const uint32_t *)pixels[DioramaPlaneForObjectPriority(2)])[108*kWidth+210]);
+  assert(object.props.sprites[0].x==210 && object.props.sprites[0].width==3 && object.props.sprites[0].width_scale==.5f);
+  assert(EditorObjectPreview_Item(&object,&scene,0,&item) && item.active && item.offset==.12f && item.thickness==.1f);
+  s_geometry.edits.object_count=0;object.snapshot.view.voxel_sprites.sprites[0].shape=3;
 
   /* A failed atlas handoff cannot erase native prop artwork or publish models. */
   object.atlas_dirty=true;recorder.fail_upload=true;scene=Scene();

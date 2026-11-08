@@ -1704,8 +1704,16 @@ static unsigned MarahnaTempleFixtures(const char *directory) {
 #include "action_voxel_castle_columns.inc"
 #include "action_voxel_castle_audit.inc"
 #include "action_voxel_temple_audit.inc"
+#include "action_voxel_authored.inc"
+#include "action_voxel_groups.inc"
 int main(int argc,char **argv) {
   Lifecycle();
+  AuthoredContracts();
+  SemanticGroupFixture(getenv("AR_VOXEL_GROUP_FIXTURE"));
+  AuthoredVisibilityFixture(getenv("AR_VOXEL_VISIBILITY_FIXTURE"));
+  AuthoredFixture(getenv("AR_VOXEL_AUTHORED_FIXTURE"));
+  AuthoredStumpFixture(getenv("AR_VOXEL_AUTHORED_STUMP_FIXTURE"));
+  AuthoredBranchFixture(getenv("AR_VOXEL_AUTHORED_STUMP_FIXTURE"));
   const unsigned fixtures=argc>1?Fixtures(argv[1]):0;
   if(argc>1)CastleColumnFixtures(argv[1]);
   if(argc>1)CastleAuditFixtures(argv[1]);

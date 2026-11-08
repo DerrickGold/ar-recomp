@@ -13,6 +13,7 @@ typedef struct Codec {
   uint8_t *output;
   size_t at, size;
   bool decode;
+  unsigned version;
 } Codec;
 
 static uint32_t Read32(const uint8_t *p) {
@@ -72,13 +73,27 @@ static bool Header(Codec *c,DioramaObjectSnapshotView *v) {
 }
 
 static bool Prop(Codec *c,ActionVoxelSprite *p,unsigned width,unsigned height) {
-  U(p->owner,1,65535);U(p->shape,1,8);U(p->priority,0,3);
+  U(p->owner,1,65535);U(p->shape,1,c->version>=2?9:8);U(p->priority,0,3);
   U(p->width,1,kVoxelSpriteWidth);U(p->height,1,kVoxelSpriteHeight);U(p->owner_tag,1,128);
   I(p->component_x,-32768,32767);I(p->component_y,-32768,32767);
   U(p->solid_y,0,kVoxelSpriteHeight);U(p->solid_height,0,kVoxelSpriteHeight);
   U(p->join_left,0,UINT32_MAX);U(p->join_right,0,UINT32_MAX);
   F(p->x,-kVoxelSpriteWidth,kDioramaObjectSnapshotWidth);
   F(p->y,-kVoxelSpriteHeight,kDioramaObjectSnapshotHeight);F(p->ambient,0,4);
+  if(c->version>=2) {
+    U(p->source,0,65535);U(p->parent_source,0,65535);U(p->animation,0,65535);
+    U(p->presentation_mode,0,kDioramaVoxelObject_Extruded);U(p->presentation_fields,0,15);
+    F(p->depth_offset,-.4f,.8f);F(p->thickness,0,.8f);
+    /* Unauthored legacy/synthetic props may be zero-initialized. Resolve()
+     * supplies 1 before drawing; an explicitly authored width is never zero. */
+    F(p->width_scale,0,4);
+    if((p->presentation_fields&kDioramaVoxelObject_Width) && p->width_scale<.125f)return false;
+    uint32_t tlo=(uint32_t)p->join_top,thi=(uint32_t)(p->join_top>>32);
+    uint32_t blo=(uint32_t)p->join_bottom,bhi=(uint32_t)(p->join_bottom>>32);
+    if(!Word(c,&tlo) || !Word(c,&thi) || !Word(c,&blo) || !Word(c,&bhi))return false;
+    if(c->decode){p->join_top=(uint64_t)thi<<32|tlo;p->join_bottom=(uint64_t)bhi<<32|blo;}
+    U(p->generation,0,UINT32_MAX);
+  } else if(c->decode)p->width_scale=1;
   uint64_t occupied=0;
   const uint64_t columns=p->width==64?UINT64_MAX:(UINT64_C(1)<<p->width)-1;
   for(unsigned y=0;y<kVoxelSpriteHeight;++y) {
@@ -91,6 +106,7 @@ static bool Prop(Codec *c,ActionVoxelSprite *p,unsigned width,unsigned height) {
   const uint32_t rows=p->height==32?UINT32_MAX:(UINT32_C(1)<<p->height)-1;
   return occupied && p->solid_y<=p->height && p->solid_height<=p->height-p->solid_y &&
       !(p->join_left&~rows) && !(p->join_right&~rows) &&
+      !(p->join_top&~columns) && !(p->join_bottom&~columns) &&
       p->x==floorf(p->x) && p->y==floorf(p->y) &&
       p->x>=-(float)p->width && p->x<(float)width &&
       p->y>=-(float)p->height && p->y<(float)height;
@@ -201,21 +217,21 @@ bool DioramaObjectSnapshot_Encode(const DioramaObjectSnapshotView *view,
   if(!view || !packet || !size)return false;
   /* Validate dimensions before pitch arithmetic or touching input pixels. */
   DioramaObjectSnapshotView checked=*view;
-  Codec header={.at=20,.size=kDioramaObjectSnapshotHeaderBytes};
+  Codec header={.at=20,.size=kDioramaObjectSnapshotHeaderBytes,.version=kDioramaObjectSnapshotVersion};
   if(!Header(&header,&checked))return false;
   for(unsigned i=0;i<4;++i)
     if(!SourcePitch(view->obj[i],view->obj_pitch[i],view->width,view->height) ||
        !SourcePitch(view->attributes[i],view->attribute_pitch[i],view->width,view->height))return false;
-  Codec values={.size=kDioramaObjectSnapshotCapacity};
+  Codec values={.size=kDioramaObjectSnapshotCapacity,.version=kDioramaObjectSnapshotVersion};
   if(!Values(&values,&checked) || !AtlasValid(view))return false;
-  Codec measure={.size=kDioramaObjectSnapshotCapacity};
+  Codec measure={.size=kDioramaObjectSnapshotCapacity,.version=kDioramaObjectSnapshotVersion};
   if(!EncodeBody(&measure,view) || measure.at>capacity)return false;
   uint8_t *owned=malloc(measure.at);
   if(!owned)return false;
   memset(owned,0,kDioramaObjectSnapshotHeaderBytes);
   Write32(owned,kMagic);Write32(owned+4,kDioramaObjectSnapshotVersion);
   Write32(owned+8,(uint32_t)measure.at);Write32(owned+16,kDioramaObjectSnapshotHeaderBytes);
-  Codec encode={.output=owned,.size=measure.at};
+  Codec encode={.output=owned,.size=measure.at,.version=kDioramaObjectSnapshotVersion};
   const bool ok=EncodeBody(&encode,view) && encode.at==measure.at;
   if(ok) {
     Write32(owned+12,Checksum(owned,measure.at));
@@ -231,12 +247,12 @@ void DioramaObjectSnapshot_Release(DioramaObjectSnapshot *snapshot) {
 bool DioramaObjectSnapshot_Decode(const uint8_t *packet,size_t size,
                                  DioramaObjectSnapshot *out) {
   if(!packet || !out || size<kDioramaObjectSnapshotHeaderBytes || size>kDioramaObjectSnapshotCapacity ||
-      Read32(packet)!=kMagic || Read32(packet+4)!=kDioramaObjectSnapshotVersion ||
+      Read32(packet)!=kMagic || Read32(packet+4)<1 || Read32(packet+4)>kDioramaObjectSnapshotVersion ||
       Read32(packet+8)!=size || Read32(packet+16)!=kDioramaObjectSnapshotHeaderBytes ||
       Read32(packet+12)!=Checksum(packet,size))return false;
   DioramaObjectSnapshot next={0};
   DioramaObjectSnapshotView *v=&next.view;
-  Codec decode={.input=packet,.at=20,.size=size,.decode=true};
+  Codec decode={.input=packet,.at=20,.size=size,.decode=true,.version=Read32(packet+4)};
   if(!Header(&decode,v) || v->atlas_height!=(v->voxel_sprites.count?kVoxelSpriteAtlasHeight:0))return false;
   for(size_t i=decode.at;i<kDioramaObjectSnapshotHeaderBytes;++i)if(packet[i])return false;
   decode.at=kDioramaObjectSnapshotHeaderBytes;

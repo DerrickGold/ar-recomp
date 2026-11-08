@@ -10,6 +10,11 @@ uint8_t g_ram[kActRaiserWramSize];
 static unsigned resolves,rasters,fail_raster_at;
 static bool fail_resolve,fail_raster,oversize,outline=true;
 static bool active_geometry=true;
+static bool diagnostic_candidates;
+static DioramaVoxelEdits authored;
+bool ActionObjectSnapshotCapture_Enabled(void) {return diagnostic_candidates;}
+const DioramaVoxelEdits *ActionVoxel_Edits(const ActionVoxelGeometry *g) {(void)g;return &authored;}
+bool ActionVoxel_HasObjectEdits(const ActionVoxelGeometry *g) {(void)g;return authored.object_count!=0;}
 bool ActionVoxel_Active(const ActionVoxelGeometry *g,unsigned group_id,unsigned room_id) {
   (void)g;(void)group_id;(void)room_id;return active_geometry;
 }
@@ -103,6 +108,13 @@ static void TestNativeHandoff(void) {
   ActionVoxelSprite_RemoveNative(&p,W,H,out,P,attributes,A);
   assert(out[0]==0 && out[1]==0 && out[2]==0xff000000u);
   assert(out[P]==0 && out[P+1]==0 && out[2*P]==0xff000000u);
+  p.presentation_mode=kDioramaVoxelObject_Flat;
+  memcpy(out,original,sizeof(out));ActionVoxelSprite_RemoveNative(&p,W,H,out,P,attributes,A);
+  assert(!memcmp(out,original,sizeof(out)));
+  p.shape=kActionVoxelSpriteGenericShape;p.presentation_mode=kDioramaVoxelObject_Auto;
+  ActionVoxelSprite_RemoveNative(&p,W,H,out,P,attributes,A);assert(!memcmp(out,original,sizeof(out)));
+  p.presentation_mode=kDioramaVoxelObject_Extruded;
+  ActionVoxelSprite_RemoveNative(&p,W,H,out,P,attributes,A);assert(out[0]==0);
 }
 int main(void) {
   TestNativeHandoff();
@@ -241,5 +253,53 @@ int main(void) {
     fail_raster=true;CaptureVoxelSprites(&f,&api,NULL,42);
     assert(!f.voxel_sprites.count && !f.voxel_sprite_atlas.data);fail_raster=false;
   }
-  puts("Voxel sprite capture: ownership, sections, stable identity, solid/spike bands, joins, lighting and fallbacks passed");
+  /* Independent authoring candidates are opt-in and stay flat until authored.
+   * A whole owner falls back when capture fails; extra candidates never wipe
+   * the reviewed prop set when the finite atlas budget fills. */
+  group=2;room=1;source=0xb499;composition=0x45a2;origin_x=20;origin_y=80;
+  f.diorama_map_group=2;f.diorama_map_number=1;diagnostic_candidates=true;Owners(1);
+  CaptureVoxelSprites(&f,&api,NULL,42);
+  assert(f.voxel_sprites.count==1 && p->shape==kActionVoxelSpriteGenericShape && p->source==0xb499);
+  assert(!ActionVoxelSprite_IsModeled(p));
+  diagnostic_candidates=false;authored.object_count=1;
+  authored.objects[0]=(DioramaVoxelObject){.source=0xb499,.parent=0xa686,
+      .selector_fields=kDioramaVoxelObject_Parent,.fields=15,.mode=kDioramaVoxelObject_Extruded,
+      .offset=.1f,.thickness=.12f,.width_scale=.5f};
+  CaptureVoxelSprites(&f,&api,NULL,42);assert(!f.voxel_sprites.count);
+  f.action_scene_effects.actor_count=1;
+  f.action_scene_effects.actors[0]=(ActionEffectActor){.address=0x8e0,.source=0xb499,
+      .parent_source=0xa686,.animation=0x4000,.generation=77};
+  CaptureVoxelSprites(&f,&api,NULL,42);
+  assert(f.voxel_sprites.count==1 && ActionVoxelSprite_IsModeled(p));
+  assert(p->parent_source==0xa686 && p->depth_offset==.1f && p->thickness==.12f && p->width_scale==.5f);
+  assert(p->generation==77);
+  ActionVoxelSprite prior=*p;
+  assert(ActionVoxelSprite_SameComponent(&prior,p));
+  ++f.action_scene_effects.actors[0].generation;
+  CaptureVoxelSprites(&f,&api,NULL,42);
+  assert(p->generation==78 && !ActionVoxelSprite_SameComponent(&prior,p));
+  prior=*p;prior.generation=0;
+  assert(!ActionVoxelSprite_SameComponent(&prior,&prior)); /* Unproven generic lifetime stays discrete. */
+  authored.objects[0].mode=kDioramaVoxelObject_Flat;
+  CaptureVoxelSprites(&f,&api,NULL,42);assert(!f.voxel_sprites.count);
+  authored.object_count=0;diagnostic_candidates=true;outline=false;
+  width=128;height=64;body_y=0;body_height=64;Owners(1);
+  CaptureVoxelSprites(&f,&api,NULL,42);assert(f.voxel_sprites.count==4);
+  assert(p->join_bottom==UINT64_MAX && !p->join_top);
+  assert(f.voxel_sprites.sprites[2].join_top==UINT64_MAX && !f.voxel_sprites.sprites[2].join_bottom);
+  fail_raster_at=rasters+3;CaptureVoxelSprites(&f,&api,NULL,42);
+  assert(!f.voxel_sprites.count);fail_raster_at=0;
+  width=height=body_height=16;Owners(17);CaptureVoxelSprites(&f,&api,NULL,42);
+  assert(f.voxel_sprites.count==16);
+  uint8_t shadow[544]={0};ActRaiserSpriteOwnership_Begin(2,1,0);
+  for(unsigned i=0;i<18;++i) {
+    const unsigned family=i?0xb499:0xb4c0,record=0x8e0+i*64;
+    ActRaiserSpriteOwnership_RecordActionObject(family,record,1768,232,i*4,i*4+4);
+    ActRaiserSpriteOwnership_RecordActionVisual(family,record,0x4000,0x7e,i?0x45a2:0x45bc,
+        origin_x,origin_y,i*4,i*4+4);
+  }
+  ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(2,1,shadow);
+  CaptureVoxelSprites(&f,&api,NULL,42);
+  assert(f.voxel_sprites.count==16 && p->shape==kActRaiserSpriteProp_Log);
+  puts("Voxel sprite capture: native ownership, opt-in candidates, authored families, joins, bounded fallback and lighting passed");
 }

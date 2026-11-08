@@ -1,6 +1,7 @@
 /* Full room navigation + animation through real C PPU/compositor, without a
  * captured scene. Host imports validate all submitted resources/geometry. */
 import assert from 'node:assert/strict';
+import {attachDepthImports} from './action_editor_depth_imports.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
@@ -63,6 +64,7 @@ const imports={
  },
  available(){return 1;}
 };
+attachDepthImports(imports,()=>api.memory);
 const wasi={fd_close:()=>0,fd_seek:()=>0,fd_write:()=>0,proc_exit:n=>{throw Error(`exit ${n}`);}};
 const instance=await WebAssembly.instantiate(fs.readFileSync(wasmFile),{ar:imports,wasi_snapshot_preview1:wasi});
 api=instance.instance.exports;api._initialize?.();assert.equal(api.DioramaPreview_Init(16384),1);
@@ -303,8 +305,10 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    assert.equal(send(Buffer.from('[effects]\nversion=1\n'),api.RoomPreview_ConfigureEffects),1);
  }
 
- // Faces and completion select separate authored scopes and native policies.
+ // Ordinary Diorama policies use independent face/completion authored scopes;
+ // Voxel deliberately retains its canonical whole-room geometry policy.
  if(base.group===7&&base.map===1) {
+   assert.equal(api.RoomPreview_Set3DMode(1),1);
    const completion=base.section==='completion';
    assert.equal(api.RoomPreview_Policy(0,0,37,1),98);
    const defaults=Array.from(new Int32Array(memory,api.DioramaPreview_Input(),98));
@@ -322,7 +326,7 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
    const phaseIni=path.join(directory,'death-heim-scenes.ini');fs.writeFileSync(phaseIni,independent);
    const observed=[api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0];
-   const native=execFileSync(replay,[file,phaseIni],{input:request.join(' ')+'\n',encoding:'utf8'}).trim().split(' ').map(v=>parseInt(v,16));
+   const native=execFileSync(replay,[file,phaseIni,'--diorama'],{input:request.join(' ')+'\n',encoding:'utf8'}).trim().split(' ').map(v=>parseInt(v,16));
    assert.deepEqual(observed,native,'A/B saved scene policy and tile edits match native replay');
    if(completion) {
      assert.equal(send(Buffer.from('[layers:07:01]\nbg2-policy = edge:repeat\n'),api.RoomPreview_Configure),1);
@@ -330,11 +334,18 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
      assert.deepEqual(Array.from(new Int32Array(memory,api.DioramaPreview_Input(),98)),defaults,
        'A edits do not become B defaults when B has no authored section');
    }
+   assert.equal(api.RoomPreview_Set3DMode(2),1);
+   if(!completion) {
+     assert.equal(api.RoomPreview_Policy(0,0,37,0),98);
+     assert.deepEqual(Array.from(new Int32Array(memory,api.DioramaPreview_Input(),98)),defaults,
+       'Voxel retains the hub native policy despite ordinary Diorama overrides');
+   }
    assert.equal(send(Buffer.from(roomIni),api.RoomPreview_Configure),1);
  }
 
  // Saved policies use the planner, affect pixels, and survive native replay.
  if(base.group===7&&base.map===3) {
+   assert.equal(api.RoomPreview_Set3DMode(1),1);
    const policy=(defaults=false)=>{
      assert.equal(api.RoomPreview_Policy(0,0,37,defaults?1:0),98);
      return Array.from(new Int32Array(memory,api.DioramaPreview_Input(),98));
@@ -356,7 +367,7 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    assert.notEqual(painted,mirrored,'removing mirroring changes actual scanout');
    const policyIni=path.join(directory,'policy.ini');fs.writeFileSync(policyIni,authored);
    const actual=[painted,api.RoomPreview_EffectHash()>>>0];
-   const expected=execFileSync(replay,[file,policyIni],{input:request.join(' ')+'\n',encoding:'utf8'}).trim().split(' ').map(v=>parseInt(v,16));
+   const expected=execFileSync(replay,[file,policyIni,'--diorama'],{input:request.join(' ')+'\n',encoding:'utf8'}).trim().split(' ').map(v=>parseInt(v,16));
    assert.deepEqual(actual,expected,'saved policy produces the same native/WASM pixels');
    const crossing=header+'bg1-policy = bands:2\n'+
      'bg1-policy-band = index:0 rows:0,100 anchor:screen edge:mirror motion:normal horizontal:inherit\n'+
@@ -369,6 +380,8 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
      assert.equal(api.RoomPreview_Hash()>>>0,painted);
    }
    assert.deepEqual(policy(true),canonical,'defaults remain available after authoring');
+   assert.equal(api.RoomPreview_Set3DMode(2),1);
+   assert.deepEqual(policy(),canonical,'Voxel keeps native background policy when ordinary overrides exist');
    assert.equal(send(Buffer.from(roomIni),api.RoomPreview_Configure),1);
  }
 

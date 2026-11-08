@@ -1,6 +1,7 @@
 /* Full room navigation + animation through real C PPU/compositor, without a
  * captured scene. Host imports validate all submitted resources/geometry. */
 import assert from 'node:assert/strict';
+import {attachDepthImports} from './action_editor_depth_imports.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
@@ -59,6 +60,7 @@ const imports={
  },
  available(){return 1;}
 };
+attachDepthImports(imports,()=>api.memory);
 const wasi={fd_close:()=>0,fd_seek:()=>0,fd_write:()=>0,proc_exit:n=>{throw Error(`exit ${n}`);}};
 const instance=await WebAssembly.instantiate(fs.readFileSync(wasmFile),{ar:imports,wasi_snapshot_preview1:wasi});
 api=instance.instance.exports;api._initialize?.();assert.equal(api.DioramaPreview_Init(16384),1);

@@ -9,6 +9,7 @@
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
 #include "actraiser/actraiser_room_profiles.h"
 #include "dev/host_dev_tools.h"
+#include "dev/action_object_snapshot_capture.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_capture.h"
 #include "sim/sim3d/sim3d_textures.h"
@@ -23,6 +24,7 @@ static const ActionReceiverLighting *s_receiver_lighting;
 static bool s_projected_receivers;
 bool ActRaiser_DioramaReceiverAttributes(void) { return s_projected_receivers; }
 static ActRaiserSpriteOwnership s_prop_attribute_owners;
+static bool s_authoring_object_attributes;
 bool ActRaiser_DioramaPropAttributes(void) { return s_prop_attribute_owners.valid; }
 static DioramaBgSourceBounds s_bg2_source_bounds;
 static bool s_track_bg2_source_bounds;
@@ -166,8 +168,9 @@ void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
     if(tinted)ActionEffectReceivers_Sample(s_receiver_lighting,receiver,receivers[i].x,receivers[i].y,multiply,add);
     uint32_t attribute=ActionEffectReceivers_Attribute(s_receiver_lighting,
         receiver,receivers[i].x,receivers[i].y);
-    const unsigned owner_tag=ActRaiserSpriteOwnership_PropTag(&s_prop_attribute_owners,
-        receivers[i].owner);
+    unsigned owner_tag=s_authoring_object_attributes?
+        ActRaiserSpriteOwnership_VisualTag(&s_prop_attribute_owners,receivers[i].owner):0;
+    if(!owner_tag)owner_tag=ActRaiserSpriteOwnership_PropTag(&s_prop_attribute_owners,receivers[i].owner);
     if(owner_tag)attribute=(attribute&0xffffffu)|(owner_tag<<24);
     uint32_t *attributes=s_projected_receivers ? (uint32_t *)g_diorama_layer_pixels[
         kDioramaPlane_ObjAttributes0+priority] : NULL;
@@ -501,8 +504,11 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
   s_receiver_lighting=NULL;
   s_projected_receivers=false;
   s_prop_attribute_owners=(ActRaiserSpriteOwnership){0};
+  s_authoring_object_attributes=false;
   const bool voxel=g_diorama_frame_active && g_settings.diorama_mode==kAction3D_Voxel &&
       ActionVoxel_ProfileForRoom(map_group,map_number)!=kActionVoxelProfile_None;
+  const bool authoring=voxel && (ActionObjectSnapshotCapture_Enabled() ||
+      ActionVoxel_HasObjectEdits(ActRaiserActionBg_VoxelGeometry(map_group,map_number)));
   if(g_settings.action_environmental_effects || voxel) {
     const ActRaiserSpriteOwnership ownership=ActRaiserSpriteOwnership_Presented(map_group,map_number);
     const ActionReceiverLighting *lighting=ownership.valid && g_settings.action_environmental_effects?
@@ -512,6 +518,7 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
     if(voxel && ownership.valid)
       {
         for(unsigned i=0;i<128;++i)prop_attributes |= ownership.prop_owner[i]!=0;
+        if(authoring)for(unsigned i=0;i<128;++i)prop_attributes |= ownership.visual_owner[i]!=0;
         for(unsigned i=0;i<ownership.wall_torch_part_count;++i)
           prop_attributes |= ownership.wall_torch_parts[i].owner_tag!=0;
       }
@@ -535,15 +542,19 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
         else
           attributes.values[slot]=ActionEffectReceivers_Attribute(lighting,receiver,
               ownership.world_x[slot],ownership.world_y[slot]);
-        const unsigned owner_tag=prop_attributes?
-            ActRaiserSpriteOwnership_PropTag(&ownership,ownership.prop_owner[slot]):0;
+        unsigned owner_tag=prop_attributes && authoring?
+            ActRaiserSpriteOwnership_VisualTag(&ownership,ownership.visual_owner[slot]):0;
+        if(!owner_tag && prop_attributes)
+          owner_tag=ActRaiserSpriteOwnership_PropTag(&ownership,ownership.prop_owner[slot]);
         if(owner_tag)attributes.values[slot]=(attributes.values[slot]&0xffffffu)|(owner_tag<<24);
       }
       const SrPpuObjCaptureRequest request={.struct_size=sizeof(request),
           .flags=SR_PPU_OBJ_CAPTURE_ATTRIBUTES,.lifetime_generation=frame->lifetime_generation,
           .attributes=&attributes};
       s_projected_receivers=ready && ActRaiser_ConfigurePpuObjCapture(&request);
-      if(s_projected_receivers && prop_attributes)s_prop_attribute_owners=ownership;
+      if(s_projected_receivers && prop_attributes) {
+        s_prop_attribute_owners=ownership;s_authoring_object_attributes=authoring;
+      }
     }
     if(lighting && !s_projected_receivers) {
       if(g_diorama_frame_active) {

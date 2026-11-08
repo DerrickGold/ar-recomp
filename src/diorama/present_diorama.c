@@ -87,7 +87,7 @@ static bool MaterializeVoxelActors(const FrameSlot *slot,
     bool copied=false;
     for(unsigned i=0;pixels[plane] && i<s_voxel_sprites_current.count;++i) {
       const ActionVoxelSprite *prop=&s_voxel_sprites_current.sprites[i];
-      if(prop->priority!=band)continue;
+      if(prop->priority!=band || !ActionVoxelSprite_IsModeled(prop))continue;
       if(!copied) {
         if(!s_voxel_obj_pixels[band])s_voxel_obj_pixels[band]=calloc(
             SR_PPU_SURFACE_MAX_WIDTH*SR_PPU_SURFACE_MAX_HEIGHT,4);
@@ -965,7 +965,12 @@ retry_projection:;
           (slot->diorama_bg_apron_mask & (1u << primary_layer))
               ? slot->obj_apron : 0);
   }
+  const ActionRoomSceneFrameState voxel_colors={
+      .brightness=(slot->inidisp&0x80)?0:slot->inidisp&15,
+      .cgwsel=slot->diorama_voxel_cgwsel,.cgadsub=slot->diorama_voxel_cgadsub,
+      .fixed_color=slot->diorama_voxel_fixed_color};
   const DioramaCapture capture = {
+      .voxel_frame=&voxel_colors,
       .plane_capture_offsets = plane_offsets,
       .voxel_map_plane_mask = DioramaFrameGeneration_VoxelMapPlaneMask(),
       .width = slot->snes_width,

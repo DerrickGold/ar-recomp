@@ -20,6 +20,37 @@ typedef bool (*DioramaSkyboxDraw)(ArRenderDevice *, ArRenderTexture,
  * Every successful Begin must be paired with End, including callback failure. */
 typedef bool (*DioramaSourceEffectBatch)(ArRenderDevice *, bool begin);
 
+/* Editor-only observation of the actual submitted surfaces. Native gameplay
+ * never supplies a callback. Coordinates identify native map pixels, including
+ * perspective-correct interpolation along caps and curved faces. */
+typedef enum DioramaVoxelFaceKind {
+  kDioramaVoxelFace_Front, kDioramaVoxelFace_Top, kDioramaVoxelFace_Side,
+  kDioramaVoxelFace_Backing, kDioramaVoxelFace_Object,
+  kDioramaVoxelFace_Left, kDioramaVoxelFace_Right, kDioramaVoxelFace_Bottom
+} DioramaVoxelFaceKind;
+typedef struct DioramaVoxelPickFace {
+  bool authored;
+  uint8_t art_index; /* Authored independent artwork page; ignored otherwise. */
+  float art_uv[8]; /* Native 16px donor coordinates for alpha-aware picking. */
+  int16_t art_source_x, art_source_y; /* Automatic cap's exact native donor. */
+  uint8_t art_source_size; /* Zero means no square donor is represented. */
+  float screen_xy[8], world_xy[8], depth[4], clip_w[4];
+  int kind, priority;
+  int plane; /* Native capture plane, or -1 for independently owned artwork. */
+  int cell_x, cell_y; /* -1 uses interpolated world coordinates. */
+  uint16_t owner; /* Captured object identity, valid only for this frame. */
+  bool sample_alpha; /* Object cap/profile: world_xy maps independent source ink. */
+} DioramaVoxelPickFace;
+typedef void (*DioramaVoxelObserveFace)(void *userdata,
+    const DioramaVoxelPickFace *face);
+
+/* Transient editor inspection only; zero preserves the production draw. */
+typedef enum DioramaVoxelInspection {
+  kDioramaVoxelInspect_All,
+  kDioramaVoxelInspect_Backing,
+  kDioramaVoxelInspect_Cutaway
+} DioramaVoxelInspection;
+
 typedef struct DioramaRenderOptions {
   uint32_t visible_planes;
   DioramaSkyMode skybox;
@@ -41,6 +72,9 @@ typedef struct DioramaRenderOptions {
    * the portable renderer used by the editor and reference comparisons. */
   DioramaSkyboxDraw draw_resident_skybox;
   DioramaSourceEffectBatch source_effect_batch;
+  DioramaVoxelObserveFace voxel_observe_face;
+  void *voxel_observer_userdata;
+  DioramaVoxelInspection voxel_inspection;
 } DioramaRenderOptions;
 
 /* Desktop adapter: snapshot the current settings and manifest for one draw. */

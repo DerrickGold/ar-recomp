@@ -1,6 +1,7 @@
 #include "action/action_voxel.h"
 #include "action/action_effect_receivers.h"
 #include "actraiser/actraiser_sprite_ownership.h"
+#include "dev/action_object_snapshot_capture.h"
 #include <string.h>
 
 /* Reviewed native compositions, relative to the origin recorded by their
@@ -16,6 +17,10 @@ static bool VoxelSpriteLayout(unsigned shape, const SrPpuObjResolveResult *b,
       if (b->x1-b->x0>kVoxelSpriteWidth || b->y1-b->y0>kVoxelSpriteHeight) return false;
       *solid_y=b->y0; *solid_height=b->y1-b->y0;
       return true;
+    case kActRaiserSpriteProp_Generic:
+      *origin_x=b->x0;*origin_y=b->y0;
+      *solid_y=b->y0;*solid_height=b->y1-b->y0;
+      return b->x1>b->x0 && b->y1>b->y0 && b->x1-b->x0<=256 && b->y1-b->y0<=256;
     case kActRaiserSpriteProp_TempleBridge: width=192; height=sh=32; break;
     case kActRaiserSpriteProp_TemplePlatform: break;
     case kActRaiserSpriteProp_TempleCrusher: height=48; sy=16; break;
@@ -27,6 +32,18 @@ static bool VoxelSpriteLayout(unsigned shape, const SrPpuObjResolveResult *b,
       b->y0<*origin_y || b->y1>*origin_y+height) return false;
   *solid_y=*origin_y+sy; *solid_height=sh;
   return true;
+}
+
+static void VoxelSpriteAuthoringFacts(ActionVoxelSprite *p,const FrameSlot *f,
+    uint16_t source,uint16_t animation) {
+  p->source=source;p->animation=animation;
+  for(unsigned i=0;i<f->action_scene_effects.actor_count;++i) {
+    const ActionEffectActor *a=&f->action_scene_effects.actors[i];
+    if(a->address!=p->owner || (source && a->source!=source))continue;
+    p->source=a->source;p->parent_source=a->parent_source;p->animation=a->animation;
+    p->generation=a->generation;break;
+  }
+  ActionVoxelSprite_Resolve(p,ActionVoxel_Edits(f->diorama_voxel));
 }
 
 /* An independent native composition atlas avoids sampling another sprite
@@ -45,26 +62,55 @@ static void CaptureVoxelSprites(FrameSlot *f, const SnesRunnerApi *api,
   const ActRaiserSpriteOwnership ownership = ActRaiserSpriteOwnership_Presented(
       f->diorama_map_group, f->diorama_map_number);
   if (!ownership.valid) return;
+  const bool capture_candidates=ActionObjectSnapshotCapture_Enabled();
+  const bool authored_objects=ActionVoxel_HasObjectEdits(f->diorama_voxel);
+  unsigned apron_reserve=0;
+  for(unsigned i=0;i<ownership.wall_torch_part_count;++i) {
+    bool in_oam=false;
+    for(unsigned slot=0;slot<128;++slot)
+      in_oam|=ownership.prop_owner[slot]==ownership.wall_torch_parts[i].owner;
+    if(!in_oam && ownership.wall_torch_parts[i].owner_tag)++apron_reserve;
+  }
   bool any=false;
   for (unsigned slot=0;slot<128;++slot) any |= ownership.prop_owner[slot]!=0;
+  if(capture_candidates || authored_objects)
+    for(unsigned slot=0;slot<128;++slot)any |= ownership.visual_owner[slot]!=0;
   for (unsigned i=0;i<ownership.wall_torch_part_count;++i)
     any |= ownership.wall_torch_parts[i].owner_tag!=0;
   if (!any) return;
   static uint32_t atlas[kVoxelSpriteAtlasWidth * kVoxelSpriteAtlasHeight];
   /* One neighbour column on either side suppresses internal bridge walls.
    * The bounded atlas and upload dimensions remain unchanged. */
-  static uint32_t pixels[(kVoxelSpriteWidth+2) * kVoxelSpriteHeight];
+  static uint32_t pixels[(kVoxelSpriteWidth+2) * (kVoxelSpriteHeight+2)];
   static ActionReceiverLighting lighting;
   const bool lit = f->action_environmental_effects && ActionEffectReceivers_Prepare(
       &f->action_scene_effects, f->diorama_map_group, f->diorama_map_number,
       f->bg1_camera_x, f->bg1_camera_y, f->bg2_camera_x, f->bg2_camera_y,
       false, &lighting);
-  for (unsigned first = 0; first < 128;) {
-    const uint16_t owner = ownership.prop_owner[first];
+  /* Preserve the existing reviewed prop budget first. Extra authoring
+   * candidates may fall back owner-by-owner, never evict established props. */
+  for(unsigned pass=0;pass<2;++pass)for (unsigned first = 0; first < 128;) {
+    if(pass && !(capture_candidates || authored_objects))break;
+    const uint16_t *owners=pass?ownership.visual_owner:ownership.prop_owner;
+    const uint16_t owner = owners[first];
     if (!owner) { ++first; continue; }
     unsigned end = first + 1;
-    while (end < 128 && ownership.prop_owner[end] == owner) ++end;
-    const unsigned shape=ownership.prop_shape[first], owner_start=f->voxel_sprites.count;
+    while (end < 128 && owners[end] == owner) ++end;
+    if(pass && ownership.prop_owner[first]) {first=end;continue;}
+    if(pass) {
+      /* The range API can only isolate a contiguous emission. An owner
+       * interleaved with another emission remains native, rather than
+       * acquiring somebody else's artwork or publishing half an actor. */
+      bool fragmented=false;
+      for(unsigned slot=0;slot<128;++slot)
+        if((slot<first || slot>=end) && owners[slot]==owner)fragmented=true;
+      if(fragmented){first=end;continue;}
+    }
+    const unsigned shape=pass?kActRaiserSpriteProp_Generic:ownership.prop_shape[first];
+    const unsigned owner_start=f->voxel_sprites.count;
+    ActionVoxelSprite policy={.owner=owner,.shape=shape};
+    VoxelSpriteAuthoringFacts(&policy,f,ownership.visual_source[first],ownership.visual_animation[first]);
+    if(!capture_candidates && !ActionVoxelSprite_IsModeled(&policy)) {first=end;continue;}
     const int origin_x=ownership.prop_origin_x[first], origin_y=ownership.prop_origin_y[first];
     const float ambient=lit ? ActionEffectReceivers_Ambient(&lighting, kActionReceiver_Enemies,
         ownership.world_x[first], ownership.world_y[first]) : 1;
@@ -101,14 +147,16 @@ static void CaptureVoxelSprites(FrameSlot *f, const SnesRunnerApi *api,
         const int x=x0+f->ws_extra+f->obj_apron, y=y0+f->ws_extra_top;
         if (x+width<=0 || y+height<=0 || x>=f->snes_width+2*f->obj_apron ||
             y>=f->snes_height+f->ws_extra_top+f->ws_extra_bottom) continue;
-        if (f->voxel_sprites.count==kVoxelSpriteLimit) {
+        if (f->voxel_sprites.count==kVoxelSpriteLimit ||
+            (pass && f->voxel_sprites.count+apron_reserve>=kVoxelSpriteLimit)) {
+          if(pass) {failed=true;break;}
           f->voxel_sprites.count=0;
           return;
         }
         SrPpuObjRasterResult result = {.struct_size = sizeof(result)};
         const SrPpuObjPartsRasterRequest raster = {.struct_size = sizeof(raster),
             .lifetime_generation = lifetime, .parts = parts, .part_count = bounds.part_count,
-            .x0=x0-1, .y0=y0, .x1=x1+1, .y1=y1,
+            .x0=x0-1, .y0=y0-1, .x1=x1+1, .y1=y1+1,
             .pixel_format = SR_PPU_OBJ_PIXEL_FORMAT_ARGB8888_U32,
             .pixels = pixels, .pixel_byte_size = sizeof(pixels),
             .pitch_bytes = (kVoxelSpriteWidth+2)*sizeof(uint32_t)};
@@ -120,16 +168,23 @@ static void CaptureVoxelSprites(FrameSlot *f, const SnesRunnerApi *api,
         const int body0=solid_y>y0?solid_y:y0;
         const int body1=solid_y+solid_height<y1?solid_y+solid_height:y1;
         ActionVoxelSprite prop={.owner=owner,.shape=shape,.priority=priority,
-            .owner_tag=ActRaiserSpriteOwnership_PropTag(&ownership,owner),
+            .owner_tag=pass?ActRaiserSpriteOwnership_VisualTag(&ownership,owner):
+                ActRaiserSpriteOwnership_PropTag(&ownership,owner),
             .width=width,.height=height,.x=x,.y=y,.ambient=ambient,
             .component_x=x0-origin_x,.component_y=y0-origin_y,
             .solid_y=body1>body0?body0-y0:0,.solid_height=body1>body0?body1-body0:0};
+        VoxelSpriteAuthoringFacts(&prop,f,ownership.visual_source[first],ownership.visual_animation[first]);
+        for(int cx=0;cx<width;++cx) {
+          if(y0>solid_y && pixels[cx+1]>>24)prop.join_top|=UINT64_C(1)<<cx;
+          if(y1<solid_y+solid_height && pixels[(height+1)*(kVoxelSpriteWidth+2)+cx+1]>>24)
+            prop.join_bottom|=UINT64_C(1)<<cx;
+        }
         uint64_t occupied=0;
         for (unsigned cy=0; cy<kVoxelSpriteCellHeight; ++cy) {
           uint32_t *row=atlas+(ay+cy)*kVoxelSpriteAtlasWidth+ax;
           memset(row,0,kVoxelSpriteCellWidth*sizeof(*row));
           if (!cy || cy>(unsigned)height) continue;
-          const uint32_t *source=pixels+(cy-1)*(kVoxelSpriteWidth+2);
+          const uint32_t *source=pixels+cy*(kVoxelSpriteWidth+2);
           if (source[0]>>24) prop.join_left|=UINT32_C(1)<<(cy-1);
           if (source[width+1]>>24) prop.join_right|=UINT32_C(1)<<(cy-1);
           for (int cx=0; cx<width; ++cx) {
@@ -158,6 +213,9 @@ static void CaptureVoxelSprites(FrameSlot *f, const SnesRunnerApi *api,
     bool in_oam=false;
     for(unsigned slot=0;slot<128;++slot)in_oam |= ownership.prop_owner[slot]==native->owner;
     if(in_oam)continue;
+    ActionVoxelSprite policy={.owner=native->owner,.shape=kActRaiserSpriteProp_WallTorch};
+    VoxelSpriteAuthoringFacts(&policy,f,0xba01,0x4000);
+    if(!capture_candidates && !ActionVoxelSprite_IsModeled(&policy))continue;
     const int x=native->x+f->ws_extra+f->obj_apron,y=native->y+f->ws_extra_top;
     const unsigned size=native->size;
     if(size!=16 || x+(int)size<=0 || y+(int)size<=0 ||
@@ -182,6 +240,7 @@ static void CaptureVoxelSprites(FrameSlot *f, const SnesRunnerApi *api,
         .component_x=native->x-native->origin_x,.component_y=native->y-native->origin_y,
         .solid_height=size,.ambient=lit?ActionEffectReceivers_Ambient(&lighting,
             kActionReceiver_Enemies,native->world_x,native->world_y):1};
+    VoxelSpriteAuthoringFacts(&prop,f,0xba01,0x4000);
     uint64_t occupied=0;
     for(unsigned cy=0;cy<kVoxelSpriteCellHeight;++cy) {
       uint32_t *row=atlas+(ay+cy)*kVoxelSpriteAtlasWidth+ax;

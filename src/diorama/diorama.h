@@ -196,6 +196,7 @@ typedef struct DioramaProjection {
   bool valid;
   bool voxel_scenery; /* Physical terrain/actor depths are published below. */
   float auto_distance; /* Resolved fit before manual zoom; controls may observe it. */
+  float camera_distance; /* Actual render distance after fit, zoom and clamping. */
   float matrix[16];
   float aspect_x, height_scale;
   /* Texture column containing captured display x=0. Action-effect callers
@@ -342,6 +343,7 @@ typedef struct DioramaSkyboxView {
  * Valid BG2 spans bound skybox sampling and waterfall attachment, never the
  * ordinary world-registered layer UVs. */
 typedef struct DioramaCapture {
+  const struct ActionRoomSceneFrameState *voxel_frame;
   int width, height, authentic_y0, obj_apron;
   DioramaVerticalBounds vertical_bounds;
   DioramaHorizontalBounds horizontal_bounds;

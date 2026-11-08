@@ -31,6 +31,8 @@ void EditorRoomScene_Destroy(EditorRoomScene *room);
 /* Complete selected-room INI text; parser/terrain resolution are production C.
  * Bad edits leave the previous configuration intact. */
 bool EditorRoomScene_Configure(EditorRoomScene *room, const char *text);
+/* Failed edits retain the previous scene; empty after a successful configure. */
+const char *EditorRoomScene_SceneryError(const EditorRoomScene *room);
 /* Query the production planner before/after saved overrides at this camera. */
 bool EditorRoomScene_BgPolicy(const EditorRoomScene *room, int x, int y,
                               uint32_t frame, bool defaults, ActionBgPlan *out, int camera_x[2]);
@@ -62,6 +64,7 @@ bool EditorRoomScene_RenderFlat(EditorRoomScene *room, int x, int y, uint32_t fr
                                 int extra_x, EditorRoomCamera *camera);
 const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *room);
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *room);
+const DioramaRoomOverride *EditorRoomScene_Terrain(const EditorRoomScene *room);
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *room);
 /* Diagnostic count of PPU scanouts, excluding reused tile images. */
 unsigned EditorRoomScene_RasterCount(const EditorRoomScene *room);

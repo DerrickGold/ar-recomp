@@ -16,6 +16,7 @@
 static void CameraPolicy(EditorRoomScene *room, const ActionSceneSnapshot *assets) {
   if (assets->scene.group != 1 || assets->scene.map != 1) return;
   assert(EditorRoomScene_Configure(room, ""));
+  assert(!*EditorRoomScene_SceneryError(room));
   const int outputs[][2] = {{960,600},{960,540},{800,600},{1260,540}};
   const int positions[] = {0,1,960,1921,2880,3840};
   for (unsigned v = 0; v < sizeof(outputs)/sizeof(*outputs); ++v) {
@@ -259,6 +260,8 @@ static void CastleAnimation(EditorRoomScene *room,const ActionSceneSnapshot *ass
 }
 
 int main(int argc, char **argv) {
+  const bool diorama=argc>3 && !strcmp(argv[argc-1],"--diorama");
+  if(diorama)--argc;
   const bool castle_animation=argc>3 && !strcmp(argv[argc-1],"--castle-animation");
   if(castle_animation)--argc;
   const bool benchmark = argc > 3 && !strcmp(argv[argc - 1], "--benchmark");
@@ -269,6 +272,7 @@ int main(int argc, char **argv) {
   static ActionSceneSnapshot assets;
   assert(bytes && ActionSceneSnapshot_Decode((const uint8_t *)bytes, n, &assets)); free(bytes);
   EditorRoomScene *room = EditorRoomScene_Create(&assets); assert(room);
+  if(diorama)EditorRoomScene_Set3DMode(room,kAction3D_Diorama);
   char *ini = Read(argv[2], &n); assert(ini && EditorRoomScene_Configure(room, ini)); free(ini);
   if(castle_animation) {CastleAnimation(room,&assets);return 0;}
   const uint32_t catalogue_before = EditorRoomScene_EffectHash(room);
@@ -345,6 +349,7 @@ int main(int argc, char **argv) {
     }
     assert(!EditorRoomScene_Render(room, -1, y, frame, extra, vertical, NULL));
     assert(!EditorRoomScene_Configure(room, "[unterminated"));
+    assert(strstr(EditorRoomScene_SceneryError(room),"line 1"));
     assert(EditorRoomScene_Hash(room) == hash);
     printf("%08x %08x\n", hash, EditorRoomScene_EffectHash(room));
   }
@@ -375,6 +380,9 @@ int main(int argc, char **argv) {
   }
   CameraPolicy(room, &assets);
   if (assets.scene.group == 1 && assets.scene.map == 1 && !assets.terrain_profile) {
+    /* Legacy virtual bands remain editable in ordinary Diorama. Voxel owns
+     * the BG1 material split and authentic sprite-priority relationship. */
+    EditorRoomScene_Set3DMode(room,kAction3D_Diorama);
     assert(EditorRoomScene_Configure(room, ""));
     assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
     uint32_t original = EditorRoomScene_Hash(room), pixel = 0;
@@ -403,6 +411,14 @@ int main(int argc, char **argv) {
     assert(EditorRoomScene_Configure(room, ""));
     assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
     assert(EditorRoomScene_Hash(room) == original);
+    EditorRoomScene_Set3DMode(room,kAction3D_Voxel);
+    assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
+    const uint32_t voxel_original=EditorRoomScene_Hash(room);
+    snprintf(edits, sizeof(edits), "[layers:01:01]\nbg1-virtual = cells:%d,%d-%d,%d band:0\n", cx, cy, cx, cy);
+    assert(EditorRoomScene_Configure(room, edits));
+    assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
+    assert(EditorRoomScene_Hash(room)==voxel_original);
+    assert(EditorRoomScene_Configure(room, ""));
   }
   if (assets.scene.group == 2 && assets.scene.map == 1) {
     assert(EditorRoomScene_Configure(room, ""));

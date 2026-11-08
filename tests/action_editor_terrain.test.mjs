@@ -28,10 +28,12 @@ function editor(data,options={}) {
       }, add(name) {classes.add(name);}, remove(name) {classes.delete(name);},
       contains(name) {return classes.has(name);}};
       this.attributes = {};
+      this.dataset = {};
     }
-    addEventListener(name,callback) {
+    addEventListener(name,callback,options) {
       const previous=this.listeners[name];
       this.listeners[name]=previous?event=>{previous(event);callback(event);}:callback;
+      (this.listenerOptions??={})[name]=options;
     }
     append(child) {this.appendChild(child);}
     appendChild(child) {
@@ -51,10 +53,14 @@ function editor(data,options={}) {
         ? {left:0,top:0,width:260,height:420} : this.selector==='#paletteZoom'
           ? {left:0,top:0,width:154,height:192} : this.selector==='#tilePalette'
             ? {left:620,top:10,width:330,height:600} : {left:0,top:0,width:960,height:640}; }
-    setPointerCapture() {}
+    setPointerCapture(id) {(this.capturedPointers??=new Set()).add(id);}
+    hasPointerCapture(id) {return this.capturedPointers?.has(id)??false;}
+    releasePointerCapture(id) {this.capturedPointers?.delete(id);}
     setAttribute(name,value) {this.attributes[name]=value;}
+    removeAttribute(name) {delete this.attributes[name];}
     contains(other) {return other===this||this.children.some(child=>child.contains(other));}
     closest(selector) {return element(selector);}
+    querySelector(selector) {return element(`${this.selector||'element'} ${selector}`);}
     focus() {documentHost.activeElement=this;}
     select() {this.selectionStart=0;this.selectionEnd=this.value.length;}
     showModal() {this.open=true;}
@@ -68,13 +74,14 @@ function editor(data,options={}) {
     if (!elements.has(selector)) {
       const e=new Element();e.selector=selector;elements.set(selector,e);
       if(/^#paletteQuarterCanvas/.test(selector))e.width=e.height=8;
+      if(selector==='#voxelOverlay')e.setAttribute('hidden','');
       if(selector==='#paletteStampPreview')e.width=e.height=64;
       if(/^#tileAction(?!Status)/.test(selector))element('#tileMenu').children.push(e);
     }
     return elements.get(selector);
   };
   const documentHost={addEventListener() {},querySelector:element, querySelectorAll:() => [],
-    createElement:() => new Element(),body:new Element(),
+    createElement:() => new Element(),createElementNS:() => new Element(),body:new Element(),
     execCommand(command) {
       if(command!=='copy')return false;
       if(!this.copyFallbackSuccess) {
@@ -139,6 +146,582 @@ function fixture() {
     bg1Attributes:0x10, bg2Attributes:1, frameWidth:256, frameHeight:224,
     terrainProfiles:[{profile:0,label:'US'}, {profile:1,label:'Japanese'},
       {profile:2,label:'European'}]};
+}
+
+/* Voxel drafts use the real INI, history, project, palette and input modules.
+ * Rendering alone is mocked: hit coordinates are supplied by the C adapter. */
+{
+  const data=fixture(),{run,elements}=editor(data,{ini:'; kept\n[layers:01:01]\nvoxel-cell:jp = cell:2,3 front:0.2\n'});
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};
+    SharedRoomPreview.validatePolicyDocument=()=>{};
+    $('#voxelMode').value='2';$('#voxelSnap').value='.025';$('#voxelPick').value='3';$('#sharedGl').width=960;$('#sharedGl').height=640;
+    const voxelHit={kind:'tile',x:2,y:3,face:'top',priority:1,front:0,back:.3,width:16,offset:0,
+      quad:[[20,20],[40,20],[40,40],[20,40]],depthHandle:[30,5]};
+    SharedRoomPreview.voxelPick=()=>({...voxelHit});SharedRoomPreview.voxelTile=()=>({...voxelHit});
+    SharedRoomPreview.voxelObjects=()=>[];setMode('shared');$('#voxelEdit').onclick();
+    VoxelEditor.select(voxelHit);$('#voxelTileFront').value='-.1';$('#voxelTileFront').oninput();`);
+  assert.equal(run('VoxelEditor.pending()'),true);
+  assert.equal(elements.get('#saveState').textContent,'Unsaved changes','draft preview is visibly unsaved even before Apply');
+  assert.equal(elements.get('#voxelOverlay').attributes.hidden,undefined,'selection SVG removes the actual hidden attribute');
+  assert.equal(elements.get('#voxelPanel').style.right,'10px','inspector docks away from a selected face on the left');
+  run(`VoxelEditor.select({...voxelHit,quad:[[700,20],[720,20],[720,40],[700,40]]})`);
+  assert.equal(elements.get('#voxelPanel').style.left,'10px','inspector docks away from a selected face on the right');
+  run('VoxelEditor.select(voxelHit)');
+  assert.doesNotMatch(run('mergeDioramaIni()'),/front:-0.1/,'preview never mutates exported/applied state');
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/voxel-cell = cell:2,3 front:-0.1/);
+  assert.equal(run('ProjectEditor.save()'),null,'project save cannot silently omit a preview draft');
+  assert.equal(run('ProjectEditor.dirty()'),true);
+  run(`$('#room').value='1';$('#room').onchange();$('#terrain').value='2';$('#terrain').onchange();`);
+  assert.equal(run('room.map'),1);assert.equal(run('terrainProfile'),0,'draft blocks room and terrain navigation');
+  assert.throws(()=>run(`loadIniText('','replacement.ini')`),/Unapplied voxel preview/);
+  run(`VoxelEditor.select({...voxelHit,x:3},true);VoxelEditor.edit('width',12);VoxelEditor.edit('backing','fill');
+    openVoxelFacePalette(value=>VoxelEditor.edit('top-art',value));choosePaletteTile(2);applyVoxelFacePalette();`);
+  assert.equal(elements.get('#voxelPlacementSummary').textContent,'12 px','collapsed placement reports its edited width');
+  assert.equal(elements.get('#voxelBackingSummary').textContent,'Fill','collapsed backing reports the selected repair');
+  assert.equal(elements.get('#voxelArtSummary').textContent,'Custom','collapsed artwork indicates an override');
+  const previewBeforeDisclosure=run('VoxelEditor.previewSection(room,roomSectionIni(room))');
+  run("$('#voxelRepair').open=true;VoxelEditor.refresh();$('#voxelRepair').open=false;VoxelEditor.refresh()");
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),previewBeforeDisclosure,'disclosing controls does not apply or drop a draft');
+  assert.equal(run('VoxelEditor.pending()'),true);
+  assert.equal(run('tileClipboard'),null,'face artwork selection does not replace the tile stamp clipboard');
+  assert.equal(run('mode'),'shared','choosing face artwork retains the 3D view');
+  assert.equal(run('VoxelEditor.apply()'),true);
+  const saved=run('mergeDioramaIni()');
+  assert.match(saved,/voxel-cell:jp = cell:2,3 front:0.2/,'other terrain stays unchanged');
+  assert.match(saved,/cell:2,3 front:-0.1 width:12 backing:fill top-art:0,1000,1000,1000,1000,0,0,16/);
+  assert.match(saved,/cell:3,3 width:12 backing:fill/);assert.match(saved,/; kept/);
+  run('undo()');assert.doesNotMatch(run('mergeDioramaIni()'),/backing:fill/);
+  run('redo()');assert.equal(run('mergeDioramaIni()'),saved);
+  const files={...run('ProjectEditor.files()')};assert(run('ProjectEditor.save()'));
+  run('VoxelEditor.resetSelected();VoxelEditor.apply()');assert.doesNotMatch(run('mergeDioramaIni()'),/backing:fill/);
+  run(`ProjectEditor.load(${JSON.stringify(files)},'voxel.zip')`);assert.equal(run('mergeDioramaIni()'),saved);
+  assert.equal(run('VoxelEditor.pending()'),false);
+  assert.equal(elements.get('#voxelStatus').textContent,'','project reload clears obsolete draft messages');
+  run(`VoxelEditor.select(voxelHit);VoxelEditor.edit('front',.1);undo()`);
+  assert.equal(run('VoxelEditor.pending()'),false,'Undo restores the prior preview without touching applied edits');run('redo()');assert.equal(run('VoxelEditor.pending()'),true);run('VoxelEditor.discard()');
+  run(`VoxelEditor.select(voxelHit);VoxelEditor.pointerDown({button:0,pointerId:7,clientX:30,clientY:5,preventDefault(){}});
+    VoxelEditor.pointerMove({clientX:30,clientY:-25,preventDefault(){}});VoxelEditor.endGesture();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/voxel-cell = cell:2,3 front:0.025 /,'drag follows the projected depth axis and snaps relative to the authored value');
+  run('VoxelEditor.discard()');
+  run(`VoxelEditor.select({kind:'object',index:1,source:0x80A1,parent:0x82B2,animation:0x9010,priority:2,
+    mode:'auto',offset:0,thickness:.1,widthScale:1,canExtrude:true});`);
+  assert.equal(elements.get('#voxelObjectThickness').disabled,true,'ordinary native sprite transform fields are inactive');
+  assert.doesNotMatch(elements.get('#voxelTarget').textContent,/\$80A1|priority/,'primary object heading keeps technical identity in details');
+  assert.match(elements.get('#voxelObjectScope').textContent,/Source \$80A1.*parent \$82B2/);
+  assert.throws(()=>run(`VoxelEditor.edit('thickness',.2)`),/Choose Extruded/);
+  run(`VoxelEditor.edit('mode','extruded');VoxelEditor.edit('thickness',.2);VoxelEditor.apply();`);
+  assert.match(run('mergeDioramaIni()'),/voxel-object = source:80A1 parent:82B2 animation:9010 mode:extruded thickness:0.2/);
+  const again=editor(data,{ini:run('mergeDioramaIni()')});assert.match(again.run('mergeDioramaIni()'),/thickness:0.2/);
+  const beforeReset=run('mergeDioramaIni()');run("$('#resetBackground').onclick()");
+  assert.doesNotMatch(run('mergeDioramaIni()'),/voxel-cell/,'BG1 reset clears authored voxel cells across terrain');
+  assert.match(run('mergeDioramaIni()'),/voxel-object/,'BG1 reset preserves native object family authoring');
+  run('undo()');assert.equal(run('mergeDioramaIni()'),beforeReset);
+  run(`VoxelEditor.select({...voxelHit,supported:false,reason:'Use tree enclosure controls.'})`);
+  assert.equal(elements.get('#voxelTileFields').disabled,true);
+  assert.throws(()=>run(`VoxelEditor.edit('width',10)`),/tree enclosure/);
+  run('VoxelEditor.select(voxelHit)');
+  const all=editor(data,{ini:'[layers:01:01]\nvoxel-cell:all = cell:1,2 width:12\nvoxel-object = source:80A1 mode:flat\nvoxel-object = source:80A1 parent:0000 mode:extruded\n'});
+  assert.match(all.run('mergeDioramaIni()'),/voxel-cell:us\+jp\+eu = cell:1,2 width:12/);
+  assert.equal(all.run("VoxelEditor.lines(room).filter(line=>line.startsWith('voxel-object')).length"),2,'unfiltered and zero-parent object rules remain distinct');
+  assert.throws(()=>run(`VoxelEditor.parse('voxel-cell',{cell:'2,3',front:'.3',back:'.2'})`),/Back depth/);
+  assert.throws(()=>run(`VoxelEditor.parse('voxel-object',{source:'0000',mode:'flat'})`),/nonzero/);
+  assert.equal(elements.get('#voxelStatus').classList.contains('error'),false);
+  console.log('Voxel authoring: preview isolation, terrain persistence, multiselect, face art, depth gesture, Apply/Discard, undo, guarded navigation and project round trip passed.');
+}
+
+/* Real preview callbacks retain one history entry per gesture and keep the
+ * floating face picker isolated from edits made after leaving the picker. */
+{
+  const {run,elements}=editor(fixture());
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};
+    SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.focusVoxelSelection=()=>true;
+    $('#voxelMode').value='2';$('#voxelSnap').value='.025';$('#voxelPick').value='1';$('#sharedGl').width=960;$('#sharedGl').height=640;
+    SharedRoomPreview.voxelObjects=()=>[];
+    SharedRoomPreview.voxelTile=(x,y)=>({kind:'tile',x,y,face:'front',priority:0,front:0,back:.3,width:16,offset:0,faces:63,
+      quad:[[20,20],[40,20],[40,40],[20,40]],frontDepthOrigin:[30,30],frontDepthHandle:[30,5]});
+    VoxelEditor.selectCells([[2,3]]);VoxelEditor.edit('width',12);VoxelEditor.edit('offset',4);undo();
+    const beforeArtwork=VoxelEditor.previewSection(room,roomSectionIni(room));
+    $('#voxelTopArt').onclick();choosePaletteTile(2);$('#paletteFaceSize').value='8';$('#paletteFaceSize').onchange();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/top-art:.*8/,'artwork choices render before Done');
+  run('closeTilePalette(false)');
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),run('beforeArtwork'),'Cancel restores the draft that existed when artwork opened');
+  assert.equal(run('VoxelEditor.canRedoPreview()'),true,'Cancel also retains the prior Redo branch');
+  run(`redo();undo();$('#voxelTopArt').onclick();choosePaletteTile(2);applyVoxelFacePalette();
+    const chosenArtwork=VoxelEditor.previewSection(room,roomSectionIni(room));undo();`);
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),run('beforeArtwork'),'one Undo removes every choice in the accepted artwork session');
+  run('redo()');assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),run('chosenArtwork'));
+  run(`$('#voxelTopArt').onclick();applyVoxelFacePalette();undo();`);
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),run('beforeArtwork'),'Done with no choice creates no empty Undo entry');
+  run(`redo();$('#voxelTopArt').onclick();choosePaletteTile(1);undo();`);
+  assert.equal(run('voxelFacePalette'),null,'Undo closes the picker before changing the preview');
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),run('chosenArtwork'));
+  run('redo()');assert.notEqual(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),run('chosenArtwork'),'Redo restores an artwork choice interrupted by Undo');
+  run(`VoxelEditor.discard();VoxelEditor.edit('width',12);$('#voxelTopArt').onclick();choosePaletteTile(2);
+    $('#voxelTileFront').value='-.1';$('#voxelTileFront').oninput();closeTilePalette(false);`);
+  assert.equal(run('voxelFacePalette'),null,'a programmatic outside edit ends the floating artwork transaction');
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/front:-0.1 width:12 top-art:/,'Cancel cannot erase a later depth edit');
+  run('undo()');
+  assert.doesNotMatch(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/front:-0.1/);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/top-art:/,'depth Undo preserves the preceding artwork choice');
+  run('undo()');assert.doesNotMatch(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/top-art:/);
+  run(`VoxelEditor.discard();VoxelEditor.edit('width',12);VoxelEditor.edit('width',12);undo();`);
+  assert.equal(run('VoxelEditor.pending()'),false,'repeating the same option does not require a no-effect Undo');
+  run(`VoxelEditor.discard();VoxelEditor.edit('front',-.1);VoxelEditor.edit('top-art','0,0001,0001,0001,0001,0,0,16');
+    const beforeHide=VoxelEditor.previewSection(room,roomSectionIni(room));
+    $('#voxelFaceFront').checked=false;$('#voxelFaceFront').onchange();
+    $('#voxelFaceFront').checked=false;$('#voxelFaceFront').onchange();undo();`);
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),run('beforeHide'),'repeating a face state creates no extra history entry');
+  run(`$('#voxelFaceFront').checked=false;$('#voxelFaceFront').onchange();$('#voxelFaceFront').checked=true;$('#voxelFaceFront').onchange();`);
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),run('beforeHide'),'showing every face restores automatic material visibility without changing art/depth');
+  run(`VoxelEditor.discard();$('#voxelFaceFront').checked=false;$('#voxelFaceFront').onchange();$('#voxelFaceFront').checked=true;$('#voxelFaceFront').onchange();`);
+  assert.equal(run('VoxelEditor.pending()'),false,'hide then show an automatic face leaves no faces-only override');
+  run(`VoxelEditor.discard();VoxelEditor.afterRender();VoxelEditor.pointerDown({button:0,pointerId:32,clientX:30,clientY:5,preventDefault(){}});
+    VoxelEditor.pointerMove({clientX:30,clientY:-20,preventDefault(){}});undo();
+    VoxelEditor.pointerMove({clientX:30,clientY:-45,preventDefault(){}});`);
+  assert.equal(run('VoxelEditor.pending()'),false,'Undo terminates an active depth drag before further pointer movement');
+  assert.equal(elements.get('#sharedGl').hasPointerCapture(32),false,'Undo releases the depth handle pointer capture');
+  run(`VoxelEditor.discard();$('#voxelPreset').value='recess';$('#voxelPresetDepth').value='.1';$('#voxelPreset').onchange();
+    $('#voxelPresetDepth').onfocus();$('#voxelPresetDepth').value='.2';$('#voxelPresetDepth').oninput();$('#voxelPresetDepth').onchange();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/front:0.2 back:0.5/,'changing conversion amount previews against its original source instead of compounding');
+  run('undo()');assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/front:0.1 back:0.4/);
+  run('redo()');assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/front:0.2 back:0.5/);
+  assert.equal(elements.get('#voxelStatus').classList.contains('error'),false);
+  console.log('Voxel history: live artwork checkpoints, Cancel isolation, grouped choices, semantic no-ops, restored automatic faces, interrupted drags and immediate conversion callbacks passed.');
+}
+
+/* Undo commits and ends live map/pixel strokes; a new stroke forks history
+ * before Redo can replay an operation from the old branch. */
+{
+  const {run,elements}=editor(fixture());
+  run(`setMode('2d');view={...view,x:0,y:0,scale:1};brush='cell';band=2;`);
+  const map=elements.get('#map2d'),mouse=(x,y)=>({clientX:x*16+2,clientY:y*16+2,button:0,preventDefault(){}});
+  map.listeners.mousedown(mouse(1,0));
+  assert.equal(run('pendingOp!==null'),true);
+  run('undo()');
+  assert.equal(run('drag'),null);assert.equal(run('pendingOp'),null);
+  for(const callback of run('window.listeners.mousemove'))callback(mouse(2,0));
+  assert.equal(run('st.byCell[1]'),undefined);assert.equal(run('st.byCell[2]'),undefined,'movement after Undo cannot paint untracked cells');
+  map.listeners.mousedown(mouse(3,0));run('redo()');
+  assert.equal(run('st.byCell[1]'),undefined,'Redo does not replay the abandoned stroke over the new one');
+  assert.equal(run('st.byCell[3]'),2);assert.equal(run('redoStack.length'),0);assert.equal(run('drag'),null);
+  run(`selectCell(0,0);$('#pixelScope').value='cell';`);
+  const pixels=elements.get('#pixelCanvas'),pixel=x=>({clientX:x*14+2,clientY:5*14+2,button:0,pointerId:1,preventDefault(){}});
+  pixels.listeners.pointerdown(pixel(3));pixels.listeners.pointermove(pixel(5));run('undo()');pixels.listeners.pointermove(pixel(9));
+  assert.equal(run('pixelDrag'),false);assert.equal(run('pixelMaskAt(room,0,L,0)'),'0'.repeat(64),'pixel drag cannot resume after Undo');
+  run(`undoStack.push({label:'missing target',voxel:{room:'missing',profile:0,before:{},after:{}}});
+    const failedUndoLength=undoStack.length,failedRedoLength=redoStack.length;undo();`);
+  assert.equal(run('undoStack.length'),run('failedUndoLength'),'an unavailable target leaves the operation available for review');
+  assert.equal(run('redoStack.length'),run('failedRedoLength'),'failed restore must not move an operation onto the other history stack');
+  console.log('Map history: interrupted paint/pixel gestures, new-edit Redo branching and failed-restore retention passed.');
+}
+
+/* Compact authoring regions, hidden-cell selection, copy masks and draft
+ * strokes exercise the same persisted records used by the C renderer. */
+{
+  const {run,elements}=editor(fixture());
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};
+    SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.focusVoxelSelection=()=>true;
+    $('#voxelMode').value='2';$('#voxelSnap').value='.025';$('#voxelPick').value='1';$('#sharedGl').width=960;$('#sharedGl').height=640;
+    SharedRoomPreview.voxelTile=(x,y,face)=>({kind:'tile',x,y,face:face===3?'back':'front',priority:0,front:0,back:.3,width:16,offset:0,
+      visible:false,faces:63,shape:'box',quad:[[20,20],[40,20],[40,40],[20,40]],
+      frontDepthOrigin:[30,30],frontDepthHandle:[30,5],backDepthOrigin:[60,30],backDepthHandle:[60,5]});
+    SharedRoomPreview.voxelObjects=()=>[];
+    VoxelEditor.selectCells(Array.from({length:2048},(_,i)=>[i%64,Math.floor(i/64)]));
+    VoxelEditor.convert('slab');`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/cell:0,0 size:64,32 front:0.2 back:0.3 shape:box/,'2048 hidden cells collapse into one authored region');
+  assert.equal(run('roomConfig(room).voxel'),undefined,'conversion remains preview-only');
+  run(`VoxelEditor.edit('shape','curve');VoxelEditor.selectCells([[8,9]]);VoxelEditor.edit('top-art','0,0001,0001,0001,0001,4,4,8');`);
+  const carved=run('VoxelEditor.previewSection(room,roomSectionIni(room))');
+  assert.match(carved,/cell:8,9 .*top-art:0,0001,0001,0001,0001,4,4,8 .*shape:curve shape-span:0,512/,'editing one cell retains the original connected curve domain');
+  run(`$('#voxelResetProperty').value='art';VoxelEditor.resetProperty();`);
+  assert.doesNotMatch(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/top-art:/);
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room)).split("\\n").filter(l=>l.startsWith("voxel-cell")).length'),1,'removing a local artwork edit re-joins the shared profile');
+  run(`VoxelEditor.edit('faces','front+top');VoxelEditor.sampleSettings();VoxelEditor.selectCells([[70,9],[71,9]]);
+    VoxelEditor.edit('offset',7);$('#voxelCopyDepth').checked=true;$('#voxelCopyArt').checked=false;$('#voxelCopyShape').checked=false;VoxelEditor.applySample();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/cell:70,9 size:2,1 front:0.2 back:0.3/);
+  assert.doesNotMatch(run('VoxelEditor.previewSection(room,roomSectionIni(room)).split("\\n").find(l=>l.includes("cell:70,9"))'),/shape:|faces:/,'copy mask preserves omitted target properties');
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room)).split("\\n").find(l=>l.includes("cell:70,9"))'),/offset:7/,'depth-only paste preserves target horizontal offset');
+  run(`$('#voxelKeepThickness').checked=true;VoxelEditor.edit('front',.1);`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/cell:70,9 size:2,1 front:0.1 back:0.2/,'moving a plane can preserve thickness');
+  run(`$('#voxelKeepThickness').checked=false;VoxelEditor.edit('shape','taper');VoxelEditor.edit('front-end',.2);VoxelEditor.edit('back-end',.2);VoxelEditor.apply();`);
+  const applied=run('mergeDioramaIni()');const reload=editor(fixture(),{ini:applied});assert.equal(reload.run('mergeDioramaIni()'),applied,'compact shapes survive editor reload');
+  run(`VoxelEditor.selectCells([[90,9]]);VoxelEditor.sampleSettings();$('#voxelTool').value='paint';$('#voxelTool').onchange();
+    let brushX=91;SharedRoomPreview.voxelPick=()=>SharedRoomPreview.voxelTile(brushX,9,0);
+    VoxelEditor.pointerDown({button:0,pointerId:8,clientX:30,clientY:30,preventDefault(){}});
+    brushX=92;VoxelEditor.pointerMove({clientX:40,clientY:30,preventDefault(){}});VoxelEditor.endGesture();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/cell:91,9 size:2,1 front:0 back:0.3/);
+  run('undo()');assert.equal(run('VoxelEditor.pending()'),false,'one Undo removes the entire two-cell brush stroke');
+  run('redo()');assert.equal(run('VoxelEditor.pending()'),true);run('VoxelEditor.discard()');
+  run(`VoxelEditor.selectCells([[8,9]]);VoxelEditor.sampleSettings();$('#voxelCopyDepth').checked=false;$('#voxelCopyShape').checked=true;
+    $('#voxelTool').value='paint';$('#voxelTool').onchange();let shapeY=10;
+    SharedRoomPreview.voxelPick=()=>SharedRoomPreview.voxelTile(91,shapeY,0);
+    VoxelEditor.pointerDown({button:0,pointerId:10,clientX:30,clientY:30,preventDefault(){}});
+    shapeY=11;VoxelEditor.pointerMove({clientX:30,clientY:40,preventDefault(){}});VoxelEditor.endGesture();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/cell:91,10 size:1,2 shape:curve shape-span:160,32/,'shape brush connects the whole stroke instead of restarting each cell');
+  run(`undo();VoxelEditor.discard();$('#voxelCopyDepth').checked=true;$('#voxelCopyShape').checked=false;`);
+  run(`$('#voxelTool').value='select';$('#voxelTool').onchange();VoxelEditor.select(SharedRoomPreview.voxelTile(90,9,3));
+    VoxelEditor.pointerDown({button:0,pointerId:9,clientX:60,clientY:5,preventDefault(){}});
+    VoxelEditor.pointerMove({clientX:60,clientY:-20,preventDefault(){}});VoxelEditor.endGesture();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/cell:90,9 back:0.4/,'back-face dragging follows its own projected depth origin');
+  run('undo();undo();redo()');assert.equal(run('mergeDioramaIni()'),applied,'applied Undo/Redo cannot resurrect an obsolete draft redo');
+  assert.equal(run('VoxelEditor.canRedoPreview()'),false);
+  run('VoxelEditor.discard();VoxelEditor.navigate(0)');assert.match(elements.get('#voxelSelection').textContent,/576 tiles/);
+  assert.throws(()=>run(`VoxelEditor.parse('voxel-cell',{cell:'0,0',shape:'taper','front-end':'.3','back-end':'.1'})`),/Bottom back/);
+  console.log('Voxel conversion: compact rectangles, hidden selection, connected profiles, copy masks, thickness lock, brush undo and back-face handles passed.');
+}
+{
+  const records=['voxel-cell:us+jp = cell:0,0 size:64,64 width:12'];
+  for(let i=0;i<240;i++)records.push(`voxel-cell:us+jp = cell:${2+i%16*3},${2+Math.floor(i/16)*3} auto:1`);
+  const {run}=editor(fixture(),{ini:'[layers:01:01]\n'+records.join('\n')+'\n'});
+  assert.equal(run('VoxelEditor.lines(room).length'),241,'valid ordered hole masks must not expand past the C record budget');
+  const encoded=run('mergeDioramaIni()');assert.equal(editor(fixture(),{ini:encoded}).run('mergeDioramaIni()'),encoded);
+  const opposite=editor(fixture(),{ini:'[layers:01:01]\nvoxel-cell:us = cell:0,0 size:4,4 width:8\nvoxel-cell:us+jp = cell:1,1 size:2,2 width:10\nvoxel-cell:jp = cell:0,0 size:4,4 width:8\n'});
+  const oppositeText=opposite.run('mergeDioramaIni()');
+  const again=editor(fixture(),{ini:oppositeText});
+  assert.equal(again.run('VoxelRecords.resolve(roomConfig(room).voxel.cells[0],1,1).width'),10);
+  assert.equal(again.run('VoxelRecords.resolve(roomConfig(room).voxel.cells[1],1,1).width'),8,'different terrain overlap order survives shared-line merging');
+  const prefix=editor(fixture(),{ini:'[layers:01:01]\nvoxel-object:jp = source:AAAA mode:flat\nvoxel-object:us+jp = source:B571 mode:extruded thickness:.2\nvoxel-object:us+jp = source:C572 mode:flat\n'});
+  assert.equal(prefix.run('VoxelEditor.lines(room).length'),3,'extra terrain prefix must not duplicate a shared suffix');
+  const object=editor(fixture(),{ini:'[layers:01:01]\nvoxel-object = source:B571 parent:0000 animation:4000 mode:flat\nvoxel-object = source:B571 mode:extruded thickness:.2\n'});
+  object.run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
+    VoxelEditor.select({kind:'object',source:0xB571,parent:0,animation:0x4000,mode:'extruded',canExtrude:true,widthScale:1});VoxelEditor.edit('width',.5);VoxelEditor.apply();`);
+  assert.match(object.run('mergeDioramaIni()'),/source:B571 parent:0000 animation:4000 mode:extruded thickness:0.2 width:0.5/,'editing a wildcard-governed object retains the complete winning rule');
+  object.run('VoxelEditor.resetSelected();VoxelEditor.apply()');
+  assert.match(object.run('mergeDioramaIni()'),/source:B571 parent:0000 animation:4000 mode:auto/,'Auto reset masks an earlier wildcard family rule');
+  console.log('Voxel codec: ordered masks, terrain-specific precedence, bounded round trip and wildcard family inheritance/reset passed.');
+}
+
+/* An attached pull moves a shared tip in XYZ while retaining a source-world
+ * base. Real UI handlers use projected C handle vectors; geometry stays draft. */
+{
+  const {run,elements}=editor(fixture(),{ini:'[layers:01:01]\nvoxel-cell = cell:2,3 size:4,1 front:.1 back:.3 width:12 backing:fill shape:curve shape-span:48,16\n'});
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
+    SharedRoomPreview.focusVoxelSelection=()=>true;SharedRoomPreview.voxelObjects=()=>[];
+    SharedRoomPreview.voxelTile=(x,y)=>({kind:'tile',x,y,face:'front',priority:0,front:0,back:.3,width:16,offset:0,
+      quad:[[100,40],[120,40],[120,60],[100,60]],faces:63,shape:'box'});
+    let attachedProjectionArgs;
+    SharedRoomPreview.voxelBendHandles=(...args)=>{attachedProjectionArgs=args;return {supported:true,anchor:[90,50],tip:[180,50],handles:[
+      {axis:'x',origin:[180,50],end:[220,50],step:16},{axis:'y',origin:[180,50],end:[180,90],step:16},
+      {axis:'z',origin:[180,50],end:[150,20],step:.1,fallback:true}]};};
+    $('#sharedGl').width=960;$('#sharedGl').height=640;$('#voxelMode').value='2';$('#voxelSnap').value='.025';
+    VoxelEditor.selectCells([[2,3],[3,3],[4,3],[5,3]]);$('#voxelTool').value='attached';$('#voxelTool').onchange();`);
+  assert.equal(run('VoxelEditor.pending()'),false,'showing the attached gizmo does not author a bend');
+  assert.equal(elements.get('#voxelPullFields').hidden,false);
+  assert.equal(elements.get('#voxelDepthControls').hidden,true,'attached tool keeps its controls distinct from face-depth editing');
+  assert(elements.get('#voxelOverlay').children.some(node=>node.textContent==='Fixed base'));
+  assert(elements.get('#voxelOverlay').children.some(node=>node.textContent==='Z control'),'collapsed projected axis is identified as a screen control');
+  assert(elements.get('#voxelOverlay').children.some(node=>node.attributes['stroke-dasharray']==='4 3'),'screen-control axis is dashed');
+  run(`$('#voxelPullAnchor').value='right';$('#voxelPullAnchor').onchange();VoxelEditor.afterRender();
+    VoxelEditor.pointerDown({button:0,pointerId:11,clientX:220,clientY:50,preventDefault(){}});
+    VoxelEditor.pointerMove({clientX:240,clientY:50,preventDefault(){}});
+    VoxelEditor.pointerMove({clientX:260,clientY:50,preventDefault(){}});VoxelEditor.endGesture();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/bend:x,96,32,16,0,0/,'X drag follows the projected native-pixel axis');
+  assert.doesNotMatch(run('mergeDioramaIni()'),/bend:/,'attached pull stays in the preview until Apply');
+  run('undo()');assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/bend:x,96,32,0,0,0/,'one Undo reverses all pointer moves in the X drag');
+  run(`redo();VoxelEditor.afterRender();VoxelEditor.pointerDown({button:0,pointerId:12,clientX:180,clientY:90,preventDefault(){}});
+    VoxelEditor.pointerMove({clientX:180,clientY:130,preventDefault(){}});VoxelEditor.endGesture();VoxelEditor.afterRender();
+    VoxelEditor.pointerDown({button:0,pointerId:13,clientX:150,clientY:20,preventDefault(){}});
+    VoxelEditor.pointerMove({clientX:120,clientY:-10,preventDefault(){}});VoxelEditor.endGesture();VoxelEditor.afterRender();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/front:0.1 back:0.3 width:12 backing:fill shape:curve shape-span:48,16 bend:x,96,32,16,16,0.1/,'XYZ tip shifts retain both source depths, width and shape domain');
+  assert.equal(run('JSON.stringify(attachedProjectionArgs)'),JSON.stringify([32,48,64,16,1,96,32,16,16,.1]),'projection gets the unchanged base and actual XYZ offsets');
+  run("$('#voxelPullReset').onclick()");assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/bend:x,96,32,0,0,0/,'tip reset preserves the chosen base and full source span');
+  run('undo()');assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/bend:x,96,32,16,16,0.1/);
+  assert.equal(run('VoxelEditor.apply()'),true);
+  const saved=run('mergeDioramaIni()'),reopened=editor(fixture(),{ini:saved});
+  assert.equal(reopened.run('mergeDioramaIni()'),saved,'atomic bend survives save/reload');
+  reopened.run(`SharedRoomPreview.voxelBendHandles=()=>null;VoxelEditor.select({kind:'tile',x:2,y:3,face:'front',front:.1,back:.3,width:12});
+    $('#voxelTool').value='attached';$('#voxelTool').onchange();`);
+  assert.equal(reopened.elements.get('#voxelPullAnchor').value,'right','reopening a bent limb restores its authored base');
+  assert.equal(Number(reopened.elements.get('#voxelPullX').value),16);
+  run(`VoxelEditor.selectCells([[3,3]]);VoxelEditor.edit('top-art','0,0001,0001,0001,0001,4,4,8');VoxelEditor.apply();`);
+  assert.equal(run('new Set(roomConfig(room).voxel.cells[0].map(r=>r.bend)).size'),1,'a local art edit preserves the shared bend token across all fragments');
+  assert.equal(run("VoxelRecords.resolve(roomConfig(room).voxel.cells[0],2,3).bend"),'x,96,32,16,16,0.1');
+  run(`VoxelEditor.sampleSettings();VoxelEditor.selectCells([[10,5],[11,5]]);$('#voxelCopyDepth').checked=false;$('#voxelCopyShape').checked=true;VoxelEditor.applySample();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/cell:10,5 size:2,1 .*bend:x,192,160,16,16,0.1/,'copying an attachment rebases its source span and retains right anchoring');
+  run(`VoxelEditor.discard();VoxelEditor.selectCells([[3,3]]);$('#voxelResetProperty').value='bend';VoxelEditor.resetProperty();VoxelEditor.apply();`);
+  assert.equal(run("VoxelRecords.resolve(roomConfig(room).voxel.cells[0],3,3).bend"),undefined);
+  assert.match(run("VoxelRecords.resolve(roomConfig(room).voxel.cells[0],3,3)['top-art']"),/4,4,8$/,'resetting attachment retains artwork');
+  assert.equal(run("VoxelRecords.resolve(roomConfig(room).voxel.cells[0],2,3).bend"),'x,96,32,16,16,0.1','reset stays inside the selected cell');
+  run('undo()');assert.equal(run("VoxelRecords.resolve(roomConfig(room).voxel.cells[0],3,3).bend"),'x,96,32,16,16,0.1');
+  run(`VoxelEditor.selectCells([[10,1],[10,2],[10,3]]);$('#voxelTool').value='attached';$('#voxelTool').onchange();`);
+  assert.equal(elements.get('#voxelPullAnchor').value,'bottom','a vertical selection exposes its bottom base without interpreting artwork');
+  run(`$('#voxelPullY').onfocus();$('#voxelPullY').value='-8';$('#voxelPullY').oninput();$('#voxelPullY').onchange();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/bend:y,64,16,0,-8,0/,'vertical attachments support upward tip movement');
+  for(const invalid of ['z,0,16,0,0,0','x,0,0,0,0,0','x,0,16,257,0,0','x,0,16,0,0,1.21','y,0.5,16,0,0,0'])
+    assert.throws(()=>run(`VoxelEditor.parse('voxel-cell',{cell:'0,0',bend:${JSON.stringify(invalid)}})`));
+  assert.equal(run("VoxelEditor.parse('voxel-cell',{cell:'0,0',bend:'y,100,20,-0.5,8,-1.2'}).bend"),'y,100,20,-0.5,8,-1.2');
+  console.log('Attached pull: explicit base, projected XYZ drags, shared spans, artwork carving, copy/reset, draft undo and reload passed.');
+}
+
+/* Camera gestures remain available while a Voxel draft is active, and never
+ * change authored geometry or put camera navigation into edit history. */
+{
+  const {run,elements}=editor(fixture());
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};
+    SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.voxelObjects=()=>[];
+    const cameraTile={kind:'tile',x:2,y:3,face:'front',front:0,back:.3,width:16,offset:0,
+      quad:[[20,20],[40,20],[40,40],[20,40]],depthHandle:[30,5]};
+    SharedRoomPreview.voxelPick=()=>({...cameraTile});SharedRoomPreview.voxelTile=()=>({...cameraTile});
+    $('#voxelMode').value='2';$('#voxelSnap').value='.025';$('#voxelPick').value='3';
+    $('#sharedGl').width=960;$('#sharedGl').height=640;$('#sharedGl').clientWidth=960;$('#sharedGl').clientHeight=640;
+    $('#sharedYaw').value='0';$('#sharedPitch').value='0';$('#sharedDistance').value='1';
+    setMode('shared');$('#voxelEdit').onclick();VoxelEditor.select(cameraTile);VoxelEditor.edit('front','-.1');
+    const beforeCameraDraft=VoxelEditor.previewSection(room,roomSectionIni(room));
+    const beforeCameraApplied=mergeDioramaIni(),beforeCameraHistory=undoStack.length;
+    const beforeCameraPlayer=[$('#previewPlayerX').value,$('#previewPlayerY').value];
+    const pointer=(button,shiftKey,x,y,id=1)=>({button,shiftKey,pointerId:id,clientX:x,clientY:y,
+      preventDefault(){this.prevented=true;}});
+    const orbitStart=pointer(1,true,100,100);$('#sharedGl').listeners.pointerdown(orbitStart);
+    $('#sharedGl').listeners.pointermove(pointer(1,true,140,120));`);
+  assert.equal(run('orbitStart.prevented'),true);
+  assert.equal(run("$('#sharedGl').hasPointerCapture(1)"),true);
+  assert.equal(Number(elements.get('#sharedYaw').value),.14);
+  assert.equal(Number(elements.get('#sharedPitch').value),.06);
+  assert.equal(run("JSON.stringify(beforeCameraPlayer)===JSON.stringify([$('#previewPlayerX').value,$('#previewPlayerY').value])"),true,'Shift-middle does not place a receiver');
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))===beforeCameraDraft'),true);
+  run(`$('#sharedGl').listeners.pointerup(pointer(1,true,140,120));
+    const wheelEvent={deltaY:-120,deltaMode:0,preventDefault(){this.prevented=true;}};
+    $('#sharedGl').listeners.wheel(wheelEvent);`);
+  assert.equal(run("$('#sharedGl').hasPointerCapture(1)"),false);
+  assert.equal(run('wheelEvent.prevented'),true);
+  assert(Number(elements.get('#sharedDistance').value)<1,'wheel up moves the preview closer');
+  assert.equal(elements.get('#sharedGl').listenerOptions.wheel.passive,false);
+  run(`$('#sharedGl').listeners.wheel({deltaY:1e6,deltaMode:1,preventDefault(){}});
+    $('#sharedGl').listeners.wheel({deltaY:1e6,deltaMode:1,preventDefault(){}});`);
+  assert.equal(Number(elements.get('#sharedDistance').value),2.5,'wheel zoom is bounded');
+  run(`$('#sharedGl').listeners.pointerdown(pointer(1,true,100,100,2));
+    $('#sharedGl').listeners.pointercancel(pointer(1,true,100,100,2));
+    $('#sharedGl').listeners.pointermove(pointer(1,true,200,200,2));`);
+  assert.equal(Number(elements.get('#sharedYaw').value),.14,'cancel ends camera motion');
+  assert.equal(run("$('#sharedGl').hasPointerCapture(2)"),false);
+  run(`$('#sharedGl').listeners.pointerdown(pointer(1,true,100,100,3));
+    for(const listener of window.listeners.blur)listener({});`);
+  assert.equal(run("$('#sharedGl').hasPointerCapture(3)"),false,'window blur releases capture');
+  assert.equal(run('VoxelEditor.pending()'),true);
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))===beforeCameraDraft'),true);
+  assert.equal(run('mergeDioramaIni()===beforeCameraApplied'),true);
+  assert.equal(run('undoStack.length===beforeCameraHistory'),true);
+  run(`undo()`);assert.equal(run('VoxelEditor.pending()'),false,'camera input did not add draft history entries');
+  console.log('Shared camera input: Shift-middle orbit, wheel zoom, receiver isolation, capture cleanup and draft preservation passed.');
+}
+
+/* Legacy plane controls commit a single gesture and stay undoable while a
+ * dropdown/range/number control or the Settings dialog retains focus. */
+{
+  const {run,elements}=editor(fixture());
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};
+    SharedRoomPreview.validatePolicyDocument=()=>{};$('#settingsMenu').hidden=true;
+    const historyKey=(key,target,shiftKey=false)=>{const event={key,metaKey:true,shiftKey,target,
+      preventDefault(){this.prevented=true;},stopPropagation(){},stopImmediatePropagation(){}};
+      for(const listener of window.listeners.keydown)listener(event);return !!event.prevented;};
+    const planeInput=(id,value)=>{$('#'+id).value=String(value);$('#'+id).oninput({target:$('#'+id)});};
+    const strategy=$('#planeStrategy');strategy.tagName='SELECT';strategy.value='voxel';strategy.onchange({target:strategy});`);
+  assert.equal(run('undoStack.length'),1);
+  assert.equal(run('selectedPlaneEdit().setVoxel'),true);
+  run("EditorLayout.modalOpen=()=>true");
+  assert.equal(run("historyKey('z',$('#planeStrategy'))"),true,'select focus in Settings routes project Undo');
+  assert.equal(run('selectedPlaneEdit().setVoxel'),false);
+  run("historyKey('z',$('#planeStrategy'),true)");
+  assert.equal(run('selectedPlaneEdit().setVoxel'),true);
+  run("planeInput('planeDepth',24);planeInput('planeDepth',35);planeInput('planeDepth',41)");
+  assert.equal(run('undoStack.length'),1,'slider input is pending until the gesture ends');
+  run("$('#planeDepth').tagName='INPUT';$('#planeDepth').type='range';historyKey('z',$('#planeDepth'))");
+  assert.equal(run('selectedPlaneEdit().voxel'),.18,'Undo finalizes and reverses the full slider drag');
+  run("historyKey('y',$('#planeDepth'))");assert.equal(run('selectedPlaneEdit().voxel'),.41);
+  run("$('#planeResetShape').onclick()");assert.equal(run('selectedPlaneEdit().setVoxel'),false);
+  run('undo()');assert.equal(run('selectedPlaneEdit().voxel'),.41);
+  run("planeInput('virtualZ',34);planeInput('virtualZ',45);$('#virtualZ').listeners.change({})");
+  assert.equal(run('roomConfig(room).virtual[0].z'),.45);
+  run('undo()');assert.equal(run('roomConfig(room).virtual[0].setZ'),false);
+  run('redo()');assert.equal(run('roomConfig(room).virtual[0].z'),.45);
+  run("$('#virtualReset').onclick()");assert.equal(run('roomConfig(room).virtual[0].setZ'),false);
+  run('undo()');assert.equal(run('roomConfig(room).virtual[0].z'),.45);
+  run("planeInput('planeAlpha',128);$('#planeAlpha').listeners.blur({});$('#room').value='1';$('#room').onchange();undo()");
+  assert.equal(run('room.map'),1,'Undo navigates to the edited room');
+  assert.equal(run('selectedPlaneEdit().setAlpha'),false);
+  for(const [type,tagName] of [['number','INPUT'],['checkbox','INPUT'],['radio','INPUT']]) {
+    run(`redo();$('#planeAlpha').tagName=${JSON.stringify(tagName)};$('#planeAlpha').type=${JSON.stringify(type)}`);
+    assert.equal(run("historyKey('z',$('#planeAlpha'))"),true,`${type} focus routes authoring Undo`);
+    assert.equal(run('selectedPlaneEdit().setAlpha'),false);
+  }
+  for(const [type,tagName] of [['text','INPUT'],['search','INPUT'],['','TEXTAREA']]) {
+    run(`$('#textHistory').tagName=${JSON.stringify(tagName)};$('#textHistory').type=${JSON.stringify(type)}`);
+    const length=run('undoStack.length');
+    assert.equal(run("historyKey('z',$('#textHistory'))"),false,'native text Undo remains unconsumed');
+    assert.equal(run('undoStack.length'),length);
+  }
+  assert.equal(elements.get('#settingsMenu').hidden,true);
+  console.log('Plane settings history: grouped sliders, focused shortcuts, shape/reset/far-plane controls and room restoration passed.');
+}
+
+/* Native semantic groups keep source membership; one shared affine transform
+ * changes the whole shape without replacing per-cell artwork or depth. */
+{
+  const ini='[layers:01:01]\nvoxel-cell = cell:2,3 size:2,2 front:.1 back:.3 width:12 shape:taper shape-span:48,32 front-end:.2 back-end:.3 bend:x,32,64,0,0,0 top-art:0,0010,0011,0012,0013,4,4,8\n';
+  const {run,elements}=editor(fixture(),{ini});
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};
+    SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.voxelObjects=()=>[];
+    $('#voxelMode').value='2';$('#voxelSnap').value='.025';$('#voxelPick').value='3';$('#sharedGl').width=960;$('#sharedGl').height=640;
+    const groupTile=(x=2,y=3)=>({kind:'tile',x,y,face:'top',front:.1,back:.3,width:16,offset:0,transformSupported:true,
+      quad:[[80,80],[120,80],[120,120],[80,120]],depthHandle:[100,60]});
+    SharedRoomPreview.voxelTile=(x,y)=>groupTile(x,y);SharedRoomPreview.voxelPick=()=>groupTile();
+    let groupQueries=0;SharedRoomPreview.voxelGroup=()=>{groupQueries++;return {supported:true,status:'ok',kind:1,label:'Stump',
+      bounds:{x:2,y:3,w:2,h:2},cells:[[2,3],[3,3],[2,4],[3,4]],pivotDepth:.2,transformSupported:true};};
+    SharedRoomPreview.voxelTransformHandles=(...args)=>{window.groupHandleArgs=args;return {supported:true,pivot:[180,140],handles:[
+      {axis:'x',origin:[180,140],end:[260,140],step:16},
+      {axis:'y',origin:[180,140],end:[180,220],step:16},
+      {axis:'z',origin:[180,140],end:[120,80],step:.1,fallback:true}]};};
+    const groupPointer=(x,y,shiftKey=false)=>({button:0,pointerId:7,clientX:x,clientY:y,shiftKey,preventDefault(){}});
+    setMode('shared');$('#voxelEdit').onclick();VoxelEditor.pointerDown(groupPointer(100,100));`);
+  assert.equal(elements.get('#voxelSelectScope').value,'whole');
+  assert.match(elements.get('#voxelSelection').textContent,/Stump · 4 tiles/);
+  assert.equal(run('groupQueries'),1);
+  run("$('#voxelTool').value='transform';$('#voxelTool').onchange()");
+  assert.equal(elements.get('#voxelTransformFields').hidden,false);
+  assert.equal(elements.get('#voxelTransformLock').checked,false,'narrowing an axis does not also change height or depth');
+  run("$('#voxelTransformSx').onfocus();$('#voxelTransformSx').value='50';$('#voxelTransformSx').oninput();$('#voxelTransformSx').onchange()");
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/transform:48,80,0.2,0,0,0,0.5,1,1/);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/front:0.1 back:0.3 width:12/);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/shape:taper shape-span:48,32 front-end:0.2 back-end:0.3 bend:x,32,64,0,0,0/);
+  assert.equal(run('VoxelEditor.lines(room,JSON.parse(JSON.stringify(roomConfig(room).voxel))).length'),1,'applied source remains unchanged during preview');
+  run('VoxelEditor.afterRender()');
+  assert(elements.get('#voxelOverlay').children.some(node=>node.attributes.id==='voxelTransformPivotMarker'));
+  assert(elements.get('#voxelOverlay').children.some(node=>node.textContent==='Z control'));
+  run(`VoxelEditor.pointerDown(groupPointer(260,140));VoxelEditor.pointerMove(groupPointer(280,140));
+    VoxelEditor.pointerMove(groupPointer(300,140));VoxelEditor.endGesture();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/transform:48,80,0.2,8,0,0,0.5,1,1/);
+  run('undo()');assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/transform:48,80,0.2,0,0,0,0.5,1,1/,'one Undo reverses the complete group move drag');
+  run(`redo();VoxelEditor.afterRender();VoxelEditor.pointerDown(groupPointer(180,220));
+    VoxelEditor.pointerMove(groupPointer(180,180));VoxelEditor.endGesture();VoxelEditor.afterRender();
+    VoxelEditor.pointerDown(groupPointer(120,80));VoxelEditor.pointerMove(groupPointer(90,50));VoxelEditor.endGesture();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/transform:48,80,0.2,8,-8,0.05,0.5,1,1/);
+  run("$('#voxelTransformLock').checked=true;VoxelEditor.resizeTransform('sy',50)");
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/transform:48,80,0.2,8,-8,0.05,0.25,0.5,0.5/,'proportional resize preserves existing axis ratios');
+  run("VoxelEditor.chooseTransformPivot('center')");
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/transform:48,64,0.2,8,0,0.05,0.25,0.5,0.5/,'pivot rebase preserves the existing affine positions');
+  assert.equal(run('VoxelEditor.apply()'),true);
+  const saved=run('mergeDioramaIni()');assert.equal(editor(fixture(),{ini:saved}).run('mergeDioramaIni()'),saved);
+  run("VoxelEditor.selectCells([[2,3]]);VoxelEditor.edit('side-art','0,0020,0021,0022,0023,0,0,16');VoxelEditor.apply()");
+  assert.equal(run("VoxelRecords.resolve(roomConfig(room).voxel.cells[0],3,4).transform"),'48,64,0.2,8,0,0.05,0.25,0.5,0.5','art carving preserves the shared neighbor pivot');
+  assert.equal(run("VoxelRecords.resolve(roomConfig(room).voxel.cells[0],3,4)['side-art']"),undefined);
+  run(`VoxelEditor.selectWhole(groupTile());$('#voxelTool').value='select';$('#voxelTool').onchange();VoxelEditor.selectPicked(groupTile(),true)`);
+  assert.equal(elements.get('#voxelSelection').textContent,'Select a surface','Shift-click toggles the entire object off');
+  run("VoxelEditor.selectWhole(groupTile());VoxelEditor.refineSelection(true)");assert.match(elements.get('#voxelSelection').textContent,/12 tiles/);
+  run('VoxelEditor.refineSelection(false)');assert.match(elements.get('#voxelSelection').textContent,/4 tiles/);
+  run("$('#voxelSelectScope').value='tile';VoxelEditor.selectPicked(groupTile(),true)");assert.match(elements.get('#voxelSelection').textContent,/3 tiles/);
+  run(`SharedRoomPreview.voxelGroup=()=>({status:'too-large',reason:'Continuous floor needs a rectangle.'});VoxelEditor.selectWhole(groupTile());`);
+  assert.match(elements.get('#voxelSelection').textContent,/1 tile/);assert.match(run('VoxelEditor.status()'),/Continuous floor/);
+  run(`VoxelEditor.select({...groupTile(),transformSupported:false,transformReason:'Water remains native.'});$('#voxelTool').value='transform';$('#voxelTool').onchange()`);
+  assert.equal(elements.get('#voxelTransformFields').disabled,true);assert.match(elements.get('#voxelTransformHint').textContent,/Water remains native/);
+  assert.throws(()=>run('VoxelEditor.setTransform({px:48,py:80,pz:.2,dx:8,dy:0,dz:0,sx:1,sy:1,sz:1})'),/Water remains native/);
+  run(`VoxelEditor.select(groupTile());$('#voxelTransformReset').onclick();VoxelEditor.apply()`);
+  assert.equal(run("VoxelRecords.resolve(roomConfig(room).voxel.cells[0],2,3).transform"),undefined);
+  assert.match(run("VoxelRecords.resolve(roomConfig(room).voxel.cells[0],2,3)['side-art']"),/0020/);
+  assert.equal(run("VoxelRecords.resolve(roomConfig(room).voxel.cells[0],3,4).transform"),'48,64,0.2,8,0,0.05,0.25,0.5,0.5');
+  for(const invalid of ['1,2,0,0,0,0,1,1','8193,0,0,0,0,0,1,1,1','0,0,2.01,0,0,0,1,1,1','0,0,0,257,0,0,1,1,1','0,0,0,0,0,1.21,1,1,1','0,0,0,0,0,0,0,1,1','0,0,0,0,0,0,1,4.1,1'])
+    assert.throws(()=>run(`VoxelEditor.parse('voxel-cell',{cell:'0,0',transform:${JSON.stringify(invalid)}})`));
+  console.log('Whole-object editing: semantic click/Shift selection, refinement, shared pivot XYZ move/resize, artwork preservation, native guards and project roundtrip passed.');
+}
+
+/* Combining already positioned groups composes one frozen outer affine with
+ * their individual transforms, so neither relative placement nor local scale
+ * is erased; repeated preview events must not multiply transformations. */
+{
+  const {run,elements}=editor(fixture(),{ini:'[layers:01:01]\nvoxel-cell = cell:2,3 transform:40,64,.2,4,0,0,.5,1,1 top-art:0,0010,0011,0012,0013,0,0,16\nvoxel-cell = cell:3,3 transform:56,64,.2,-2,8,0,1,2,1\n'});
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
+    SharedRoomPreview.voxelTransformHandles=()=>null;SharedRoomPreview.voxelObjects=()=>[];
+    SharedRoomPreview.voxelTile=(x,y)=>({kind:'tile',x,y,front:.1,back:.3,width:16,transformSupported:true});
+    VoxelEditor.selectCells([[2,3],[3,3]]);$('#voxelTool').value='transform';$('#voxelTool').onchange();
+    const initialMixed=mergeDioramaIni();
+    VoxelEditor.setTransform({px:48,py:64,pz:.2,dx:8,dy:0,dz:0,sx:1,sy:1,sz:1});
+    VoxelEditor.setTransform({px:48,py:64,pz:.2,dx:16,dy:0,dz:0,sx:1,sy:1,sz:1});`);
+  let preview=run('VoxelEditor.previewSection(room,roomSectionIni(room))');
+  assert.match(preview,/cell:2,3 .*transform:48,64,0.2,16,0,0,0.5,1,1/);
+  assert.match(preview,/cell:3,3 .*transform:48,64,0.2,14,8,0,1,2,1/);
+  run('VoxelEditor.resizeTransform("sx",50)');preview=run('VoxelEditor.previewSection(room,roomSectionIni(room))');
+  assert.match(preview,/cell:2,3 .*transform:48,64,0.2,16,0,0,0.25,1,1/);
+  assert.match(preview,/cell:3,3 .*transform:48,64,0.2,15,8,0,0.5,2,1/);
+  assert.match(elements.get('#voxelTransformSummary').textContent,/keeps existing placements/);
+  assert.throws(()=>run('VoxelEditor.setTransform({px:48,py:64,pz:.2,dx:0,dy:0,dz:0,sx:1,sy:4,sz:1})'),/sy/,'a composed result beyond native limits rejects the whole operation');
+  assert.equal(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),preview);
+  run('VoxelEditor.discard()');assert.equal(run('mergeDioramaIni()===initialMixed'),true);
+  run(`VoxelEditor.sampleSettings();VoxelEditor.selectCells([[10,5],[11,5]]);$('#voxelCopyDepth').checked=false;
+    $('#voxelCopyTransform').checked=true;VoxelEditor.applySample();`);
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/cell:10,5 size:2,1 transform:168,96,0.2,4,0,0,0.5,1,1/,'copying a transform rebases its pivot into the target bounds');
+  console.log('Mixed group transforms: frozen composition, noncumulative preview, bounds rejection, isolated copy mask and pivot rebasing passed.');
+}
+
+/* Focus follows the displayed world bounds, while authoring membership and
+ * future pivot domains remain anchored to the original native cells. */
+{
+  const {run}=editor(fixture(),{ini:'[layers:01:01]\nvoxel-cell = cell:2,3 size:2,2 transform:48,80,.2,80,40,0,.5,.5,1\n'});
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
+    SharedRoomPreview.voxelObjects=()=>[];SharedRoomPreview.voxelTransformHandles=()=>null;
+    SharedRoomPreview.voxelTile=(x,y)=>({kind:'tile',x,y,front:.1,back:.3,width:16,offset:0});
+    SharedRoomPreview.focusVoxelSelection=bounds=>{window.focusedGroup=bounds;return true;};
+    VoxelEditor.selectCells([[2,3],[3,3],[2,4],[3,4]],{focus:true});`);
+  assert.equal(run('JSON.stringify(window.focusedGroup)'),JSON.stringify({x:120,y:104,width:16,height:16}));
+  run(`VoxelEditor.setTransform({px:48,py:80,pz:.2,dx:-80,dy:-40,dz:0,sx:.5,sy:.5,sz:1});$('#voxelFocus').onclick();`);
+  assert.equal(run('JSON.stringify(window.focusedGroup)'),JSON.stringify({x:-40,y:24,width:16,height:16}));
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/cell:2,3 size:2,2 transform:48,80/,'Focus never shifts the authored cells or pivot');
+  run(`VoxelEditor.discard();loadIniText('[layers:01:01]\\nvoxel-cell = cell:2,3 transform:40,64,.2,4,0,0,.5,1,1\\nvoxel-cell = cell:3,3 transform:56,64,.2,-2,8,0,1,2,1\\n','focus.ini');
+    VoxelEditor.selectCells([[2,3],[3,3]]);$('#voxelFocus').onclick();`);
+  assert.equal(run('JSON.stringify(window.focusedGroup)'),JSON.stringify({x:40,y:40,width:22,height:32}),'mixed placements contribute their independently transformed extents');
+  run(`loadIniText('[layers:01:01]\\nvoxel-cell = cell:2,3 width:32 offset:4 bend:x,32,48,16,8,0 transform:40,64,.2,20,-10,0,2,.5,1\\n','focus.ini');
+    VoxelEditor.selectCells([[2,3]]);$('#voxelFocus').onclick();`);
+  assert.equal(run('JSON.stringify(window.focusedGroup)'),JSON.stringify({x:36,y:46,width:96,height:12}),'Focus applies width, offset, curved pull then the final affine');
+  console.log('Group focus: positive/negative moves, mixed placements, width/offset/bend order and stable source membership passed.');
+}
+
+/* Native solids keep closed, coherent component transforms. A local authored
+ * surface can move independently; partially selecting untouched native wood
+ * cannot silently tear it away from an otherwise transformed stump. */
+{
+  const {run}=editor(fixture(),{ini:'[layers:01:01]\nvoxel-cell = cell:3,3 front:.1 back:.3 top-art:0,0010,0011,0012,0013,0,0,16\n'});
+  run(`SharedRoomPreview.validateScenery=()=>{};SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
+    SharedRoomPreview.voxelObjects=()=>[];SharedRoomPreview.voxelTransformHandles=()=>null;
+    SharedRoomPreview.voxelTile=(x,y)=>({kind:'tile',x,y,front:.1,back:.3,width:16,offset:0,
+      nativeGeometry:x!==3,transformSupported:true});
+    let membershipQueries=0;SharedRoomPreview.voxelGroup=()=>{membershipQueries++;return {supported:true,status:'ok',label:'Stump',
+      cells:[[2,3],[3,3],[2,4],[3,4]],transformSupported:true};};
+    const nativeTransform={px:48,py:80,pz:.2,dx:8,dy:0,dz:0,sx:.5,sy:1,sz:1};
+    VoxelEditor.selectCells([[2,3]]);`);
+  assert.throws(()=>run('VoxelEditor.setTransform(nativeTransform)'),/Select the whole classified object/);
+  assert.equal(run('VoxelEditor.pending()'),false,'partial native membership fails before a draft is staged');
+  assert.throws(()=>run('VoxelEditor.setTransform({...nativeTransform,dx:16})'),/Select the whole classified object/);
+  assert.equal(run('membershipQueries'),1,'a failed membership result is cached until the selection changes');
+  run(`VoxelEditor.selectCells([[2,3],[3,3],[2,4],[3,4]]);
+    VoxelEditor.setTransform({...nativeTransform,dx:0,sx:1});`);
+  assert.equal(run('VoxelEditor.pending()'),false,'unchanged zero movement / 100 percent resize does not author an identity token');
+  run(`VoxelEditor.setTransform(nativeTransform);
+    VoxelEditor.setTransform({...nativeTransform,dx:16});VoxelEditor.afterRender();`);
+  assert.equal(run('membershipQueries'),2,'a complete native component is queried once across preview input and render frames');
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/cell:3,3 .*top-art:0,0010,0011,0012,0013,0,0,16 transform:48,80,0.2,16,0,0,0.5,1,1/,'authored members receive the same group transform without losing artwork');
+  run('VoxelEditor.discard();VoxelEditor.selectCells([[3,3]]);VoxelEditor.setTransform(nativeTransform)');
+  assert.equal(run('membershipQueries'),2,'an independently authored surface subset does not require native component membership');
+  run(`VoxelEditor.discard();loadIniText('[layers:01:01]\\nvoxel-cell = cell:2,3 transform:40,64,.2,8,0,0,1,1,1\\nvoxel-cell = cell:3,3 transform:56,64,.2,0,0,0,1,1,1\\n','mixed-native.ini');
+    VoxelEditor.selectCells([[2,3],[3,3],[2,4],[3,4]]);`);
+  assert.throws(()=>run('VoxelEditor.setTransform(nativeTransform)'),/one shared move\/resize transform/,'one native component cannot receive incompatible composed transforms');
+  assert.equal(run('VoxelEditor.pending()'),false);
+  run(`loadIniText('[layers:01:01]\\nvoxel-cell = cell:2,3 size:2,2 transform:48,80,.2,8,0,0,.5,1,1\\n','reset-native.ini');
+    VoxelEditor.selectCells([[2,3]]);`);
+  assert.throws(()=>run("VoxelEditor.edit('transform',undefined)"),/Select the whole classified object/,'partial Reset move/resize uses the same guard');
+  assert.throws(()=>run('VoxelEditor.resetSelected()'),/Select the whole classified object/,'Reset selected cannot bypass native coherence');
+  assert.throws(()=>run("VoxelEditor.edit('backing','fill')"),/backing-only overrides/,'a repair edit cannot silently promote a native transform into a box');
+  assert.equal(run('VoxelEditor.pending()'),false);
+  run(`VoxelEditor.sampleSettings();VoxelEditor.selectCells([[2,4]]);$('#voxelCopyDepth').checked=false;$('#voxelCopyTransform').checked=true;`);
+  assert.throws(()=>run('VoxelEditor.applySample()'),/Select the whole classified object/,'copying a rebased transform onto one native member is rejected atomically');
+  assert.equal(run('VoxelEditor.pending()'),false);
+  run("VoxelEditor.selectCells([[2,3]]);VoxelEditor.edit('top-art','0,0020,0021,0022,0023,0,0,16')");
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/top-art:0,0020,0021,0022,0023,0,0,16 transform:48,80,0.2,8,0,0,0.5,1,1/,'local artwork preserving the common transform remains editable');
+  run("VoxelEditor.selectCells([[2,3],[3,3],[2,4],[3,4]]);VoxelEditor.edit('transform',undefined)");
+  assert.doesNotMatch(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/transform:/,'whole-group reset succeeds');
+  assert.match(run('VoxelEditor.previewSection(room,roomSectionIni(room))'),/top-art:0,0020/,'whole transform reset retains local artwork');
+  run(`VoxelEditor.discard();loadIniText('[layers:01:01]\\nvoxel-cell = cell:3,3 front:.1 back:.3 transform:48,80,.2,8,0,0,.5,1,1\\n','partial-authored.ini');
+    VoxelEditor.selectCells([[3,3]]);$('#voxelResetProperty').value='depth';`);
+  assert.throws(()=>run('VoxelEditor.resetProperty()'),/Select the whole classified object/,'removing the last authored geometry fields must not create a partial native transform');
+  assert.equal(run('VoxelEditor.pending()'),false);
+  console.log('Native group preflight: complete component membership, shared canonical transform, authored subsets, copy/reset guards, no-op identity and cached queries passed.');
 }
 
 /* Final-battle material uses the same project/undo path as scenery. */
@@ -2562,6 +3145,8 @@ cv('undo()');assert.equal(cv('JSON.stringify(mapBounds(room,0))'),'{"x0":0,"y0":
 cv('redo();tileClipboard={key:keyOf(room,0),w:1,h:1,cells:[blankTile()]};stampTiles(-8,-2);stampTiles(23,17);');
 assert.equal(cv('currentCoveragePlan().fits'),true);
 cv('ctx.strokes=[];drawCoverageGuide();');
+assert.equal(cv('ctx.strokes.length'),0,'coverage overlays start hidden for artwork editing');
+cv("$('#coverageQuick').onclick();ctx.strokes=[];drawCoverageGuide();");
 assert.equal(cv('ctx.strokes[0].color'),'#76d19c');
 cv("$('#coverageAspect').value=String(16/9);$('#coverageAspect').onchange();");
 assert.equal(cv("$('#sharedAspect').value"),String(16/9));

@@ -308,16 +308,17 @@ function actorHit3d(ev) {
 }
 glc.addEventListener('mousedown', ev => {
   if(ev.button===2||macControlClick(ev))return;
+  if(ev.button===1)ev.preventDefault();
   /* Capture the pointer so a drag that leaves the canvas keeps tracking
    * instead of stopping and resuming somewhere else. */
   if (glc.setPointerCapture && ev.pointerId !== undefined)
     try { glc.setPointerCapture(ev.pointerId); } catch (_) {}
-  if (actor.show && !ev.shiftKey && actorHit3d(ev)) {
+  if (ev.button===0 && actor.show && !ev.shiftKey && actorHit3d(ev)) {
     const p = actorPointFromEvent(ev);
     drag = { actor3d:true, ox: p[0]-actor.x, oy: p[1]-actor.y };
     return;
   }
-  drag = { orbit:true, pan:ev.shiftKey, x:ev.clientX, y:ev.clientY }; });
+  drag = { orbit:true, pan:ev.shiftKey&&ev.button!==1, x:ev.clientX, y:ev.clientY }; });
 window.addEventListener('mousemove', ev => {
   if (mode !== '3d' || !drag) return;
   if (drag.actor3d) {
@@ -344,3 +345,4 @@ window.addEventListener('mousemove', ev => {
 glc.addEventListener('wheel', ev => { ev.preventDefault();
   orbit.dist = Math.max(0.4, Math.min(9, orbit.dist * Math.exp(ev.deltaY*0.0012)));
   draw(); }, { passive:false });
+window.addEventListener('blur',()=>{if(drag?.orbit||drag?.actor3d)drag=null;});
