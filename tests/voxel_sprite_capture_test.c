@@ -113,12 +113,18 @@ int main(void) {
       .diorama_voxel=(const struct ActionVoxelGeometry *)1,
       .diorama_plane_request_mask=1u<<SR_PPU_OVERLAY_OBJ,
       .snes_width=384,.snes_height=224,.ws_extra=64,.obj_apron=64,.ws_extra_top=32};
-  /* Floating/falling marsh logs never enter extraction. Without a modeled
-   * owner, their native OBJ winners remain intact for the usual compositor. */
-  Owners(1);CaptureVoxelSprites(&f,&api,NULL,42);
-  assert(!f.voxel_sprites.count && !f.voxel_sprite_atlas.data && !resolves && !rasters);
+  /* Floating marsh logs never enter extraction. Without a modeled owner,
+   * their native OBJ winners remain intact for the usual compositor. */
   source=0xb499;composition=0x45a2;Owners(1);CaptureVoxelSprites(&f,&api,NULL,42);
   assert(!f.voxel_sprites.count && !f.voxel_sprite_atlas.data && !resolves && !rasters);
+  /* A bridge log is one exact 16x16 rectangle with a full solid band. */
+  source=0xb4c0;composition=0x45bc;Owners(1);CaptureVoxelSprites(&f,&api,NULL,42);
+  assert(f.voxel_sprites.count==1 && resolves==4 && rasters==1);
+  assert(f.voxel_sprites.sprites[0].shape==kActRaiserSpriteProp_Log);
+  assert(f.voxel_sprites.sprites[0].owner==0x8e0 && f.voxel_sprites.sprites[0].owner_tag==1);
+  assert(f.voxel_sprites.sprites[0].width==16 && f.voxel_sprites.sprites[0].height==16);
+  assert(f.voxel_sprites.sprites[0].solid_height==16 && !f.voxel_sprites.sprites[0].solid_y);
+  resolves=rasters=0;
   group=4;room=5;source=0xd601;composition=0x4750;
   f.diorama_map_group=4;f.diorama_map_number=5;
   Owners(1);CaptureVoxelSprites(&f,&api,NULL,42);

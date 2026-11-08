@@ -99,16 +99,22 @@ void ActRaiserSpriteOwnership_RecordActionVisual(uint16_t source,uint16_t record
       (first_byte & 3) || (end_byte & 3) ||
       ActRaiserSpriteOwnership_ActionRole(record) != kActRaiserSprite_Enemy)
     return;
-  /* Bloodpool's $B499/$B4C0 floating/falling log actors retain their native
-   * flat artwork in every state. Their $A686 collision companions and native
-   * priority remain unchanged. Static BG1 bridge logs have their own reviewed
-   * map-material geometry; they do not use this sprite-prop path. */
+  /* Bloodpool Act 1 places two native log families (US rows $0A:B4CB-B590,
+   * group table $00:B449). Type $01 starts $B4C0: single 16x16 logs laid in
+   * contiguous bridge runs at cell rows $0F/$16/$18. Those bridge logs are
+   * modeled, including after they begin falling with unchanged artwork.
+   * Type $00 starts $B499: spaced 48x16 logs on the row-$1F waterline. Those
+   * floating logs keep their native flat artwork in every state. $A686
+   * collision companions emit no OAM and are never modeled. */
+  const bool bridge_log = s_build.group==kActRaiserMapGroup_Bloodpool && s_build.map==1 &&
+      source==0xb4c0 && bank==0x7e && animation==0x4000 && composition==0x45bc;
   /* The lava crossing's $D601 emitter keeps composition $4750 while falling
    * under $8661. Its linked $A686 collision record emits no OAM. This is an
    * observed composition identity, independent of pose, position and handler. */
   const bool rock = s_build.group==kActRaiserMapGroup_Aitos && s_build.map==5 &&
       source==0xd601 && bank==0x7e && animation==0x4000 && composition==0x4750;
-  unsigned shape=rock?kActRaiserSpriteProp_RockPlatform:0;
+  unsigned shape=rock?kActRaiserSpriteProp_RockPlatform:
+      bridge_log?kActRaiserSpriteProp_Log:0;
   /* Bloodpool's stationary $BA01 decoration loops in $BA0D with animation
    * state 8 (three native flame pictures). Its sconce and existing glow live
    * on BG1. Source descriptors are canonical US native identities even when

@@ -233,9 +233,10 @@ static void TestVoxelProps(void) {
   CHECK(!ActRaiserSpriteOwnership_Presented(4,4).valid);
   shadow[0]=1;ActRaiserSpriteOwnership_Upload(4,5,shadow);
   CHECK(!ActRaiserSpriteOwnership_Presented(4,5).valid);
-  /* Both native log compositions stay flat at the waterline and on upper
-   * platforms, including unchanged artwork after they begin falling. Actor
-   * ownership and world coordinates still feed priority and lighting. */
+  /* Type $01 bridge logs ($B4C0) are modeled wherever they are, including
+   * after they begin falling with unchanged artwork. Type $00 floating logs
+   * ($B499) stay flat. Ownership and world coordinates still feed priority
+   * and lighting for both. */
   const unsigned log_heights[]={232,488,512};
   for(unsigned short_log=0;short_log<2;++short_log)
   for(unsigned height=0;height<sizeof(log_heights)/sizeof(*log_heights);++height) {
@@ -247,9 +248,11 @@ static void TestVoxelProps(void) {
         short_log?0x45bc:0x45a2,20,80,40,52);
     ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(2,1,shadow);
     o=ActRaiserSpriteOwnership_Presented(2,1);
-    CHECK(o.valid && !ActRaiserSpriteOwnership_PropTag(&o,0xee0));
+    CHECK(o.valid && ActRaiserSpriteOwnership_PropTag(&o,0xee0)==(short_log?11:0));
     for(unsigned slot=10;slot<13;++slot) {
-      CHECK(o.slots[slot]==kActRaiserSprite_Enemy && !o.prop_owner[slot] && !o.prop_shape[slot]);
+      CHECK(o.slots[slot]==kActRaiserSprite_Enemy);
+      CHECK(o.prop_owner[slot]==(short_log?0xee0:0));
+      CHECK(o.prop_shape[slot]==(short_log?kActRaiserSpriteProp_Log:0));
       CHECK(o.world_x[slot]==1040 && o.world_y[slot]==(int)y);
     }
   }
@@ -265,7 +268,9 @@ static void TestVoxelProps(void) {
     ActRaiserSpriteOwnership_Complete(shadow);
     ActRaiserSpriteOwnership_Upload(2,scenario==3?2:1,shadow);
     o=ActRaiserSpriteOwnership_Presented(2,scenario==3?2:1);
-    CHECK(o.valid && !o.prop_shape[3] && !o.prop_owner[3]);
+    /* Scenario 6 is the unchanged bridge log: the positive control. */
+    CHECK(o.valid && o.prop_shape[3]==(scenario==6?kActRaiserSpriteProp_Log:0));
+    CHECK(o.prop_owner[3]==(scenario==6?record:0));
   }
   for(unsigned scenario=0;scenario<7;++scenario) {
     const unsigned room=scenario==1?4:5;
