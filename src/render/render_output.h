@@ -2,6 +2,7 @@
 #define AR_RENDER_OUTPUT_H
 
 #include "render_device.h"
+#include "presentation_options.h"
 
 /* Scoped physical-output frame used by presentation paths that render into an
  * aspect-fit viewport. Begin clears margins when present, selects
@@ -59,5 +60,16 @@ bool ArRenderOutputFrame_RestoreViewport(ArRenderOutputFrame *frame);
  * already-failed scene and deliberately cannot hide the original error. */
 bool ArRenderOutputFrame_Finish(ArRenderOutputFrame *frame);
 void ArRenderOutputFrame_Abort(ArRenderOutputFrame *frame);
+
+/* The game scene may render into a reusable smaller target. Resolve before
+ * drawing flat overlays. The caller cancels any scope left by a failed scene. */
+ArRenderTargetBeginResult ArRenderSceneScale_Begin(
+    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset);
+bool ArRenderSceneScale_Viewport(ArRenderDevice *device, ArRenderRectI *viewport);
+bool ArRenderSceneScale_Resolve(
+    ArRenderDevice *device, ArRenderRectI *viewport, ArRenderFilter filter);
+bool ArRenderSceneScale_ResolveFrame(ArRenderOutputFrame *frame, ArRenderFilter filter);
+bool ArRenderSceneScale_Cancel(ArRenderDevice *device);
+void ArRenderSceneScale_Reset(ArRenderDevice *device);
 
 #endif /* AR_RENDER_OUTPUT_H */

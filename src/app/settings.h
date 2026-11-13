@@ -27,16 +27,6 @@ typedef enum {
 
 enum { kDisplayMode_PresetCount = kDisplayMode_Custom };
 
-typedef enum {
-  kScreenAspect_43 = 0,
-  kScreenAspect_169,
-  kScreenAspect_1610,
-  kScreenAspect_Stretch,   /* fill the window, ignore aspect (was a separate
-                            * "Stretch to window" toggle) */
-  kScreenAspect_Auto,      /* appended: saved manual indices stay stable */
-  kScreenAspect_Count,
-} ScreenAspect;
-
 /* Host window presentation. Borderless is desktop-fullscreen (SDL's default
  * fullscreen); Exclusive requests a real fullscreen video mode. */
 typedef enum {
@@ -359,6 +349,7 @@ typedef struct Settings {
    * render width without reallocating emulated state. */
   int extended_aspect;
   int pixel_aspect;
+  int render_resolution;    /* RenderResolution preset */
   int window_scale;         /* windowed client-size multiple */
   int window_mode;          /* WindowMode: windowed / borderless / exclusive */
   int picture_in_picture_corner; /* PictureInPictureCorner; inset placement */

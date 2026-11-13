@@ -2217,6 +2217,14 @@ static void TestVideoSettingAudit(void) {
 
   const SettingDesc *display = Settings_Find("display_mode");
   const SettingDesc *window_scale = Settings_Find("window_scale");
+  const SettingDesc *resolution = Settings_Find("render_resolution");
+  CHECK(Settings_IsMenuVisible(resolution));
+  CHECK(g_settings.render_resolution == kRenderResolution_Native);
+  CHECK(Settings_SetLong(resolution, kRenderResolution_720p) == kSettingChange_Applied);
+  char preset[24];
+  Settings_FormatValue(resolution, preset, sizeof(preset));
+  CHECK(strcmp(preset, "720p") == 0);
+  CHECK(!Settings_IsMenuVisible(window_scale));
   const SettingDesc *hd = Settings_Find("hd_replacements");
   const SettingDesc *stretch = Settings_Find("ignore_aspect_ratio");
   const SettingDesc *uncapped = Settings_Find("uncapped_framerate");

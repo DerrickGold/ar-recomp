@@ -183,7 +183,11 @@ static bool ActionCamera_DioramaMargins(const ActionBgPlan *plan,
       : kActionVoxelProfile_None;
   capture.framing_y = ActionVoxel_VerticalFraming(framing_profile, capture.framing_y);
   const bool crt = g_settings.pixel_aspect == kPixelAspect_Crt43;
-  const int visible_width = Settings_VisibleWidth();
+  int visible_width = Settings_VisibleWidth();
+  ActRaiserAutoCanvas canvas = {g_ws_display_extra, 0};
+  const bool pillarbox = g_settings.extended_aspect == kScreenAspect_Auto &&
+      DisplayGeometry_CapActionAutoCanvas(&canvas, crt);
+  if (pillarbox) visible_width = kActRaiserAuthenticWidth + 2 * canvas.extra_columns;
   const int visible_height = 224 + (g_settings.extended_aspect == kScreenAspect_Auto
       ? 2 * g_actraiser_display_geometry->auto_vertical_budget : 0);
   int output_width = g_actraiser_display_geometry->output_width;
@@ -193,6 +197,8 @@ static bool ActionCamera_DioramaMargins(const ActionBgPlan *plan,
     output_height = visible_height * (crt ? 6 : 1);
   }
   const bool stretch = Settings_IgnoreAspectRatio();
+  const int fixed_aspect_height = pillarbox ? 9 :
+      visible_width > kActRaiserAuthenticWidth ? Settings_ExtendedAspectY() : 0;
   const DioramaView view = {.camera = {
       .tilt_x = (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad / 1000.0f,
       .tilt_y = (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad / 1000.0f,
@@ -200,7 +206,8 @@ static bool ActionCamera_DioramaMargins(const ActionBgPlan *plan,
     .distance_scale = 1, .camera_framing_weight = 1, .pixel_aspect = g_settings.pixel_aspect,
     .ignore_aspect_ratio = stretch, .visible_width = visible_width, .visible_height = visible_height,
     .viewport = ArPresentationLayout_ResolveViewport(output_width, output_height,
-        stretch, crt, visible_width, visible_height)};
+        stretch, crt && !fixed_aspect_height, fixed_aspect_height ? 16 : visible_width,
+        fixed_aspect_height ? fixed_aspect_height : visible_height)};
   const DioramaTrunkSettings trunk=DioramaTrunk_ResolveForMode(g_settings.diorama_mode,
       g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],room);
   const struct ActionVoxelGeometry *castle = g_settings.diorama_mode == kAction3D_Voxel
@@ -232,7 +239,13 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
   const bool wide = ActionCamera_ResolvePlayfield(&plan);
   const DioramaRoomOverride *room = g_settings.diorama_mode ? ActRaiser_CurrentVirtualLayerRoom() : NULL;
   int horizontal_before, horizontal_after;
-  DioramaCameraPolicy_HorizontalMargins(&plan, room, wide ? g_ws_extra : 0,
+  int margin_budget = wide ? g_ws_extra : 0;
+  if (wide && g_settings.extended_aspect == kScreenAspect_Auto) {
+    ActRaiserAutoCanvas canvas = {g_ws_display_extra, 0};
+    if (DisplayGeometry_CapActionAutoCanvas(&canvas, g_settings.pixel_aspect == kPixelAspect_Crt43))
+      margin_budget = canvas.extra_columns;
+  }
+  DioramaCameraPolicy_HorizontalMargins(&plan, room, margin_budget,
       &horizontal_before, &horizontal_after);
   const uint16_t native_width = ActionCamera_Read16(
       cpu, kActRaiserWram_Bg1Width);

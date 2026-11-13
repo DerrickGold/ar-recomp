@@ -27,6 +27,7 @@
 #include "diorama/diorama.h"
 #include "diorama/diorama_frame_generation.h"
 #include "present/display_geometry.h"
+#include "render/presentation_layout.h"
 #include "host_display_pacing.h"
 #include "host_display_refresh_cache.h"
 #include "host_display_reseed.h"
@@ -432,6 +433,33 @@ void HostDisplay_CalculateWindowSize(int scale, int *width, int *height) {
   if (height) *height = window_height;
 }
 
+bool HostDisplay_ResolvePresetWindowSize(uint32_t display, float pixel_density,
+                                         int *width, int *height) {
+  const int pixels = ArPresentationLayout_RenderHeight(g_settings.render_resolution);
+  if (!pixels || g_settings.window_mode != kWindowMode_Windowed) return false;
+  int aspect_x = Settings_ExtendedAspectX(), aspect_y = Settings_ExtendedAspectY();
+  if (g_settings.extended_aspect == kScreenAspect_Auto && g_window) {
+    SDL_GetWindowSize(g_window, &aspect_x, &aspect_y);
+  }
+  if (aspect_x <= 0 || aspect_y <= 0) {
+    aspect_x = g_settings.extended_aspect == kScreenAspect_Auto ? 16 : 4;
+    aspect_y = g_settings.extended_aspect == kScreenAspect_Auto ? 9 : 3;
+  }
+  const float density = pixel_density > 0.0f ? pixel_density : 1.0f;
+  const int pixel_width = (int)(((int64_t)pixels * aspect_x + aspect_y / 2) / aspect_y);
+  int w = (int)(pixel_width / density + 0.5f), h = (int)(pixels / density + 0.5f);
+  SDL_Rect usable;
+  if (SDL_GetDisplayUsableBounds(display, &usable) && (w > usable.w || h > usable.h)) {
+    const ArRenderRectI fit = ArPresentationLayout_ResolveViewport(
+        usable.w, usable.h, false, false, aspect_x, aspect_y);
+    w = fit.w;
+    h = fit.h;
+  }
+  *width = w > 0 ? w : 1;
+  *height = h > 0 ? h : 1;
+  return true;
+}
+
 void HostDisplay_RecomputeLogicalPresentation(void) {
   if (!g_window || !ArRenderDevice_IsReady(&g_render_device)) return;
   /* Drawable pixels, not window points or the desktop mode. The apply path
@@ -454,9 +482,12 @@ void HostDisplay_ApplyWindowScale(void) {
   HostDisplay_CalculateWindowSize(
       point_scale, &window_width, &window_height);
 
+  const bool preset = HostDisplay_ResolvePresetWindowSize(
+      SDL_GetDisplayForWindow(g_window), Settings_HostPixelDensity(),
+      &window_width, &window_height);
   HostDisplay_RecomputeLogicalPresentation();
-  if (g_settings.window_mode == kWindowMode_Windowed &&
-      g_settings.extended_aspect != kScreenAspect_Auto)
+  if (preset || (g_settings.window_mode == kWindowMode_Windowed &&
+                 g_settings.extended_aspect != kScreenAspect_Auto))
     SDL_SetWindowSize(g_window, window_width, window_height);
 }
 
@@ -530,7 +561,7 @@ static void ResolveVideoGeometry(bool apply_runtime_changes,
     memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
     memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
     HostPpuOutput_Rebind();
-    if (resize_window && !automatic) HostDisplay_ApplyWindowScale();
+    if (resize_window && (!automatic || g_settings.render_resolution)) HostDisplay_ApplyWindowScale();
     HostDisplay_InvalidatePresentHistory();
   }
 
@@ -1054,7 +1085,7 @@ void HostDisplay_ApplySetting(const SettingDesc *desc) {
     HostInput_RequestPausedRedraw();
     return;
   }
-  if (desc->field == &g_settings.window_scale)
+  if (desc->field == &g_settings.window_scale || desc->field == &g_settings.render_resolution)
     HostDisplay_ApplyWindowScale();
   else if (desc->field == &g_settings.display_mode ||
            desc->category == kSettingCat_Widescreen)

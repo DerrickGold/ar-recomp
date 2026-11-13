@@ -1216,22 +1216,41 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
         !ArRenderTexture_IsValid(WorldNavigationComposition_Get()->label))))
     return kPresentationOutcome_CoreFailure;
 
-  const int aspect_width = slot->visible_width *
-      (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
-  const int aspect_height = FrameSlot_VisibleHeight(slot) *
-      (slot->pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
+  const ArRenderExtentI aspect = FrameSlot_Aspect(slot);
   const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   ArRenderOutputFrame output_frame;
   if (!ArRenderOutputFrame_BeginAspectFit(
           &g_render_device, slot->ignore_aspect_ratio,
-          aspect_width, aspect_height, black, black, &output_frame))
+          aspect.width, aspect.height, black, black, &output_frame))
     return kPresentationOutcome_CoreFailure;
-  const ArRenderRectI viewport = {
+  ArRenderRectI viewport = {
     0, 0, output_frame.viewport.w, output_frame.viewport.h,
   };
+  const bool imported = slot->sim.world_travel.imported || slot->sim.world_travel.turning;
+  WorldNavigationProjection projection;
+  const bool flat = imported && slot->sim.world_travel.flat;
+  const PresentationOutcome outcome = flat
+      ? (WorldNavigationImports_DrawFlat(slot, viewport)
+          ? kPresentationOutcome_Complete : kPresentationOutcome_CoreFailure)
+      : DrawWorldNavigationScene(slot, viewport, &projection,
+          (ArRenderPointF){.5f, .72f}, (DeathHeimCompletionArt){0}, false);
+  if (!PresentationOutcome_IsUsable(outcome)) {
+    ArRenderOutputFrame_Abort(&output_frame);
+    return outcome;
+  }
+  if (!composition->empty_animation &&
+      !(flat ? WorldNavigationComposition_DrawLayer(slot, viewport, &composition->palace,
+                  WorldNavigationComposition_Get()->palace, (ArRenderPointF){0}, 1)
+             : DrawWorldNavigationPalace(slot, viewport, &projection))) {
+    ArRenderOutputFrame_Abort(&output_frame);
+    return kPresentationOutcome_CoreFailure;
+  }
+  if (!ArRenderSceneScale_ResolveFrame(&output_frame,
+          flat ? kArRenderFilter_Nearest : kArRenderFilter_Linear))
+    return kPresentationOutcome_CoreFailure;
+  viewport = (ArRenderRectI){0, 0, output_frame.viewport.w, output_frame.viewport.h};
   ArLocalizedPreparedFrame localized_label;
   bool localized_label_ready = false;
-  const bool imported = slot->sim.world_travel.imported || slot->sim.world_travel.turning;
   if (!imported && !composition->empty_animation && composition->label.visible) {
     const ArLocalizationScreenTextRecord *record =
         ArLocalizationFrame_FindScreenText(
@@ -1260,22 +1279,8 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
           bounds, &localized_label);
     }
   }
-  WorldNavigationProjection projection;
-  const bool flat = imported && slot->sim.world_travel.flat;
-  const PresentationOutcome outcome = flat
-      ? (WorldNavigationImports_DrawFlat(slot, viewport)
-          ? kPresentationOutcome_Complete : kPresentationOutcome_CoreFailure)
-      : DrawWorldNavigationScene(slot, viewport, &projection,
-          (ArRenderPointF){.5f, .72f}, (DeathHeimCompletionArt){0}, false);
-  if (!PresentationOutcome_IsUsable(outcome)) {
-    ArRenderOutputFrame_Abort(&output_frame);
-    return outcome;
-  }
   if (!composition->empty_animation &&
-      (!(flat ? WorldNavigationComposition_DrawLayer(slot, viewport, &composition->palace,
-                    WorldNavigationComposition_Get()->palace, (ArRenderPointF){0}, 1)
-              : DrawWorldNavigationPalace(slot, viewport, &projection)) ||
-       !WorldNavigationComposition_DrawLayer(
+      (!WorldNavigationComposition_DrawLayer(
            slot, viewport, &composition->plaque,
            WorldNavigationComposition_Get()->plaque, (ArRenderPointF){0}, 1.0f) ||
        (!imported && !localized_label_ready && composition->label.visible &&

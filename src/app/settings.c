@@ -1402,12 +1402,22 @@ const SettingDesc g_setting_descs[] = {
   { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Screen ratio",
     "4:3, 16:9, 16:10, Stretch, or Auto. Auto adapts action, world navigation, "
     "and towns to the window without stretching. Extra rows need action or "
-    "3D world/town rendering. Scene bounds and capture limits can leave borders.",
+    "3D world/town rendering. Scene bounds and capture limits can leave borders. "
+    "Action is capped at 16:9.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.extended_aspect, kScreenAspect_43,
     kScreenAspect_43, kScreenAspect_Auto, 1, false,
     kScreenAspectLabels, kScreenAspect_Count, NULL, OnScreenRatioChanged,
     ParseExtendedAspect, NULL, .modern_env = true },
+  { "render_resolution", "AR_RENDER_RESOLUTION", "Render resolution",
+    "Limit the game image to this height. Width follows Screen ratio. "
+    "Fixed presets also size the window when it fits. Native follows the output.",
+    kSettingType_Enum, kApply_Callback, kSettingCat_Display,
+    &g_settings.render_resolution, kRenderResolution_Native,
+    kRenderResolution_Native, kRenderResolution_Count - 1, 1, false,
+    (const char *const[]){"Native", "480p", "540p", "720p", "800p", "900p",
+                         "1080p", "1440p", "2160p"},
+    kRenderResolution_Count, NULL, NULL, NULL, NULL, .modern_env = true },
   { "pixel_aspect", "AR_ASPECT_PAR", "Pixel aspect",
     "Use the original 4:3 CRT pixel stretch or square output pixels.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
@@ -1426,7 +1436,7 @@ const SettingDesc g_setting_descs[] = {
     "the window in Windowed mode; fullscreen uses the display's resolution.",
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.window_scale, 3, 1, 8, 1, false, NULL, 0,
-    WindowScaleAvailable, NULL, NULL, NULL, .modern_env = true },
+    WindowScaleAvailable, NULL, NULL, NULL, .modern_env = true, .menu_hidden = true },
   { "picture_in_picture_corner", "AR_PICTURE_IN_PICTURE_CORNER", "PiP corner",
     "Place the authentic picture-in-picture in this corner. Hold Render "
     "comparison to toggle the picture-in-picture view.",
@@ -1710,7 +1720,7 @@ const SettingDesc g_setting_descs[] = {
     Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_render_scale", "AR_SIM3D_VOXEL_RENDER_SCALE",
-    "Voxel render scale",
+    "Voxel edge quality",
     "Native draws directly into the scene. Pixel-clean locks projected "
     "corners to the output pixel grid for crisp voxel edges. Smooth 2x "
     "renders the background voxel pass at double resolution and downsamples "

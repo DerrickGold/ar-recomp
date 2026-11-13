@@ -1,4 +1,15 @@
 [
+  {"key":"setting.render_resolution.label","text":["Render resolution","Résolution de rendu","Renderauflösung","描画解像度"]},
+  {"key":"setting.render_resolution.help","text":["Limit the game image to this height. Width follows Screen ratio. Fixed presets also size the window when it fits. Native follows the output.","Limite la hauteur de rendu du jeu. La largeur suit le format d’écran. Les préréglages dimensionnent aussi la fenêtre si elle tient à l’écran. Natif suit la sortie.","Begrenzt die Höhe des Spielbilds. Die Breite folgt dem Bildschirmformat. Vorgaben passen auch die Fenstergröße an, wenn Platz ist. Nativ folgt der Ausgabe.","ゲーム映像の描画の高さを制限します。幅は画面比率に従います。固定設定は画面に収まる場合にウィンドウサイズも設定します。ネイティブは出力に従います。"]},
+  {"key":"setting.render_resolution.value.0","text":["Native","Natif","Nativ","ネイティブ"]},
+  {"key":"setting.render_resolution.value.1","text":["480p","480p","480p","480p"]},
+  {"key":"setting.render_resolution.value.2","text":["540p","540p","540p","540p"]},
+  {"key":"setting.render_resolution.value.3","text":["720p","720p","720p","720p"]},
+  {"key":"setting.render_resolution.value.4","text":["800p","800p","800p","800p"]},
+  {"key":"setting.render_resolution.value.5","text":["900p","900p","900p","900p"]},
+  {"key":"setting.render_resolution.value.6","text":["1080p","1080p","1080p","1080p"]},
+  {"key":"setting.render_resolution.value.7","text":["1440p","1440p","1440p","1440p"]},
+  {"key":"setting.render_resolution.value.8","text":["2160p","2160p","2160p","2160p"]},
   {"key":"setting.picture_in_picture_corner.label","text":["PiP corner","Coin de l’incrustation","Bild-im-Bild-Ecke","小画面の位置"]},
   {"key":"setting.picture_in_picture_corner.help","text":["Place the authentic picture-in-picture in this corner. Hold Render comparison to toggle the picture-in-picture view.","Place l’image incrustée d’origine dans ce coin. Maintenez Comparaison du rendu pour afficher ou masquer l’incrustation.","Platziert das originale Bild im Bild in dieser Ecke. Rendering-Vergleich gedrückt halten, um das Bild im Bild ein- oder auszublenden.","オリジナル映像の小画面をこの隅に配置します。レンダリング比較を長押しすると、小画面の表示を切り替えます。"]},
   {"key":"setting.picture_in_picture_corner.value.0","text":["Bottom right","En bas à droite","Unten rechts","右下"]},
@@ -2208,10 +2219,10 @@
   {
     "key": "setting.extended_aspect.help",
     "text": [
-      "4:3, 16:9, 16:10, Stretch, or Auto. Auto adapts action, world navigation, and towns to the window without stretching. Extra rows need action or 3D world/town rendering. Scene bounds and capture limits can leave borders.",
-      "4:3, 16:9, 16:10, Étirer ou Auto. Auto adapte l’action, la navigation mondiale et les villes à la fenêtre sans étirement. Les lignes supplémentaires nécessitent l’action ou le rendu 3D du monde ou des villes. Les limites de scène et de capture peuvent laisser des bordures.",
-      "4:3, 16:9, 16:10, Strecken oder Auto. Auto passt Action, Weltnavigation und Städte ohne Strecken ans Fenster an. Zusätzliche Zeilen benötigen Action oder die 3D-Darstellung von Welt oder Stadt. Szenen- und Aufnahmegrenzen können Ränder lassen.",
-      "4:3、16:9、16:10、引き伸ばし、または自動。自動はアクション、ワールド移動、街の表示を引き伸ばさずにウィンドウに合わせます。上下の拡張にはアクション、またはワールド・街の3D描画が必要です。シーンや描画範囲の制限により余白が残る場合があります。"
+      "4:3, 16:9, 16:10, Stretch, or Auto. Auto adapts action, world navigation, and towns to the window without stretching. Extra rows need action or 3D world/town rendering. Scene bounds and capture limits can leave borders. Action is capped at 16:9.",
+      "4:3, 16:9, 16:10, Étirer ou Auto. Auto adapte l’action, la navigation mondiale et les villes à la fenêtre sans étirement. Les lignes supplémentaires nécessitent l’action ou le rendu 3D du monde ou des villes. Les limites de scène et de capture peuvent laisser des bordures. Les niveaux d’action sont limités au 16:9.",
+      "4:3, 16:9, 16:10, Strecken oder Auto. Auto passt Action, Weltnavigation und Städte ohne Strecken ans Fenster an. Zusätzliche Zeilen benötigen Action oder die 3D-Darstellung von Welt oder Stadt. Szenen- und Aufnahmegrenzen können Ränder lassen. Actionlevel sind auf 16:9 begrenzt.",
+      "4:3、16:9、16:10、引き伸ばし、または自動。自動はアクション、ワールド移動、街の表示を引き伸ばさずにウィンドウに合わせます。上下の拡張にはアクション、またはワールド・街の3D描画が必要です。シーンや描画範囲の制限により余白が残る場合があります。 アクションステージは16:9までです。"
     ]
   },
   {
@@ -4823,7 +4834,7 @@
   {"key":"setting.sim3d_voxel_facing.label","text":["Voxel camera facing","Orientation des voxels","Voxel-Kameraausrichtung","ボクセルのカメラ向き"]},
   {"key":"setting.sim3d_voxel_facing.value.0","text":["Shared lean","Inclinaison commune","Gemeinsame Neigung","共通の傾き"]},
   {"key":"setting.sim3d_voxel_facing.value.1","text":["Per-model lean","Inclinaison par modèle","Neigung je Modell","モデルごとの傾き"]},
-  {"key":"setting.sim3d_voxel_render_scale.label","text":["Voxel render scale","Échelle de rendu des voxels","Voxel-Renderskalierung","ボクセルの描画倍率"]},
+  {"key":"setting.sim3d_voxel_render_scale.label","text":["Voxel edge quality","Qualité des contours des voxels","Voxel-Kantenqualität","ボクセルの輪郭品質"]},
   {"key":"setting.sim3d_voxel_render_scale.value.0","text":["Native","D’origine","Original","元の表示"]},
   {"key":"setting.sim3d_voxel_render_scale.value.1","text":["Smooth 2x","Lissé 2x","Glatt 2x","滑らか2倍"]},
   {"key":"setting.sim3d_voxel_render_scale.value.2","text":["Pixel-clean","Pixels nets","Pixelscharf","くっきりピクセル"]},

@@ -98,6 +98,21 @@ void ArPresentationLayout_ResolveLogicalSize(
     *logical_height = visible_height * (crt_pixel_aspect ? 6 : 1);
 }
 
+int ArPresentationLayout_RenderHeight(int preset) {
+  static const int heights[kRenderResolution_Count] = {
+    0, 480, 540, 720, 800, 900, 1080, 1440, 2160,
+  };
+  return preset >= 0 && preset < kRenderResolution_Count ? heights[preset] : 0;
+}
+
+ArRenderExtentI ArPresentationLayout_RenderExtent(ArRenderRectI viewport, int preset) {
+  const int height = ArPresentationLayout_RenderHeight(preset);
+  if (viewport.w <= 0 || height <= 0 || viewport.h <= height)
+    return (ArRenderExtentI){viewport.w, viewport.h};
+  const int width = (int)(((int64_t)viewport.w * height + viewport.h / 2) / viewport.h);
+  return (ArRenderExtentI){width > 0 ? width : 1, height};
+}
+
 ArRenderRectI ArPresentationLayout_ResolveViewport(
     int output_width, int output_height, bool stretch,
     bool crt_pixel_aspect, int visible_width, int visible_height) {

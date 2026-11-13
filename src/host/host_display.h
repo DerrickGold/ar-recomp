@@ -58,6 +58,8 @@ extern const uint64_t kHostDisplayEmulationFrameIntervalNs;
 void HostDisplay_SetWidescreenRuntimeAllowed(bool allowed);
 void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes);
 void HostDisplay_CalculateWindowSize(int scale, int *width, int *height);
+bool HostDisplay_ResolvePresetWindowSize(uint32_t display, float pixel_density,
+                                         int *width, int *height);
 void HostDisplay_RecomputeLogicalPresentation(void);
 void HostDisplay_ApplyWindowScale(void);
 

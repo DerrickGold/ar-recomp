@@ -4,6 +4,14 @@
 
 #include "presentation_layout.h"
 
+static struct {
+  ArRenderDevice *device;
+  ArRenderTexture texture;
+  ArRenderExtentI extent;
+  ArRenderRectI destination;
+  ArRenderTargetState parent;
+} s_scene_scale;
+
 static void ResetFrame(ArRenderOutputFrame *frame) {
   if (frame) memset(frame, 0, sizeof(*frame));
 }
@@ -35,8 +43,10 @@ bool ArRenderOutput_ResolveAspectFit(
       width <= 0 || height <= 0)
     return false;
 
-  const ArRenderRectI resolved = ArPresentationLayout_ResolveViewport(
-      width, height, stretch, false, aspect_width, aspect_height);
+  ArRenderRectI resolved;
+  if (!ArRenderSceneScale_Viewport(device, &resolved))
+    resolved = ArPresentationLayout_ResolveViewport(
+        width, height, stretch, false, aspect_width, aspect_height);
   *viewport = resolved;
   if (output_width) *output_width = width;
   if (output_height) *output_height = height;
@@ -163,4 +173,84 @@ void ArRenderOutputFrame_Abort(ArRenderOutputFrame *frame) {
   if (!frame->viewport_is_output)
     (void)ArRenderDevice_SetViewport(frame->device, NULL);
   ResetFrame(frame);
+}
+
+ArRenderTargetBeginResult ArRenderSceneScale_Begin(
+    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset) {
+  const ArRenderExtentI extent = ArPresentationLayout_RenderExtent(destination, preset);
+  if (extent.width <= 0 || extent.height <= 0 || extent.height == destination.h)
+    return kArRenderTargetBegin_Omitted;
+  if (s_scene_scale.parent.valid) return kArRenderTargetBegin_StateLost;
+  if (s_scene_scale.device != device || !ArRenderTexture_IsValid(s_scene_scale.texture) ||
+      extent.width != s_scene_scale.extent.width ||
+      extent.height != s_scene_scale.extent.height) {
+    ArRenderSceneScale_Reset(s_scene_scale.device);
+    const ArRenderTextureDesc desc = {
+      .width = extent.width, .height = extent.height,
+      .format = kArRenderPixelFormat_Argb8888, .usage = kArRenderTextureUsage_Target,
+      .filter = kArRenderFilter_Linear, .blend = kArRenderBlendMode_Opaque,
+    };
+    if (!ArRenderDevice_CreateTexture(device, &desc, &s_scene_scale.texture))
+      return kArRenderTargetBegin_Omitted;
+    s_scene_scale.extent = extent;
+  }
+  s_scene_scale.device = device;
+  s_scene_scale.destination = destination;
+  return ArRenderDevice_BeginTarget(device, s_scene_scale.texture, &s_scene_scale.parent);
+}
+
+bool ArRenderSceneScale_Viewport(ArRenderDevice *device, ArRenderRectI *viewport) {
+  if (s_scene_scale.device != device || !s_scene_scale.parent.valid) return false;
+  *viewport = (ArRenderRectI){0, 0, s_scene_scale.extent.width, s_scene_scale.extent.height};
+  return true;
+}
+
+bool ArRenderSceneScale_Cancel(ArRenderDevice *device) {
+  if (s_scene_scale.device != device || !s_scene_scale.parent.valid) return true;
+  const bool restored = ArRenderDevice_EndTarget(device, &s_scene_scale.parent);
+  s_scene_scale.parent = (ArRenderTargetState){0};
+  return restored;
+}
+
+bool ArRenderSceneScale_Resolve(
+    ArRenderDevice *device, ArRenderRectI *viewport, ArRenderFilter filter) {
+  if (s_scene_scale.device != device || !s_scene_scale.parent.valid) return true;
+  const ArRenderRectF source = {viewport->x, viewport->y, viewport->w, viewport->h};
+  if (!ArRenderSceneScale_Cancel(device)) return false;
+  *viewport = s_scene_scale.destination;
+  const ArRenderColorF black = {0, 0, 0, 1};
+  ArRenderOutputFrame output;
+  if (!ArRenderOutputFrame_Begin(device, *viewport, black, black, &output))
+    return false;
+  const ArRenderRectF destination = {0, 0, viewport->w, viewport->h};
+  const ArRenderDrawState state = {.flags = kArRenderDrawState_Filter, .filter = filter};
+  const bool drawn = ArRenderDevice_DrawTextureWithState(
+      device, s_scene_scale.texture, &source, &destination, &state);
+  return ArRenderOutputFrame_Finish(&output) && drawn;
+}
+
+bool ArRenderSceneScale_ResolveFrame(ArRenderOutputFrame *frame, ArRenderFilter filter) {
+  if (!frame || !frame->active) return false;
+  if (s_scene_scale.device != frame->device || !s_scene_scale.parent.valid) return true;
+  ArRenderDevice *device = frame->device;
+  ArRenderRectI viewport = frame->viewport;
+  if (!ArRenderOutputFrame_Finish(frame) ||
+      !ArRenderSceneScale_Resolve(device, &viewport, filter))
+    return false;
+  int width, height;
+  if (!ArRenderDevice_GetOutputSize(device, &width, &height)) return false;
+  const bool full = viewport.x == 0 && viewport.y == 0 &&
+      viewport.w == width && viewport.h == height;
+  if (!full && !ArRenderDevice_SetViewport(device, &viewport)) return false;
+  *frame = (ArRenderOutputFrame){
+    .device = device, .viewport = viewport, .output_width = width, .output_height = height,
+    .viewport_is_output = full, .active = true,
+  };
+  return true;
+}
+
+void ArRenderSceneScale_Reset(ArRenderDevice *device) {
+  if (device != s_scene_scale.device) return;
+  ArRenderDevice_DestroyTexture(device, s_scene_scale.texture);
+  memset(&s_scene_scale, 0, sizeof(s_scene_scale));
 }

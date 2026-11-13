@@ -1675,6 +1675,8 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_render_sdl_state_test
         tests/render_sdl_state_test.c
+        src/render/render_output.c
+        src/render/presentation_layout.c
     )
     target_link_libraries(actraiser_render_sdl_state_test PRIVATE
         actraiser_render_sdl_test_support)

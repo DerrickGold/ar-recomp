@@ -81,6 +81,38 @@ static void TestSceneCanvasLimits(void) {
   }
 }
 
+static void TestRenderPresetsAndActionCap(void) {
+  const ArRenderRectI images[] = {{0,0,1920,1440}, {0,0,2560,1440}, {0,0,2304,1440}};
+  const int widths[] = {960, 1280, 1152};
+  for (unsigned i = 0; i < sizeof(images) / sizeof(images[0]); ++i) {
+    const ArRenderExtentI extent =
+        ArPresentationLayout_RenderExtent(images[i], kRenderResolution_720p);
+    assert(extent.width == widths[i] && extent.height == 720);
+  }
+  FrameSlot slot = {.visible_width = 342, .snes_height = 224,
+      .pixel_aspect = kPixelAspect_Crt43, .extended_aspect = kScreenAspect_169};
+  ArRenderExtentI aspect = FrameSlot_Aspect(&slot);
+  assert(aspect.width == 16 && aspect.height == 9);
+  slot.extended_aspect = kScreenAspect_1610;
+  aspect = FrameSlot_Aspect(&slot);
+  assert(aspect.width == 16 && aspect.height == 10);
+  slot.visible_width = 256;
+  aspect = FrameSlot_Aspect(&slot);
+  assert(aspect.width == 256 * 7 && aspect.height == 224 * 6);
+  const ArRenderExtentI smaller = ArPresentationLayout_RenderExtent(
+      (ArRenderRectI){0,0,640,480}, kRenderResolution_720p);
+  assert(smaller.width == 640 && smaller.height == 480);
+  for (int crt = 0; crt <= 1; ++crt) {
+    ActRaiserAutoCanvas wide;
+    assert(DisplayGeometry_ResolveAutoCanvas(3440, 1440, crt, &wide));
+    ActRaiserAutoCanvas action = wide;
+    assert(DisplayGeometry_CapActionAutoCanvas(&action, crt));
+    assert(action.extra_columns == (crt ? 43 : 72) && action.extra_rows == 0);
+    assert(wide.extra_columns > action.extra_columns);
+    assert(!DisplayGeometry_CapActionAutoCanvas(&action, crt));
+  }
+}
+
 static void TestNativeOverlayPlacement(void) {
   FrameSlot frame = {.snes_width=496,.snes_height=224,
       .visible_width=256,.visible_x0=120};
@@ -195,6 +227,7 @@ static void TestCapturePlacement(void) {
 int main(void) {
   TestGeometry();
   TestSceneCanvasLimits();
+  TestRenderPresetsAndActionCap();
   TestNativeOverlayPlacement();
   TestPictureInPictureCorners();
   assert(SDL_Init(0));

@@ -156,6 +156,7 @@ typedef struct FrameSlot {
   bool ws_active;
   int ws_extra;
   bool ignore_aspect_ratio;
+  bool action_auto_pillarbox;
   int visible_x0;
   int visible_width;
   int visible_height; /* Requested canvas, independent of bounded capture. */
@@ -378,6 +379,23 @@ typedef struct FrameSlot {
 /* Zero-initialized native/test slots retain the authentic-height default. */
 static inline int FrameSlot_VisibleHeight(const FrameSlot *slot) {
   return slot->visible_height > 0 ? slot->visible_height : slot->snes_height;
+}
+/* Use exact widescreen ratios when the capture can supply the wide view.
+ * Authentic fallbacks retain the aspect of their captured image. */
+static inline ArRenderExtentI FrameSlot_FixedAspect(const FrameSlot *slot) {
+  if (slot->action_auto_pillarbox) return (ArRenderExtentI){16, 9};
+  if (slot->visible_width > kFrameSlotAuthenticWidth) {
+    if (slot->extended_aspect == kScreenAspect_169) return (ArRenderExtentI){16, 9};
+    if (slot->extended_aspect == kScreenAspect_1610) return (ArRenderExtentI){16, 10};
+  }
+  return (ArRenderExtentI){0};
+}
+static inline ArRenderExtentI FrameSlot_Aspect(const FrameSlot *slot) {
+  const ArRenderExtentI fixed = FrameSlot_FixedAspect(slot);
+  if (fixed.width) return fixed;
+  const bool crt = slot->pixel_aspect == kPixelAspect_Crt43;
+  return (ArRenderExtentI){slot->visible_width * (crt ? 7 : 1),
+                          FrameSlot_VisibleHeight(slot) * (crt ? 6 : 1)};
 }
 static inline int FrameSlot_CaptureHeight(const FrameSlot *slot) {
   return slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom;

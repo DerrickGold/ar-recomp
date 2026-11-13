@@ -161,7 +161,8 @@ static ArImportedGameView CaptureView(void) {
     ArPresentationCanvas canvas = {0};
     ArPresentationLayout_ResolveCanvas(width, height, crt,
         (ArPresentationCanvasLimits){256, 224, 128, 64}, &canvas);
-    view.extra_columns = canvas.extra_columns;
+    const int action_limit = ArPresentationLayout_ResolveHorizontalMargin(256, 224, 16, 9, crt, 128);
+    view.extra_columns = canvas.extra_columns < action_limit ? canvas.extra_columns : action_limit;
     view.extra_rows = canvas.extra_rows;
   } else if (g_settings.display_mode != kDisplayMode_43 && g_settings.ws_action) {
     view.extra_columns = ArPresentationLayout_ResolveHorizontalMargin(256, 224,

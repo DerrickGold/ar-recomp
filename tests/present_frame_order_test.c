@@ -6,6 +6,7 @@
 #include "present/present_internal.h"
 #include "sim/menu/present_sim_menu.h"
 #include "render/crt_post.h"
+#include "render/render_output.h"
 #include "present/render_comparison.h"
 #include "app/session_fatal.h"
 #include "app/settings.h"
@@ -29,6 +30,7 @@ static int s_expected_stages;
 static uint64_t s_authentic_uploaded_serial;
 static bool s_dialogue_ready;
 static bool s_fail_scene;
+static bool s_scaled_scene;
 static int s_menu_draws;
 static bool s_separate_window;
 static int s_separate_draws;
@@ -103,11 +105,28 @@ bool CrtPost_Begin(ArRenderDevice *device, const CrtPostConfig *config) {
   return true;
 }
 
+ArRenderTargetBeginResult ArRenderSceneScale_Begin(
+    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset) {
+  CHECK(device == &g_render_device);
+  CHECK(RectsEqual(destination, kFallback));
+  CHECK(preset == kRenderResolution_540p && s_stage == 2 && !s_scaled_scene);
+  s_scaled_scene = true;
+  return kArRenderTargetBegin_Ready;
+}
+
+bool ArRenderSceneScale_Cancel(ArRenderDevice *device) {
+  CHECK(device == &g_render_device && s_stage == 3);
+  s_scaled_scene = false;
+  return true;
+}
+
 uint64_t PresentAuthenticUploadedFrameSerial(void) {
   return s_authentic_uploaded_serial;
 }
 
 void PresentCompositeScene(const FrameSlot *slot, float alpha) {
+  CHECK(s_scaled_scene == (g_settings.render_resolution != kRenderResolution_Native &&
+                          !(slot->inidisp & 0x80) && (slot->inidisp & 15)));
   CHECK(s_stage++ == 2);
   CHECK(slot == s_expected_slot);
   CHECK(alpha == s_expected_alpha);
@@ -218,6 +237,8 @@ int main(int argc, char **argv) {
   s_expected_transition_alpha = 0;
   s_expected_stages = 5;
   if (argc == 2 && strcmp(argv[1], "scene-failure") == 0) {
+    slot.inidisp = 15;
+    g_settings.render_resolution = kRenderResolution_540p;
     s_fail_scene = true;
     (void)PresentFrame(&slot, s_expected_alpha, s_expected_presentation_fps);
     CHECK(SessionFatal_Requested());
@@ -235,6 +256,10 @@ int main(int argc, char **argv) {
   slot.visible_height = slot.visible_top = slot.ws_extra_bottom = 0;
 
   slot.inidisp = 0x0f;
+  g_settings.render_resolution = kRenderResolution_540p;
+  RunCase(&slot);
+  CHECK(!s_scaled_scene);
+  g_settings.render_resolution = kRenderResolution_Native;
   slot.localization.dialogue_ticket = 10;
   s_dialogue_ready = true;
   RunCase(&slot);

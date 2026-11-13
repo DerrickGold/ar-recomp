@@ -591,7 +591,7 @@ cannot be decoded. No ROM-derived graphics are committed.
 ## Display and scaling
 
 Screen ratio offers 4:3, 16:9, 16:10, Stretch, and Auto. Ratio, pixel aspect, render profile,
-renderer path, render scale, window mode, stretching, HUD/menu scale, and
+renderer path, render resolution, window mode, stretching, HUD/menu scale, and
 widescreen policy changes apply live.
 
 **Auto** fits action stages, world navigation and simulation towns to the
@@ -604,13 +604,24 @@ Unavailable room rows remain blank instead of stretching the level. Enhanced
 3D towns and world navigation project extra rows from their host-owned worlds;
 classic flat towns, Mode 7 and the Sky Palace extend horizontally while keeping
 their native height. Title screens and cutscenes retain their original framing.
-Auto works with flat and 3D action rendering; a manually adjusted 3D camera
-still controls its own zoom and pose.
+In flat and 3D action stages, Auto caps the game view at 16:9 and adds side
+bars on wider displays. Manual 3D camera controls still adjust zoom and pose.
 Returning to a fixed ratio restores its saved render-profile settings.
 
-*Render scale* is the internal render/upscale multiple of the SNES output
-(1–8, default 3). Higher values render more actual detail in the 3D town and
-Mode 7 paths and downsample into the window. *Refresh rate* is Vsync (timed by
+**Render resolution** defaults to **Native**. Fixed presets cap the game
+image at 480p, 540p, 720p, 800p, 900p, 1080p, 1440p, or 2160p. Width follows
+the fitted game view. At 720p, a 16:9 view renders at 1280×720 and a 16:10
+view renders at 1152×720. This applies to flat rendering, action 3D, towns,
+and world navigation. Flat HUD and menus use the drawable resolution.
+
+In Windowed mode, selecting a preset sizes the window to that resolution
+where it fits on the display. You can still resize the window. A smaller
+game area renders at its available size. Fullscreen uses the display's
+current mode. Native window sizing still reads the saved `window_scale`
+value. The separate **Voxel edge quality** setting controls edge treatment
+in 3D towns.
+
+*Refresh rate* is Vsync (timed by
 the SDL renderer), Uncapped (vsync off with a soft 2× nominal-display-refresh
 cap), Limit with a chosen target FPS, or Unlimited (vsync and host presentation
 throttling off). The optional *FPS counter* reports completed host presents in

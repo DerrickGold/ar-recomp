@@ -38,6 +38,15 @@ ActRaiserAutoCanvas DisplayGeometry_ConstrainAutoCanvas(
   return (ActRaiserAutoCanvas){0};
 }
 
+bool DisplayGeometry_CapActionAutoCanvas(ActRaiserAutoCanvas *canvas, bool crt_pixel_aspect) {
+  const int limit = ArPresentationLayout_ResolveHorizontalMargin(
+      kActRaiserAuthenticWidth, kActRaiserAuthenticHeight, 16, 9,
+      crt_pixel_aspect, kActRaiserWidescreenExtraMax);
+  if (canvas->extra_columns <= limit) return false;
+  canvas->extra_columns = limit;
+  return true;
+}
+
 static ActRaiserDisplayGeometry s_geometry;
 
 const ActRaiserDisplayGeometry *const g_actraiser_display_geometry =

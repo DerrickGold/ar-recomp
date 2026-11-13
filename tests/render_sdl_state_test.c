@@ -1,4 +1,5 @@
 #include "platform/sdl/render_sdl_internal.h"
+#include "render/render_output.h"
 
 #include <SDL3/SDL.h>
 #include "support/test_assert.h"
@@ -58,7 +59,45 @@ static void AssertTextureState(SDL_Texture *texture,
   assert(actual_blend == blend);
 }
 
+static void TestScaledScene(void) {
+  SDL_Surface *surface = SDL_CreateSurface(1720, 720, SDL_PIXELFORMAT_ARGB8888);
+  assert(surface);
+  SDL_Renderer *renderer = SDL_CreateSoftwareRenderer(surface);
+  assert(renderer);
+  ArSdlRenderBackend backend = {0};
+  ArRenderDevice device = {0};
+  assert(ArSdlRenderBackend_Bind(&device, &backend, renderer));
+
+  const ArRenderRectI image = {220, 0, 1280, 720};
+  const ArRenderColorF black = {0, 0, 0, 1}, red = {1, 0, 0, 1};
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_480p) ==
+         kArRenderTargetBegin_Ready);
+  ArRenderOutputFrame frame;
+  assert(ArRenderOutputFrame_BeginAspectFit(&device, false, 16, 9, black, red, &frame));
+  assert(frame.viewport.w == 853 && frame.viewport.h == 480);
+  assert(ArRenderSceneScale_ResolveFrame(&frame, kArRenderFilter_Nearest));
+  assert(frame.viewport.x == 220 && frame.viewport.w == 1280 && frame.viewport.h == 720);
+  const ArRenderRectF marker = {0, 0, 1, 1};
+  assert(ArRenderDevice_DrawSolidRect(&device, &marker, (ArRenderColorF){1, 1, 1, 1},
+                                    kArRenderBlendMode_Opaque));
+  assert(ArRenderOutputFrame_Finish(&frame));
+  SDL_Surface *readback = SDL_RenderReadPixels(renderer, NULL);
+  assert(readback);
+  Uint8 r, g, b, a;
+  assert(SDL_ReadSurfacePixel(readback, 219, 0, &r, &g, &b, &a) && r == 0 && g == 0);
+  assert(SDL_ReadSurfacePixel(readback, 220, 0, &r, &g, &b, &a) && r == 255 && g == 255);
+  assert(SDL_ReadSurfacePixel(readback, 221, 0, &r, &g, &b, &a) && r == 255 && g == 0);
+  assert(SDL_ReadSurfacePixel(readback, 1499, 719, &r, &g, &b, &a) && r == 255 && g == 0);
+  assert(SDL_ReadSurfacePixel(readback, 1500, 719, &r, &g, &b, &a) && r == 0 && g == 0);
+  SDL_DestroySurface(readback);
+  ArRenderSceneScale_Reset(&device);
+  ArSdlRenderBackend_Destroy(&device);
+  SDL_DestroyRenderer(renderer);
+  SDL_DestroySurface(surface);
+}
+
 int main(void) {
+  TestScaledScene();
   SDL_Surface *surface = SDL_CreateSurface(
       16, 16, SDL_PIXELFORMAT_ARGB8888);
   assert(surface);

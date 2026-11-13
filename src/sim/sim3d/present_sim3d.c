@@ -2015,15 +2015,12 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
             (unsigned)slot->sim.projection_distance_x100);
   }
 
-  const int aspect_width = slot->visible_width *
-      (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
-  const int aspect_height = FrameSlot_VisibleHeight(slot) *
-      (slot->pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
+  const ArRenderExtentI aspect = FrameSlot_Aspect(slot);
   const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   ArRenderOutputFrame output_frame;
   if (!ArRenderOutputFrame_BeginAspectFit(
           &g_render_device, slot->ignore_aspect_ratio,
-          aspect_width, aspect_height, black, black, &output_frame)) {
+          aspect.width, aspect.height, black, black, &output_frame)) {
     Sim3DPerformance_EndPresentation();
     return kPresentationOutcome_CoreFailure;
   }
@@ -2045,6 +2042,13 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
     Sim3DPerformance_EndPresentation();
     return outcome;
   }
+  const ArRenderFilter filter = slot->sim.effective_features & kSimFeature_GroundProjection
+      ? kArRenderFilter_Linear : kArRenderFilter_Nearest;
+  if (!ArRenderSceneScale_ResolveFrame(&output_frame, filter)) {
+    Sim3DPerformance_EndPresentation();
+    return kPresentationOutcome_CoreFailure;
+  }
+  viewport = (ArRenderRectI){0, 0, output_frame.viewport.w, output_frame.viewport.h};
   PublishSimCraterAnchor(slot,&crater);
 
   /* A full SIM capture temporarily supersedes the normal widescreen town-HUD

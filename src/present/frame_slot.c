@@ -187,16 +187,20 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   dst->ignore_aspect_ratio = Settings_IgnoreAspectRatio();
   dst->visible_x0 = Settings_VisibleX0();
   dst->visible_width = Settings_VisibleWidth();
+  dst->action_auto_pillarbox = false;
   if (dst->extended_aspect == kScreenAspect_Auto) {
     const SimViewKind sim_view = Sim3D_PresentationDecision(&dst->sim).view;
     const bool projected_sim = sim_view == kSimView_WorldNavigation ||
         (sim_view == kSimView_Enhanced &&
          (dst->sim.effective_features & kSimFeature_GroundProjection));
-    const ActRaiserAutoCanvas canvas = DisplayGeometry_ConstrainAutoCanvas(
+    ActRaiserAutoCanvas canvas = DisplayGeometry_ConstrainAutoCanvas(
         (ActRaiserAutoCanvas){g_ws_display_extra,
             g_actraiser_display_geometry->auto_vertical_budget},
         g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
         have_ppu_view ? ppu_view.state.bg_mode : -1, projected_sim);
+    if (ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]))
+      dst->action_auto_pillarbox = DisplayGeometry_CapActionAutoCanvas(
+          &canvas, dst->pixel_aspect == kPixelAspect_Crt43);
     dst->visible_x0 = dst->ws_extra - canvas.extra_columns;
     dst->visible_width = kFrameSlotAuthenticWidth + 2 * canvas.extra_columns;
     dst->visible_top = canvas.extra_rows;

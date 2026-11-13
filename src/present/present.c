@@ -228,14 +228,11 @@ void PresentUpload(const FrameSlot *slot) {
 bool Present_ResolveOutputViewport(
     ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI *viewport) {
   if (!slot || !viewport) return false;
-  const int aspect_width = slot->visible_width *
-      (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
-  const int aspect_height = FrameSlot_VisibleHeight(slot) *
-      (slot->pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
+  const ArRenderExtentI aspect = FrameSlot_Aspect(slot);
   ArRenderRectI resolved;
   if (!ArRenderOutput_ResolveAspectFit(
           device, slot->ignore_aspect_ratio,
-          aspect_width, aspect_height, &resolved, NULL, NULL))
+          aspect.width, aspect.height, &resolved, NULL, NULL))
     return false;
   *viewport = resolved;
   return true;
@@ -421,6 +418,7 @@ bool Present_EffectRendererSupported(void) {
  * does not emit _DEVICE_RESET at all — this is a Windows-D3D and
  * Vulkan-backed (Steam Deck) bug. */
 void PresentRendererResources_Reset(void) {
+  ArRenderSceneScale_Reset(&g_render_device);
   PresentDiorama_Reset(&g_render_device);
   PerformanceOverlay_Reset(&g_render_device);
   Sim3DTextures_ResetUploads();
@@ -582,6 +580,10 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   }
   PresentActionHeat_End(&g_render_device, slot, output_viewport);
   if (SessionFatal_Requested()) return;
+  if (!ArRenderSceneScale_Resolve(&g_render_device, &output_viewport, kArRenderFilter_Nearest)) {
+    SessionFatal_Request("The renderer could not upscale the game scene.");
+    return;
+  }
   PresentHdReplacements_DrawScreen(&g_render_device, slot, output_viewport);
   /* The captured BG3 surface is transparent outside its visible cells, so it
    * can be the final single unit without covering a BG1/BG2 HD replacement.
@@ -604,6 +606,7 @@ bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
    * image, not the player's independent display treatment. */
   if (!ArRenderDevice_SetClipRect(&g_render_device, NULL))
     return false;
+  (void)ArRenderSceneScale_Viewport(&g_render_device, &viewport);
   const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   ArRenderOutputFrame output_frame;
   if (!ArRenderOutputFrame_Begin(
@@ -619,7 +622,8 @@ bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
     0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
   };
   bool drawn;
-  if (PresentSimMenu_Active(slot)) {
+  const bool menu = PresentSimMenu_Active(slot);
+  if (menu) {
     const ArRenderRectI local = {0, 0, viewport.w, viewport.h};
     if (slot->sim.separated_valid)
       drawn = PresentSimMenuFlatTown(slot,
@@ -629,14 +633,17 @@ bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
       drawn = ArRenderDevice_DrawTexture(&g_render_device, g_texture,
                                          &clean_source, &destination);
     }
-    if (drawn) PresentHud_DrawComposited(&g_render_device, slot, local);
   } else drawn = ArRenderDevice_DrawTexture(
       &g_render_device, g_authentic_texture, &source, &destination);
   if (!drawn) {
     ArRenderOutputFrame_Abort(&output_frame);
     return false;
   }
-  return ArRenderOutputFrame_Finish(&output_frame);
+  if (!ArRenderOutputFrame_Finish(&output_frame) ||
+      !ArRenderSceneScale_Resolve(&g_render_device, &viewport, kArRenderFilter_Nearest))
+    return false;
+  if (menu) PresentHud_DrawComposited(&g_render_device, slot, viewport);
+  return true;
 }
 
 bool PresentAuthenticComparisonImage(const FrameSlot *slot,

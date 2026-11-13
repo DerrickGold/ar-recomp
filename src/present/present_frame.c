@@ -5,6 +5,7 @@
 
 #include "constants.h"
 #include "render/crt_post.h"
+#include "render/render_output.h"
 #include "present/present_internal.h"
 #include "sim/menu/present_sim_menu.h"
 #include "present/render_comparison.h"
@@ -44,6 +45,22 @@ static ArRenderRectI EndCrtPost(int scan_columns, int scan_lines,
       &g_render_device, scan_columns, scan_lines, image);
   PerformanceMetrics_End(performance);
   return result;
+}
+
+static bool BeginSceneResolution(ArRenderRectI viewport) {
+  if (g_settings.render_resolution == kRenderResolution_Native) return true;
+  const ArRenderTargetBeginResult result = ArRenderSceneScale_Begin(
+      &g_render_device, viewport, g_settings.render_resolution);
+  if (result != kArRenderTargetBegin_StateLost) return true;
+  SessionFatal_Request("The renderer could not restore its output while setting up render resolution.");
+  return false;
+}
+
+static void EndSceneResolution(void) {
+  if (g_settings.render_resolution != kRenderResolution_Native &&
+      !ArRenderSceneScale_Cancel(&g_render_device))
+    SessionFatal_Request("The renderer could not restore its output after drawing the game scene (%s).",
+                         ArRenderDevice_LastError(&g_render_device));
 }
 
 static bool AuthenticFrameSynchronized(const FrameSlot *slot) {
@@ -90,8 +107,11 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
         kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight, &output_size);
     (void)BeginCrtPost();
     if (SessionFatal_Requested()) return image;
-    if (!(blank ? PresentBlankScene() : PresentAuthenticScene(slot, image))) {
-      RequestComparisonDrawFailure("native view");
+    const bool scene_drawn = blank ? PresentBlankScene() :
+        BeginSceneResolution(image) && PresentAuthenticScene(slot, image);
+    EndSceneResolution();
+    if (!scene_drawn || SessionFatal_Requested()) {
+      if (!SessionFatal_Requested()) RequestComparisonDrawFailure("native view");
       (void)EndCrtPost(
           kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight, image);
       return image;
@@ -100,13 +120,16 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
     image = EndCrtPost(
         kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight, image);
   } else {
+    const ArRenderExtentI aspect = FrameSlot_FixedAspect(slot);
     image = ComputePresentationViewportWithOutput(
         &g_render_device, slot->ignore_aspect_ratio,
-        slot->pixel_aspect, slot->visible_width, FrameSlot_VisibleHeight(slot),
-        &output_size);
+        aspect.width ? kPixelAspect_Square : slot->pixel_aspect,
+        aspect.width ? aspect.width : slot->visible_width,
+        aspect.height ? aspect.height : FrameSlot_VisibleHeight(slot), &output_size);
     (void)BeginCrtPost();
     if (SessionFatal_Requested()) return image;
-    PresentCompositeScene(slot, alpha);
+    if (blank || BeginSceneResolution(image)) PresentCompositeScene(slot, alpha);
+    EndSceneResolution();
     if (!blank && !SessionFatal_Requested()) PresentSimMenu_Draw(slot, image);
     if (SessionFatal_Requested()) {
       (void)EndCrtPost(

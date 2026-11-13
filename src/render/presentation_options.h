@@ -17,6 +17,29 @@ typedef enum {
   kPixelAspect_Count,
 } PixelAspect;
 
+typedef enum {
+  kScreenAspect_43 = 0,
+  kScreenAspect_169,
+  kScreenAspect_1610,
+  kScreenAspect_Stretch,   /* fill the window, ignore aspect (was a separate
+                            * "Stretch to window" toggle) */
+  kScreenAspect_Auto,      /* appended: saved manual indices stay stable */
+  kScreenAspect_Count,
+} ScreenAspect;
+
+typedef enum {
+  kRenderResolution_Native = 0,
+  kRenderResolution_480p,
+  kRenderResolution_540p,
+  kRenderResolution_720p,
+  kRenderResolution_800p,
+  kRenderResolution_900p,
+  kRenderResolution_1080p,
+  kRenderResolution_1440p,
+  kRenderResolution_2160p,
+  kRenderResolution_Count,
+} RenderResolution;
+
 /* Persisted corner order keeps the original inset position as the default. */
 typedef enum {
   kPictureInPicture_BottomRight = 0,

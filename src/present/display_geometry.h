@@ -34,6 +34,9 @@ bool DisplayGeometry_ResolveAutoCanvas(
 ActRaiserAutoCanvas DisplayGeometry_ConstrainAutoCanvas(
     ActRaiserAutoCanvas requested, int map_group, int map_number, int bg_mode,
     bool projected_sim);
+/* Keep Auto action framing within 16:9 while retaining the wider capture
+ * budget used by simulation and navigation. */
+bool DisplayGeometry_CapActionAutoCanvas(ActRaiserAutoCanvas *canvas, bool crt_pixel_aspect);
 void DisplayGeometry_SetAutoVerticalBudget(int budget);
 void DisplayGeometry_SetOutputSize(int width, int height);
 

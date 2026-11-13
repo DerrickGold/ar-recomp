@@ -23,6 +23,7 @@ typedef struct FakeBackend {
   int present_count;
   ArRenderTextureDesc last_desc;
   ArRenderRectI last_update;
+  ArRenderRectF last_source, last_destination;
   ArRenderTexture last_texture;
   ArRenderDrawState last_draw_state;
   bool last_draw_state_present;
@@ -139,8 +140,8 @@ static bool DrawTexture(void *context, ArRenderTexture texture,
                         const ArRenderRectF *destination,
                         const ArRenderDrawState *state) {
   FakeBackend *backend = context;
-  (void)source;
-  (void)destination;
+  if (source) backend->last_source = *source;
+  if (destination) backend->last_destination = *destination;
   backend->draw_texture_count++;
   backend->last_texture = texture;
   backend->last_draw_state_present = state != NULL;
@@ -649,6 +650,39 @@ static void TestOutputFrameScope(void) {
   assert(!frame.active);
 }
 
+static void TestSceneResolution(void) {
+  FakeBackend backend = {.output_width = 3440, .output_height = 1440};
+  ArRenderDevice device = {0};
+  assert(ArRenderDevice_Init(&device, &kFakeOps, &backend,
+      (ArRenderCapabilities){.flags = kArRenderCapability_RenderTargets |
+                                      kArRenderCapability_ScopedRenderTargets}));
+  const ArRenderRectI image = {440, 0, 2560, 1440};
+  const ArRenderTexture parent = {41};
+  backend.target_state.target = parent;
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_Native) ==
+         kArRenderTargetBegin_Omitted);
+  assert(backend.create_count == 0);
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_720p) ==
+         kArRenderTargetBegin_Ready);
+  assert(backend.last_desc.width == 1280 && backend.last_desc.height == 720);
+  assert(backend.target_state.target.value != parent.value);
+  ArRenderRectI scene = {0, 0, 1280, 720};
+  assert(ArRenderSceneScale_Resolve(&device, &scene, kArRenderFilter_Nearest));
+  assert(!memcmp(&scene, &image, sizeof(image)));
+  assert(backend.target_state.target.value == parent.value);
+  assert(!backend.target_state.viewport_set && backend.clear_count == 1);
+  assert(backend.last_source.w == 1280 && backend.last_source.h == 720);
+  assert(backend.last_destination.w == 2560 && backend.last_destination.h == 1440);
+  assert(backend.last_draw_state.filter == kArRenderFilter_Nearest);
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_720p) ==
+         kArRenderTargetBegin_Ready);
+  assert(backend.create_count == 1);
+  assert(ArRenderSceneScale_Cancel(&device));
+  assert(backend.target_state.target.value == parent.value && backend.draw_texture_count == 1);
+  ArRenderSceneScale_Reset(&device);
+  assert(backend.destroy_count == 1);
+}
+
 static void TestDirtyUploadWorksWithoutANativeRenderer(void) {
   FakeBackend backend = {0};
   ArRenderDevice device = {0};
@@ -691,6 +725,7 @@ int main(void) {
   TestDeviceDispatchAndCapabilities();
   TestIncompleteBackendIsRejected();
   TestOutputFrameScope();
+  TestSceneResolution();
   TestDirtyUploadWorksWithoutANativeRenderer();
   puts("render_device_test: ok");
   return 0;

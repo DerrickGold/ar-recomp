@@ -114,13 +114,19 @@ void HostVideo_Create(const char *title, bool hidden_capture) {
   int win_w;
   int win_h;
   HostDisplay_CalculateWindowSize(scale, &win_w, &win_h);
+  const SDL_DisplayID boot_display = SDL_GetPrimaryDisplay();
+  const SDL_DisplayMode *boot_mode = SDL_GetDesktopDisplayMode(boot_display);
+  const bool preset_window = HostDisplay_ResolvePresetWindowSize(
+      boot_display, boot_mode ? boot_mode->pixel_density : 1.0f, &win_w, &win_h);
   /* Developer override: AR_WINDOW_SIZE=<w>x<h> reproduces another device's
    * output shape (Steam Deck 1280x800, a phone's 2316x1080) on a desktop,
    * including the letterbox margins a picture-sized window never has. */
+  bool window_override = false;
   {
     const char *size = SDL_getenv("AR_WINDOW_SIZE");
     int w = 0, h = 0;
     if (size && sscanf(size, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) {
+      window_override = true;
       win_w = w;
       win_h = h;
     }
@@ -198,6 +204,10 @@ void HostVideo_Create(const char *title, bool hidden_capture) {
   if (!hidden_capture && g_settings.window_mode == kWindowMode_Exclusive)
     HostDisplay_ApplyWindowMode();
   HostDisplay_UpdateProperties();
+  if (preset_window && !window_override) {
+    HostDisplay_ApplyWindowScale();
+    SDL_SyncWindow(g_window);
+  }
 
   /* Aspect-correct letterboxing via SDL's logical presentation — one
    * implementation shared with the resize/settings paths so boot and runtime

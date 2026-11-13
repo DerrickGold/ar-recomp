@@ -2,6 +2,8 @@
 #include "app/settings.h"
 #include "present/present.h"
 #include "render/presentation_layout.h"
+#include "render/render_output.h"
+#include "app/session_fatal.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -131,6 +133,9 @@ static bool DrawScene(const ArImportedGameFrame *game, ArRenderRectI viewport, u
     if (!ArRenderDevice_UpdateTexture(s_device, s_main, NULL, frame->main, AR2_CAPTURE_PITCH * 4) ||
         !ArRenderDevice_DrawTexture(s_device, s_main, &source, &destination)) return false;
   }
+  if (!ArRenderSceneScale_Resolve(s_device, &viewport,
+          diorama ? kArRenderFilter_Linear : kArRenderFilter_Nearest))
+    return false;
   if (!diorama || options.hud_flat) {
     const int pinned = Settings_ScalePercentToOutput(g_settings.hud_scale_percent);
     float scale = pinned ? pinned / 100.f : viewport.h / (float)frame->display_height;
@@ -163,12 +168,25 @@ bool Ar2Presentation_Draw(const ArImportedGameFrame *frame, uint64_t now_ns,
   if (!frame || !frame->video.main || !ArRenderDevice_GetOutputSize(s_device, &width, &height))
     return false;
   const int visible = 256 + frame->video.display_extra * 2;
+  const bool capped = frame->video.level && g_settings.extended_aspect == kScreenAspect_Auto &&
+      (int64_t)width * 9 > (int64_t)height * 16;
+  const int fixed_height = capped ? 9 : frame->video.display_extra ? Settings_ExtendedAspectY() : 0;
   *viewport = ArPresentationLayout_ResolveViewport(width, height, Settings_IgnoreAspectRatio(),
-      g_settings.pixel_aspect == kPixelAspect_Crt43, visible, frame->video.display_height);
+      !fixed_height && g_settings.pixel_aspect == kPixelAspect_Crt43,
+      fixed_height ? 16 : visible, fixed_height ? fixed_height : frame->video.display_height);
   const CrtPostConfig crt = Present_CaptureCrtConfig();
   (void)CrtPost_Begin(s_device, &crt);
-  bool ok = ArRenderDevice_Clear(s_device, (ArRenderColorF){0, 0, 0, 1}) &&
-      DrawScene(frame, *viewport, now_ns);
+  if (SessionFatal_Requested()) return false;
+  ArRenderRectI scene_view = *viewport;
+  const ArRenderTargetBeginResult begin = ArRenderSceneScale_Begin(
+      s_device, *viewport, g_settings.render_resolution);
+  if (begin == kArRenderTargetBegin_Ready)
+    (void)ArRenderSceneScale_Viewport(s_device, &scene_view);
+  bool ok = begin != kArRenderTargetBegin_StateLost &&
+      ArRenderDevice_UseOutputCoordinates(s_device) &&
+      ArRenderDevice_Clear(s_device, (ArRenderColorF){0, 0, 0, 1}) &&
+      DrawScene(frame, scene_view, now_ns);
+  ok = ArRenderSceneScale_Cancel(s_device) && ok;
   *viewport = CrtPost_End(s_device, visible, frame->video.display_height, *viewport);
   return ok;
 }

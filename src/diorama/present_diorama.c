@@ -31,6 +31,7 @@
 #include "diorama/diorama_bg_gpu.h"
 #include "host/host_clock.h"
 #include "present/present.h"
+#include "render/render_output.h"
 #include "present/presentation_surface.h"
 #include "present/presentation_upload_mirror.h"
 #include "render/present_hud.h"
@@ -1272,6 +1273,12 @@ retry_projection:;
   /* Count once after recovery, including the first frame that fell back. */
   if (DioramaFrameGeneration_SourceProjectionFallback())
     PerformanceMetrics_Add(kPerformanceCount_EffectProjectionFallbackFrames, 1);
+  if (!ArRenderSceneScale_Resolve(device, &output_viewport, kArRenderFilter_Linear)) {
+    DioramaPerformance_End(presentation_performance);
+    DioramaPerformance_PresentCompleted();
+    SessionFatal_Request("The renderer could not upscale the Diorama scene.");
+    return;
+  }
   /* Flat HUD mode leaves BG3 in the same RemoveFromGame capture used by flat
    * presentation. Reconstruct its split pieces into one texture before
    * drawing the screen-space overlay; drawing them directly creates seams
