@@ -2,7 +2,7 @@
 #define AR_ACTION_VOXEL_INTERNAL_H
 #include "action/action_voxel.h"
 #include <stdatomic.h>
-enum { kVoxelPassLists = 4, kVoxelMaxRearFills = 512 };
+enum { kVoxelPassLists = 4, kVoxelMaxRearFills = 512, kVoxelMaxLintelReturns = 32 };
 typedef struct VoxelRearFill {
   short x, y;
   bool preserve_existing, replace_front; /* Reviewed baked shadows may need both native split images repaired. */
@@ -54,6 +54,8 @@ struct ActionVoxelGeometry {
   VoxelEdge edges[kVoxelMaxEdges];
   unsigned edge_count, rear_trim_count, high_deck_count;
   VoxelRearTrim rear_trims[kVoxelMaxRearTrims];
+  VoxelLintelReturn lintel_returns[kVoxelMaxLintelReturns];
+  unsigned lintel_return_count;
   VoxelGate gates[kVoxelMaxGates];
   unsigned gate_count;
   VoxelPatch patches[kVoxelMaxPatches];

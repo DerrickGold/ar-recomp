@@ -125,8 +125,14 @@ static void AuditSpecialized(const ActionRoomScene *s,const ActionVoxelGeometry 
   printf("],\"profile_surfaces\":[");for(unsigned i=0;i<g->profile_surface_count;++i){const VoxelProfileSurface *p=g->profile_surfaces+i;printf("%s[%d,%d,%u]",i?",":"",p->x,p->y,p->art_id);}
   printf("],\"water\":[");for(unsigned i=0;i<g->water_surface_count;++i){const VoxelWaterSurface *p=g->water_surfaces+i;printf("%s{\"x\":%d,\"y\":%d,\"width\":%d,\"priority\":%u,\"background\":%u,\"sample_y\":%u,\"sample_height\":%u,\"opaque\":%u,\"uniform_color\":[%u,%u]}",i?",":"",p->x,p->y,p->width,p->high_priority,p->background,p->sample_y,p->sample_height,p->opaque,p->uniform_color[0],p->uniform_color[1]);}
   printf("],\"waterfalls\":[");for(unsigned i=0;i<g->waterfall_count;++i){const VoxelWaterfall *p=g->waterfalls+i;printf("%s[%d,%d,%d,%d,%u]",i?",":"",p->x,p->y,p->width,p->height,p->high_priority);}
-  printf("],\"gates\":[");for(unsigned i=0;i<g->gate_count;++i){const VoxelGate *p=g->gates+i;printf("%s[%d,%d,%d,%u,%u,%u,%u]",i?",":"",p->x,p->y,p->height,p->high_priority,p->to_right,p->width,p->centered);}
+  printf("],\"gates\":[");for(unsigned i=0;i<g->gate_count;++i){const VoxelGate *p=g->gates+i;printf("%s[%d,%d,%d,%u,%u,%u,%u,%u]",i?",":"",p->x,p->y,p->height,p->high_priority,p->to_right,p->width,p->centered,p->solid_face);}
   printf("],\"rear_trims\":[");for(unsigned i=0;i<g->rear_trim_count;++i){const VoxelRearTrim *p=g->rear_trims+i;printf("%s[%d,%d,%d]",i?",":"",p->x,p->y,p->width);}
+  printf("],\"lintel_returns\":[");
+  for(unsigned i=0;i<g->lintel_return_count;++i) {
+    const VoxelLintelReturn *lip=&g->lintel_returns[i];
+    printf("%s{\"x\":%d,\"y\":%d,\"rear_depth\":%.7g,\"priority\":%u,\"owned_art\":%u}",
+        i?",":"",lip->x,lip->y,lip->rear_depth,lip->high_priority,lip->owned_art);
+  }
   printf("],\"rear_fills\":[");for(unsigned i=0;i<g->rear_fill_count;++i){const VoxelRearFill *p=g->rear_fills+i;printf("%s{\"x\":%d,\"y\":%d,\"preserve_existing\":%s,\"replace_front\":%s,\"art\":",i?",":"",p->x,p->y,p->preserve_existing?"true":"false",p->replace_front?"true":"false");AuditHex16(p->colors,256);putchar('}');}
   printf("],\"trunk_curves\":[");for(unsigned i=0;i<g->trunk_curve_count;++i)printf("%s[%d,%d]",i?",":"",g->trunk_curves[i].top_y,g->trunk_curves[i].base_y);
   printf("],\"column_curves\":[");for(unsigned i=0;i<g->column_curve_count;++i)printf("%s[%d,%d]",i?",":"",g->column_curves[i].top_y,g->column_curves[i].base_y);printf("]");

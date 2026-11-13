@@ -350,8 +350,11 @@ typedef struct VoxelGate {
   short x, y, height;
   unsigned char high_priority, to_right;
   unsigned char width, centered; /* Width 0 retains the original 8px strip. */
+  bool solid_face;
 } VoxelGate;
 const VoxelGate *ActionVoxel_Gates(const ActionVoxelGeometry *c, unsigned *count);
+/* Front depth of the rendered closure, behind the doorway trim. */
+float ActionVoxel_ClosureInset(const ActionVoxelGeometry *c);
 /* Native-art caps and crossed profiles. Rear grass stays behind the path. */
 typedef enum VoxelPatchKind {
   kVoxelPatch_Thorns, kVoxelPatch_BranchRear, kVoxelPatch_SideProfile, kVoxelPatch_Spikes,
@@ -406,6 +409,8 @@ float ActionVoxel_FrontRecess(const ActionVoxelGeometry *c, int tile_x, int tile
  * The room-wide bound also limits the front mesh's added pixel partitions. */
 enum { kVoxelMaxPixelRecessCells = 64 };
 const uint8_t *ActionVoxel_PixelRecessRows(const ActionVoxelGeometry *c, int tile_x, int tile_y);
+void ActionVoxel_GateInkRows(const ActionVoxelGeometry *c, int tile_x, int tile_y,
+    bool high_priority, uint8_t rows[8]);
 float ActionVoxel_TrimBackDepth(const ActionVoxelGeometry *c);
 float ActionVoxel_TrimDepth(const ActionVoxelGeometry *c);
 float ActionVoxel_BranchDepth(const ActionVoxelGeometry *c);
@@ -453,6 +458,14 @@ bool ActionVoxel_Split(const ActionVoxelGeometry *c, int ox, int oy, int width, 
                         const uint32_t *low, size_t low_pitch,
                         uint32_t *rear, uint32_t *foreground);
 const VoxelEdge *ActionVoxel_Edges(const ActionVoxelGeometry *c, unsigned *count);
+typedef struct VoxelLintelReturn {
+  short x, y, sample_x, sample_y;
+  short interior_x, interior_bottom;
+  float rear_depth, interior_front_depth;
+  uint16_t owned_art;
+  bool high_priority, interior_only;
+} VoxelLintelReturn;
+const VoxelLintelReturn *ActionVoxel_LintelReturns(const ActionVoxelGeometry *c, unsigned *count);
 const uint16_t *ActionVoxel_EdgesForPass(const ActionVoxelGeometry *c, VoxelEdgePass pass,
                                              bool high, unsigned *count);
 #endif

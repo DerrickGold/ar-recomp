@@ -345,6 +345,43 @@ static bool DrawOwnedProfileSides(ArRenderDevice *device,const DioramaCapture *c
   }
   return true;
 }
+static bool DrawVoxelDoorInteriors(ArRenderDevice *device, const DioramaViewGeometry *g,
+    const DioramaLayerDraw *layer, int ox, int oy, int width, int height) {
+  unsigned count;
+  const VoxelLintelReturn *returns=ActionVoxel_LintelReturns(layer->voxel_geometry,&count);
+  const float du=g->u1-g->u0, dv=g->v1-g->v0;
+  const float distance_scale=1/fmaxf(1,g->camera.distance);
+  for (unsigned i=0;i<count;++i) {
+    const VoxelLintelReturn *lip=&returns[i];
+    const int x=lip->interior_x-ox;
+    const int top=lip->y-oy, bottom=lip->interior_bottom-oy;
+    if (bottom<=top || x<0 || x>width || bottom<=0 || top>=height) continue;
+    /* The jamb hides the near end of a wall running parallel to the depth
+     * edges of the sill. Its rear end lands inside the opaque door backing. */
+    const float u=x/(float)SR_PPU_SURFACE_MAX_WIDTH;
+    ArRenderVertex2D vertices[4]={0};
+    float depths[4], clip_w[4], distance=0;
+    bool valid=true;
+    for (unsigned j=0;j<4;++j) {
+      const bool rear=j>=2;
+      const float depth=rear ? layer->voxel_depth : lip->interior_front_depth;
+      const float scale=1+depth*distance_scale;
+      const float y=(j==1 || j==2) ? fminf(bottom,height) : fmaxf(top,0);
+      valid &= VoxelProjectWithW(g,((u-g->u0)/du-.5f)*g->aspect_x*scale,
+          (.5f-(y/SR_PPU_SURFACE_MAX_HEIGHT-g->v0)/dv)*g->height_scale*scale,-depth,
+          &vertices[j].position,&distance,&depths[j],&clip_w[j]);
+      vertices[j].tex_coord=(ArRenderPointF){.5f,.5f};
+      vertices[j].color=(ArRenderColorF){1,1,1,1};
+    }
+    if (!valid || DioramaVoxelQuadOutsideViewport(vertices,g->width,g->height)) continue;
+    const ArRenderTexture black=UnlitSceneryMap(device);
+    if (!ArRenderTexture_IsValid(black) ||
+        !RenderShadedDioramaDepthGeometryWithW(device,black,vertices,depths,clip_w,4,
+            VoxelQuadIndices(),6,kArRenderBlendMode_Alpha,NULL,(ArRenderRectF){0,0,1,1},
+            NULL,g->depth_sink,layer->description->plane,false)) return false;
+  }
+  return true;
+}
 static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capture,
                                const DioramaViewGeometry *g, const DioramaLayerDraw *layer,
                                float near_depth, float far_depth, VoxelEdgePass pass) {
@@ -360,6 +397,9 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
   const float du = g->u1 - g->u0, dv = g->v1 - g->v0, depth = layer->voxel_depth;
   const bool rear = pass == kVoxelEdgeRearTrim;
   const bool rear_grass = layer->description->plane == SR_PPU_OVERLAY_BG1;
+  if (pass==kVoxelEdgeNative && layer->description->plane==kDioramaPlane_Bg1Far &&
+      far_depth==depth && !DrawVoxelDoorInteriors(device,g,layer,ox,oy,capture->width,capture->height))
+    return false;
   const bool high_priority =
       pass != kVoxelEdgeNative || layer->description->plane == kDioramaPlane_Bg1Hi;
   const float rear_offset = rear ? ActionVoxel_RearFaceDepth(layer->voxel_geometry) : 0;
@@ -368,12 +408,12 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
           ? DofRadiusForLayer(.5f - (rear_grass ? depth : rear_offset)) : 0;
   int count = 0;
   GroundCoverBeginBatch();
-  /* The iron gate is a two-sided grating, not an extrusion of opaque pixels.
-   * Repeat its native transparent strip across the doorway and join the rear
-   * jamb. Keep the native priority slot, including the portion ahead of actors. */
+  /* Carry the native transparent grating across the opening behind the
+   * foreground trim. The source still controls its alpha and priority. */
   if (!rear_grass && pass == kVoxelEdgeNative && far_depth == depth) {
     unsigned n;
     const VoxelGate *gates = ActionVoxel_Gates(layer->voxel_geometry, &n);
+    const float gate_inset=ActionVoxel_ClosureInset(castle);
     for (unsigned i = 0; i < n; ++i) {
       const VoxelGate p = gates[i];
       const int width=p.width?p.width:8;
@@ -382,13 +422,16 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       if (y1 <= y0) continue;
       const float front_x = p.x - ox + (p.centered?width*.5f:(p.to_right ? 0 : width)),
                   back_x = p.x - ox + (p.centered?width*.5f:(p.to_right ? 8 : 0));
-      for (unsigned slice = 0; slice < kVoxelGateDepthSlices; ++slice) {
+      const unsigned slices=p.solid_face ? 1 : kVoxelGateDepthSlices;
+      for (unsigned slice = 0; slice < slices; ++slice) {
         VoxelSide face = {0};
         bool ok = true;
         for (unsigned j = 0; j < 4; ++j) {
           const bool back = j == 1 || j == 2, bottom = j >= 2;
-          const float t = (slice + (back ? 1.f : 0.f)) / kVoxelGateDepthSlices, z = t * depth;
-          const float x = front_x + (back_x - front_x) * t, y = bottom ? y1 : y0;
+          const float t = (slice + (back ? 1.f : 0.f)) / slices;
+          const float z=p.solid_face ? gate_inset : gate_inset+(depth-gate_inset)*t;
+          const float x=p.solid_face ? p.x-ox+width*t : front_x+(back_x-front_x)*t;
+          const float y=bottom ? y1 : y0;
           const float u = x / SR_PPU_SURFACE_MAX_WIDTH, v = y / SR_PPU_SURFACE_MAX_HEIGHT;
           const float scale = 1 + z / fmaxf(1, g->camera.distance);
           const float wx = ((u - g->u0) / du - .5f) * g->aspect_x * scale;
@@ -396,10 +439,11 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
           ok = ok && VoxelProjectWithW(g, wx, wy, -z, &face.v[j].position, &face.distance, &face.depths[j],&face.clip_w[j]);
           if (!ok) break;
           /* Half-texel insets keep adjacent marble/floor out of filtered bars. */
-          const float su = (p.x - ox + (back ? width-.5f : .5f)) / SR_PPU_SURFACE_MAX_WIDTH;
-          const float sv = (bottom ? y1 - .5f : y0 + .5f) / SR_PPU_SURFACE_MAX_HEIGHT;
+          const float inset=p.solid_face ? 0 : .5f;
+          const float su = (p.x - ox + (back ? width-inset : inset)) / SR_PPU_SURFACE_MAX_WIDTH;
+          const float sv = (bottom ? y1-inset : y0+inset) / SR_PPU_SURFACE_MAX_HEIGHT;
           face.v[j].tex_coord = (ArRenderPointF){su, sv};
-          float shade = (1 - .22f * t) *
+          float shade = (p.solid_face ? 1 : 1 - .22f * t) *
                         (1 - SceneryDimming_Amount(layer->dimming, layer->dimming_ramp, su, sv));
           if (layer->exposure && layer->exposure->sample)
             shade *= layer->exposure->sample(layer->exposure->userdata, su, sv, su, sv);
@@ -548,6 +592,40 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
   const uint16_t *indices = NULL;
   total = 0;
   if (!rear_grass) indices = ActionVoxel_EdgesForPass(castle, pass, high_priority, &total);
+  if (!rear_grass && pass == kVoxelEdgeNative && far_depth == depth) {
+    unsigned count_returns;
+    const VoxelLintelReturn *returns = ActionVoxel_LintelReturns(castle, &count_returns);
+    for (unsigned i = 0; i < count_returns; ++i) {
+      const VoxelLintelReturn *lip = &returns[i];
+      if(lip->interior_only)continue;
+      if (lip->high_priority != high_priority || lip->sample_x < ox ||
+          lip->sample_x >= ox + capture->width || lip->sample_y < oy ||
+          lip->sample_y >= oy + capture->height) continue;
+      VoxelSide face = {.owned_source = lip->owned_art != 0};
+      bool valid = true;
+      for (unsigned j = 0; j < 4; ++j) {
+        const bool back = j == 1 || j == 2;
+        const float z = back ? lip->rear_depth : 0;
+        const float u = (lip->x - ox) / (float)SR_PPU_SURFACE_MAX_WIDTH;
+        const float v = (lip->y - oy + (j == 2 ? 2 : 0)) / (float)SR_PPU_SURFACE_MAX_HEIGHT;
+        const float scale = 1 + z / fmaxf(1, g->camera.distance);
+        valid &= VoxelProjectWithW(g, ((u-g->u0)/du-.5f)*g->aspect_x*scale,
+            (.5f-(v-g->v0)/dv)*g->height_scale*scale, -z,
+            &face.v[j].position, &face.distance, &face.depths[j], &face.clip_w[j]);
+        face.v[j].tex_coord = lip->owned_art
+            ? VoxelOwnedArtUv(lip->owned_art - 1, back ? 7.5f : .5f, j == 2 ? 6.5f : 5.5f)
+            : (ArRenderPointF){(lip->sample_x-ox+.5f)/SR_PPU_SURFACE_MAX_WIDTH,
+                              (lip->sample_y-oy+.5f)/SR_PPU_SURFACE_MAX_HEIGHT};
+        const float shade = .48f * (1 - SceneryDimming_Amount(layer->dimming, layer->dimming_ramp,
+            (lip->sample_x-ox+.5f)/SR_PPU_SURFACE_MAX_WIDTH,
+            (lip->sample_y-oy+.5f)/SR_PPU_SURFACE_MAX_HEIGHT));
+        face.v[j].color = (ArRenderColorF){layer->shade.r*shade, layer->shade.g*shade, layer->shade.b*shade, 1};
+      }
+      if (!valid) continue;
+      if (!ReserveVoxelSide(device, g, layer, &count, blur)) return false;
+      s_voxel_sides[count++] = face;
+    }
+  }
   for (unsigned i = 0; i < total; ++i) {
     VoxelEdge e = edges[indices[i]];
     if (e.high_priority != high_priority) continue;
@@ -1327,44 +1405,62 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
         (int)floorf((tx0+x)*.5f),(int)floorf((ty0+y)*.5f)):NULL;
     if(a && a->native_front_hidden)cells[y*nx+x]|=2;
   }
-  /* A successfully compiled pure gate already supplies the transverse
-   * grating. Omit its duplicate flat face, retaining the same unmodified
-   * texture for the gate mesh. Mixed jamb/grille cells keep their native face. */
+  /* Separate gate ink from its jamb. Pure panels supply their own face. */
   unsigned gate_count;const VoxelGate *gates=ActionVoxel_Gates(layer->voxel_geometry,&gate_count);
   for(unsigned i=0;i<gate_count;++i) {
     const VoxelGate *gate=&gates[i];
-    if(gate->width || gate->centered || gate->high_priority!=high || (gate->x&7) ||
-        gate->x<ox || gate->x+8>ox+capture->width)continue;
-    const int x=gate->x/8-tx0;if(x<0 || x>=nx)continue;
+    const int width=gate->width ? gate->width : 8;
+    if(gate->high_priority!=high || gate->x<ox || gate->x+width>ox+capture->width)continue;
+    if(gate->centered) {
+      const int x0=(int)floorf(gate->x/8.f)-tx0;
+      const int x1=(int)ceilf((gate->x+width)/8.f)-tx0;
+      const int y0=(int)floorf(gate->y/8.f)-ty0;
+      const int y1=(int)ceilf((gate->y+gate->height)/8.f)-ty0;
+      for(int y=y0<0?0:y0;y<ny && y<y1;++y)
+        for(int x=x0<0?0:x0;x<nx && x<x1;++x)
+          cells[y*nx+x]|=64;
+      continue;
+    }
+    if((gate->width && !gate->solid_face) || (gate->x&7))continue;
+    const int x=gate->x/8-tx0;
     for(int y=0;y<ny;++y)
-      if((ty0+y)*8>=gate->y && (ty0+y+1)*8<=gate->y+gate->height)cells[y*nx+x]|=2;
+      if((ty0+y)*8>=gate->y && (ty0+y+1)*8<=gate->y+gate->height)
+        for(int xx=x;xx<x+width/8;++xx)
+          if(xx>=0 && xx<nx)cells[y*nx+xx]|=2;
   }
   unsigned count=0;
   for(int y=0;y<ny;++y)for(int x=0;x<nx;++x) {
     const unsigned tag=cells[y*nx+x];
     if((tag&2) || (layer->desert_columns_only && !(tag&8)))continue;
-    if(tag&16) {
-      /* Preserve the native low-priority surface: only the reviewed wood
-       * pixels in this mixed character follow its rear post. Water keeps
-       * its exact source coordinates and zero depth. Merge equal pixel
-       * rectangles within this cell; all ordinary cells use the fast path. */
-      const uint8_t *mask=ActionVoxel_PixelRecessRows(layer->voxel_geometry,tx0+x,ty0+y);
+    if(tag&(16|64)) {
+      /* Move only the reviewed ink. All pixels retain their native UVs. */
+      const ActionVoxelGeometry *voxel=layer->voxel_geometry;
+      uint8_t rear[8]={0},gate[8]={0};
+      if(tag&16)memcpy(rear,ActionVoxel_PixelRecessRows(voxel,tx0+x,ty0+y),sizeof(rear));
+      if(tag&64)ActionVoxel_GateInkRows(voxel,tx0+x,ty0+y,high,gate);
+      const float depths[3]={tag&16?0:ActionVoxel_FrontRecess(voxel,tx0+x,ty0+y),
+          ActionVoxel_SceneryRecess(voxel),ActionVoxel_ClosureInset(voxel)};
       uint8_t visited[8]={0};
       const int sx=(tx0+x)*8-ox,sy=(ty0+y)*8-oy;
       for(unsigned py=0;py<8;++py)for(unsigned px=0;px<8;++px) {
         if(visited[py]&(1u<<(7-px)))continue;
-        const bool rear=(mask[py]&(1u<<(7-px)))!=0;
+        const unsigned bit=1u<<(7-px);
+        const unsigned plane=(gate[py]&bit)?2:(rear[py]&bit)?1:0;
+        const unsigned row=plane==2?gate[py]:plane==1?rear[py]&~gate[py]:~(rear[py]|gate[py]);
         unsigned ex=px+1,ey=py+1;
-        while(ex<8 && !(visited[py]&(1u<<(7-ex))) &&
-            !!(mask[py]&(1u<<(7-ex)))==rear)++ex;
+        while(ex<8 && ((row&~visited[py])&(1u<<(7-ex))))++ex;
         const unsigned bits=((1u<<(ex-px))-1)<<(8-ex);
-        while(ey<8 && !(visited[ey]&bits) && (mask[ey]&bits)==(rear?bits:0))++ey;
+        while(ey<8 && !(visited[ey]&bits)) {
+          const unsigned next=plane==2?gate[ey]:plane==1?rear[ey]&~gate[ey]:~(rear[ey]|gate[ey]);
+          if((next&bits)!=bits)break;
+          ++ey;
+        }
         for(unsigned yy=py;yy<ey;++yy)visited[yy]|=bits;
         const float x0=fmaxf(left,sx+(int)px),x1=fminf(right,sx+(int)ex);
         const float y0=fmaxf(top,sy+(int)py),y1=fminf(bottom,sy+(int)ey);
         if(x1<=x0 || y1<=y0)continue;
         if(count==kVoxelMaxVisibleFaces)return 0;
-        const float depth=rear?ActionVoxel_SceneryRecess(layer->voxel_geometry):0;
+        const float depth=depths[plane];
         if(VoxelSourceQuad(g,layer,x0,y0,x1,y1,depth,depth,false,false,0,0,1,
             &s_voxel_sides[count]))++count;
       }

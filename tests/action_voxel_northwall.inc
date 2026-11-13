@@ -276,6 +276,17 @@ static unsigned NorthwallFixtures(const char *directory) {
      * and stays entirely ahead of that walking plane. */
     int gate_x,gate_y;
     if(room<=3 && FixtureCell(s,0x7c,&gate_x,&gate_y)) {
+      unsigned return_count;
+      const VoxelLintelReturn *returns=ActionVoxel_LintelReturns(a,&return_count);
+      bool joined=false;
+      for(unsigned i=0;i<return_count;++i)
+        if(returns[i].x==gate_x*8-16 && returns[i].y==gate_y*8) {
+          assert(returns[i].high_priority && returns[i].rear_depth==ActionVoxel_SceneryRecess(a));
+          assert(returns[i].interior_x==gate_x*8+8 && returns[i].interior_bottom>=gate_y*8+64);
+          assert(returns[i].interior_front_depth==actor);
+          joined=true;
+        }
+      assert(joined);
       unsigned leaf_faces=0;
       for(unsigned i=0;i<count;++i) {
         const VoxelEdge *e=&edges[i];
@@ -306,6 +317,9 @@ static unsigned NorthwallFixtures(const char *directory) {
         memset(variant.characters+(word&1023)*32,0,32);
       }
       assert(ActionVoxel_Build(b,&variant,NULL,settings) && ActionVoxel_Active(b,6,room));
+      returns=ActionVoxel_LintelReturns(b,&return_count);
+      for(unsigned i=0;i<return_count;++i)
+        assert(returns[i].x!=gate_x*8-16 || returns[i].y!=gate_y*8);
       assert(ActionVoxel_Split(b,gate_x*8,gate_y*8,16,16,16,
                                &gate_frame,NULL,0,gate_rear,gate_front));
       for(unsigned p=0;p<256;++p)assert(!gate_rear[p] && !gate_front[p]);

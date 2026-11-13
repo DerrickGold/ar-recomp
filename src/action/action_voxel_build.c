@@ -15,6 +15,7 @@ typedef struct VoxelMaterialProfile {
   uint16_t face_colors[4]; /* Native face-only ink; PixelRecess instead selects rear-mounted ink. */
   bool complete_rear_matte;
   bool portal_jamb;
+  bool door_closure;
 } VoxelMaterialProfile;
 /* Artwork-only policy is separate from structural flags: existing shape,
  * animation and rear-copy allowlists must not reinterpret a new top donor. */
@@ -114,6 +115,7 @@ typedef struct CastleMaterial {
   bool rear_backing_donor;
   bool complete_rear_matte;
   bool portal_jamb;
+  bool door_closure;
   uint8_t opaque_rear_ink; /* One-based native palette index; zero is legacy black. */
   uint32_t flags;
   uint16_t rear_rows[16]; /* Contextual native collision contour, MSB is left. */
@@ -620,6 +622,7 @@ static void Material(const ActionRoomScene *s, unsigned bg, const uint16_t words
     out->flags = flip ? p->flags & ~kCastleBackingMaterial : p->flags;
     out->complete_rear_matte = p->complete_rear_matte;
     out->portal_jamb = p->portal_jamb;
+    out->door_closure = p->door_closure;
     out->rear_fold_pixels = (flip & 2) ? 0 : (p->flags >> 24) & 15;
     break;
   }
@@ -1443,7 +1446,8 @@ static bool AppendGate(ActionVoxelGeometry *c,VoxelGate gate) {
   for(unsigned i=0;i<c->gate_count;++i) {
     VoxelGate *p=&c->gates[i];
     if(p->x==gate.x && p->y+p->height==gate.y && p->width==gate.width &&
-        p->high_priority==gate.high_priority && p->to_right==gate.to_right && p->centered==gate.centered) {
+        p->high_priority==gate.high_priority && p->to_right==gate.to_right &&
+        p->centered==gate.centered && p->solid_face==gate.solid_face) {
       p->height+=gate.height;return true;
     }
   }
@@ -1582,6 +1586,132 @@ static bool NativeContourEdited(const DioramaRoomOverride *terrain,int x,int y) 
       kDioramaVoxelCell_Shape|kDioramaVoxelCell_FrontEnd|kDioramaVoxelCell_BackEnd|
       kDioramaVoxelCell_Bend|kDioramaVoxelCell_Transform;
   return ActionVoxel_CellOwnsArtwork(cell) && (cell->fields&geometry);
+}
+/* The two native jamb strips project apart as the camera turns. A short
+ * return under the outside edge of their common lintel joins them in depth.
+ * The return occupies one native X coordinate and leaves the front art intact. */
+static bool MaterialHasGrille(const CastleMaterial *material) {
+  return material->gate_colors[0] || material->gate_colors[1] ||
+         material->gate_colors[2] || material->gate_colors[3];
+}
+
+/* The tomb lintels already have their own face geometry. Use the paired
+ * native jambs to locate the dark interior independently of those faces. */
+static bool BuildTombDoorInteriors(ActionVoxelGeometry *c,const ActionRoomScene *s,
+    const DioramaRoomOverride *terrain,const DioramaStampLayerOverride *stamps,
+    const CastleMaterial native[256],const uint16_t *tiles,size_t tile_pitch) {
+  const int y_end=(c->origin_y+c->height)/16;
+  for(int y=c->origin_y/16+1;y<y_end;++y)
+    for(int x=c->origin_x/16;x<(c->origin_x+c->width)/16;++x) {
+      CastleMaterial inner,above;
+      uint8_t id,above_id;
+      if(!LookupMaterial(s,stamps,native,x,y,&inner,&id,tiles,tile_pitch) ||
+          !inner.portal_jamb || inner.collision ||
+          (inner.words[0]&0x2000) ||
+          !LookupMaterial(s,stamps,native,x,y-1,&above,&above_id,tiles,tile_pitch) ||
+          !above.collision)continue;
+      for(int dir=-1;dir<=1;dir+=2) {
+        int bottom=y;
+        bool closed=false;
+        for(;bottom<y_end;++bottom) {
+          CastleMaterial rear,front;
+          uint8_t rear_id,front_id;
+          if(!LookupMaterial(s,stamps,native,x,bottom,&rear,&rear_id,tiles,tile_pitch) ||
+              !LookupMaterial(s,stamps,native,x+dir,bottom,&front,&front_id,tiles,tile_pitch) ||
+              !rear.portal_jamb || rear.collision || (rear.words[0]&0x2000) ||
+              !front.portal_jamb || !(front.words[0]&0x2000) ||
+              (front.collision && !MaterialHasGrille(&rear)))break;
+          if(ActionVoxel_AuthoredCellAt(c,x,bottom) || ActionVoxel_AuthoredCellAt(c,x+dir,bottom) ||
+              (terrain && (DioramaLayerOrder_PixelEditAt(terrain,0,x,bottom,rear_id) ||
+                           DioramaLayerOrder_PixelEditAt(terrain,0,x+dir,bottom,front_id)))) {
+            bottom=y;
+            break;
+          }
+          closed|=MaterialHasGrille(&rear) || MaterialHasGrille(&front);
+        }
+        if(bottom-y<2 || c->lintel_return_count==kVoxelMaxLintelReturns)continue;
+        for(int row=y;row<bottom;++row)
+          for(int column=0;column<2;++column) {
+            VoxelRearFill fill={.x=(x+column*dir)*16,.y=row*16,.preserve_existing=true};
+            for(unsigned pixel=0;pixel<256;++pixel)fill.colors[pixel]=0x8000;
+            if(!AppendRearFill(c,&fill))return false;
+          }
+        c->lintel_returns[c->lintel_return_count++]=(VoxelLintelReturn){
+          .y=y*16,.interior_x=(x+(closed?0:dir))*16+8,
+          .interior_bottom=bottom*16,
+          .interior_front_depth=closed?ActionVoxel_ClosureInset(c):
+              fmaxf(ActionVoxel_LocalTrimDepth(c,true),ActionVoxel_PlayRecess(c)-.01f),
+          .interior_only=true,
+        };
+      }
+    }
+  return true;
+}
+
+static bool BuildLintelReturns(ActionVoxelGeometry *c, const ActionRoomScene *s,
+    const DioramaRoomOverride *terrain, const DioramaStampLayerOverride *stamps,
+    const CastleMaterial native[256], const uint16_t *tiles, size_t tile_pitch) {
+  for (unsigned i = 0; i < c->edge_count; ++i) {
+    const VoxelEdge *edge = &c->edges[i];
+    const int y = edge->y + 1;
+    if (edge->side != 2 || edge->far_rank != 2 || !edge->colliding || y % 16) continue;
+    const int cell_y = y / 16, cell_x = edge->x / 16;
+    if (edge->x < 0 || y < 16 || y + 2 > c->origin_y + c->height) continue;
+    for (int dir = -1; dir <= 1; dir += 2) {
+      const int x = (cell_x + (dir < 0)) * 16;
+      const int sample_x = x + (dir < 0 ? -1 : 0);
+      if (sample_x < edge->x || sample_x >= edge->x + edge->length) continue;
+      CastleMaterial rear, front;
+      uint8_t rear_id, front_id;
+      if (!LookupMaterial(s, stamps, native, cell_x, cell_y, &rear, &rear_id, tiles, tile_pitch) ||
+          !rear.portal_jamb || rear.collision ||
+          !LookupMaterial(s, stamps, native, cell_x + dir, cell_y, &front, &front_id, tiles, tile_pitch) ||
+          !front.portal_jamb || front.collision) continue;
+      const unsigned rear_q = dir < 0, front_q = rear_q ^ 1;
+      if ((rear.words[rear_q] & 0x2000) || !(front.words[front_q] & 0x2000)) continue;
+      const int front_x = dir < 0 ? cell_x * 16 - 1 : (cell_x + 1) * 16;
+      if (front_x < c->origin_x || front_x >= c->origin_x + c->width) continue;
+      const size_t at = (size_t)(y - c->origin_y) * c->width;
+      const unsigned rear_ink = c->front[at + sample_x - c->origin_x] & kVoxelKindMask;
+      const unsigned front_ink = c->front[at + front_x - c->origin_x] & kVoxelKindMask;
+      if ((rear_ink != kVoxelThin && rear_ink != kVoxelRearOnly) || front_ink != kVoxelForeground) continue;
+      if (ActionVoxel_AuthoredCellAt(c, cell_x, cell_y) ||
+          ActionVoxel_AuthoredCellAt(c, cell_x + dir, cell_y) ||
+          ActionVoxel_AuthoredCellAt(c, cell_x, cell_y - 1) ||
+          ActionVoxel_AuthoredCellAt(c, cell_x + dir, cell_y - 1) ||
+          (terrain && (DioramaLayerOrder_PixelEditAt(terrain,0,cell_x,cell_y,rear_id) ||
+                       DioramaLayerOrder_PixelEditAt(terrain,0,cell_x+dir,cell_y,front_id)))) continue;
+      const float rear_depth = rear_ink == kVoxelRearOnly ? ActionVoxel_Depth(c) : ActionVoxel_SceneryRecess(c);
+      if (rear_depth <= 0 || c->lintel_return_count == kVoxelMaxLintelReturns) continue;
+      /* Follow the paired jambs down to the sill. The dark return fills the
+       * depth gap behind the front strip without painting over either face. */
+      int bottom = cell_y;
+      for (; (bottom+1)*16 <= c->origin_y+c->height; ++bottom) {
+        CastleMaterial near, far;
+        uint8_t near_id, far_id;
+        if (!LookupMaterial(s,stamps,native,cell_x+dir,bottom,&near,&near_id,tiles,tile_pitch) ||
+            !near.portal_jamb || near.collision || !(near.words[front_q]&0x2000) ||
+            !(near.words[front_q+2]&0x2000)) break;
+        if (ActionVoxel_AuthoredCellAt(c,cell_x,bottom) ||
+            ActionVoxel_AuthoredCellAt(c,cell_x+dir,bottom) ||
+            (terrain && (DioramaLayerOrder_PixelEditAt(terrain,0,cell_x+dir,bottom,near_id) ||
+                         (LookupMaterial(s,stamps,native,cell_x,bottom,&far,&far_id,tiles,tile_pitch) &&
+                          DioramaLayerOrder_PixelEditAt(terrain,0,cell_x,bottom,far_id))))) {
+          bottom = cell_y;
+          break;
+        }
+      }
+      c->lintel_returns[c->lintel_return_count++] = (VoxelLintelReturn){
+          .x = x, .y = y, .sample_x = sample_x, .sample_y = y - 1,
+          .interior_x = (cell_x+(dir>0))*16+dir*8, .interior_bottom = bottom*16,
+          .interior_front_depth = fmaxf(ActionVoxel_LocalTrimDepth(c,true),ActionVoxel_PlayRecess(c)-.01f),
+          .rear_depth = rear_depth, .owned_art = edge->top_owned_art,
+          .high_priority = edge->high_priority,
+      };
+    }
+  }
+  return c->profile!=kActionVoxelProfile_KassandoraTomb ||
+      BuildTombDoorInteriors(c,s,terrain,stamps,native,tiles,tile_pitch);
 }
 static bool SnowRockReturnsToBank(const CastleMaterial *material,const ActionRoomScene *s,
     const DioramaStampLayerOverride *stamps,const CastleMaterial native[256],
@@ -2053,7 +2183,15 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
                 .high_priority=high_priority,.kind=patch_kind};
           }
         }
-        if (kind == kVoxelGate) {
+        const bool solid_closure=material.door_closure && solid && !edit &&
+            !NativeContourEdited(terrain,cx,cy);
+        if (solid_closure) {
+          /* Native collision stays in the map. The closure's visible front
+           * is a separate face, behind the doorway's masonry. */
+          if(!AppendGate(c,(VoxelGate){.x=tx*8,.y=ty*8,.height=8,.width=8,
+              .high_priority=high_priority,.solid_face=true}))return false;
+          kind=kVoxelGate;
+        } else if (kind == kVoxelGate) {
           const unsigned to_right = !!(w & 0x4000);
           if(!AppendGate(c,(VoxelGate){.x=tx*8,.y=ty*8,.height=8,
               .high_priority=high_priority,.to_right=to_right}))return false;
@@ -2073,7 +2211,7 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
           if(right>left && !AppendGate(c,(VoxelGate){.x=tx*8+left,.y=ty*8+top,.width=right-left,.height=bottom-top,
               .high_priority=high_priority,.centered=true}))return false;
         }
-        const bool silhouette = kind == kVoxelThin || kind == kVoxelGate;
+        const bool silhouette = kind == kVoxelThin || (kind == kVoxelGate && !solid_closure);
         for (int y = 0; y < 8; ++y)
           for (int x = 0; x < 8; ++x) {
             const unsigned p = material.pixels[quadrant][y * 8 + x];
@@ -2143,7 +2281,8 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
   /* Adjacent reviewed grille strips share one continuous side panel. */
   for(unsigned i=0;i<c->gate_count;++i)for(unsigned j=i+1;j<c->gate_count;) {
     VoxelGate *a=&c->gates[i],*b=&c->gates[j];
-    if(a->centered && b->centered && a->y==b->y && a->height==b->height &&
+    if(((a->centered && b->centered) || (a->solid_face && b->solid_face)) &&
+        a->y==b->y && a->height==b->height &&
         a->high_priority==b->high_priority && a->x+a->width==b->x) {
       a->width+=b->width;memmove(b,b+1,(c->gate_count-j-1)*sizeof(*b));--c->gate_count;
     } else ++j;
@@ -2257,6 +2396,7 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
   c->ready = true;
   if(!BuildAuthoredCells(c,s,terrain,stamps,native,palette,tiles,tile_pitch) ||
       !BuildAutomaticSurfaceArt(c,s,terrain,stamps,native,palette,tiles,tile_pitch))return false;
+  if(!BuildLintelReturns(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
   BuildCastleTerminalMatte(c,s,terrain,stamps,native,palette,tiles,tile_pitch);
   BuildJungleTerminal(c,s,terrain,stamps,native,palette,tiles,tile_pitch);
   return true;

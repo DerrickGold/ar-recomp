@@ -223,6 +223,19 @@ const uint8_t *ActionVoxel_PixelRecessRows(const ActionVoxelGeometry *c,int tile
   const unsigned owner=c->pixel_recess_cells[(size_t)y*(c->width/8)+(size_t)x];
   return owner ? c->pixel_recess_rows[owner-1] : NULL;
 }
+void ActionVoxel_GateInkRows(const ActionVoxelGeometry *c,int tile_x,int tile_y,
+    bool high_priority,uint8_t rows[8]) {
+  memset(rows,0,8);
+  if(!c || !c->ready || !c->front)return;
+  const int64_t x=(int64_t)tile_x*8-c->origin_x,y=(int64_t)tile_y*8-c->origin_y;
+  if(x<0 || y<0 || x+8>c->width || y+8>c->height)return;
+  const unsigned tag=kVoxelGate|(high_priority?kVoxelHighPriority:0);
+  const uint8_t *cell=c->front+(size_t)y*c->width+x;
+  for(unsigned py=0;py<8;++py)
+    for(unsigned px=0;px<8;++px)
+      if((cell[py*c->width+px]&(kVoxelKindMask|kVoxelHighPriority))==tag)
+        rows[py]|=1u<<(7-px);
+}
 bool ActionVoxel_SnowReceiverRun(const ActionVoxelGeometry *c,int world_x,int world_y,int *bottom) {
   if(!bottom||!c||!c->ready||c->profile!=kActionVoxelProfile_NorthwallSnow||
       !c->front||!c->soft_surfaces)return false;
@@ -434,6 +447,9 @@ float ActionVoxel_TrimBackDepth(const ActionVoxelGeometry *c) {
 float ActionVoxel_TrimDepth(const ActionVoxelGeometry *c) {
   return ActionVoxel_Depth(c)*(ProfilePolicy(c)->deep_trim ? .25f : .12f);
 }
+float ActionVoxel_ClosureInset(const ActionVoxelGeometry *c) {
+  return ActionVoxel_Depth(c)*.16f;
+}
 float ActionVoxel_BranchDepth(const ActionVoxelGeometry *c) {
   return fminf(ActionVoxel_Depth(c), fmaxf(ActionVoxel_TrimDepth(c),
                                          ActionVoxel_PlayRecess(c) + .015f));
@@ -515,6 +531,10 @@ bool ActionVoxel_Active(const ActionVoxelGeometry *c, unsigned group, unsigned r
 const VoxelEdge *ActionVoxel_Edges(const ActionVoxelGeometry *c, unsigned *count) {
   *count = c ? c->edge_count : 0;
   return c ? c->edges : NULL;
+}
+const VoxelLintelReturn *ActionVoxel_LintelReturns(const ActionVoxelGeometry *c, unsigned *count) {
+  *count = c ? c->lintel_return_count : 0;
+  return c ? c->lintel_returns : NULL;
 }
 static bool HighDeck(const VoxelEdge *e) {
   return e->high_priority && e->colliding && e->side == 0 && e->far_rank >= 2;

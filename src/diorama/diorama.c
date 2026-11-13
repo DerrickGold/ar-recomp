@@ -4626,8 +4626,7 @@ static PresentationOutcome DrawResolvedDioramaLayer(
   if(layer.voxel_depth>0) {
     unsigned count;const VoxelGate *gates=ActionVoxel_Gates(layer.voxel_geometry,&count);
     for(unsigned i=0;i<count;++i)
-      gate_front |= !gates[i].width && !gates[i].centered &&
-          gates[i].high_priority==(description->plane==kDioramaPlane_Bg1Hi);
+      gate_front |= gates[i].high_priority==(description->plane==kDioramaPlane_Bg1Hi);
   }
   const bool relief_front=layer.voxel_depth>0 &&
       (ActionVoxel_SceneryRecess(layer.voxel_geometry)>0 || ActionVoxel_HasColumns(layer.voxel_geometry) || gate_front ||

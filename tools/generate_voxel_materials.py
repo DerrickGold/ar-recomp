@@ -105,8 +105,11 @@ for manifest, symbol, suffix in TABLES:
         if type(portal_jamb) is not bool or (portal_jamb and
                 any(kind not in (1, 2, 4) for kind in record['kinds'])):
             raise ValueError(f'{manifest}: invalid portal jamb for {record["key"]}')
+        door_closure = record.get('door_closure', False)
+        if type(door_closure) is not bool or (door_closure and record['kinds'] != [1, 1, 1, 1]):
+            raise ValueError(f'{manifest}: invalid solid door closure for {record["key"]}')
         key = (int(record["key"], 16), tuple(record["kinds"]), record["flags"], rear_colors,
-               gate_colors, face_colors, rear_fold, complete_matte, portal_jamb)
+               gate_colors, face_colors, rear_fold, complete_matte, portal_jamb, door_closure)
         record_rooms = 0
         for room, terrain, metatile in record["origins"]:
             record_rooms |= 1 << room
@@ -230,7 +233,7 @@ for manifest, symbol, suffix in TABLES:
                 raise ValueError(f'{manifest}: conflicting top surface policies for {key:016x}')
     lines = [f"/* Generated reviewed artwork roles. See assets/environments/{manifest}. */",
              f"static const VoxelMaterialProfile k{symbol}Materials[] = {{"]
-    for (key, kinds, flags, rear_colors, gate_colors, face_colors, rear_fold, complete_matte, portal_jamb), rooms in sorted(profiles.items()):
+    for (key, kinds, flags, rear_colors, gate_colors, face_colors, rear_fold, complete_matte, portal_jamb, door_closure), rooms in sorted(profiles.items()):
         gate_text = ",{%s}" % ",".join(map(str, gate_colors))
         face_text = ",{%s}" % ",".join(map(str, face_colors))
         # Keep compact profiles: bits24..27 carry an explicitly reviewed band
@@ -239,6 +242,8 @@ for manifest, symbol, suffix in TABLES:
         matte_text = ",.complete_rear_matte=true" if complete_matte else ""
         if portal_jamb:
             matte_text += ",.portal_jamb=true"
+        if door_closure:
+            matte_text += ",.door_closure=true"
         lines.append("  {UINT64_C(0x%016x),0x%04x,{%s},%d,{%s}%s%s%s}," %
                      (key, rooms, ",".join(map(str, kinds)), flags, ",".join(map(str, rear_colors)),
                       gate_text, face_text, matte_text))

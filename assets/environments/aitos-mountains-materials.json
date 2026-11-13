@@ -800,6 +800,7 @@
     },
     {
       "key": "1169f5d18835898d",
+      "door_closure": true,
       "kinds": [
         1,
         1,
