@@ -335,6 +335,9 @@ In diorama mode, 3D towns and 3D world navigation, the right stick orbits, the t
 and R3 recentres. The mouse equivalents are right-drag, wheel, and middle-click.
 All seven pad inputs are re-bindable; sensitivity, deadzone, and invert-Y are
 configurable. Dynamic town orbit returns to its baseline on release.
+In action stages, Free Cam keeps your orbit and zoom. As you approach an
+edge, it shifts the view to keep the playfield on screen. If you zoom out
+past the available playfield, the camera balances the space around it.
 World navigation allows full-globe inspection in either town camera mode and
 smoothly centers the planet while orbiting. Release returns the orbit to the
 Palace travel direction; deliberate zoom-out keeps the centered framing until

@@ -189,5 +189,6 @@ DioramaCameraView DioramaCamera_Present(
     .distance_scale = distance_scale,
     .distance_offset = dynamic ? frame->controls.zoom_offset : 0.0f,
     .framing_weight = dynamic ? 1.0f - frame->controls.framing_override : 0.0f,
+    .free_camera = !dynamic,
   };
 }

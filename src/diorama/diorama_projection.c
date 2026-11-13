@@ -172,10 +172,10 @@ DioramaHorizontalBounds DioramaHorizontalBounds_Resolve(
   return bounds;
 }
 
-bool Diorama_ClampCameraHorizontally(
+static bool ClampCameraHorizontally(
     float matrix[16], float aspect_x, float height_scale,
     float z_world, float rake, float bow,
-    const DioramaHorizontalBounds *bounds) {
+    const DioramaHorizontalBounds *bounds, bool center_if_narrow) {
   if (!bounds || !bounds->valid || !isfinite(bounds->left) ||
       !isfinite(bounds->right) || bounds->left >= bounds->right ||
       !CameraProjectionValid(matrix, aspect_x, height_scale, z_world, rake, bow))
@@ -196,11 +196,71 @@ bool Diorama_ClampCameraHorizontally(
       else upper = fminf(upper, -p.x);
     }
   }
-  if (lower > upper) return true;
-  const float shift = fmaxf(lower, fminf(0.0f, upper));
+  if (lower > upper && !center_if_narrow) return true;
+  const float shift = lower > upper ? 0.5f * (lower + upper)
+      : fmaxf(lower, fminf(0.0f, upper));
   if (shift == 0.0f) return true;
   for (int c = 0; c < 4; ++c)
     matrix[c * 4] += 2.0f * shift * matrix[c * 4 + 3];
+  return true;
+}
+
+bool Diorama_ClampCameraHorizontally(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    const DioramaHorizontalBounds *bounds) {
+  return ClampCameraHorizontally(matrix, aspect_x, height_scale, z_world, rake,
+                                 bow, bounds, false);
+}
+
+bool Diorama_FrameFreeCameraHorizontally(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow, const DioramaHorizontalBounds *world,
+    float capture_left, float capture_right) {
+  DioramaHorizontalBounds available = {
+    .valid = true, .left_reached = true, .right_reached = true,
+    .left = capture_left, .right = capture_right,
+  };
+  if (world && world->valid) {
+    if (world->left_reached) available.left = fmaxf(capture_left, world->left);
+    if (world->right_reached) available.right = fminf(capture_right, world->right);
+  }
+  return ClampCameraHorizontally(matrix, aspect_x, height_scale, z_world, rake,
+                                 bow, &available, true);
+}
+
+bool Diorama_FrameFreeCameraVertically(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow) {
+  if (!CameraProjectionValid(matrix, aspect_x, height_scale, z_world, rake, bow))
+    return false;
+  float upper = INFINITY, lower = -INFINITY;
+  for (int edge = 0; edge < 2; ++edge) {
+    const float t = (float)edge;
+    const float z = DioramaTiltedRowDepth(z_world, rake, bow, t);
+    Scene3DPoint end[2];
+    for (int side = 0; side < 2; ++side) {
+      if (!Scene3D_ProjectWorldPoint(matrix, ((float)side - 0.5f) * aspect_x,
+              (0.5f - t) * height_scale, z, 1, 1, &end[side]))
+        return false;
+    }
+    /* The projected edge is a straight line. A tilted corner already off
+     * screen should not pull the visible playfield away from the player. */
+    float a = end[0].y, b = end[1].y;
+    const float dx = end[1].x - end[0].x;
+    if (fabsf(dx) > 0.00001f) {
+      a += fmaxf(0, fminf(1, -end[0].x / dx)) * (end[1].y - end[0].y);
+      b = end[0].y + fmaxf(0, fminf(1, (1.0f - end[0].x) / dx)) *
+          (end[1].y - end[0].y);
+    }
+    if (edge) lower = 1.0f - fminf(a, b);
+    else upper = -fmaxf(a, b);
+  }
+  /* Projected bounds can cover the screen at close range. Shift only enough
+   * to keep the edges out. Once they cannot cover it, split the spare space. */
+  const float shift = lower > upper ? 0.5f * (lower + upper)
+      : fmaxf(lower, fminf(0.0f, upper));
+  if (shift != 0.0f) CameraShiftVertically(matrix, shift);
   return true;
 }
 

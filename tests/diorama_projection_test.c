@@ -132,6 +132,46 @@ static void TestTiltedCameraFraming(void) {
           }
 }
 
+static void TestFreeCameraFraming(void) {
+  /* A close, offset view comes back to the lower edge. A zoomed-out
+   * capture instead gets equal margins, with the original scale intact. */
+  for (int step = 0; step <= 10; ++step) {
+    DioramaProjection p = Projection();
+    const float scale = 1.5f - 0.1f * step;
+    p.matrix[0] = p.matrix[5] = 2.0f * scale;
+    p.matrix[12] = 0.8f;
+    p.matrix[13] = 0.8f;
+    const DioramaHorizontalBounds room = {
+      .valid = true, .left = 0.25f, .right = 0.75f,
+      .left_reached = true, .right_reached = true,
+    };
+    CHECK(Diorama_FrameFreeCameraHorizontally(
+        p.matrix, p.aspect_x, 1.0f, 0, 0, 0, &room, 0, 1));
+    CHECK(Diorama_FrameFreeCameraVertically(p.matrix, p.aspect_x, 1.0f, 0, 0, 0));
+    ArRenderPointF top_left, bottom_right;
+    CHECK(Diorama_ProjectCapturedBg1Point(&p, 25, 0, &top_left, NULL, NULL));
+    CHECK(Diorama_ProjectCapturedBg1Point(&p, 75, 50, &bottom_right, NULL, NULL));
+    const float margin = fmaxf(0, 50.0f * (1.0f - scale));
+    CHECK(Near(top_left.x, margin));
+    CHECK(Near(bottom_right.y, 100 - margin));
+    CHECK(Near(bottom_right.x - top_left.x, 100 * scale));
+    CHECK(Near(bottom_right.y - top_left.y, 100 * scale));
+  }
+
+  /* At a strong yaw the offscreen end of the edge would pull the view
+   * farther than necessary. Only the portion in frame controls the stop. */
+  DioramaProjection p = Projection();
+  p.matrix[1] = 0.5f;
+  p.matrix[5] = 3.0f;
+  p.matrix[13] = 0.5f;
+  CHECK(Diorama_FrameFreeCameraVertically(p.matrix, p.aspect_x, 1, 0, 0, 0));
+  CHECK(Near(p.matrix[13], 0));
+  p.matrix[0] = 2.0f;
+  p.matrix[13] = 0.5f;
+  CHECK(Diorama_FrameFreeCameraVertically(p.matrix, p.aspect_x, 1, 0, 0, 0));
+  CHECK(Near(p.matrix[13], 0.25f));
+}
+
 static void TestCameraFramingCentersNativeBand(void) {
   for (int bottom_heavy = 0; bottom_heavy < 2; bottom_heavy++) {
     DioramaProjection projection = Projection();
@@ -1066,6 +1106,7 @@ static void TestSkyWeatherBandMerging(void) {
 }
 
 int main(void) {
+  TestFreeCameraFraming();
   TestSkyWeatherBandMerging();
   TestHorizontalCameraStopsFollowProjectedViewport();
   TestCameraFitsCapturedColumns();

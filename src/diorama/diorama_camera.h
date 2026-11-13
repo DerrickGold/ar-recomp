@@ -96,8 +96,9 @@ typedef struct DioramaCameraView {
   DioramaCameraPose pose;
   float distance_scale;
   float distance_offset;
-  /* 0 permits free framing; 1 fully centers and clamps the dynamic view. */
+  /* 0 permits the manual pose; 1 fully centers and clamps the dynamic view. */
   float framing_weight;
+  bool free_camera;
 } DioramaCameraView;
 
 /* Sample once per capture, using elapsed emulation ticks (zero on a host-

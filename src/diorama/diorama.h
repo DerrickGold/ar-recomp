@@ -120,6 +120,16 @@ bool Diorama_ClampCameraVertically(
     float z_world, float rake, float bow,
     bool clamp_top, bool clamp_bottom, float *world_y_offset);
 
+/* Manual gameplay orbit keeps the chosen scale. On each axis, keep edges
+ * outside the view where possible and balance the margins otherwise. */
+bool Diorama_FrameFreeCameraHorizontally(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow, const DioramaHorizontalBounds *world,
+    float capture_left, float capture_right);
+bool Diorama_FrameFreeCameraVertically(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow);
+
 void Diorama_TranslateCameraWorldY(float matrix[16], float shift);
 void Diorama_TranslateCameraWorldX(float matrix[16], float shift);
 /* Authored view offset relative to native scroll, in native pixels. */
@@ -401,6 +411,7 @@ typedef struct DioramaView {
   float distance_scale;
   float distance_offset;
   float camera_framing_weight;
+  bool fit_free_camera;
   int pixel_aspect;
   bool ignore_aspect_ratio;
   int visible_width;

@@ -2816,6 +2816,21 @@ static void PrepareDioramaView(const DioramaCapture *capture,
   float framing_weight = Clampf(view->camera_framing_weight, 0.0f, 1.0f);
   if (framing_weight == 0.0f) {
     Diorama_OffsetCamera(geometry->matrix, capture->framing_x, framing_y, par);
+    if (view->fit_free_camera) {
+      const int primary = capture->vertical_bounds.valid ? capture->vertical_bounds.plane
+          : capture->horizontal_bounds.valid ? capture->horizontal_bounds.plane
+          : SR_PPU_OVERLAY_BG1;
+      const DioramaResolvedLayer *focal = CameraFocalLayer(primary, scene, resolved, resolved_count);
+      if (focal) {
+        const float apron = DioramaPlaneUsesBgApron(primary, capture->bg_apron_mask)
+            ? (float)capture->obj_apron / (float)capture->width : 0.0f;
+        Diorama_FrameFreeCameraHorizontally(geometry->matrix, geometry->aspect_x,
+            geometry->height_scale, focal->z - 0.5f, focal->rake, focal->bow,
+            &capture->horizontal_bounds, -apron, 1.0f + apron);
+        Diorama_FrameFreeCameraVertically(geometry->matrix, geometry->aspect_x,
+            geometry->height_scale, focal->z - 0.5f, focal->rake, focal->bow);
+      }
+    }
     return;
   }
   float free_matrix[16];
@@ -2857,8 +2872,8 @@ static void PrepareDioramaView(const DioramaCapture *capture,
         capture->bg2_world_height, geometry->world_y_offset);
   geometry->world_y_offset *= framing_weight;
 
-  /* Restore automatic framing and the camera stop alongside the manual pose.
-   * Free Cam and active manual input use the untouched camera matrix. */
+  /* Restore automatic framing and the camera stop alongside the manual pose
+   * during the Dynamic Cam override's release. */
   if (framing_weight < 1.0f) {
     for (int i = 0; i < 16; i++)
       geometry->matrix[i] = free_matrix[i] + framing_weight *

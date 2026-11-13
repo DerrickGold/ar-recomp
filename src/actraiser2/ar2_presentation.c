@@ -120,7 +120,9 @@ static bool DrawScene(const ArImportedGameFrame *game, ArRenderRectI viewport, u
         .pixel_aspect = g_settings.pixel_aspect,
         .ignore_aspect_ratio = Settings_IgnoreAspectRatio(),
         .distance_scale = camera.distance_scale, .distance_offset = camera.distance_offset,
-        .camera_framing_weight = camera.framing_weight, .camera = camera.pose};
+        .camera_framing_weight = camera.framing_weight,
+        .fit_free_camera = camera.free_camera,
+        .camera = camera.pose};
     const DioramaScene scene = {.render = &options,
         .additive_plane_mask = 1u << kDioramaPlane_Bg2Far};
     DioramaProjection projection;

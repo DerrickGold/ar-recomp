@@ -119,6 +119,7 @@ static void CheckFreeControlAndModeChanges(void) {
   Near(view.distance_scale, 1.0f);
   Near(view.distance_offset, 0.0f);
   Near(view.framing_weight, 0.0f);
+  assert(view.free_camera);
   assert(!memcmp(&original, &frame, sizeof(frame)));
   frame.controls.free_pose.tilt_y = -.4f;
   view = DioramaCamera_Present(&presenter, &frame, 10, 1000000000);
@@ -132,6 +133,7 @@ static void CheckFreeControlAndModeChanges(void) {
   Near(view.distance_scale, 1); /* A mode switch cannot replay this capture's hit. */
   Near(view.distance_offset, 2.0f);
   Near(view.framing_weight, 0.0f);
+  assert(!view.free_camera);
   frame.controls.mode = kDioramaCam_Free;
   view = DioramaCamera_Present(&presenter, &frame, 11, 1000000000);
   Near(view.pose.tilt_x, -.3f);

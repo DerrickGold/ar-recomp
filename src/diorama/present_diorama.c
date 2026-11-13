@@ -1088,6 +1088,7 @@ retry_projection:;
       .distance_scale = camera.distance_scale,
       .distance_offset = camera.distance_offset,
       .camera_framing_weight = camera.framing_weight,
+      .fit_free_camera = camera.free_camera && primary_layer >= 0,
       .pixel_aspect = slot->pixel_aspect,
       .ignore_aspect_ratio = slot->ignore_aspect_ratio,
       .visible_width = slot->visible_width,
