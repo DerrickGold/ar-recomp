@@ -232,8 +232,12 @@ trackToggle.addEventListener("click",()=>{
   if(!trackOptions.hidden){ closeTrackPicker(); return; }
   trackOptions.hidden=false; trackToggle.setAttribute("aria-expanded","true"); trackSearch.value=""; filterTracks(); trackSearch.focus();
 });
-document.addEventListener("pointerdown",event=>{ if(!event.target.closest(".asset-track-picker")) closeTrackPicker(); });
-document.querySelector(".asset-track-picker").addEventListener("focusout",event=>{ if(!event.currentTarget.contains(event.relatedTarget)) closeTrackPicker(); });
+// WebKit can blur the search field without focusing a mouse-clicked button.
+// Wait for focus to arrive outside: closing on focusout would hide the option
+// before its click can select the track.
+for(const type of ["pointerdown","focusin"]){
+  document.addEventListener(type,event=>{ if(!event.target.closest(".asset-track-picker")) closeTrackPicker(); });
+}
 trackOptions.addEventListener("keydown",event=>{
   const visible=[...trackButtons.values()].filter(button=>!button.hidden);
   if(event.key==="Escape"){ event.preventDefault(); closeTrackPicker(true); }

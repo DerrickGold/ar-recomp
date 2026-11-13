@@ -98,22 +98,21 @@ test("asset numeric arguments reformat but filenames, IDs and media resources st
 // Run the actual application alongside i18n, with a deliberately small DOM.
 // No copied asset state machine and no browser/server dependency. Unsupported
 // row selectors fail loudly so this fixture cannot silently hide new behavior.
-function setupAssetApp(){
+function setupAssetApp(tracks=[["song-09","Track 09"],["song-01","Sky Palace"]]){
   const s=setup(), ids=new Map(),rows=[];
   const node=id=>{
-    if(!ids.has(id)){const n=new Node("div");n.id=id;n.files=[];n.focus=()=>{s.doc.activeElement=n;};ids.set(id,n);s.doc.children.push(n);}
+    if(!ids.has(id)){const n=new Node("div");n.id=id;n.files=[];n.focus=()=>{s.doc.activeElement=n;};n.closest=()=>null;ids.set(id,n);s.doc.children.push(n);}
     return ids.get(id);
   };
-  const names=["Track 09","Sky Palace"];
-  for(const [index,id] of ["song-09","song-01"].entries()){
+  for(const [index,[id,name]] of tracks.entries()){
     const row=new Node("div","",{"data-track":id,"data-source":index===0?"0E:F69F":"1C:A988"});
-    const file=new Node("input");file.files=[];
+    const file=new Node("input");file.files=[];file.name="track-"+id;
     const remove=new Node("input");remove.value="0";
     const split=new Node("input");split.value="0";
     const regionChoice=new Node("input");regionChoice.name="split-"+id;regionChoice.value="fillmore";regionChoice.checked=false;
     const audio=new Node("audio");audio.paused=true;audio.currentTime=0;audio.pauses=0;audio.loads=0;
     audio.pause=()=>{audio.paused=true;audio.pauses++;};audio.load=()=>{audio.loads++;};
-    const current=new Node("span"),clear=new Node("button"),label=new Node("label",names[index]);
+    const current=new Node("span"),clear=new Node("button"),label=new Node("label",name);
     const selectors={"input[type=file]":file,".asset-remove":remove,".split-change":split,
       ".replacement-audio":audio,".replacement-caption":new Node("span"),".asset-current":current,
       ".asset-clear":clear,".asset-copy label":label,".asset-source":new Node("span"),".split-toggle":null};
@@ -124,8 +123,13 @@ function setupAssetApp(){
     rows.push(row);s.doc.children.push(row);
     Object.assign(row,{file,remove,split,regionChoice,audio,current,clear,label});
   }
-  const list=node("asset-track-list");list.append=child=>list.children.push(child);
+  const list=node("asset-track-list");
   const pickerHost=new Node("div"),tabsHost=new Node("div"),header=new Node("header");header.offsetHeight=70;
+  const pickerNodes=new Set([pickerHost,list,...["asset-track-toggle","asset-track-options","asset-search"].map(node)]);
+  const inPicker=n=>{n.closest=selector=>selector===".asset-track-picker"?pickerHost:null;pickerNodes.add(n);};
+  pickerNodes.forEach(inPicker);pickerHost.contains=n=>pickerNodes.has(n);
+  list.append=child=>{inPicker(child);list.children.push(child);};
+  node("asset-track-options").hidden=true;
   const tabs=[node("tab-home"),node("tab-build")];
   tabs.forEach(tab=>tab.setAttribute("aria-controls",tab.id.replace("tab-","panel-")));
   const originalQuery=s.doc.querySelectorAll.bind(s.doc);
@@ -139,7 +143,7 @@ function setupAssetApp(){
     if(selector.startsWith("#"))return node(selector.slice(1));
     return {".tabs":tabsHost,".workspace-bar":header,".asset-track-picker":pickerHost}[selector]??assert.fail(`unexpected document selector ${selector}`);
   };
-  s.doc.createElement=tag=>new Node(tag);
+  s.doc.createElement=tag=>{const n=new Node(tag);n.focus=()=>{s.doc.activeElement=n;};n.click=()=>n.fire("click");return n;};
   s.doc.body=new Node("body");
   s.doc.documentElement.style={setProperty(){}};
   s.context.window.addEventListener=()=>{};
@@ -159,7 +163,7 @@ function setupAssetApp(){
   const source=readFileSync(new URL("../web/app.js",import.meta.url),"utf8");
   assert.match(source,/\}\)\(\);\s*$/);
   runInNewContext(source.replace(/\}\)\(\);\s*$/,"window.testApplyMode=applyMode;\nwindow.testRefresh=refresh;\n})();"),s.context);
-  return {...s,node,rows,list,requests,urls,applyMode:s.context.window.testApplyMode,refresh:s.context.window.testRefresh};
+  return {...s,node,rows,list,pickerHost,requests,urls,applyMode:s.context.window.testApplyMode,refresh:s.context.window.testRefresh};
 }
 
 test("blocked build shows localized policy recovery while preserving the raw report",async()=>{
@@ -448,6 +452,63 @@ test("real asset controller keeps unsaved files, playback, search and form state
     s.node("asset-search").value=query;await s.node("asset-search").fire("input");
     assert.equal(s.list.children[1].hidden,false);assert.equal(s.list.children[0].hidden,true);
   }
+});
+
+test("music track clicks survive WebKit's null focusout and preserve pending uploads",async()=>{
+  const s=setupAssetApp([["title-theme","Title Theme"],["song-01","Sky Palace"]]);
+  const [title,palace]=s.rows,[titleButton,palaceButton]=s.list.children;
+  const toggle=s.node("asset-track-toggle"),options=s.node("asset-track-options"),search=s.node("asset-search");
+  assert.equal(title.hidden,false);assert.equal(palace.hidden,true);
+  const files=[{name:"title replacement.ogg"}];title.file.files=files;await title.file.fire("change");
+  await toggle.fire("click");
+  assert.equal(s.doc.activeElement,search);assert.equal(options.hidden,false);
+  await s.doc.fire("pointerdown",{target:palaceButton});
+  // WebKit blurs the search input without focusing the mouse-clicked button.
+  // Hiding its ancestor here prevents the subsequent browser click entirely.
+  s.doc.activeElement=s.doc.body;
+  await s.pickerHost.fire("focusout",{target:search,currentTarget:s.pickerHost,relatedTarget:null});
+  assert.equal(options.hidden,false,"the pressed track must remain available until click");
+  await palaceButton.fire("click");
+  assert.equal(title.hidden,true);assert.equal(palace.hidden,false);
+  assert.equal(s.node("asset-selected-track").textContent,palace.label.textContent);
+  assert.equal(palaceButton.getAttribute("aria-current"),"true");
+  assert.equal(options.hidden,true);assert.equal(toggle.getAttribute("aria-expanded"),"false");
+  assert.equal(s.doc.activeElement,toggle);
+  await toggle.fire("click");await titleButton.fire("click");
+  assert.equal(title.hidden,false);assert.equal(palace.hidden,true);
+  assert.equal(title.file.files,files);assert.equal(title.file.name,"track-title-theme");
+  assert.equal(title.dataset.pending,"pending");assert.equal(s.node("asset-bar").dataset.dirty,"true");
+});
+
+test("music track picker stays open for internal focus and closes for outside interaction",async()=>{
+  const s=setupAssetApp(),toggle=s.node("asset-track-toggle"),options=s.node("asset-track-options");
+  const button=s.list.children[1],outside=s.node("save-assets-top");
+  await toggle.fire("click");
+  await s.pickerHost.fire("focusout",{target:s.node("asset-search"),currentTarget:s.pickerHost,relatedTarget:button});
+  button.focus();await s.doc.fire("focusin",{target:button});
+  assert.equal(options.hidden,false);
+  await s.doc.fire("pointerdown",{target:outside});
+  assert.equal(options.hidden,true);assert.equal(toggle.getAttribute("aria-expanded"),"false");
+  await toggle.fire("click");
+  await s.pickerHost.fire("focusout",{target:s.node("asset-search"),currentTarget:s.pickerHost,relatedTarget:outside});
+  outside.focus();await s.doc.fire("focusin",{target:outside});
+  assert.equal(options.hidden,true);assert.equal(s.doc.activeElement,outside);
+});
+
+test("music track picker keeps keyboard navigation, search selection and Escape",async()=>{
+  const s=setupAssetApp(),toggle=s.node("asset-track-toggle"),options=s.node("asset-track-options"),search=s.node("asset-search");
+  const key=(key,target=s.doc.activeElement)=>options.fire("keydown",{key,target,preventDefault(){}});
+  await toggle.fire("click");
+  await key("ArrowDown");assert.equal(s.doc.activeElement,s.list.children[0]);
+  await key("End");assert.equal(s.doc.activeElement,s.list.children[1]);
+  await key("Home");assert.equal(s.doc.activeElement,s.list.children[0]);
+  await key("ArrowUp");assert.equal(s.doc.activeElement,s.list.children[1]);
+  await key("Escape");assert.equal(options.hidden,true);assert.equal(s.doc.activeElement,toggle);
+  await toggle.fire("click");search.value="Sky Palace";await search.fire("input");
+  assert.equal(s.list.children[0].hidden,true);assert.equal(s.list.children[1].hidden,false);
+  await key("Enter",search);
+  assert.equal(s.rows[0].hidden,true);assert.equal(s.rows[1].hidden,false);
+  assert.equal(options.hidden,true);assert.equal(s.node("asset-selected-track").textContent,s.rows[1].label.textContent);
 });
 
 test("asset errors use stable actionable codes and retain raw details and pending files",async()=>{
