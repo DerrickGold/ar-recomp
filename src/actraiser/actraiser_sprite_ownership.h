@@ -95,6 +95,7 @@ enum {
   /* Native animated flame attached to the room's rear wall, never extruded. */
   kActRaiserSpriteProp_WallTorch,
   kActRaiserSpriteProp_Generic,
+  kActRaiserSpriteProp_IcePlatform,
 };
 void ActRaiserSpriteOwnership_RecordActionVisual(uint16_t source,uint16_t record,
     uint16_t animation,uint8_t bank,uint16_t composition,

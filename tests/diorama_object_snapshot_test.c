@@ -110,9 +110,9 @@ int main(void) {
   for(size_t n=0;n<size;n+=113)Rejected(n,&owned);
   Rejected(size+1,&owned);
   const struct {size_t offset;uint32_t value;} bad[]={
-    {4,3},{16,64},{20,8},{24,9},{28,3},{32,3},{36,65536},{40,399},
+    {4,kDioramaObjectSnapshotVersion+1},{16,64},{20,8},{24,9},{28,3},{32,3},{36,65536},{40,399},
     {68,641},{72,353},{76,2},{80,16},{84,17},{88,81},{92,34},{120,1},
-    {128,0},{132,10},{136,4},{140,65},{144,33},{148,129},
+    {128,0},{132,kActionVoxelSpriteIceShape+1},{136,4},{140,65},{144,33},{148,129},
     {176,0x7fc00000},{180,0x3f000000},{184,0x7f800000},
     {200,3},{204,16},{216,0}, /* mode, flags and explicit zero width */
     {220,8},{240,8}, /* p0 width3 cannot own bit3 in joins or rows. */
@@ -137,6 +137,15 @@ int main(void) {
   assert(DioramaObjectSnapshot_Encode(&torch,packet,sizeof(packet),&torch_size));
   assert(DioramaObjectSnapshot_Decode(packet,torch_size,&owned));
   assert(owned.view.voxel_sprites.sprites[0].shape==kActionVoxelSpriteGenericShape);
+  Put(4,2);Rehash(torch_size);
+  assert(DioramaObjectSnapshot_Decode(packet,torch_size,&owned));
+  assert(owned.view.voxel_sprites.sprites[0].shape==kActionVoxelSpriteGenericShape);
+  torch.voxel_sprites.sprites[0].shape=kActionVoxelSpriteIceShape;
+  assert(DioramaObjectSnapshot_Encode(&torch,packet,sizeof(packet),&torch_size));
+  assert(DioramaObjectSnapshot_Decode(packet,torch_size,&owned));
+  assert(owned.view.voxel_sprites.sprites[0].shape==kActionVoxelSpriteIceShape);
+  Put(4,2);Rehash(torch_size);
+  Rejected(torch_size,&owned);
   /* Version 1's fixed 316-byte prop contract remains readable: its first
    * 60 bytes are followed directly by 32 silhouette rows. No authored facts
    * or joins existed there. Keep original actor/plane payloads byte-exact. */

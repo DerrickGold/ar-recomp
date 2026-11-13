@@ -120,6 +120,92 @@ static void NorthwallAnimation(const ActionRoomScene *source,ActionVoxelGeometry
   printf("Northwall animation: %u unused definitions, 4 native + 4 edited phases, split parity and unsafe-input recovery\n",unused);
 }
 
+static void NorthwallForegroundPillars(const ActionRoomScene *s, const ActionVoxelGeometry *g) {
+  const unsigned char ids[] = {0x57, 0x5f, 0x67, 0x6f, 0x77};
+  unsigned cells = 0, count, sides = 0;
+  const VoxelEdge *edges = ActionVoxel_Edges(g, &count);
+  const float depth = ActionVoxel_Depth(g);
+  const float actor = ActionVoxel_PlayRecess(g) - .01f;
+  for (int y = 0; y < (int)ActionRoomScene_TileHeight(s, 1) / 2; ++y)
+    for (int x = 0; x < (int)ActionRoomScene_TileWidth(s, 1) / 2; ++x) {
+      uint8_t id;
+      uint16_t word;
+      assert(ActionRoomScene_LookupTile(s, 1, x * 2, y * 2, &word, &id));
+      if (!memchr(ids, id, sizeof(ids))) continue;
+      VoxelCellGeometry geometry;
+      assert(ActionVoxel_CellGeometry(g, x, y, &geometry));
+      for (unsigned q = 0; q < 4; ++q) {
+        assert(ActionRoomScene_LookupTile(s, 1, x * 2 + (q & 1), y * 2 + (q >> 1), &word, NULL));
+        assert((word & 0x2000) && !(s->bg[0].metatiles[id * 8 + q * 2] & 2));
+        assert(geometry.front[q] == 0 && geometry.back[q] < actor);
+      }
+      const ActionRoomSceneFrameState frame = {.brightness = 15};
+      uint32_t rear[256], front[256];
+      assert(ActionVoxel_Split(g, x * 16, y * 16, 16, 16, 16, &frame, NULL, 0, rear, front));
+      for (unsigned p = 0; p < 256; ++p)
+        assert(rear[p] == 0xff000000u && front[p] == 0);
+      if (id == 0x57 || id == 0x77)
+        for (int dx = -1; dx <= 1; dx += 2) {
+          /* The old cap/base silhouette extends into these rear tiles. */
+          uint32_t source[256];
+          for (unsigned py = 0; py < 16; ++py)
+            for (unsigned px = 0; px < 16; ++px)
+              source[py * 16 + px] =
+                  ForestNativeColor(s, (x + dx) * 16 + px, y * 16 + py, &frame);
+          assert(ActionVoxel_Split(g, (x + dx) * 16, y * 16, 16, 16, 16,
+                                   &frame, source, 16, rear, front));
+          for (unsigned p = 0; p < 256; ++p)
+            assert(rear[p] == (source[p] ? source[p] : 0xff000000u) && front[p] == 0);
+        }
+      ++cells;
+      for (unsigned i = 0; i < count; ++i) {
+        const VoxelEdge *e = &edges[i];
+        if (!(e->side & 1) || e->far_rank != 1 || e->x / 16 != x || e->y / 16 != y)
+          continue;
+        VoxelEdgeSpan span;
+        assert(e->high_priority && !e->colliding && e->thin_trim);
+        assert(ActionVoxel_ResolveEdgeSpan(g, e, kVoxelEdgeNative, 0, depth, &span));
+        assert(span.near_depth == 0 && span.far_depth < actor);
+        ++sides;
+      }
+    }
+  assert(cells && sides);
+  printf("Northwall 06/%02u foreground ice columns: %u cells, %u thin sides ahead of OBJ2\n",
+      s->map, cells, sides);
+}
+
+static void NorthwallForegroundEntrance(const ActionRoomScene *s, const ActionVoxelGeometry *g) {
+  const unsigned char ids[] = {0xd1, 0xd9, 0xe1, 0xe2, 0xe3};
+  unsigned cells = 0;
+  const float actor = ActionVoxel_PlayRecess(g) - .01f;
+  const ActionRoomSceneFrameState frame = {.brightness = 15};
+  for (int y = 0; y < (int)ActionRoomScene_TileHeight(s, 1) / 2; ++y)
+    for (int x = 0; x < (int)ActionRoomScene_TileWidth(s, 1) / 2; ++x) {
+      uint8_t id;
+      uint16_t word;
+      assert(ActionRoomScene_LookupTile(s, 1, x * 2, y * 2, &word, &id));
+      if (!memchr(ids, id, sizeof(ids))) continue;
+      VoxelCellGeometry geometry;
+      assert(ActionVoxel_CellGeometry(g, x, y, &geometry));
+      uint32_t source[256] = {0}, rear[256], front[256];
+      for (unsigned q = 0; q < 4; ++q) {
+        assert(ActionRoomScene_LookupTile(s, 1, x * 2 + (q & 1), y * 2 + (q >> 1), &word, NULL));
+        if (word & 0x2000) {
+          assert(geometry.front[q] == 0 && geometry.back[q] < actor);
+          continue;
+        }
+        for (unsigned py = (q >> 1) * 8; py < (q >> 1) * 8 + 8; ++py)
+          for (unsigned px = (q & 1) * 8; px < (q & 1) * 8 + 8; ++px)
+            source[py * 16 + px] = ForestNativeColor(s, x * 16 + px, y * 16 + py, &frame);
+      }
+      assert(ActionVoxel_Split(g, x * 16, y * 16, 16, 16, 16, &frame, source, 16, rear, front));
+      for (unsigned p = 0; p < 256; ++p)
+        assert(rear[p] == (source[p] ? source[p] : 0xff000000u));
+      ++cells;
+    }
+  assert(cells == 17);
+}
+
 static unsigned NorthwallFixtures(const char *directory) {
   static ActionSceneSnapshot fixture;
   static ActionRoomScene variant;
@@ -138,7 +224,10 @@ static unsigned NorthwallFixtures(const char *directory) {
     assert(ActionVoxel_Profile(a)==(ice?kActionVoxelProfile_NorthwallIce:kActionVoxelProfile_NorthwallSnow));
     assert(ActionVoxel_Depth(a)==(ice?.22f:.20f));
     assert(ActionVoxel_PlayRecess(a)==(ice?.075f:.065f));
-    if(room==5)NorthwallAnimation(s,a,b,settings);
+    if(room==5) {
+      NorthwallAnimation(s,a,b,settings);
+      NorthwallForegroundEntrance(s,a);
+    }
     variant=*s;Renumber(&variant);
     assert(ActionVoxel_Build(b,&variant,NULL,settings));SameGeometry(a,b);
     variant=*s;memset(variant.palette,0,sizeof(variant.palette));
@@ -162,8 +251,10 @@ static unsigned NorthwallFixtures(const char *directory) {
       }
     }
     assert(solid);if(room==1 || room==8)assert(decks);
-    if(room==2 || room==3 || room==5){assert(rear);TombIntervals(a);}
+    if(room==5)assert(rear);
+    if(room==2 || room==3 || room==5)TombIntervals(a);
     if(ice) {
+      if (room <= 3) NorthwallForegroundPillars(s, a);
       assert(ActionVoxel_HasRearRelief(a));
       unsigned water_count,width=0,expected=0;
       const VoxelWaterSurface *water=ActionVoxel_WaterSurfaces(a,&water_count);assert(water_count);
@@ -181,22 +272,33 @@ static unsigned NorthwallFixtures(const char *directory) {
     } else if(room==1)DesertMaterial(a,s,1,kVoxelSolid);
     else if(room==5)DesertMaterial(a,s,0x5f,kVoxelSolid);
     else DesertMaterial(a,s,0xf3,kVoxelSolid);
-    /* The opaque outer exit pillar has no native collision because the native
-     * transition owns passage. Its displayed ice still has full depth;
-     * its neighbouring narrow jamb remains a separate shallow material. */
+    /* The exit masks the player in native OBJ2, so its front jamb is thin
+     * and stays entirely ahead of that walking plane. */
     int gate_x,gate_y;
     if(room<=3 && FixtureCell(s,0x7c,&gate_x,&gate_y)) {
       unsigned leaf_faces=0;
       for(unsigned i=0;i<count;++i) {
         const VoxelEdge *e=&edges[i];
         if(e->x<gate_x*8 || e->x>gate_x*8+16 || e->y<gate_y*8 || e->y>gate_y*8+16)continue;
-        if(e->high_priority && !e->colliding && e->far_rank==2) {
+        if(e->high_priority && !e->colliding && e->far_rank==1) {
           VoxelEdgeSpan span;
           assert(ActionVoxel_ResolveEdgeSpan(a,e,kVoxelEdgeNative,0,depth,&span));
-          assert(span.far_depth==depth);++leaf_faces;
+          assert(e->thin_trim && !e->rear_mounted);
+          assert(span.near_depth==0 && span.far_depth<=depth*.10001f);
+          assert(span.far_depth<settings.play_recess-.01f);++leaf_faces;
         }
       }
       assert(leaf_faces);
+      const ActionRoomSceneFrameState gate_frame={.brightness=15};
+      uint32_t gate_rear[256],gate_front[256];
+      assert(ActionVoxel_Split(a,gate_x*8,gate_y*8,16,16,16,
+                               &gate_frame,NULL,0,gate_rear,gate_front));
+      unsigned backed=0;
+      for(unsigned p=0;p<256;++p) {
+        assert(!gate_rear[p] || gate_rear[p]==0xff000000u);
+        backed+=gate_rear[p]!=0;
+      }
+      assert(backed);
       variant=*s;
       for(unsigned q=0;q<4;++q) {
         uint16_t word;
@@ -204,6 +306,9 @@ static unsigned NorthwallFixtures(const char *directory) {
         memset(variant.characters+(word&1023)*32,0,32);
       }
       assert(ActionVoxel_Build(b,&variant,NULL,settings) && ActionVoxel_Active(b,6,room));
+      assert(ActionVoxel_Split(b,gate_x*8,gate_y*8,16,16,16,
+                               &gate_frame,NULL,0,gate_rear,gate_front));
+      for(unsigned p=0;p<256;++p)assert(!gate_rear[p] && !gate_front[p]);
       unsigned cleared_count;const VoxelEdge *cleared=ActionVoxel_Edges(b,&cleared_count);
       for(unsigned i=0;i<cleared_count;++i) {
         const VoxelEdge *e=&cleared[i];

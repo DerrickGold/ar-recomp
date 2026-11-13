@@ -557,6 +557,10 @@ float ActionVoxel_ColumnFrontDepth(const ActionVoxelGeometry *c,const VoxelTrunk
   const float weight=curve && curve->linear && curve->base_y>curve->top_y && isfinite(world_y)
       ? fmaxf(0,fminf(1,(world_y-curve->top_y)/(curve->base_y-curve->top_y)))
       : TrunkCurveWeight(curve,world_y);
+  if(c && c->profile==kActionVoxelProfile_NorthwallSnow && curve) {
+    const float contact=fmaxf(0,ActionVoxel_PlayRecess(c)-.01f);
+    return contact+(ActionVoxel_SceneryRecess(c)-contact)*weight;
+  }
   if(c && c->profile==kActionVoxelProfile_KassandoraDesert && curve)
     return fminf(ActionVoxel_Depth(c),ActionVoxel_PlayRecess(c)+.015f)*weight;
   return ActionVoxel_Depth(c)*weight;
@@ -821,7 +825,8 @@ bool ActionVoxel_Split(const ActionVoxelGeometry *c, int ox, int oy, int width, 
       VoxelTrunkCurve section={0};
       if(column && column<=c->column_curve_count)
         ActionVoxel_ColumnSection(&c->column_curves[column-1],wx+.5f,&section);
-      const bool rear_column=column && column<=c->column_curve_count && wy>=section.base_y;
+      const bool rear_column=column && column<=c->column_curve_count && wy>=section.base_y &&
+          c->profile!=kActionVoxelProfile_NorthwallSnow;
       /* Native high priority is an independent source, not a material hint.
        * Never merge it into either low-priority image or condition it on the
        * depth classifier. The ordinary high slot stays above OBJ2/below OBJ3. */

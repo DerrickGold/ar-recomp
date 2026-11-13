@@ -13,6 +13,7 @@ enum {
   kVoxelSpriteCellWidth = 66, kVoxelSpriteCellHeight = 34,
   kVoxelSpriteAtlasWidth = 264, kVoxelSpriteAtlasHeight = 136,
   kActionVoxelSpriteGenericShape = 9,
+  kActionVoxelSpriteIceShape = 10,
 };
 typedef struct ActionVoxelSprite {
   uint16_t owner;
@@ -42,6 +43,25 @@ static inline bool ActionVoxelSprite_IsModeled(const ActionVoxelSprite *p) {
       (p->shape != kActionVoxelSpriteGenericShape ||
        p->presentation_mode == kDioramaVoxelObject_Extruded);
 }
+
+static inline bool ActionVoxelSprite_KeepsNativeFace(const ActionVoxelSprite *p) {
+  /* Ice pits rely on OBJ priority to show the blue face through the BG1
+   * lip. Keep those winning pixels in their original slot unless an edit
+   * explicitly moves or resizes the face. */
+  return p->shape==kActionVoxelSpriteIceShape &&
+      !(p->presentation_fields&(kDioramaVoxelObject_Offset|kDioramaVoxelObject_Width));
+}
+
+static inline float ActionVoxelSprite_DepthOffset(const ActionVoxelSprite *p, float play_recess) {
+  if (p->presentation_fields & kDioramaVoxelObject_Offset) return p->depth_offset;
+  /* Start at the native OBJ2 face and extend away from the camera. */
+  return p->shape==kActionVoxelSpriteIceShape ? play_recess-.01f : 0;
+}
+
+static inline float ActionVoxelSprite_Thickness(const ActionVoxelSprite *p, float deck_depth) {
+  if (p->presentation_fields & kDioramaVoxelObject_Thickness) return p->thickness;
+  return p->shape==kActionVoxelSpriteIceShape ? .36f*deck_depth : deck_depth;
+}
 /* Re-resolve against the current project, not the rules active when a
  * diagnostic pose was captured. Unauthored generic compositions stay native. */
 static inline void ActionVoxelSprite_Resolve(ActionVoxelSprite *p,
@@ -64,7 +84,8 @@ static inline void ActionVoxelSprite_Resolve(ActionVoxelSprite *p,
 static inline void ActionVoxelSprite_RemoveNative(const ActionVoxelSprite *p,
     unsigned width, unsigned height, uint32_t *pixels, size_t pitch,
     const uint32_t *attributes, size_t attribute_pitch) {
-  if (!ActionVoxelSprite_IsModeled(p) || !p->owner_tag || p->owner_tag>128 || !pixels || !attributes ||
+  if (!ActionVoxelSprite_IsModeled(p) || ActionVoxelSprite_KeepsNativeFace(p) ||
+      !p->owner_tag || p->owner_tag>128 || !pixels || !attributes ||
       !p->width || p->width>kVoxelSpriteWidth || !p->height || p->height>kVoxelSpriteHeight ||
       pitch<width || attribute_pitch<width ||
       !(p->x>=-(float)p->width && p->x<(float)width &&

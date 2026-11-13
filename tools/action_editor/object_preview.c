@@ -91,10 +91,11 @@ bool EditorObjectPreview_Item(const EditorObjectPreview *p,const DioramaScene *s
   ActionVoxelSprite_Resolve(&resolved,scene?ActionVoxel_Edits(scene->voxel_geometry):NULL);
   out->source=resolved.source;out->parent=resolved.parent_source;out->animation=resolved.animation;
   out->shape=resolved.shape;out->mode=resolved.presentation_mode;
-  out->offset=resolved.depth_offset;out->width_scale=resolved.width_scale;
+  out->offset=ActionVoxelSprite_DepthOffset(&resolved,scene?ActionVoxel_PlayRecess(scene->voxel_geometry):0);
+  out->width_scale=resolved.width_scale;
   out->thickness=(resolved.presentation_fields&kDioramaVoxelObject_Thickness)?resolved.thickness:
       (resolved.shape==kActRaiserSpriteProp_WallTorch && resolved.presentation_mode!=kDioramaVoxelObject_Extruded)?0:
-      scene?ActionVoxel_Depth(scene->voxel_geometry):0;
+      ActionVoxelSprite_Thickness(&resolved,scene?ActionVoxel_Depth(scene->voxel_geometry):0);
   const bool supported=scene && ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number);
   out->can_extrude=bounds && out->source && supported;
   out->active=bounds && supported && ActionVoxelSprite_IsModeled(&resolved);

@@ -13,6 +13,8 @@ typedef struct VoxelMaterialProfile {
   uint16_t rear_colors[4];
   uint16_t gate_colors[4];
   uint16_t face_colors[4]; /* Native face-only ink; PixelRecess instead selects rear-mounted ink. */
+  bool complete_rear_matte;
+  bool portal_jamb;
 } VoxelMaterialProfile;
 /* Artwork-only policy is separate from structural flags: existing shape,
  * animation and rear-copy allowlists must not reinterpret a new top donor. */
@@ -99,6 +101,7 @@ enum { kCastleRearMaterial = 1, kCastleBackingMaterial = 2, kVoxelTexturedTopMat
        kVoxelContactSceneryMaterial = 268435456,
        kVoxelRaisedSceneryMaterial = 536870912,
        kVoxelPostShadowMaterial = 1073741824 };
+#define kVoxelSnowRockMaterial UINT32_C(2147483648)
 typedef struct CastleMaterial {
   uint16_t words[4];
   uint64_t shape;
@@ -109,6 +112,8 @@ typedef struct CastleMaterial {
   uint8_t native_ice_tip_source,native_ice_tip_flip;
   bool native_slope, native_slope_foot, native_slope_support;
   bool rear_backing_donor;
+  bool complete_rear_matte;
+  bool portal_jamb;
   uint8_t opaque_rear_ink; /* One-based native palette index; zero is legacy black. */
   uint32_t flags;
   uint16_t rear_rows[16]; /* Contextual native collision contour, MSB is left. */
@@ -240,8 +245,8 @@ static uint64_t Boundary(const ActionVoxelGeometry *c, int x, int y, unsigned si
                                  : DepthRank(c, yy * c->width + xx);
   /* Thin foreground trim on a full floor exposes only the walkway behind it.
    * Shared solid interiors have no side, even across native priorities. */
-  const bool rear=c->mixed_scenery && far_rank==1 && c->front_recess[(y/8)*(c->width/8)+x/8];
-  const bool neighbor_rear=c->mixed_scenery && near_rank==1 &&
+  const bool rear=c->mixed_scenery && c->front_recess && far_rank==1 && c->front_recess[(y/8)*(c->width/8)+x/8];
+  const bool neighbor_rear=c->mixed_scenery && c->front_recess && near_rank==1 &&
       c->front_recess[(yy/8)*(c->width/8)+xx/8];
   const bool thin=c->thin_trim_cells && far_rank==1 &&
       c->thin_trim_cells[(y/8)*(c->width/8)+x/8];
@@ -613,6 +618,8 @@ static void Material(const ActionRoomScene *s, unsigned bg, const uint16_t words
     }
     /* Backing stays in its reviewed source orientation. */
     out->flags = flip ? p->flags & ~kCastleBackingMaterial : p->flags;
+    out->complete_rear_matte = p->complete_rear_matte;
+    out->portal_jamb = p->portal_jamb;
     out->rear_fold_pixels = (flip & 2) ? 0 : (p->flags >> 24) & 15;
     break;
   }
@@ -1349,6 +1356,31 @@ static bool BuildRearFill(ActionVoxelGeometry *c, const ActionRoomScene *s,
     }
   return true;
 }
+/* Thorn caps can share a shrub crown with a neighboring tree root. The
+ * joining pixels identify the rear shrub independently of the hazard below. */
+static bool ForestCrownJoinsRoot(const ActionRoomScene *s,
+    const DioramaStampLayerOverride *stamps, const CastleMaterial native[256],
+    const CastleMaterial *crown, int cx, int cy, const uint16_t *tiles, size_t tile_pitch) {
+  for (int dx = -1; dx <= 1; dx += 2) {
+    CastleMaterial root;
+    uint8_t id;
+    if (!LookupMaterial(s, stamps, native, cx + dx, cy, &root, &id, tiles, tile_pitch) ||
+        !(root.flags & kVoxelTreeRootMaterial)) continue;
+    const unsigned root_x = dx < 0 ? 7 : 0;
+    const unsigned crown_x = 7 - root_x;
+    for (unsigned y = 0; y < 16; ++y) {
+      const unsigned root_q = (y / 8) * 2 + (dx < 0);
+      const unsigned crown_q = root_q ^ 1;
+      const unsigned row = (y & 7) * 8;
+      const unsigned ink = root.pixels[root_q][row + root_x];
+      if (ink && (root.rear_colors[root_q] & (1u << ink)) &&
+          crown->kind[crown_q] == kVoxelFoliage && crown->pixels[crown_q][row + crown_x])
+        return true;
+    }
+  }
+  return false;
+}
+
 /* A grounded mixed root already contains a complete native foliage patch.
  * Continue that local plant only into the old curved-bark footprint. Keeping
  * a second bark image at the vegetation plane would restore the old depth
@@ -1550,6 +1582,22 @@ static bool NativeContourEdited(const DioramaRoomOverride *terrain,int x,int y) 
       kDioramaVoxelCell_Shape|kDioramaVoxelCell_FrontEnd|kDioramaVoxelCell_BackEnd|
       kDioramaVoxelCell_Bend|kDioramaVoxelCell_Transform;
   return ActionVoxel_CellOwnsArtwork(cell) && (cell->fields&geometry);
+}
+static bool SnowRockReturnsToBank(const CastleMaterial *material,const ActionRoomScene *s,
+    const DioramaStampLayerOverride *stamps,const CastleMaterial native[256],
+    int cx,int cy,const uint16_t *tiles,size_t tile_pitch) {
+  if(material->flags&kVoxelRearMountedMaterial)return true;
+  if(!material->native_slope)return false;
+  /* A slope can be the right edge of the lower rock course. Match the
+   * adjacent base art, through at most one intervening rock slope. */
+  for(int distance=1;distance<=2;++distance) {
+    CastleMaterial left;uint8_t id;
+    if(!LookupMaterial(s,stamps,native,cx-distance,cy,&left,&id,tiles,tile_pitch) ||
+        !(left.flags&kVoxelSnowRockMaterial))break;
+    if(left.flags&kVoxelRearMountedMaterial)return true;
+    if(!left.native_slope)break;
+  }
+  return false;
 }
 static uint16_t NativeSlopeFootRow(const ActionVoxelGeometry *c,const ActionRoomScene *s,
     const DioramaRoomOverride *terrain,const DioramaStampLayerOverride *stamps,
@@ -1784,9 +1832,10 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
       /* A shrub crown is also reused above solid thorn caps. Follow its reviewed
        * border base when present so the whole plant stays on one plane;
        * identical artwork elsewhere retains its own placement. */
-      const bool rear_foliage = foliage && have_below && !below.collision &&
-          below.kind[0] == kVoxelRearOnly && below.kind[1] == kVoxelRearOnly;
       const bool growth_crown = foliage && have_below && (below.flags & kVoxelGrowthMaterial);
+      const bool rear_foliage = foliage && have_below &&
+          ((!below.collision && below.kind[0] == kVoxelRearOnly && below.kind[1] == kVoxelRearOnly) ||
+           (growth_crown && ForestCrownJoinsRoot(s, stamps, native, &material, cx, cy, tiles, tile_pitch)));
       /* A raised bank's original shrub footprint continues through its crown.
        * Crown artwork is also used on foreground thorn platforms, so inherit
        * only a reviewed plain foliage base's backing, never its geometry. */
@@ -1801,6 +1850,10 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
       uint16_t slope_support[16]={0};
       const bool have_slope_support=NativeMountainSlopeSupport(c,s,terrain,stamps,native,
           &material,cx,cy,edit,tiles,tile_pitch,slope_support);
+      const bool snow_rock=(material.flags&kVoxelSnowRockMaterial) &&
+          !NativeContourEdited(terrain,cx,cy);
+      const bool snow_rock_base=snow_rock &&
+          SnowRockReturnsToBank(&material,s,stamps,native,cx,cy,tiles,tile_pitch);
       if ((material.flags & kVoxelSoftSurfaceMaterial) || slope_foot || have_slope_support) {
         if (!c->soft_surfaces) {
           c->soft_surfaces=calloc((size_t)c->width/16,c->height/16);
@@ -1862,7 +1915,7 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
       if(!BuildPostShadowRepair(c,s,terrain,stamps,native,&material,cx,cy,edit,palette,tiles,tile_pitch))
         return false;
       if ((material.flags & kVoxelOpaqueRearMaterial) &&
-          !BuildOpaquePortalBacking(c,&material,cx,cy,edit,palette))return false;
+          !BuildOpaqueRearBacking(c,&material,cx,cy,edit,palette))return false;
       for (unsigned quadrant = 0; quadrant < 4; ++quadrant) {
         const int tx = cx * 2 + (quadrant & 1), ty = cy * 2 + (quadrant >> 1);
         const unsigned w = material.words[quadrant];
@@ -1871,9 +1924,16 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
         if (rear_foliage && kind == kVoxelFoliage) kind = kVoxelRearOnly;
         if (!kind) continue;
         const bool high_priority = (w & 0x2000) != 0;
+        /* Door art contains separate native foreground and rear strips.
+         * Keep the high strip ahead of actors and let low trim sit against
+         * the wall. Native colliding masonry and grille ink are independent. */
+        const bool portal_jamb=material.portal_jamb && !solid &&
+            (kind==kVoxelSolid || kind==kVoxelForeground || kind==kVoxelThin);
+        if(portal_jamb)
+          kind=high_priority?kVoxelForeground:c->front_recess?kVoxelThin:kVoxelRearOnly;
         /* Reviewed raised crenellations need matching rear trim. Portals
          * with authored rear jambs do not request a second copy. */
-        const bool rear_trim = high_priority && (material.flags & kCastleRearMaterial);
+        const bool rear_trim = high_priority && !portal_jamb && (material.flags & kCastleRearMaterial);
         if (rear_trim && !(tx & 1) && !(ty & 1)) {
           VoxelRearTrim *last = c->rear_trim_count ? &c->rear_trims[c->rear_trim_count - 1] : NULL;
           if (last && last->y == ty * 8 && last->x + last->width == tx * 8)
@@ -1888,6 +1948,7 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
          * collision and foreground priority remain separate flags. */
         if (high_priority && kind == kVoxelSolid && !solid &&
             !(material.flags & kVoxelTerrainBodyMaterial)) kind = kVoxelForeground;
+        if(snow_rock && !high_priority && kind==kVoxelForeground)kind=kVoxelSolid;
         bool colored = false;
         for (int y = 0; y < 8; ++y)
           for (int x = 0; x < 8; ++x) {
@@ -1901,6 +1962,25 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
                             palette[((w >> 10) & 7) * 16 + p]);
           }
         if (!colored) continue;
+        if(snow_rock && !high_priority && kind==kVoxelSolid) {
+          /* Crown and base use the same actor-clear front and share the
+           * existing rear endpoint. This changes no native collision bits. */
+          if(!c->column_cells) {
+            c->column_cells=calloc((size_t)c->width/8,c->height/8);
+            if(!c->column_cells)return false;
+          }
+          /* A snow-rock base that meets a separate bank returns to the
+           * shallow relief plane by the bottom of its native metatile. */
+          const short top=snow_rock_base?cy*16+8:0, bottom=snow_rock_base?(cy+1)*16:0;
+          unsigned owner=0;
+          while(owner<c->column_curve_count &&
+              (c->column_curves[owner].top_y!=top || c->column_curves[owner].base_y!=bottom))++owner;
+          if(owner==c->column_curve_count) {
+            if(owner==kVoxelMaxCastleColumns)return false;
+            c->column_curves[c->column_curve_count++]=(VoxelTrunkCurve){.top_y=top,.base_y=bottom};
+          }
+          c->column_cells[(size_t)(ty-y0/8)*(c->width/8)+tx-x0/8]=(uint8_t)(owner+1);
+        }
         bool foot_quadrant=quadrant<2 && (slope_foot&(quadrant?0x00ff:0xff00));
         for(unsigned y=0;y<8 && !foot_quadrant;++y)
           foot_quadrant=!!(slope_support[(quadrant/2)*8+y]&((quadrant&1)?0x00ff:0xff00));
@@ -1925,7 +2005,7 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
         /* Noncolliding front posts are scenery outside the walking lane.
          * Keep their native front face/priority, but do not give them the
          * quarter-deck thickness used by rocks and rear-mounted supports. */
-        if(priority_scenery && high_priority && !solid && kind==kVoxelForeground) {
+        if((priority_scenery || portal_jamb) && high_priority && !solid && kind==kVoxelForeground) {
           if(!c->thin_trim_cells) {
             c->thin_trim_cells=calloc((size_t)c->width/8,c->height/8);
             if(!c->thin_trim_cells)return false;
@@ -1934,9 +2014,9 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
         }
         if((ActionVoxel_RearMountedScenery(c) ||
             (material.flags&(kVoxelRearMountedMaterial|kVoxelContactSceneryMaterial)) ||
-            (priority_scenery && !high_priority)) &&
+            ((priority_scenery || portal_jamb) && !high_priority)) &&
             (kind==kVoxelForeground ||
-             (kind==kVoxelThin && (material.flags&kVoxelRearMountedMaterial)))) {
+             (kind==kVoxelThin && ((material.flags&kVoxelRearMountedMaterial) || portal_jamb)))) {
           if(!c->front_recess)return false;
           c->front_recess[(ty-y0/8)*(c->width/8)+tx-x0/8]=2;
         }
@@ -1953,8 +2033,8 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
           c->raised_scenery_cells[(ty-y0/8)*(c->width/8)+tx-x0/8]=1;
           c->mixed_scenery=true;
         }
-        c->mixed_scenery |= (material.flags&kVoxelRearMountedMaterial)!=0 || priority_scenery;
-        if(!BuildPixelRecess(c,&material,edit,quadrant,tx,ty,slope_foot))return false;
+        c->mixed_scenery |= (material.flags&kVoxelRearMountedMaterial)!=0 || priority_scenery || portal_jamb;
+        if(!snow_rock && !BuildPixelRecess(c,&material,edit,quadrant,tx,ty,slope_foot))return false;
         if (material.flags & (kVoxelGrowthMaterial | kVoxelBranchMaterial | kVoxelSideProfileMaterial |
                               kVoxelSpikeMaterial | kVoxelRearGrassMaterial)) {
           const unsigned patch_kind = material.flags & kVoxelRearGrassMaterial ? kVoxelPatch_RearGrass
@@ -2017,7 +2097,7 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
                  (p && (!silhouette || palette[((w >> 10) & 7) * 16 + p])))
                     ? (pixel_kind | (high_priority ? kVoxelHighPriority : 0) |
                        (rear_trim ? kVoxelRearTrim : 0) | (solid ? kVoxelColliding : 0) |
-                       ((material.flags & kVoxelRearCopyMaterial) ? kVoxelRearCopy : 0) |
+                       (((material.flags & kVoxelRearCopyMaterial) && !portal_jamb) ? kVoxelRearCopy : 0) |
                        (((material.flags & kVoxelTexturedTopMaterial) || foot_pixel) ? kVoxelTexturedTop : 0))
                     : 0;
             if ((material.flags & kVoxelBranchMaterial) && p && pixel_kind != kVoxelRearOnly) {

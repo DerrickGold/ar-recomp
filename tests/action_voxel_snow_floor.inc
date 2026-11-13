@@ -85,10 +85,12 @@ static void SnowFloorSlopes(const ActionRoomScene *s,const ActionVoxelGeometry *
           ++surface_y;++outline_offsets;
         }
         const size_t at=(y*16+surface_y-g->origin_y)*g->width+x*16+px-g->origin_x;
-        if((g->front[at]&kVoxelKindMask)!=kVoxelSolid || !(tops[at]&2))
+        const VoxelTrunkCurve *rock=ActionVoxel_ColumnCurveForCell(g,(x*16+px)/8,(y*16+surface_y)/8);
+        const unsigned cap=rock?1:2;
+        if((g->front[at]&kVoxelKindMask)!=kVoxelSolid || !(tops[at]&cap))
           fprintf(stderr,"snow contact region%u cell%u,%u id%02x collision%u left%u right%u pixel%u,%u role%u top%u\n",
               region,x,y,id,collision,left,right,px,surface_y,g->front[at]&kVoxelKindMask,tops[at]);
-        assert((g->front[at]&kVoxelKindMask)==kVoxelSolid && (tops[at]&2));++contacts;
+        assert((g->front[at]&kVoxelKindMask)==kVoxelSolid && (tops[at]&cap));++contacts;
       }
     }
   assert(cells==58 && ascending==22 && descending==36 && contacts==928 && outline_offsets==2);
@@ -123,7 +125,7 @@ static void SnowFloorFixtures(const char *directory) {
     const size_t area=(size_t)base->width*base->height;
     uint8_t *top=calloc(area,1);assert(top);
     unsigned edge_count;const VoxelEdge *edges=ActionVoxel_Edges(base,&edge_count);
-    unsigned shared_caps=0,door_edges=0;
+    unsigned shared_caps=0;
     for(unsigned i=0;i<edge_count;++i) {
       const VoxelEdge *e=&edges[i];
       assert(!e->flat_rear_join && !e->rear_fold_top && !e->rear_fold_bottom);
@@ -142,13 +144,7 @@ static void SnowFloorFixtures(const char *directory) {
           shared_caps+=e->length;
         }
       }
-      if(e->far_rank==1 && e->x>=156*16 && e->x<157*16 && e->y>=36*16 && e->y<40*16) {
-        VoxelEdgeSpan span;
-        if(ActionVoxel_ResolveEdgeSpanAtY(base,e,kVoxelEdgeNative,0,ActionVoxel_Depth(base),e->y,&span)) {
-          assert(!e->rear_mounted && !e->colliding);
-          assert(span.near_depth>=0 && span.far_depth<=.050001f);++door_edges;
-        }
-      }
+      assert(!(e->far_rank==1 && e->x>=156*16 && e->x<157*16 && e->y>=36*16 && e->y<40*16));
     }
     SnowFloorSlopes(s,base,top,region);
     unsigned expected_caps=0,sloped_caps=0;
@@ -164,8 +160,8 @@ static void SnowFloorFixtures(const char *directory) {
       if(above==kVoxelForeground)++expected_caps;
       else if(y&15)++sloped_caps;
     }
-    assert(expected_caps && sloped_caps && shared_caps==expected_caps && door_edges==4);
-    unsigned details=0,hazards=0,pits=0,pit_floor_columns=0,foot_pixels=0;
+    assert(expected_caps && sloped_caps && shared_caps==expected_caps);
+    unsigned details=0,hazards=0,pits=0,pit_floor_columns=0,foot_pixels=0,rock_bases=0;
     int8_t hazard_art[256];memset(hazard_art,-1,sizeof(hazard_art));
     for(unsigned y=0;y<ActionRoomScene_TileHeight(s,1)/2;++y)
       for(unsigned x=0;x<ActionRoomScene_TileWidth(s,1)/2;++x) {
@@ -195,26 +191,39 @@ static void SnowFloorFixtures(const char *directory) {
           assert(ActionRoomScene_LookupTile(s,1,x*2+(q&1),y*2+(q>>1),&word,NULL));
           assert(!(word&0x2000));
           if(detail) {
+            const VoxelTrunkCurve *rock=ActionVoxel_ColumnCurveForCell(base,x*2+(q&1),y*2+(q>>1));
             bool modeled=false,foot_quadrant=false;
             const uint8_t *recess=ActionVoxel_PixelRecessRows(base,x*2+(q&1),y*2+(q>>1));
             for(unsigned py=0;py<8;++py)for(unsigned px=0;px<8;++px) {
               const unsigned m=base->front[(y*16+(q>>1)*8+py-base->origin_y)*base->width+x*16+(q&1)*8+px-base->origin_x];
               const bool contact=q<2 && !py && (foot&(1u<<(15-(q&1)*8-px)));
               assert(!(m&(kVoxelHighPriority|kVoxelColliding)));
-              assert(((m&kVoxelKindMask)==kVoxelSolid)==contact);
+              if(!rock)assert(((m&kVoxelKindMask)==kVoxelSolid)==contact);
               if(recess)assert(!!(recess[py]&(1u<<(7-px)))==!contact);
               foot_quadrant|=contact;foot_pixels+=contact;
               modeled|=(m&kVoxelKindMask)==kVoxelForeground;
             }
-            if(foot_quadrant)assert(recess);
-            assert(fabsf(cell.front[q]-(modeled?.15f:.2f))<.000001f);
+            if(rock) {
+              ++rock_bases;assert(!recess);
+              const float front=ActionVoxel_ColumnFrontDepth(base,rock,y*16+(q>>1)*8+4);
+              assert(fabsf(cell.front[q]-front)<.000001f && front>=settings.play_recess-.010001f);
+              assert(fabsf(ActionVoxel_ColumnFrontDepth(base,rock,(y+1)*16)-.15f)<.000001f);
+            } else {
+              if(foot_quadrant)assert(recess);
+              assert(fabsf(cell.front[q]-(modeled?.15f:.2f))<.000001f);
+            }
             assert(fabsf(cell.back[q]-.2f)<.000001f);
           }
         }
+        if(id==0x7b) {
+          assert(ActionVoxel_FrontRecess(base,x*2,y*2)==ActionVoxel_SceneryRecess(base));
+          assert(ActionVoxel_FrontRecess(base,x*2,y*2+1)==ActionVoxel_SceneryRecess(base));
+        }
         if(hazard)for(unsigned py=0;py<16;++py)for(unsigned px=0;px<16;++px) {
           const size_t at=(y*16+py-base->origin_y)*base->width+x*16+px-base->origin_x;
-          assert((base->front[at]&kVoxelKindMask)!=kVoxelSolid);
-          assert((base->front[at]&kVoxelKindMask)!=kVoxelForeground);
+          const unsigned kind=base->front[at]&kVoxelKindMask;
+          assert(!kind || kind==kVoxelRearOnly || kind==kVoxelFoliage);
+          if(hazard_art[id]==1 && kind)assert(kind==kVoxelRearOnly);
           if(base->front[at]) {
             const unsigned q=(py/8)*2+px/8;
             assert(!!(base->front[at]&kVoxelColliding)==!!(s->bg[0].metatiles[id*8+q*2]&2));
@@ -231,7 +240,7 @@ static void SnowFloorFixtures(const char *directory) {
           }
         }
       }
-    assert(details && pits && hazards==pits*3 && pit_floor_columns==pits*16 && foot_pixels==10);
+    assert(details && pits && rock_bases && hazards==pits*3 && pit_floor_columns==pits*16 && foot_pixels==10);
     if(!region)assert(details==205 && hazards==90 && pits==30);
     /* The native collision bytes, masks and artwork are immutable, including
      * all slopes. A material remap must not change this semantic policy. */
@@ -245,8 +254,8 @@ static void SnowFloorFixtures(const char *directory) {
     for(unsigned q=0;q<4;++q)assert(cell.front[q]==.03f && cell.back[q]==.1f);
     assert(ActionVoxel_FrontRecess(edited,0,28*2)==0); /* Adjacent bank stays on contact. */
     assert(!memcmp(s,&original,sizeof(original)));
-    printf("Northwall snow floor terrain%u: %u walking cap pixels (%u slope pixels), %u rear details, %u open hazard cells/%u pit floor columns, %u shallow door edges; native collision/art and overrides preserved\n",
-        region,expected_caps,sloped_caps,details,hazards,pit_floor_columns,door_edges);
+    printf("Northwall snow floor terrain%u: %u walking cap pixels (%u slope pixels), %u rear details, %u open hazard cells/%u pit floor columns and a rear jamb\n",
+        region,expected_caps,sloped_caps,details,hazards,pit_floor_columns);
     free(top);ActionVoxel_Release(base);ActionVoxel_Release(edited);
   }
 }

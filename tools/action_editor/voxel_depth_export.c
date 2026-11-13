@@ -147,7 +147,15 @@ static void Cell(const ActionRoomScene *s,const ActionVoxelGeometry *g,
   bool patch=false;
   for(unsigned i=0;i<g->patch_count;++i)patch|=Intersects(x*16,y*16,g->patches[i].x,g->patches[i].y,g->patches[i].width,g->patches[i].height);
   if(patch)Flag(&comma,"special_patch");
-  printf("]}");
+  putchar(']');
+  /* Mixed quadrants can contain rear ink and a modeled front. */
+  if(export_surfaces) {
+    printf(",\"native_front_recess\":[");
+    for(unsigned q=0;q<4;++q)
+      printf("%s%.7g",q?",":"",ActionVoxel_FrontRecess(g,x*2+(q&1),y*2+(q>>1)));
+    putchar(']');
+  }
+  putchar('}');
 }
 #include "voxel_surface_export.inc"
 

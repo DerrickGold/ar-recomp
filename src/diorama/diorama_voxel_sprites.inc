@@ -18,7 +18,11 @@ static bool VoxelSpriteFace(const DioramaCapture *capture,const DioramaViewGeome
   const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
   const float oy=capture->camera_y-capture->authentic_y0;
   for (unsigned i=0; i<4; ++i) {
-    const float scale = 1+depth[i]/fmaxf(1,g->camera.distance);
+    const float distance=fmaxf(1,g->camera.distance);
+    /* Ice keeps the native front sprite. Match the native OBJ projection
+     * exactly at the lip so the top and sprite share their screen edge. */
+    const float scale = ActionVoxelSprite_KeepsNativeFace(p) ?
+        (distance+depth[i])/(distance-.01f) : 1+depth[i]/distance;
     const float px=origin+(x[i]-origin)*width;
     const float wx=(px/SR_PPU_SURFACE_MAX_WIDTH-g->u0)/(g->u1-g->u0)-.5f;
     const float wy=.5f-(y[i]/SR_PPU_SURFACE_MAX_HEIGHT-g->v0)/(g->v1-g->v0);
@@ -88,13 +92,14 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaCapture *captur
         p->presentation_mode!=kDioramaVoxelObject_Extruded;
     const bool wall_torch=attached_torch &&
         (!(p->presentation_fields&kDioramaVoxelObject_Thickness) || p->thickness==0);
-    const float start=p->depth_offset+(attached_torch?default_depth:0);
-    const float full=start+((p->presentation_fields&kDioramaVoxelObject_Thickness)?p->thickness:default_depth);
+    const float start=ActionVoxelSprite_DepthOffset(p,recess)+(attached_torch?default_depth:0);
+    const float full=start+ActionVoxelSprite_Thickness(p,default_depth);
     /* Native flame artwork shares the sconce/glow's BG1 plane. Keep the same
      * native priority slot and exact-owner handoff, but emit only one flat
      * rear face; a front cap would recreate the floating duplicate. */
     const unsigned caps=wall_torch || full==start?1:2;
     for(unsigned end=0;end<caps;++end) {
+    if(!end && ActionVoxelSprite_KeepsNativeFace(p))continue;
     const float cap=wall_torch?start:end?full:start;
     if(front!=(cap<recess))continue;
     if (!VoxelSpriteFace(capture,g,p,ax,ay,true,&count,
@@ -114,7 +119,11 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaCapture *captur
        * higher priority. Other sides split at the native actor plane. */
       const bool top=axis==0 && side==0;
       if (front && top) continue;
-      const float near=top?start:front?start:fmaxf(start,recess);
+      const bool native_ice_lip=top && ActionVoxelSprite_KeepsNativeFace(p);
+      /* The native sprite is a sampled rectangle, while the cap is a
+       * perspective triangle. Overlap their join by a subpixel in depth
+       * so independent edge rasterization cannot expose the wall behind. */
+      const float near=top?start-(native_ice_lip?.004f:0):front?start:fmaxf(start,recess);
       const float far=top?full:front?fminf(full,recess):full;
       if(far<=near)continue;
       const unsigned first_row=axis?0:p->solid_y, rows=axis?p->width:p->solid_y+p->solid_height;
@@ -144,7 +153,8 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaCapture *captur
         const float v0=ay+(axis?begin:row+.5f), v1=ay+(axis?col:row+.5f);
         if (!VoxelSpriteFace(capture,g,p,ax,ay,false,&count,
             (float[]){p->x+x0,p->x+x1,p->x+x1,p->x+x0},
-            (float[]){p->y+y0,p->y+y1,p->y+y1,p->y+y0},
+            (float[]){p->y+y0+(native_ice_lip?.25f:0),p->y+y1+(native_ice_lip?.25f:0),
+                p->y+y1,p->y+y0},
             (float[]){near,near,far,far},(float[]){u0,u1,u1,u0},
             (float[]){v0,v1,v1,v0},top?.96f:axis?.80f:.65f,p->ambient)) return false;
       }

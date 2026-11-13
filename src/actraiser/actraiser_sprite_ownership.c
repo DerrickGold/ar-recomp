@@ -116,6 +116,16 @@ void ActRaiserSpriteOwnership_RecordActionVisual(uint16_t source,uint16_t record
       source==0xd601 && bank==0x7e && animation==0x4000 && composition==0x4750;
   unsigned shape=rock?kActRaiserSpriteProp_RockPlatform:
       bridge_log?kActRaiserSpriteProp_Log:0;
+  if (s_build.group==kActRaiserMapGroup_Northwall && bank==0x7e && animation==0x4000) {
+    /* Match the native ice bridge's solid pose and the two rideable ice
+     * families. The linked $A686 collision records emit no artwork. */
+    const bool ice_bridge=(s_build.map==1 || s_build.map==2) &&
+        source==0xecd4 && (composition==0x4742 || composition==0x474e);
+    const bool floating_ice=s_build.map==2 && (source==0xec22 || source==0xec30) &&
+        composition==0x474e;
+    const bool rising_ice=s_build.map==3 && source==0xec8c && composition==0x478e;
+    if (ice_bridge || floating_ice || rising_ice) shape=kActRaiserSpriteProp_IcePlatform;
+  }
   /* Bloodpool's stationary $BA01 decoration loops in $BA0D with animation
    * state 8 (three native flame pictures). Its sconce and existing glow live
    * on BG1. Source descriptors are canonical US native identities even when

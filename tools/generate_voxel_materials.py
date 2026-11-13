@@ -98,7 +98,15 @@ for manifest, symbol, suffix in TABLES:
             raise ValueError(f'{manifest}: invalid rear ground band for {record["key"]}')
         if record['flags'] & 0x0f000000:
             raise ValueError(f'{manifest}: reserved ground-band bits for {record["key"]}')
-        key = (int(record["key"], 16), tuple(record["kinds"]), record["flags"], rear_colors, gate_colors, face_colors, rear_fold)
+        complete_matte = record.get('complete_rear_matte', False)
+        if type(complete_matte) is not bool or (complete_matte and not record['flags'] & 8388608):
+            raise ValueError(f'{manifest}: complete rear matte requires opaque rear backing for {record["key"]}')
+        portal_jamb = record.get('portal_jamb', False)
+        if type(portal_jamb) is not bool or (portal_jamb and
+                any(kind not in (1, 2, 4) for kind in record['kinds'])):
+            raise ValueError(f'{manifest}: invalid portal jamb for {record["key"]}')
+        key = (int(record["key"], 16), tuple(record["kinds"]), record["flags"], rear_colors,
+               gate_colors, face_colors, rear_fold, complete_matte, portal_jamb)
         record_rooms = 0
         for room, terrain, metatile in record["origins"]:
             record_rooms |= 1 << room
@@ -222,14 +230,18 @@ for manifest, symbol, suffix in TABLES:
                 raise ValueError(f'{manifest}: conflicting top surface policies for {key:016x}')
     lines = [f"/* Generated reviewed artwork roles. See assets/environments/{manifest}. */",
              f"static const VoxelMaterialProfile k{symbol}Materials[] = {{"]
-    for (key, kinds, flags, rear_colors, gate_colors, face_colors, rear_fold), rooms in sorted(profiles.items()):
+    for (key, kinds, flags, rear_colors, gate_colors, face_colors, rear_fold, complete_matte, portal_jamb), rooms in sorted(profiles.items()):
         gate_text = ",{%s}" % ",".join(map(str, gate_colors))
         face_text = ",{%s}" % ",".join(map(str, face_colors))
         # Keep compact profiles: bits24..27 carry an explicitly reviewed band
         # height, separate from the lower material-role flags.
         flags |= rear_fold << 24
-        lines.append("  {UINT64_C(0x%016x),0x%04x,{%s},%d,{%s}%s%s}," %
-                     (key, rooms, ",".join(map(str, kinds)), flags, ",".join(map(str, rear_colors)), gate_text, face_text))
+        matte_text = ",.complete_rear_matte=true" if complete_matte else ""
+        if portal_jamb:
+            matte_text += ",.portal_jamb=true"
+        lines.append("  {UINT64_C(0x%016x),0x%04x,{%s},%d,{%s}%s%s%s}," %
+                     (key, rooms, ",".join(map(str, kinds)), flags, ",".join(map(str, rear_colors)),
+                      gate_text, face_text, matte_text))
     lines.append("};")
     if rear_donor_profiles:
         lines.append(f"static const VoxelRearDonorProfile k{symbol}RearDonors[] = {{")

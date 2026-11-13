@@ -1079,6 +1079,7 @@
     },
     {
       "key": "31f9499366b195c0",
+      "portal_jamb": true,
       "kinds": [
         4,
         4,
@@ -2594,13 +2595,14 @@
     },
     {
       "key": "8744a93b6760e761",
+      "portal_jamb": true,
       "kinds": [
         4,
         4,
         4,
         4
       ],
-      "flags": 9,
+      "flags": 8388617,
       "role": "gate_trim",
       "origins": [
         [
@@ -3525,13 +3527,14 @@
     },
     {
       "key": "ad1992191fb3f8a1",
+      "portal_jamb": true,
       "kinds": [
         4,
         4,
         4,
         4
       ],
-      "flags": 9,
+      "flags": 8388617,
       "role": "gate_trim",
       "origins": [
         [
@@ -3656,6 +3659,7 @@
     },
     {
       "key": "b1c83082ba5e6cf8",
+      "portal_jamb": true,
       "kinds": [
         4,
         4,

@@ -73,7 +73,9 @@ static bool Header(Codec *c,DioramaObjectSnapshotView *v) {
 }
 
 static bool Prop(Codec *c,ActionVoxelSprite *p,unsigned width,unsigned height) {
-  U(p->owner,1,65535);U(p->shape,1,c->version>=2?9:8);U(p->priority,0,3);
+  const unsigned max_shape=c->version>=3?kActionVoxelSpriteIceShape:
+      c->version>=2?kActionVoxelSpriteGenericShape:8;
+  U(p->owner,1,65535);U(p->shape,1,max_shape);U(p->priority,0,3);
   U(p->width,1,kVoxelSpriteWidth);U(p->height,1,kVoxelSpriteHeight);U(p->owner_tag,1,128);
   I(p->component_x,-32768,32767);I(p->component_y,-32768,32767);
   U(p->solid_y,0,kVoxelSpriteHeight);U(p->solid_height,0,kVoxelSpriteHeight);

@@ -175,20 +175,24 @@ static uint64_t ForestBackingHash(const void *bytes,size_t count) {
  * the production contract uses exact native artwork fingerprints. */
 static bool ForestBorderBackingVerify(const ActionRoomScene *s,const ActionVoxelGeometry *g,unsigned region) {
   const ActionRoomSceneFrameState frame={.brightness=15};unsigned cells=0,opaque=0,missing=0;
-  unsigned crowns=0,crown_opaque=0,rear_plants=0,growth_plants=0;
+  unsigned crowns=0,crown_opaque=0,rear_plants=0,growth_plants=0,root_crowns=0;
   for(unsigned y=0;y<ActionRoomScene_TileHeight(s,1)/2;++y)
     for(unsigned x=0;x<ActionRoomScene_TileWidth(s,1)/2;++x) {
       uint16_t word;uint8_t id;assert(ActionRoomScene_LookupTile(s,1,x*2,y*2,&word,&id));
-      bool crown=false,rear_plant=false,growth_plant=false;
+      bool crown=false,rear_plant=false,growth_plant=false,joins_root=false;
       if(id==2 || id==0xc1 || id==0xd1) {
         uint8_t below;assert(ActionRoomScene_LookupTile(s,1,x*2,(y+1)*2,&word,&below));
         /* Native crown02 and C1 have identical artwork. Its bank support is
          * the independent witness: copying this fingerprint everywhere would
          * incorrectly add a backstop to foreground thorn-platform plants. */
         crown=below==0xc9;
-        growth_plant=below==0xba || below==0xbb;
+        joins_root=(x==84 && y==39) || (x==175 && y==34) ||
+            (region==1 && ((x==38 && y==42) || ((x==205 || x==215) && y==34)));
+        if(joins_root)assert(below==0xba || below==0xbb);
+        root_crowns+=joins_root;
+        growth_plant=(below==0xba || below==0xbb) && !joins_root;
         rear_plant=!crown && !growth_plant;
-        assert(crown || growth_plant || below==0x1b || below==0x1d || below==0x0a || below==0x0b || below==0xb0);
+        assert(crown || growth_plant || joins_root || below==0x1b || below==0x1d || below==0x0a || below==0x0b || below==0xb0);
         crowns+=crown;rear_plants+=rear_plant;growth_plants+=growth_plant;
       } else if(id!=0xb9 && id!=0xc0 && id!=0xc9)continue;
       else ++cells;
@@ -196,17 +200,28 @@ static bool ForestBorderBackingVerify(const ActionRoomScene *s,const ActionVoxel
       assert(ActionVoxel_Split(g,x*16,y*16,16,16,16,&frame,low,16,rear,front));
       for(unsigned py=0;py<16;++py)for(unsigned px=0;px<16;++px) {
         const unsigned at=py*16+px;
-        assert(front[at]==(rear_plant?0:low[at])); /* Preserve the existing native front plane. */
+        assert(front[at]==(rear_plant?0:low[at]));
         if(low[at]) {
           const unsigned role=g->front[(size_t)(y*16+py-g->origin_y)*g->width+x*16+px-g->origin_x];
           assert((role&kVoxelKindMask)==(rear_plant?kVoxelRearOnly:kVoxelFoliage) && !(role&(kVoxelColliding|kVoxelHighPriority)));
           if(growth_plant)assert(!(role&kVoxelRearCopy));
           else {missing+=rear[at]!=low[at];if(crown)++crown_opaque;else if(!rear_plant)++opaque;}
+        } else if(joins_root) {
+          /* Existing thorn backing can show through native alpha holes. */
+          uint32_t backing=0;
+          for(unsigned i=0;i<g->rear_fill_count;++i) {
+            const VoxelRearFill *fill=&g->rear_fills[i];
+            if(fill->x==(int)x*16 && fill->y==(int)y*16 && (fill->colors[at]&0x8000) &&
+                (!fill->preserve_existing || !backing))
+              backing=ActionVoxel_AuthoredColor(fill->colors[at],&frame);
+          }
+          assert(rear[at]==backing);
         } else if(!growth_plant)assert(!rear[at]); /* Preserve the irregular outer silhouette. */
       }
     }
   assert(cells==(region==1?5u:3u));
-  assert(crowns==(region==1?2u:1u) && growth_plants==(region==1?13u:7u));
+  assert(crowns==(region==1?2u:1u) && growth_plants==(region==1?8u:5u) &&
+      root_crowns==(region==1?5u:2u));
   /* Recorded before/after hashes independently expose any accidental geometry
    * change in this backing-only contract. Ignore only its intended source tag. */
   uint64_t mask=UINT64_C(14695981039346656037);

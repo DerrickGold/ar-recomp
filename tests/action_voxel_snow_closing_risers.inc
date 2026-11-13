@@ -1,17 +1,17 @@
-/* Frozen native pre-effect witnesses: edge bytes omit only the new effect marker;
+/* Native terrain witnesses after the snow-rock taper. Edge bytes omit the effect marker;
  * native front/art/patch and physical-span hashes remain independent controls. */
-static const uint64_t kSnowClosingOriginal[12][5]={
-  {UINT64_C(0x500ab0217cf89069),UINT64_C(0xf047560d670fa42a),UINT64_C(0x2d60bb082cebd655),UINT64_C(0x2e7758ece8b2e31c),UINT64_C(0x85d1eaa80a7dc57d)},
-  {UINT64_C(0x500ab0217cf89069),UINT64_C(0xf047560d670fa42a),UINT64_C(0x2d60bb082cebd655),UINT64_C(0x2e7758ece8b2e31c),UINT64_C(0x85d1eaa80a7dc57d)},
-  {UINT64_C(0x2f2a1bc35d7381d5),UINT64_C(0x74d1364cc3e80f82),UINT64_C(0xd008811f60347784),UINT64_C(0xcbf29ce484222325),UINT64_C(0x89164edc19393b05)},
+static const uint64_t kSnowClosingExpected[12][5]={
+  {UINT64_C(0xb3925d66f1a6a928),UINT64_C(0x70c0844f92ebdf6a),UINT64_C(0x896d93c903f537a9),UINT64_C(0x2e7758ece8b2e31c),UINT64_C(0x259c5323779ff185)},
+  {UINT64_C(0xb3925d66f1a6a928),UINT64_C(0x70c0844f92ebdf6a),UINT64_C(0x896d93c903f537a9),UINT64_C(0x2e7758ece8b2e31c),UINT64_C(0x259c5323779ff185)},
+  {UINT64_C(0x156dadda39a08e0b),UINT64_C(0x231fa54e36b9ea1a),UINT64_C(0xd008811f60347784),UINT64_C(0xcbf29ce484222325),UINT64_C(0x89164edc19393b05)},
   {UINT64_C(0xd200dc26dad59f67),UINT64_C(0xa609b93279e4209a),UINT64_C(0x742518d874b1f889),UINT64_C(0xcbf29ce484222325),UINT64_C(0xbf3c3b84c357e711)},
-  {UINT64_C(0x987a483f3ff391f5),UINT64_C(0xf62a6d8b7508acee),UINT64_C(0x7fda9aa8891f0095),UINT64_C(0xda36fc71108869bc),UINT64_C(0x85d1eaa80a7dc57d)},
-  {UINT64_C(0x987a483f3ff391f5),UINT64_C(0xf62a6d8b7508acee),UINT64_C(0x7fda9aa8891f0095),UINT64_C(0xda36fc71108869bc),UINT64_C(0x85d1eaa80a7dc57d)},
-  {UINT64_C(0x2f2a1bc35d7381d5),UINT64_C(0x74d1364cc3e80f82),UINT64_C(0xd008811f60347784),UINT64_C(0xcbf29ce484222325),UINT64_C(0x89164edc19393b05)},
+  {UINT64_C(0xceb48e5c772ee584),UINT64_C(0x76a39bcda0e4e82e),UINT64_C(0x311e449abc617f39),UINT64_C(0xda36fc71108869bc),UINT64_C(0x259c5323779ff185)},
+  {UINT64_C(0xceb48e5c772ee584),UINT64_C(0x76a39bcda0e4e82e),UINT64_C(0x311e449abc617f39),UINT64_C(0xda36fc71108869bc),UINT64_C(0x259c5323779ff185)},
+  {UINT64_C(0x156dadda39a08e0b),UINT64_C(0x231fa54e36b9ea1a),UINT64_C(0xd008811f60347784),UINT64_C(0xcbf29ce484222325),UINT64_C(0x89164edc19393b05)},
   {UINT64_C(0xd200dc26dad59f67),UINT64_C(0xa609b93279e4209a),UINT64_C(0x742518d874b1f889),UINT64_C(0xcbf29ce484222325),UINT64_C(0xbf3c3b84c357e711)},
-  {UINT64_C(0x500ab0217cf89069),UINT64_C(0xf047560d670fa42a),UINT64_C(0x28efd47048c64895),UINT64_C(0x2e7758ece8b2e31c),UINT64_C(0x85d1eaa80a7dc57d)},
-  {UINT64_C(0x500ab0217cf89069),UINT64_C(0xf047560d670fa42a),UINT64_C(0x28efd47048c64895),UINT64_C(0x2e7758ece8b2e31c),UINT64_C(0x85d1eaa80a7dc57d)},
-  {UINT64_C(0x2f2a1bc35d7381d5),UINT64_C(0x74d1364cc3e80f82),UINT64_C(0xd008811f60347784),UINT64_C(0xcbf29ce484222325),UINT64_C(0x89164edc19393b05)},
+  {UINT64_C(0xb3925d66f1a6a928),UINT64_C(0x70c0844f92ebdf6a),UINT64_C(0x43f2ee147d2922a9),UINT64_C(0x2e7758ece8b2e31c),UINT64_C(0x259c5323779ff185)},
+  {UINT64_C(0xb3925d66f1a6a928),UINT64_C(0x70c0844f92ebdf6a),UINT64_C(0x43f2ee147d2922a9),UINT64_C(0x2e7758ece8b2e31c),UINT64_C(0x259c5323779ff185)},
+  {UINT64_C(0x156dadda39a08e0b),UINT64_C(0x231fa54e36b9ea1a),UINT64_C(0xd008811f60347784),UINT64_C(0xcbf29ce484222325),UINT64_C(0x89164edc19393b05)},
   {UINT64_C(0xd200dc26dad59f67),UINT64_C(0xa609b93279e4209a),UINT64_C(0x742518d874b1f889),UINT64_C(0xcbf29ce484222325),UINT64_C(0xbf3c3b84c357e711)},
 };
 static uint64_t SnowClosingEdges(const ActionVoxelGeometry *g) {
@@ -51,7 +51,7 @@ static unsigned SnowClosingCheck(const ActionRoomScene *s,const ActionVoxelGeome
     }
     assert(side&&lower);++n;if(end)++right;else++left;
   }
-  printf("Snow supported tiny risers: left%u right%u total%u existing-phase%u native-source%u\n",left,right,n,phase,raw);assert(left==177&&right==281&&phase==250&&raw==208);return n;
+  printf("Snow supported tiny risers: left%u right%u total%u existing-phase%u native-source%u\n",left,right,n,phase,raw);assert(left==171&&right==217&&phase==238&&raw==150);return n;
 }
 static void SnowClosingRiserFixtures(const char*directory) {
   if(!directory)return;unsigned original_row=0;
@@ -65,10 +65,10 @@ static void SnowClosingRiserFixtures(const char*directory) {
       TombCapTerrain(6,room,region,&terrain);assert(ActionVoxel_Build(g,s,shipped?&terrain:NULL,set));
       uint64_t hashes[]={SnowClosingEdges(g),TombCapGeometryHash(g),ForestBackingHash(g->front,(size_t)g->width*g->height),
           ForestBackingHash(g->patches,g->patch_count*sizeof(*g->patches)),ForestBackingHash(g->authored_art,g->authored_art_count*sizeof(*g->authored_art))};
-      for(unsigned k=0;k<5;++k)assert(hashes[k]==kSnowClosingOriginal[original_row][k]);++original_row;
+      for(unsigned k=0;k<5;++k)assert(hashes[k]==kSnowClosingExpected[original_row][k]);++original_row;
       if(room==1)total=SnowClosingCheck(s,g);
       else for(unsigned i=0;i<g->edge_count;++i)assert(!g->edges[i].snow_closing_riser[0]&&!g->edges[i].snow_closing_riser[1]);
-      printf("Snow region%u room%u shipped%u original edge/art/front/patch/span %s\n",region,room,shipped,"exact");DioramaLayerOrder_ClearRoom(&terrain);
+      printf("Snow region%u room%u shipped%u edge/art/front/patch/span %s\n",region,room,shipped,"exact");DioramaLayerOrder_ClearRoom(&terrain);
     }
     if(room==1) {
       assert(ActionVoxel_Build(g,s,NULL,set));remap=*s;Renumber(&remap);assert(ActionVoxel_Build(other,&remap,NULL,set));assert(SnowClosingCheck(&remap,other)==total);SameGeometry(g,other);

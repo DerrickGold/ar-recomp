@@ -91,8 +91,19 @@ static void AitosCliffFootFixtures(const char *directory) {
     ActionVoxelGeometry *base=ActionVoxel_Create(),*edited=ActionVoxel_Create();assert(base&&edited);
     const ActionVoxelSettings settings=ActionVoxel_SettingsForRoom(4,room);assert(ActionVoxel_Build(base,s,NULL,settings));
     if(room<3) {
-      int tx,ty;assert(FixtureCell(s,0x83,&tx,&ty));VoxelCellGeometry cell;assert(ActionVoxel_CellGeometry(base,tx/2,ty/2,&cell));
-      for(unsigned q=0;q<4;++q)assert(cell.front[q]==0 && fabsf(cell.back[q]-.05f)<.000001f);
+      unsigned cliff_cells=0;
+      for (unsigned y=0;y<ActionRoomScene_TileHeight(s,1);y+=2)
+        for (unsigned x=0;x<ActionRoomScene_TileWidth(s,1);x+=2) {
+          uint8_t id;
+          DioramaTileStamp source={.x=x/2,.y=y/2};
+          assert(ActionRoomScene_LookupTile(s,1,x,y,&source.words[0],&id));
+          if(id!=0x83)continue;
+          for(unsigned q=1;q<4;++q)
+            assert(ActionRoomScene_LookupTile(s,1,x+(q&1),y+(q>>1),&source.words[q],NULL));
+          assert(!AitosCliffRear(s,base,&source));
+          ++cliff_cells;
+        }
+      assert(cliff_cells==(room==1?4:1));
     } else {
       AitosCliffTerrain(region,&terrain);assert(ActionVoxel_Build(edited,s,&terrain,settings));unsigned missing=0,targets=0;
       for(int y=16;y<=20;y+=2) {

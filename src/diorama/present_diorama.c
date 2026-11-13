@@ -91,7 +91,8 @@ static bool MaterializeVoxelActors(const FrameSlot *slot,
     bool copied=false;
     for(unsigned i=0;pixels[plane] && i<s_voxel_sprites_current.count;++i) {
       const ActionVoxelSprite *prop=&s_voxel_sprites_current.sprites[i];
-      if(prop->priority!=band || !ActionVoxelSprite_IsModeled(prop))continue;
+      if(prop->priority!=band || !ActionVoxelSprite_IsModeled(prop) ||
+          ActionVoxelSprite_KeepsNativeFace(prop))continue;
       if(!copied) {
         if(!s_voxel_obj_pixels[band])s_voxel_obj_pixels[band]=calloc(
             SR_PPU_SURFACE_MAX_WIDTH*SR_PPU_SURFACE_MAX_HEIGHT,4);

@@ -1,5 +1,5 @@
 {
-  "description": "Reviewed Northwall snow banks, shallow snow lips, tree approach and freestanding summit canopy. Local native surfaces only; no distant backing or generated sky. Existing snow/aurora/stars stay in their environmental layers. Runtime identity uses displayed art, palette slot, collision and priority. Atlas IDs remain authoring provenance only.",
+  "description": "Reviewed Northwall snow banks, shallow snow lips, tree approach and freestanding summit canopy. The cleft keeps its complete native back wall. Only pale spike ink projects into the pit. Runtime identity uses displayed art, palette slot, collision and priority. Atlas IDs remain authoring provenance only.",
   "materials": [
     {
       "key": "011e544acc4a72d4",
@@ -410,7 +410,7 @@
         4,
         4
       ],
-      "flags": 49160,
+      "flags": 2147532808,
       "role": "rear_snow_bank_detail",
       "origins": [
         [
@@ -1227,7 +1227,7 @@
         1,
         1
       ],
-      "flags": 20484,
+      "flags": 2147504132,
       "role": "solid_snow_bank",
       "origins": [
         [
@@ -1561,7 +1561,7 @@
         1,
         1
       ],
-      "flags": 20484,
+      "flags": 2147504132,
       "role": "native_collision_snow_ramp",
       "origins": [
         [
@@ -1872,7 +1872,7 @@
         1,
         1
       ],
-      "flags": 20484,
+      "flags": 2147504132,
       "role": "solid_snow_bank",
       "origins": [
         [
@@ -2873,8 +2873,8 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_tree_bark",
+      "flags": 9437192,
+      "role": "foreground_tree_entrance",
       "origins": [
         [
           5,
@@ -3491,7 +3491,7 @@
         1,
         1
       ],
-      "flags": 20484,
+      "flags": 2147504132,
       "role": "native_collision_snow_ramp",
       "origins": [
         [
@@ -3807,7 +3807,7 @@
         3,
         3
       ],
-      "flags": 512,
+      "flags": 520,
       "role": "snow_cleft_spikes",
       "origins": [
         [
@@ -3820,10 +3820,10 @@
         0
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        3842,
+        3842,
+        3842,
+        3842
       ]
     },
     {
@@ -4040,7 +4040,7 @@
         4,
         4
       ],
-      "flags": 49160,
+      "flags": 2147532808,
       "role": "rear_snow_bank_detail",
       "origins": [
         [
@@ -4077,8 +4077,8 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_tree_bark",
+      "flags": 9437192,
+      "role": "foreground_tree_entrance",
       "origins": [
         [
           5,
@@ -4157,8 +4157,8 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_tree_bark",
+      "flags": 9437192,
+      "role": "foreground_tree_entrance",
       "origins": [
         [
           5,
@@ -4302,7 +4302,7 @@
         1,
         1
       ],
-      "flags": 20484,
+      "flags": 2147504132,
       "role": "native_collision_snow_ramp",
       "origins": [
         [
@@ -4569,7 +4569,7 @@
         1,
         1
       ],
-      "flags": 20484,
+      "flags": 2147504132,
       "role": "native_collision_snow_ramp",
       "origins": [
         [
@@ -5086,7 +5086,7 @@
         3,
         3
       ],
-      "flags": 512,
+      "flags": 520,
       "role": "snow_cleft_spikes",
       "origins": [
         [
@@ -5101,10 +5101,10 @@
         ]
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        3842,
+        3842,
+        3842,
+        3842
       ],
       "animation_phases": [
         0
@@ -5112,13 +5112,14 @@
     },
     {
       "key": "b8f1b1e1f73a1525",
+      "portal_jamb": true,
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        2,
+        2,
+        2,
+        2
       ],
-      "flags": 9,
+      "flags": 32768,
       "role": "ice_gate_inner_jamb",
       "origins": [
         [
@@ -5138,10 +5139,10 @@
         ]
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        0,
+        0,
+        0,
+        0
       ],
       "animation_phases": [
         0
@@ -5297,7 +5298,7 @@
         3,
         3
       ],
-      "flags": 512,
+      "flags": 520,
       "role": "snow_cleft_spikes",
       "origins": [
         [
@@ -5317,10 +5318,10 @@
         ]
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        3842,
+        3842,
+        3842,
+        3842
       ],
       "animation_phases": [
         0
@@ -5654,8 +5655,8 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_tree_bark",
+      "flags": 9437192,
+      "role": "foreground_tree_entrance",
       "origins": [
         [
           5,
@@ -5923,7 +5924,7 @@
         4,
         4
       ],
-      "flags": 49160,
+      "flags": 2147532808,
       "role": "rear_snow_bank_detail",
       "origins": [
         [
@@ -6062,7 +6063,7 @@
         4,
         4
       ],
-      "flags": 49160,
+      "flags": 2147532808,
       "role": "rear_snow_bank_detail",
       "origins": [
         [
@@ -6204,8 +6205,8 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_tree_bark",
+      "flags": 9437192,
+      "role": "foreground_tree_entrance",
       "origins": [
         [
           5,
@@ -6574,13 +6575,14 @@
     },
     {
       "key": "f670df7643f7020d",
+      "portal_jamb": true,
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        2,
+        2,
+        2,
+        2
       ],
-      "flags": 9,
+      "flags": 32768,
       "role": "ice_gate_inner_jamb",
       "origins": [
         [
@@ -6600,10 +6602,10 @@
         ]
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        0,
+        0,
+        0,
+        0
       ],
       "animation_phases": [
         0
@@ -6648,14 +6650,15 @@
     },
     {
       "key": "f9ee5923f2c07017",
+      "portal_jamb": true,
       "kinds": [
         1,
         1,
         1,
         1
       ],
-      "flags": 4100,
-      "role": "solid_exit_ice_pillar",
+      "flags": 8392708,
+      "role": "foreground_exit_jamb",
       "origins": [
         [
           1,
@@ -6685,7 +6688,7 @@
         3,
         3
       ],
-      "flags": 512,
+      "flags": 520,
       "role": "snow_cleft_spikes",
       "origins": [
         [
@@ -6705,10 +6708,10 @@
         ]
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        65535,
+        65535,
+        65535,
+        65535
       ],
       "animation_phases": [
         0

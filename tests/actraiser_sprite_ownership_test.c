@@ -319,6 +319,21 @@ static void TestVoxelProps(void) {
   CHECK(!ActRaiserSpriteOwnership_Presented(5,6).prop_owner[4]);
   CHECK(ActRaiserSpriteOwnership_Presented(5,6).visual_owner[4]==0xba0);
   CHECK(ActRaiserSpriteOwnership_Presented(5,6).visual_source[4]==0xe3a1);
+  const struct { unsigned room,source,composition; bool platform; } ice[]={
+    {1,0xecd4,0x4742,true},{2,0xecd4,0x474e,true},{3,0xecd4,0x4742,false},
+    {1,0xecd4,0x4712,false},{2,0xec22,0x474e,true},{2,0xec30,0x474e,true},
+    {2,0xec30,0x49b1,false},{3,0xec8c,0x48da,false},{3,0xec8c,0x478e,true},
+    {2,0xa686,0x4742,false},{2,0xec22,0x4763,false},
+  };
+  for(unsigned i=0;i<sizeof(ice)/sizeof(*ice);++i) {
+    ActRaiserSpriteOwnership_Begin(6,ice[i].room,0);
+    ActRaiserSpriteOwnership_RecordActionObject(ice[i].source,0xba0,400,200,16,32);
+    ActRaiserSpriteOwnership_RecordActionVisual(ice[i].source,0xba0,0x4000,0x7e,
+        ice[i].composition,0,0,16,32);
+    ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(6,ice[i].room,shadow);
+    o=ActRaiserSpriteOwnership_Presented(6,ice[i].room);
+    CHECK(o.prop_shape[4]==(ice[i].platform?kActRaiserSpriteProp_IcePlatform:0));
+  }
   /* Wall flames attach by their native source family, independently of the
    * animation picture/composition and regional art selection. Nearby static
    * scenery, fire enemies and reused/player slots remain normal native OBJ. */

@@ -175,6 +175,7 @@ static bool GroundCoverGather(const DioramaCapture *capture,const DioramaViewGeo
         &pressure,cap,ACTION_GROUND_COVER_MAX_CONTACT_TOLERANCE,
         s_ground_cover_cap,kGroundCoverCapVertices,&count))return false;
     if(count)++s_ground_cover.bank_caps[bank];
+    const unsigned first_overlay=count;
     if(count&&g->options->voxel_observe_ground_cover) {
       /* Union native-X coverage rather than reporting the cap bounding box:
        * an authored cutout can remove a whole middle strip. */
@@ -213,6 +214,9 @@ static bool GroundCoverGather(const DioramaCapture *capture,const DioramaViewGeo
       for(unsigned j=0;j<3;++j) {
         const DioramaGroundCoverVertex *v=&s_ground_cover_cap[i+j];
         if(!GroundCoverProject(capture,g,v->position,dedicated,&face.vertices[j].position,&face.depths[j],&face.clip_w[j])){visible=false;break;}
+        /* Native lip and riser overlays share vertical planes with their
+         * receivers. Give the overlay a small raster depth lead. */
+        if(cap->receiver && i>=first_overlay)face.depths[j]-=.00002f;
         face.distance+=face.clip_w[j]/3;
         face.mix[j]=v->sample.crest_mix;face.alpha[j]=v->sample.alpha*layer->shade.a;
       }

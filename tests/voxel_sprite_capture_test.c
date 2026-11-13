@@ -115,6 +115,14 @@ static void TestNativeHandoff(void) {
   ActionVoxelSprite_RemoveNative(&p,W,H,out,P,attributes,A);assert(!memcmp(out,original,sizeof(out)));
   p.presentation_mode=kDioramaVoxelObject_Extruded;
   ActionVoxelSprite_RemoveNative(&p,W,H,out,P,attributes,A);assert(out[0]==0);
+  p.shape=kActionVoxelSpriteIceShape;
+  p.presentation_fields=kDioramaVoxelObject_Thickness;
+  memcpy(out,original,sizeof(out));
+  ActionVoxelSprite_RemoveNative(&p,W,H,out,P,attributes,A);
+  assert(!memcmp(out,original,sizeof(out)));
+  p.presentation_fields|=kDioramaVoxelObject_Width;
+  ActionVoxelSprite_RemoveNative(&p,W,H,out,P,attributes,A);
+  assert(out[0]==0);
 }
 int main(void) {
   TestNativeHandoff();

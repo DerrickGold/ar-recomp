@@ -13,6 +13,7 @@ static bool VoxelSpriteLayout(unsigned shape, const SrPpuObjResolveResult *b,
   switch (shape) {
     case kActRaiserSpriteProp_Log:
     case kActRaiserSpriteProp_RockPlatform:
+    case kActRaiserSpriteProp_IcePlatform:
     case kActRaiserSpriteProp_WallTorch:
       if (b->x1-b->x0>kVoxelSpriteWidth || b->y1-b->y0>kVoxelSpriteHeight) return false;
       *solid_y=b->y0; *solid_height=b->y1-b->y0;
@@ -134,7 +135,7 @@ static void CaptureVoxelSprites(FrameSlot *f, const SnesRunnerApi *api,
       /* The older small props retain their exact single rectangle. Larger
        * reviewed compositions use a grid anchored before native clipping. */
       if (shape==kActRaiserSpriteProp_Log || shape==kActRaiserSpriteProp_RockPlatform ||
-          shape==kActRaiserSpriteProp_WallTorch) {
+          shape==kActRaiserSpriteProp_IcePlatform || shape==kActRaiserSpriteProp_WallTorch) {
         sx=bounds.x0; sy=bounds.y0;
       }
       for (int gy=sy; gy<bounds.y1 && !failed; gy+=kVoxelSpriteHeight)

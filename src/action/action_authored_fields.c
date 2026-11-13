@@ -794,6 +794,13 @@ static bool GroundGrains(ActionEffectGeometryWriter *w,const ActionEffectInstanc
    * out after movement stops, rather than spawning around a stationary body. */
   for(unsigned body=0;body<kActionFieldWakeCount;++body) {
     const ActionFieldWake *wake=&wakes->bodies[body];if(wake->strength<=0)continue;
+    ActionEffectInstance powder=*e;
+    if(body==0 && w->voxel_ground_cover_owned) {
+      /* Keep the authored BG1 painter slot, but project the player's wake
+       * at the same depth as the native player sprite. */
+      powder.projection_plane=kActionEffectProjectionPlane_Obj;
+      powder.obj_priority=2;
+    }
     const float source_slope=GroundSlope(s,wake->x),source_grade=GroundSlopeResponse(source_slope);
     const unsigned phase=DeterministicHash_Mix32(wake->seed^0x4d31u)%48;
     for(unsigned i=0;i<kActionGroundWakeGrains;++i) {
@@ -841,10 +848,10 @@ static bool GroundGrains(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       if(puff) {
         const unsigned variant=seed%kActionMaskCloudCount;
         ArRenderColorF body=tint;body.r*=.88f;body.g*=.94f;
-        if(!SlopedPowderPatch(w,e,clip,kActionMaskCloudBodyFirst+variant,x,y,radius,ry,slope,body,project,context))return false;
+        if(!SlopedPowderPatch(w,&powder,clip,kActionMaskCloudBodyFirst+variant,x,y,radius,ry,slope,body,project,context))return false;
         ArRenderColorF crest=MixColor(tint,(ArRenderColorF){1,1,1,tint.a},.65f);crest.a*=.75f;
-        if(!SlopedPowderPatch(w,e,clip,kActionMaskCloudLightFirst+variant,x,y,radius,ry,slope,crest,project,context))return false;
-      } else if(!AppendSceneParticle(w,e,x,y,x+side,y+1,size*.85f,size*1.15f,tint,project,context))return false;
+        if(!SlopedPowderPatch(w,&powder,clip,kActionMaskCloudLightFirst+variant,x,y,radius,ry,slope,crest,project,context))return false;
+      } else if(!AppendSceneParticle(w,&powder,x,y,x+side,y+1,size*.85f,size*1.15f,tint,project,context))return false;
     }
   }
   return true;

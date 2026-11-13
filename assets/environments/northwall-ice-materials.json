@@ -126,8 +126,9 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_ice_column",
+      "flags": 9437184,
+      "complete_rear_matte": true,
+      "role": "foreground_ice_column",
       "origins": [
         [
           2,
@@ -503,7 +504,8 @@
         7,
         7
       ],
-      "flags": 256,
+      "flags": 8388864,
+      "complete_rear_matte": true,
       "role": "recessed_ice_wall",
       "origins": [
         [
@@ -1093,8 +1095,9 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_ice_column",
+      "flags": 9437184,
+      "complete_rear_matte": true,
+      "role": "foreground_ice_column",
       "origins": [
         [
           2,
@@ -1393,7 +1396,8 @@
         7,
         7
       ],
-      "flags": 256,
+      "flags": 8388864,
+      "complete_rear_matte": true,
       "role": "recessed_ice_wall",
       "origins": [
         [
@@ -1506,7 +1510,8 @@
         7,
         7
       ],
-      "flags": 256,
+      "flags": 8388864,
+      "complete_rear_matte": true,
       "role": "recessed_ice_wall",
       "origins": [
         [
@@ -1732,7 +1737,8 @@
         7,
         7
       ],
-      "flags": 256,
+      "flags": 8388864,
+      "complete_rear_matte": true,
       "role": "recessed_ice_wall",
       "origins": [
         [
@@ -2098,8 +2104,9 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_ice_column",
+      "flags": 9437184,
+      "complete_rear_matte": true,
+      "role": "foreground_ice_column",
       "origins": [
         [
           2,
@@ -2609,7 +2616,8 @@
         7,
         7
       ],
-      "flags": 256,
+      "flags": 8388864,
+      "complete_rear_matte": true,
       "role": "recessed_ice_wall",
       "origins": [
         [
@@ -3065,8 +3073,9 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_ice_column",
+      "flags": 9437184,
+      "complete_rear_matte": true,
+      "role": "foreground_ice_column",
       "origins": [
         [
           2,
@@ -3159,13 +3168,14 @@
     },
     {
       "key": "b8f1b1e1f73a1525",
+      "portal_jamb": true,
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        2,
+        2,
+        2,
+        2
       ],
-      "flags": 9,
+      "flags": 32768,
       "role": "ice_gate_inner_jamb",
       "origins": [
         [
@@ -3215,10 +3225,10 @@
         ]
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        0,
+        0,
+        0,
+        0
       ],
       "animation_phases": [
         0,
@@ -3299,7 +3309,8 @@
         7,
         7
       ],
-      "flags": 256,
+      "flags": 8388864,
+      "complete_rear_matte": true,
       "role": "recessed_ice_wall",
       "origins": [
         [
@@ -3922,13 +3933,14 @@
     },
     {
       "key": "f670df7643f7020d",
+      "portal_jamb": true,
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        2,
+        2,
+        2,
+        2
       ],
-      "flags": 9,
+      "flags": 32768,
       "role": "ice_gate_inner_jamb",
       "origins": [
         [
@@ -3978,10 +3990,10 @@
         ]
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        0,
+        0,
+        0,
+        0
       ],
       "animation_phases": [
         0,
@@ -3998,8 +4010,9 @@
         4,
         4
       ],
-      "flags": 32776,
-      "role": "rear_ice_column",
+      "flags": 9437184,
+      "complete_rear_matte": true,
+      "role": "foreground_ice_column",
       "origins": [
         [
           2,
@@ -4145,14 +4158,15 @@
     },
     {
       "key": "f9ee5923f2c07017",
+      "portal_jamb": true,
       "kinds": [
         1,
         1,
         1,
         1
       ],
-      "flags": 4100,
-      "role": "solid_exit_ice_pillar",
+      "flags": 8392708,
+      "role": "foreground_exit_jamb",
       "origins": [
         [
           2,
