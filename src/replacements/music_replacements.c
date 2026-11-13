@@ -35,7 +35,7 @@ enum { kMusicManifestLineCapacity = 1024 };
 #define SPC_PORT_SOUND_EFFECT 2
 #define SPC_CMD_IDLE 0x00
 #define SPC_CMD_HALT 0xF0
-#define SPC_CMD_ATTENTION 0xF1
+#define SPC_CMD_FADE_OUT 0xF1
 #define SPC_CMD_PAUSE 0xF2
 #define SPC_CMD_UPLOAD 0xFF
 
@@ -95,6 +95,13 @@ static bool s_driver_paused;
 static bool s_host_paused;
 static uint64_t s_next_session_token;
 static int s_music_volume_percent = 100;
+enum {
+  kDriverSongAddress = 0x04,
+  kDriverFadeActiveAddress = 0x30,
+  kDriverFadeTicksAddress = 0x31,
+  kDriverFadeScale = 128 * 128,
+};
+static int s_driver_fade_gain = kDriverFadeScale;
 
 static bool PlaybackPaused(void) {
   return s_driver_paused || s_host_paused;
@@ -104,6 +111,23 @@ void MusicReplacements_SetMusicVolumePercent(int volume_percent) {
   if (volume_percent < 0) volume_percent = 0;
   if (volume_percent > 100) volume_percent = 100;
   s_music_volume_percent = volume_percent;
+}
+
+void MusicReplacements_ObserveDriverState(const uint8_t *aram, size_t size) {
+  if (!aram || size <= kDriverFadeTicksAddress) return;
+  if (!aram[kDriverFadeActiveAddress]) {
+    s_driver_fade_gain = kDriverFadeScale;
+    return;
+  }
+  /* $F1 enables the driver's 127-music-tick fade ($05CB). Its volume path
+   * scales by ticks/128 before squaring ($0CDA-$0CE5), so mirror that curve.
+   * Observe the live countdown: its speed follows the song's changing tempo.
+   * $05E8 clears the song at completion but leaves the fade flag set; the
+   * countdown can then wrap. Keep that stopped song silent until a new start
+   * clears the flag ($0631), including when enhanced music is toggled on. */
+  int ticks = aram[kDriverSongAddress] ? aram[kDriverFadeTicksAddress] : 0;
+  if (ticks > 127) ticks = 127;
+  s_driver_fade_gain = ticks * ticks;
 }
 
 /* ---- streamer state (serialised by the APU lock) ----------------------- */
@@ -408,6 +432,7 @@ void MusicReplacements_Shutdown(void) {
   s_encoded_bytes = 0;
   s_loaded_src = 0;
   s_current_song = -1;
+  s_driver_fade_gain = kDriverFadeScale;
 }
 
 static void StartSession(const MusicReplacement *entry, int song) {
@@ -476,7 +501,7 @@ void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t val) {
   if (val == SPC_CMD_HALT) {
     /* The driver halts music instantly on $F0; mirror it. Note $F0 precedes
      * every song change that UPLOADS a new image, but not every play command:
-     * the $F1-echo chains play an already-resident bank without it (see the
+     * the $F1 fade chains play an already-resident bank without it (see the
      * identity guard before StartSession below). */
     s_current_song = -1;
     s_driver_paused = false;
@@ -491,7 +516,9 @@ void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t val) {
               s.session->name);
     return;
   }
-  if (val == SPC_CMD_ATTENTION || val == SPC_CMD_UPLOAD ||
+  /* The consumed $F1 fade is mirrored through ObserveDriverState, not a host
+   * timer. The subsequent same-song echo must preserve the streaming cursor. */
+  if (val == SPC_CMD_FADE_OUT || val == SPC_CMD_UPLOAD ||
       val == SPC_CMD_IDLE)
     return;
 
@@ -557,6 +584,7 @@ void MusicReplacements_MixOutput(int16_t *out, int out_frames) {
   const MusicReplacement *entry = s.session;
   const int gain = s.gain_percent;
   const int music_volume = s_music_volume_percent;
+  const int fade_gain = s_driver_fade_gain;
   int output_rate = RtlGetAudioOutputRate();
   if (output_rate <= 0)
     output_rate = kHostAudioMinimumOutputFrequencyHz;
@@ -648,6 +676,7 @@ void MusicReplacements_MixOutput(int16_t *out, int out_frames) {
       int sample = (int)v;
       sample = (sample * gain) / kPercentScale;
       sample = (sample * music_volume) / kPercentScale;
+      sample = (int)((int64_t)sample * fade_gain / kDriverFadeScale);
       if (!s_session_bypassed) {
         int mixed = out[i * 2 + ch] + sample;
         out[i * 2 + ch] = (int16_t)(mixed < -32768 ? -32768
@@ -689,6 +718,7 @@ void MusicReplacements_InstallHooks(void) {
   s_session_bypassed = false;
   s_halted_replacement = false;
   s_next_session_token = 0;
+  s_driver_fade_gain = kDriverFadeScale;
   NativeAudioMixer_SetMusicReplacementActive(false);
 }
 

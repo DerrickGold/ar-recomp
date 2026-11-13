@@ -15,6 +15,9 @@ static int s_sfx_gain = -1;
 static int s_replacement_music_gain = -1;
 static uint32_t s_mix_flags;
 static uint32_t s_unclassified_music_source_min;
+static unsigned s_driver_observations;
+static const uint8_t *s_observed_aram;
+static size_t s_observed_aram_size;
 
 static SrResult ConfigureAudioMix(
     SrRunnerHandle *runner, const SrAudioMixControl *control) {
@@ -42,6 +45,12 @@ const SnesRunnerApi *sr_runner_get_api(uint32_t requested_version) {
 
 void MusicReplacements_SetMusicVolumePercent(int volume_percent) {
   s_replacement_music_gain = volume_percent;
+}
+
+void MusicReplacements_ObserveDriverState(const uint8_t *aram, size_t size) {
+  ++s_driver_observations;
+  s_observed_aram = aram;
+  s_observed_aram_size = size;
 }
 
 static int s_failures;
@@ -114,6 +123,15 @@ static void TestRouting(void) {
   NativeAudioMixer_RouteDspWrite(&context, &routing);
   CHECK(routing.update_count == 1u && routing.update[0].voice == 7u &&
         routing.update[0].bus == RTL_AUDIO_VOICE_BUS_SFX);
+  CHECK(s_driver_observations == 1u && s_observed_aram == aram &&
+        s_observed_aram_size == sizeof(aram));
+
+  /* Native fade completion writes global KOFF even when no music voice is
+   * updating. Observe it before the voice-only routing classifier returns. */
+  context.dsp_address = 0x5Cu;
+  NativeAudioMixer_RouteDspWrite(&context, &routing);
+  CHECK(routing.update_count == 0u && s_driver_observations == 2u);
+  context.dsp_address = 0x74u;
 
   context.extended_voices_enabled = 1u;
   context.voice_bus_count = RTL_AUDIO_ADAPTER_VOICE_MAX;
@@ -126,8 +144,11 @@ static void TestRouting(void) {
         routing.update[1].bus == RTL_AUDIO_VOICE_BUS_MUSIC);
 
   aram[0x1au] = 0x40u;
+  const unsigned before_load = s_driver_observations;
   NativeAudioMixer_RouteStateLoaded(&loaded, &loaded_routing);
   CHECK(loaded_routing.voice_bus_count == 8u);
+  CHECK(s_driver_observations == before_load + 1u && s_observed_aram == aram &&
+        s_observed_aram_size == sizeof(aram));
   for (int voice = 0; voice < 6; ++voice)
     CHECK(loaded_routing.voice_bus[voice] == RTL_AUDIO_VOICE_BUS_MUSIC);
   CHECK(loaded_routing.voice_bus[6] == RTL_AUDIO_VOICE_BUS_SFX);
@@ -146,8 +167,16 @@ static void TestRouting(void) {
 
   context.struct_size = sizeof(context.struct_size);
   routing.update_count = 2u;
+  const unsigned before_invalid = s_driver_observations;
   NativeAudioMixer_RouteDspWrite(&context, &routing);
-  CHECK(routing.update_count == 0u);
+  CHECK(routing.update_count == 0u && s_driver_observations == before_invalid);
+  context.struct_size = RTL_AUDIO_DSP_WRITE_CONTEXT_V2_SIZE;
+  context.apu_ram_byte_size = 0x31u;
+  NativeAudioMixer_RouteDspWrite(&context, &routing);
+  CHECK(routing.update_count == 0u && s_driver_observations == before_invalid);
+  loaded.apu_ram_byte_size = 0x1Au;
+  NativeAudioMixer_RouteStateLoaded(&loaded, &loaded_routing);
+  CHECK(loaded_routing.voice_bus_count == 0u && s_driver_observations == before_invalid);
 }
 
 static void TestInstallAndGains(void) {

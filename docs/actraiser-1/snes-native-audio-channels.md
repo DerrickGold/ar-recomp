@@ -43,6 +43,28 @@ These mailboxes have depth one. Two BRKs before the next drain do not form a
 queue: the later value replaces `$035B`. The same applies independently to
 `$035A`.
 
+### Music fade and boss transition
+
+Port 0 command `$F1` starts a fade, rather than merely acknowledging a song
+request. SPC `$05CB` sets fade flag `$30`, countdown `$31 = $7F`, and the
+command echo in `$04`. The boss music actor at CPU `$00:A3FE` sends `$F1`,
+waits for its echo, then sends song 1 while the outgoing bank is still resident.
+It waits for the driver to report zero before halting, uploading the boss bank,
+and starting the next song.
+
+The countdown advances on music ticks (`$0487-$0492`), so fade duration follows
+the song tempo. The volume routine at `$0CDA-$0CE5` applies `countdown / 128`
+before squaring the voice volume. Enhanced music observes these ARAM fields
+through the DSP routing callback and applies the corresponding squared gain
+to replacement PCM. The echoed song command preserves the current decoder's
+position; it does not restart the outgoing music.
+
+At fade completion, `$05E8` clears `$04` but leaves the fade flag set. Enhanced
+output remains silent in this state, including if the countdown wraps before
+the CPU sends its halt. A new native song clears the fade flag at `$0631` and
+restores full replacement gain. Global DSP writes also update this observation,
+so it continues after the music voices stop; sound-effect gain is unaffected.
+
 ## SPC700 allocation and suppression logic
 
 The decisive driver routine is ARAM `$0DA0-$0E13`.

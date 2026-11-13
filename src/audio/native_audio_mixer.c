@@ -83,6 +83,9 @@ void NativeAudioMixer_RouteDspWrite(
       (context->extended_voices_enabled != 0u &&
        context->voice_bus_count != RTL_AUDIO_ADAPTER_VOICE_MAX))
     return;
+  /* Global writes continue after the song stops. Observe those too so the
+   * enhanced stream reaches silence even when no music voice writes remain. */
+  MusicReplacements_ObserveDriverState(context->apu_ram, context->apu_ram_byte_size);
   if (!NativeAudioMixer_ClassifyDspWrite(
           context->dsp_address, context->spc_x,
           context->apu_ram[kActRaiserCurrentTrackMaskAddress],
@@ -145,6 +148,7 @@ void NativeAudioMixer_RouteStateLoaded(
       (context->extended_voices_enabled != 0u &&
        context->voice_bus_count != RTL_AUDIO_ADAPTER_VOICE_MAX))
     return;
+  MusicReplacements_ObserveDriverState(context->apu_ram, context->apu_ram_byte_size);
   /* Voices 0-5 are always song tracks. Voices 6/7 are effects exactly while
    * their driver ownership bits are set; subsequent per-track DSP writes keep
    * the labels precise as playback advances after the load. */

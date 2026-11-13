@@ -27,7 +27,8 @@
  * streams the file into the final mix and mutes DSP voices tagged Music by the
  * logical-track observer. SRCN >= 0x0C remains only a startup fallback before
  * a voice has a tag; explicit SFX voices stay audible regardless of sample.
- * $F0 (halt) stops the stream; a new play command switches it. Missing file /
+ * $F1 fades the stream using the native sequencer's countdown and volume
+ * curve; $F0 (halt) stops it; a new play command switches it. Missing file /
  * no entry = fully authentic playback.
  *
  * Threading: trigger callbacks run on the game thread (under the APU lock —
@@ -91,6 +92,12 @@ void MusicReplacements_ApplySetting(void);
 /* Music-bus gain applied in addition to each manifest entry's authored gain.
  * The caller holds the APU lock; 100 preserves the legacy mix exactly. */
 void MusicReplacements_SetMusicVolumePercent(int volume_percent);
+
+/* Observe the native driver's song/fade state from DSP-write and state-load
+ * callbacks, including global DSP writes after the fade has halted music.
+ * Caller holds the APU lock; the ARAM view is used only during this call.
+ * Tracked even without a replacement so live enabling adopts a running fade. */
+void MusicReplacements_ObserveDriverState(const uint8_t *aram, size_t size);
 
 /* Suspend/resume the replacement decoder for host-owned pauses (P and the
  * settings overlay). HostAudio gates the whole SDL device at the same edge so

@@ -622,6 +622,126 @@ static void TestHaltedReplacement(const char *fixture) {
   CHECK(!s_music_replacement_active);
 }
 
+/* Compare decoded music against an independent PCM reference while retaining
+ * a nonzero native/SFX mix. The manifest gain is 80%, the music slider 50%.
+ * Explicit fade ratios below come from the native driver, not the observer. */
+static void CheckFadeBlock(const int16_t *reference, int offset,
+                          int numerator, int denominator) {
+  int16_t actual[128];
+  for (int i = 0; i < 128; ++i) actual[i] = i & 1 ? -987 : 1234;
+  MusicReplacements_MixOutput(actual, 64);
+  for (int i = 0; i < 128; ++i) {
+    int music = reference[offset * 2 + i] * 80 / 100;
+    music = music * 50 / 100;
+    music = music * numerator / denominator;
+    CHECK(actual[i] == (i & 1 ? -987 : 1234) + music);
+  }
+}
+
+static void TestNativeFadePlayback(const char *fixture) {
+  int error = 0;
+  stb_vorbis *decoder = stb_vorbis_open_filename(fixture, &error, NULL);
+  CHECK(decoder);
+  if (!decoder) return;
+  int16_t reference[4096];
+  CHECK(stb_vorbis_get_samples_short_interleaved(decoder, 2, reference, 4096) == 2048);
+  stb_vorbis_close(decoder);
+
+  char manifest[2048];
+  snprintf(manifest, sizeof(manifest),
+           "[music:level]\nsrc = 01:8000\nloop = 0\ngain = 80\nfile = %s\n"
+           "[music:boss]\nsrc = 02:8000\nloop = 0\ngain = 80\nfile = %s\n",
+           fixture, fixture);
+  CHECK(MusicReplacements_Load(WriteManifest(manifest)) == 2);
+  MusicReplacements_InstallHooks();
+  MusicReplacements_SetMusicVolumePercent(50);
+  g_settings.music_replacements = true;
+  MusicReplacements_OnSpcUpload(0x018000);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  bool completed = true;
+  const uint64_t level_token = MusicReplacements_GetOneShotSnapshot(&completed);
+  CHECK(level_token && !completed && s_music_replacement_active);
+  uint8_t aram[0x32] = {0};
+  aram[0x04] = 1;
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram));
+  CheckFadeBlock(reference, 0, 1, 1);
+
+  /* The boss actor sends F1, waits for its echo, then repeats song 1 while
+   * the outgoing song fades. Neither command should rewind the OGG. */
+  MusicReplacements_OnApuPortWrite(0, 0xF1);
+  aram[0x04] = 0xF1;
+  aram[0x30] = 0xFF;
+  aram[0x31] = 127;
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram));
+  CheckFadeBlock(reference, 64, 16129, 16384);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  aram[0x04] = 1;
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram));
+  CHECK(MusicReplacements_GetOneShotSnapshot(&completed) == level_token && !completed);
+  CheckFadeBlock(reference, 128, 16129, 16384);
+
+  aram[0x31] = 64;
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram));
+  CheckFadeBlock(reference, 192, 1, 4);
+  MusicReplacements_OnApuPortWrite(0, 0xF2);
+  CheckFadeBlock(reference, 256, 0, 1); /* Pause preserves cursor and SFX. */
+  MusicReplacements_SetHostPaused(true);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  CheckFadeBlock(reference, 256, 0, 1);
+  MusicReplacements_SetHostPaused(false);
+  CheckFadeBlock(reference, 256, 1, 4);
+
+  /* Comparison bypass still advances the decoder and observes native fades. */
+  MusicReplacements_SetSessionBypassed(true);
+  aram[0x31] = 32;
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram));
+  CheckFadeBlock(reference, 320, 0, 1);
+  MusicReplacements_SetSessionBypassed(false);
+  CheckFadeBlock(reference, 384, 1, 16);
+  MusicReplacements_ObserveDriverState(NULL, sizeof(aram));
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram) - 1);
+  CheckFadeBlock(reference, 448, 1, 16);
+
+  aram[0x31] = 1;
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram));
+  CheckFadeBlock(reference, 512, 1, 16384);
+  aram[0x31] = 0;
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram));
+  CheckFadeBlock(reference, 576, 0, 1);
+  /* Native halt clears the song echo; its countdown can wrap before the CPU
+   * responds. The finished fade must stay silent, with native music muted. */
+  aram[0x04] = 0;
+  aram[0x31] = 255;
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram));
+  CheckFadeBlock(reference, 640, 0, 1);
+  CHECK(s_music_replacement_active);
+  CHECK(MusicReplacements_GetOneShotSnapshot(&completed) == level_token && !completed);
+
+  MusicReplacements_OnApuPortWrite(0, 0xF0);
+  MusicReplacements_OnApuPortWrite(0, 0xFF);
+  MusicReplacements_OnSpcUpload(0x028000);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  aram[0x04] = 1;
+  aram[0x30] = 0; /* A genuine native song start clears the fade flag. */
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram));
+  CHECK(MusicReplacements_GetOneShotSnapshot(&completed) != level_token && !completed);
+  CheckFadeBlock(reference, 0, 1, 1);
+
+  /* Enabling enhanced playback during a native fade adopts its current gain. */
+  g_settings.music_replacements = false;
+  MusicReplacements_ApplySetting();
+  CHECK(!s_music_replacement_active);
+  aram[0x30] = 0xFF;
+  aram[0x31] = 32;
+  MusicReplacements_ObserveDriverState(aram, sizeof(aram));
+  g_settings.music_replacements = true;
+  MusicReplacements_ApplySetting();
+  CHECK(s_music_replacement_active);
+  CheckFadeBlock(reference, 0, 1, 16);
+  MusicReplacements_Shutdown();
+  MusicReplacements_SetMusicVolumePercent(100);
+}
+
 int main(int argc, char **argv) {
   TestMusicResamplerMath();
   TestParseEntries();
@@ -636,6 +756,7 @@ int main(int argc, char **argv) {
   if (argc == 2) {
     TestCachedPlayback(argv[1]);
     TestHaltedReplacement(argv[1]);
+    TestNativeFadePlayback(argv[1]);
   }
   if (s_failures) {
     fprintf(stderr, "music manifest tests: %d failure(s)\n", s_failures);
