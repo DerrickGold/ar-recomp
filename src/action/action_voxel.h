@@ -291,6 +291,7 @@ typedef struct VoxelEdge {
   uint16_t fold_length; /* Original vertical span after native edge splitting. */
   unsigned char trunk_curve; /* One-based semantic lower-trunk owner; zero is unchanged. */
   unsigned char column_curve, neighbor_column_curve;
+  uint16_t room_edge_color; /* Opaque RGB555 for a room boundary cap, zero for ordinary edges. */
 } VoxelEdge;
 /* A lower tree shaft bends from its unchanged branch contact at top_y to the
  * rear vegetation at base_y. Query the owning cell once, then evaluate that

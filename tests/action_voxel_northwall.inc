@@ -239,9 +239,18 @@ static unsigned NorthwallFixtures(const char *directory) {
     }
     unsigned count,solid=0,rear=0,decks=0;
     const VoxelEdge *edges=ActionVoxel_Edges(a,&count);assert(count && count<kVoxelMaxEdges);
+    unsigned caps[4]={0};
+    const int room_width=ActionRoomScene_TileWidth(s,1)*8;
+    const int room_height=ActionRoomScene_TileHeight(s,1)*8;
     const float depth=ActionVoxel_Depth(a),actor=ActionVoxel_PlayRecess(a)-.01f;
     for(unsigned i=0;i<count;++i) {
       const VoxelEdge *e=&edges[i];solid+=e->colliding!=0;rear+=e->rear_mounted!=0;
+      const bool boundary[]={e->y==0,e->x==room_width-1,e->y==room_height-1,e->x==0};
+      if(e->room_edge_color) {
+        assert((e->room_edge_color&0x8000) && boundary[e->side] && !e->near_rank);
+        caps[e->side]+=e->length;
+      }
+      if(boundary[e->side] && e->far_rank==2)assert(e->room_edge_color);
       if(e->high_priority && e->colliding && !e->side && e->far_rank==2) {
         VoxelEdgeSpan front,back;
         if(ActionVoxel_ResolveEdgeSpan(a,e,kVoxelEdgeNative,0,depth,&front) &&
@@ -250,6 +259,7 @@ static unsigned NorthwallFixtures(const char *directory) {
         }
       }
     }
+    if(room==2)for(unsigned side=0;side<4;++side)assert(caps[side]>0);
     assert(solid);if(room==1 || room==8)assert(decks);
     if(room==5)assert(rear);
     if(room==2 || room==3 || room==5)TombIntervals(a);

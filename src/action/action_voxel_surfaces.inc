@@ -50,6 +50,54 @@ static bool SurfaceMaterial(VoxelSurfaceBuild *b,int x,int y,CastleMaterial *m,
   *edit=DioramaLayerOrder_PixelEditAt(b->terrain,0,x/16,y/16,metatile);
   return true;
 }
+
+static bool SurfaceAtRoomEdge(const ActionVoxelGeometry *c,const VoxelEdge *edge) {
+  const int x=edge->x-c->origin_x,y=edge->y-c->origin_y;
+  return edge->side==0 ? y==0 : edge->side==1 ? x==c->width-1 :
+         edge->side==2 ? y==c->height-1 : x==0;
+}
+
+/* Sample the matching depth rank beside the cap in its source quadrant.
+ * Using an opaque colour avoids exposing the rear sheet through edge UVs. */
+static uint16_t SurfaceRoomEdgeColor(const ActionVoxelGeometry *c,const VoxelEdge *edge,
+    const CastleMaterial *material,const DioramaPixelEdit *edit,
+    const uint16_t palette[128],int x,int y,int cx,int cy) {
+  const int tx=(x-cx)&8,ty=(y-cy)&8;
+  unsigned red=0,green=0,blue=0,count=0;
+  for(int py=ty;py<ty+8;++py)for(int px=tx;px<tx+8;++px) {
+    const size_t at=(size_t)(cy+py-c->origin_y)*c->width+cx+px-c->origin_x;
+    if(DepthRank(c,at)!=edge->far_rank)continue;
+    const unsigned ink=SceneryBackingColor(material,edit,palette,px,py);
+    red+=ink&31;
+    green+=(ink>>5)&31;
+    blue+=(ink>>10)&31;
+    ++count;
+  }
+  if(!count)return 0;
+  return 0x8000|((red+count/2)/count)|(((green+count/2)/count)<<5)|
+      (((blue+count/2)/count)<<10);
+}
+
+static void SurfaceCloseRoomEdges(ActionVoxelGeometry *c,const ActionRoomScene *s,
+    const DioramaRoomOverride *terrain,const DioramaStampLayerOverride *stamps,
+    const CastleMaterial native[256],const uint16_t palette[128],const uint16_t *tiles,size_t pitch) {
+  for(unsigned i=0;i<c->edge_count;++i) {
+    VoxelEdge *edge=&c->edges[i];
+    if(edge->near_rank || !SurfaceAtRoomEdge(c,edge))continue;
+    const VoxelAuthoredCell *owner=AuthoredPixelOwner(c,edge->x,edge->y);
+    if(owner && owner->native_transform)continue;
+    const int x=edge->x+((edge->side&1)?0:edge->length/2);
+    const int y=edge->y+((edge->side&1)?edge->length/2:0);
+    /* Room origins are aligned to metatiles, including negative stamps. */
+    const int cx=c->origin_x+(x-c->origin_x)/16*16;
+    const int cy=c->origin_y+(y-c->origin_y)/16*16;
+    CastleMaterial material;
+    uint8_t id;
+    if(!LookupMaterial(s,stamps,native,cx/16,cy/16,&material,&id,tiles,pitch))continue;
+    const DioramaPixelEdit *edit=DioramaLayerOrder_PixelEditAt(terrain,0,cx/16,cy/16,id);
+    edge->room_edge_color=SurfaceRoomEdgeColor(c,edge,&material,edit,palette,x,y,cx,cy);
+  }
+}
 #include "action_voxel_native_surface.inc"
 /* An actual edge owns a finite fragment. Follow its original native pixels
  * inward, not a first-opaque silhouette guess: lower shelves inside the same
@@ -739,7 +787,7 @@ static bool BuildAutomaticSurfaceArt(ActionVoxelGeometry *c,const ActionRoomScen
      * textured_top only requested the former6px contour inset: replacing
      * that raw sampling with a verified full square preserves its fold. */
     if((original.far_rank!=2 && !(b->native_surfaces && original.far_rank==1)) ||
-        original.top_sample_size) {edges[count++]=original;continue;}
+        original.top_sample_size || original.room_edge_color) {edges[count++]=original;continue;}
     const int origin=(original.side&1)?original.y:original.x;
     const unsigned bands=((origin&7)+original.length+7)/8;
     if(bands>candidate_capacity) {

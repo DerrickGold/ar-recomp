@@ -74,7 +74,7 @@ static void AuditSourceCells(const ActionRoomScene *s,const ActionVoxelGeometry 
   printf("]");
 }
 static void AuditEdges(const ActionVoxelGeometry *g) {
-  printf(",\"edge_fields\":[\"x\",\"y\",\"length\",\"side\",\"near_rank\",\"far_rank\",\"priority\",\"colliding\",\"sample_x\",\"sample_y\",\"sample_size\",\"surface_texture\",\"owned_art\",\"derived\",\"native_x\",\"soft\",\"column\",\"trunk\",\"contour_skin\",\"surface_top_material\",\"fold_top\",\"fold_bottom\",\"flat_rear_join\",\"native_actor_priority\",\"rear_trim\",\"rear_mounted\",\"thin_trim\",\"raised_scenery\",\"native_near\",\"native_far\",\"native_span_valid\",\"behind_near\",\"behind_far\",\"behind_span_valid\",\"rear_near\",\"rear_far\",\"rear_span_valid\",\"physical_near\",\"physical_far\",\"physical_span_valid\"],\"edges\":[");
+  printf(",\"edge_fields\":[\"x\",\"y\",\"length\",\"side\",\"near_rank\",\"far_rank\",\"priority\",\"colliding\",\"sample_x\",\"sample_y\",\"sample_size\",\"surface_texture\",\"owned_art\",\"derived\",\"native_x\",\"soft\",\"column\",\"trunk\",\"contour_skin\",\"surface_top_material\",\"fold_top\",\"fold_bottom\",\"flat_rear_join\",\"native_actor_priority\",\"rear_trim\",\"rear_mounted\",\"thin_trim\",\"raised_scenery\",\"native_near\",\"native_far\",\"native_span_valid\",\"behind_near\",\"behind_far\",\"behind_span_valid\",\"rear_near\",\"rear_far\",\"rear_span_valid\",\"physical_near\",\"physical_far\",\"physical_span_valid\",\"room_edge_color\"],\"edges\":[");
   for(unsigned i=0;i<g->edge_count;++i) {
     const VoxelEdge *e=g->edges+i;VoxelEdgeSpan span={0};
     bool valid=ActionVoxel_ResolveEdgeSpan(g,e,kVoxelEdgeNative,0,ActionVoxel_Depth(g),&span);
@@ -87,14 +87,14 @@ static void AuditEdges(const ActionVoxelGeometry *g) {
     if(rear_valid){physical_near=fminf(physical_near,rear.near_depth);physical_far=fmaxf(physical_far,rear.far_depth);}
     const bool physical_valid=valid||behind_valid||rear_valid;
     if(!physical_valid)physical_near=0;
-    printf("%s[%d,%d,%d,%u,%u,%u,%u,%u,%d,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%.7g,%.7g,%s,%.7g,%.7g,%s,%.7g,%.7g,%s,%.7g,%.7g,%s]",i?",":"",
+    printf("%s[%d,%d,%d,%u,%u,%u,%u,%u,%d,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%.7g,%.7g,%s,%.7g,%.7g,%s,%.7g,%.7g,%s,%.7g,%.7g,%s,%u]",i?",":"",
         e->x,e->y,e->length,e->side,e->near_rank,e->far_rank,e->high_priority,e->colliding,
         e->top_sample_x,e->top_sample_y,e->top_sample_size,e->surface_texture,e->top_owned_art,
         e->surface_derived,e->surface_native_x,e->soft_surface,e->column_curve,e->trunk_curve,
         e->contour_skin,e->surface_top_material,e->rear_fold_top,e->rear_fold_bottom,e->flat_rear_join,
         e->native_actor_priority,e->rear_trim,e->rear_mounted,e->thin_trim,e->raised_scenery,
         span.near_depth,span.far_depth,valid?"true":"false",behind.near_depth,behind.far_depth,behind_valid?"true":"false",
-        rear.near_depth,rear.far_depth,rear_valid?"true":"false",physical_near,physical_far,physical_valid?"true":"false");
+        rear.near_depth,rear.far_depth,rear_valid?"true":"false",physical_near,physical_far,physical_valid?"true":"false",e->room_edge_color);
   }
   printf("],\"owned_art\":[");
   for(unsigned i=0;i<g->authored_art_count;++i){if(i)putchar(',');AuditHex16(g->authored_art[i],256);}printf("]");

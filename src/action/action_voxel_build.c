@@ -242,9 +242,8 @@ static uint64_t Boundary(const ActionVoxelGeometry *c, int x, int y, unsigned si
   unsigned far_rank = DepthRank(c, y * c->width + x);
   if(!far_rank && (pixel&kVoxelKindMask)==kVoxelFoliage && WetProfileFoamCrownRiser(c,x,y,side))
     far_rank=2; /* Cap closure only: never change the native front/profile mask. */
-  const unsigned near_rank = xx < 0 || yy < 0 || xx >= c->width || yy >= c->height
-                                 ? 0
-                                 : DepthRank(c, yy * c->width + xx);
+  const bool room_edge = xx < 0 || yy < 0 || xx >= c->width || yy >= c->height;
+  const unsigned near_rank = room_edge ? 0 : DepthRank(c, yy * c->width + xx);
   /* Thin foreground trim on a full floor exposes only the walkway behind it.
    * Shared solid interiors have no side, even across native priorities. */
   const bool rear=c->mixed_scenery && c->front_recess && far_rank==1 && c->front_recess[(y/8)*(c->width/8)+x/8];
@@ -281,7 +280,7 @@ static uint64_t Boundary(const ActionVoxelGeometry *c, int x, int y, unsigned si
       exposed=back>lower_front && !(lower_neighbor<=lower_front && neighbor_back>=back);
     }
   }
-  return exposed && KeepProfileContour(c,x,y,side)
+  return exposed && ((room_edge && far_rank==2) || KeepProfileContour(c,x,y,side))
              ? far_rank | (near_rank << 2) | ((pixel & kVoxelHighPriority) ? 16 : 0) |
                    ((pixel & kVoxelRearTrim) ? 32 : 0) | ((pixel & kVoxelColliding) ? 64 : 0) |
                    ((pixel & kVoxelTexturedTop) ? 128 : 0) |
@@ -2394,8 +2393,9 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
   }
   if (!BuildWaterSurfaces(c,s,terrain)) return false;
   c->ready = true;
-  if(!BuildAuthoredCells(c,s,terrain,stamps,native,palette,tiles,tile_pitch) ||
-      !BuildAutomaticSurfaceArt(c,s,terrain,stamps,native,palette,tiles,tile_pitch))return false;
+  if(!BuildAuthoredCells(c,s,terrain,stamps,native,palette,tiles,tile_pitch))return false;
+  SurfaceCloseRoomEdges(c,s,terrain,stamps,native,palette,tiles,tile_pitch);
+  if(!BuildAutomaticSurfaceArt(c,s,terrain,stamps,native,palette,tiles,tile_pitch))return false;
   if(!BuildLintelReturns(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
   BuildCastleTerminalMatte(c,s,terrain,stamps,native,palette,tiles,tile_pitch);
   BuildJungleTerminal(c,s,terrain,stamps,native,palette,tiles,tile_pitch);

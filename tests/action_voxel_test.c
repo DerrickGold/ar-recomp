@@ -18,6 +18,8 @@ static void SameGeometry(const ActionVoxelGeometry *a, const ActionVoxelGeometry
     /* Owned image indices may deduplicate differently under a palette fade
      * or when an authored image precedes the same automatic material. */
     a_edge.top_owned_art=b_edge.top_owned_art=0;
+    assert(!!a_edge.room_edge_color==!!b_edge.room_edge_color);
+    a_edge.room_edge_color=b_edge.room_edge_color=0;
     assert(!memcmp(&a_edge,&b_edge,sizeof(a_edge)));
   }
   if(ActionVoxel_Profile(a)!=kActionVoxelProfile_FillmoreForest &&

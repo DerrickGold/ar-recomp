@@ -9,7 +9,7 @@ typedef struct VoxelSide {
   ArRenderPointF heat_world_xy[4];
   bool heat_finite;
   float distance;
-  bool rear_source,owned_source;
+  bool rear_source,owned_source,solid_color;
   uint16_t crisp_page; /* One-based native-front filtered source, zero unchanged. */
   uint16_t ground_cover; /* One-based painter-only staged snow triangle. */
 } VoxelSide;
@@ -630,19 +630,6 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     VoxelEdge e = edges[indices[i]];
     if (e.high_priority != high_priority) continue;
     const VoxelAuthoredCell *transformed=native_transforms?NativeTransformCell(castle,e.x,e.y):NULL;
-    const VoxelTrunkCurve *column_curve=ActionVoxel_ColumnCurveForEdge(castle,&e);
-    VoxelEdge neighbor=e;neighbor.column_curve=e.neighbor_column_curve;
-    const VoxelTrunkCurve *neighbor_curve=ActionVoxel_ColumnCurveForEdge(castle,&neighbor);
-    const bool ramp_join=!transformed && (e.side&1) && e.near_rank==2 && e.far_rank==2 &&
-        e.x-ox>=0 && e.x-ox<capture->width &&
-        column_curve && neighbor_curve && column_curve->contact_count==8 && neighbor_curve->contact_count==8;
-    if(ramp_join) {
-      /* These tiny closures belong to one continuous rock face. Floor art
-       * and dark outer-side shading would stripe every native2px section.
-       * Continue the owner's native ink; authored surfaces disable the
-       * automatic ramp ownership before reaching this path. */
-      e.top_owned_art=0;e.top_sample_size=0;e.surface_texture=0;
-    }
     const unsigned face_mask[]={kDioramaVoxelFaceMask_Top,kDioramaVoxelFaceMask_Right,kDioramaVoxelFaceMask_Bottom,kDioramaVoxelFaceMask_Left};
     if(transformed && !(transformed->faces&face_mask[e.side]))continue;
     float x0 = e.x - ox, y0 = e.y - oy, x1 = x0, y1 = y0;
@@ -666,6 +653,16 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
           dv*SR_PPU_SURFACE_MAX_HEIGHT/fmaxf(.01f,g->height_scale));
       const float guard=fmaxf(fabsf(az),fabsf(bz))*pixels+16;
       if(bx+guard<ox || ax-guard>ox+capture->width || by+guard<oy || ay-guard>oy+capture->height)continue;
+    }
+    const VoxelTrunkCurve *column_curve=ActionVoxel_ColumnCurveForEdge(castle,&e);
+    VoxelEdge neighbor=e;neighbor.column_curve=e.neighbor_column_curve;
+    const VoxelTrunkCurve *neighbor_curve=ActionVoxel_ColumnCurveForEdge(castle,&neighbor);
+    const bool ramp_join=!transformed && (e.side&1) && e.near_rank==2 && e.far_rank==2 &&
+        e.x-ox>=0 && e.x-ox<capture->width &&
+        column_curve && neighbor_curve && column_curve->contact_count==8 && neighbor_curve->contact_count==8;
+    if(ramp_join) {
+      /* Continue native ink through internal two-pixel ramp joins. */
+      e.top_owned_art=0;e.top_sample_size=0;e.surface_texture=0;
     }
     VoxelEdgeSpan span;
     if(transformed) {
@@ -700,7 +697,8 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
      * pixels and depth, so clipping and actor-band splits share the same UVs.
      * A cropped-out source retains the original cap sampling. */
     const float sample_x = e.top_sample_x - ox, sample_y = e.top_sample_y - oy;
-    const bool live_contract=e.surface_texture==kVoxelSurfaceTextureLiveInward &&
+    const bool room_cap=e.room_edge_color!=0;
+    const bool live_contract=!room_cap && e.surface_texture==kVoxelSurfaceTextureLiveInward &&
         !e.top_owned_art && e.top_sample_size>=1 && e.top_sample_size<=16;
     float guard_bounds[4];const float *guard_source=NULL;
     const int primary_height=layer->voxel_guard?layer->voxel_guard->layout.primary_height:capture->height;
@@ -717,9 +715,9 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
         DioramaSandSurface_Covered(sample_x,sample_y,(e.side&1)?1:e.length,
             capture->width,primary_height,guard_source,e.top_sample_size);
     const bool inward_surface = e.surface_texture == kVoxelSurfaceTextureNativeInward;
-    const bool sampled_surface = e.surface_texture && (e.far_rank == 2 ||
+    const bool sampled_surface = !room_cap && e.surface_texture && (e.far_rank == 2 ||
         (inward_surface && e.far_rank == 1)) && e.top_sample_size > 1 && e.top_owned_art;
-    const bool sampled_top = !live_contract && !sampled_surface && e.side == 0 && e.top_sample_size > 1 && (e.top_owned_art ||
+    const bool sampled_top = !room_cap && !live_contract && !sampled_surface && e.side == 0 && e.top_sample_size > 1 && (e.top_owned_art ||
         (sample_x >= 0 && sample_y >= 0 &&
         sample_x + e.top_sample_size <= capture->width &&
         sample_y + e.top_sample_size <= capture->height));
@@ -795,7 +793,15 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     const float face_far = sampled_top ? fminf(span.far_depth, tile_z0 + tile_depth) : span.far_depth;
     if (face_far <= face_near || (sampled_top && x1 <= x0)) continue;
     const bool owned_top=sampled_top && e.top_owned_art;
-    VoxelSide next = {.owned_source=owned_top || sampled_surface || transformed};float observer_xy[8];
+    VoxelSide next = {.owned_source=owned_top || sampled_surface || transformed,
+        .solid_color=room_cap};float observer_xy[8];
+    ArRenderColorF tint=layer->shade;
+    if(room_cap) {
+      const uint32_t color=ActionVoxel_AuthoredColor(e.room_edge_color,capture->voxel_frame);
+      tint.r*=((color>>16)&255)/255.f;
+      tint.g*=((color>>8)&255)/255.f;
+      tint.b*=(color&255)/255.f;
+    }
     const bool cover_top=s_ground_cover.active_count&&e.side==0;
     DioramaGroundCoverCap cover={.from={x0+ox,y0+oy},.to={x1+ox,y1+oy},
         .actor_z=ActionVoxel_PlayRecess(castle),.contact_radius=6*g->aspect_x/(du*SR_PPU_SURFACE_MAX_WIDTH)};
@@ -808,7 +814,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       if(fabsf(x1+ox-e.x-e.length)<.000001f)cover.closing_riser[1]=e.snow_closing_riser[1];
     }
     const bool folded_top = e.side == 0 && e.rear_fold_top && face_far > contact;
-    next.rear_source = folded_top && !e.flat_rear_join && !e.textured_top && face_near >= contact - .00001f;
+    next.rear_source = !room_cap && folded_top && !e.flat_rear_join && !e.textured_top && face_near >= contact - .00001f;
     bool ok = true;
     for (unsigned j = 0; j < 4; ++j) {
       const bool end = j == 1 || j == 2, back = j >= 2;
@@ -967,6 +973,11 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       next.v[j].tex_coord = (ArRenderPointF){
           (sampled_top ? top_u : sx) / SR_PPU_SURFACE_MAX_WIDTH,
           (sampled_top ? top_v : sy) / SR_PPU_SURFACE_MAX_HEIGHT};
+      /* The solid cap has no texture, but lighting still needs a receiver
+       * on the terrain side of the contour. */
+      if(room_cap)next.v[j].tex_coord=(ArRenderPointF){
+          (x+(e.side==1?-.5f:e.side==3?.5f:0))/SR_PPU_SURFACE_MAX_WIDTH,
+          (native_y+(e.side==2?-.5f:e.side==0?.5f:0))/SR_PPU_SURFACE_MAX_HEIGHT};
       if(ramp_join)next.v[j].tex_coord=(ArRenderPointF){
           (e.x-ox+.5f)/SR_PPU_SURFACE_MAX_WIDTH,native_y/SR_PPU_SURFACE_MAX_HEIGHT};
       const unsigned shade_side=e.contour_skin
@@ -981,8 +992,8 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
         shade *= layer->exposure->sample(layer->exposure->userdata, next.v[j].tex_coord.x,
                                          next.v[j].tex_coord.y, next.v[j].tex_coord.x,
                                          next.v[j].tex_coord.y);
-      next.v[j].color = (ArRenderColorF){layer->shade.r * shade, layer->shade.g * shade,
-                                         layer->shade.b * shade, ramp_join?layer->shade.a:1};
+      next.v[j].color = (ArRenderColorF){tint.r * shade, tint.g * shade,
+                                         tint.b * shade, ramp_join?tint.a:1};
       if(live_surface) {
         VoxelEdge raw=e;raw.high_priority=false;raw.colliding=false;
         VoxelEdgeSpan full;float near=0,far=0;
@@ -1067,15 +1078,18 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
     const bool rear_source = s_voxel_sides[s_voxel_order[first]].rear_source;
     const bool owned_source = s_voxel_sides[s_voxel_order[first]].owned_source;
     const bool cover=s_voxel_sides[s_voxel_order[first]].ground_cover!=0;
+    const bool solid=s_voxel_sides[s_voxel_order[first]].solid_color;
+    const bool untextured=cover||solid;
     const bool heat_owned=g->depth_sink && owned_source && !cover && DioramaHeat_Active(&light.heat);
     const bool heat_finite=s_voxel_sides[s_voxel_order[first]].heat_finite;
     int end = first + 1;
     while (end < count && s_voxel_sides[s_voxel_order[end]].rear_source == rear_source &&
         s_voxel_sides[s_voxel_order[end]].owned_source == owned_source&&
+        s_voxel_sides[s_voxel_order[end]].solid_color == solid &&
         (!heat_owned || s_voxel_sides[s_voxel_order[end]].heat_finite==heat_finite)&&
         (s_voxel_sides[s_voxel_order[end]].ground_cover!=0)==cover) ++end;
-    if(cover&&dof_active){ok=DioramaEffectBackend_Unbind(device);dof_active=false;}
-    if(!cover&&bind_dof&&!dof_active) {
+    if(untextured&&dof_active){ok=DioramaEffectBackend_Unbind(device);dof_active=false;}
+    if(!untextured&&bind_dof&&!dof_active) {
       const DioramaDofEdgeEffectParams params={.texel_width=light.texel_width,.texel_height=light.texel_height,
           .blur_radius=blur,.u_max=1,.v_max=1};
       ok=ok&&DioramaEffectBackend_BindDofEdge(device,&params);dof_active=ok;
@@ -1092,14 +1106,14 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
       }
     }
     light.heat_owned=heat_owned?VoxelOwnedHeat(0,heat_finite):(DioramaHeatOwned){0};
-    if(!cover&&!owned_source&&layer->voxel_guard) {
+    if(!untextured&&!owned_source&&layer->voxel_guard) {
       ok=ok&&RenderVoxelNativeSources(device,layer,rear_source?layer->voxel_rear_texture:layer->texture,
           s_voxel_vertices,s_voxel_depths,g->depth_sink?s_voxel_clip_w:NULL,packed*4,quad_indices,packed*6,
           layer->blend,NULL,(ArRenderRectF){0,0,1,1},&light,g->depth_sink,false,rear_source,false);
     } else ok = ok&&RenderShadedDioramaDepthGeometryWithReceiver(device,
-        cover?ArRenderTexture_Invalid():owned_source ? VoxelAuthoredAtlas() : rear_source ? layer->voxel_rear_texture : layer->texture,
+        untextured?ArRenderTexture_Invalid():owned_source ? VoxelAuthoredAtlas() : rear_source ? layer->voxel_rear_texture : layer->texture,
         s_voxel_vertices,s_voxel_depths,g->depth_sink?s_voxel_clip_w:NULL,heat_owned?s_voxel_heat_world_xy:NULL,packed*4,quad_indices,packed*6,
-        cover?kArRenderBlendMode_Alpha:layer->blend,NULL,(ArRenderRectF){0,0,1,1},cover?NULL:&light,g->depth_sink,layer->description->plane,false);
+        untextured?kArRenderBlendMode_Alpha:layer->blend,NULL,(ArRenderRectF){0,0,1,1},untextured?NULL:&light,g->depth_sink,layer->description->plane,false);
     first = end;
   }
   if(dof_active)ok=DioramaEffectBackend_Unbind(device)&&ok;
