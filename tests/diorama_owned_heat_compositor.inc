@@ -113,7 +113,7 @@ static unsigned OwnedHeatTransportFixture(unsigned scenario) {
     assert(projection.valid&&probe.count&&r.actor_seen&&transport.native);
     if(frame==2||frame==3)assert(r.creates==creates&&r.uploads==uploads);
     if(!frame){assert(!transport.skin&&!transport.finite&&!transport.crisp);unheated=probe;continue;}
-    assert(transport.skin&&transport.before&&transport.after);
+    assert(transport.skin&&transport.before&&!transport.after);
     if(authored){assert(transport.crisp);if(frame==4)assert(transport.finite);}
     for(unsigned f=0;f<probe.count;++f)assert(probe.submitted[f]&&transport.seen[f]==1);
     if(frame==1){assert(probe.count==unheated.count);for(unsigned f=0;f<probe.count;++f)

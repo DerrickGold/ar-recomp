@@ -13,6 +13,7 @@
 #include "render/scene3d_math.h"
 #include "action/action_effect_source.h"
 #include "action/action_effect_mask_texture.h"
+#include "diorama/diorama_capture_blend.h"
 #include "diorama/diorama_snapshot.h"
 #include "diorama/diorama_trunk_guard_upload.h"
 #include "diorama/diorama_voxel_guard_upload.h"
@@ -953,6 +954,15 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       s_effects_enabled?&s_receiver:NULL,environment->camera_x[0],environment->camera_y[0],extra,
       &capture,&s_textures[receiver_plane],&s_pixels[receiver_plane],
       &s_textures[kDioramaPlane_ObjAttributes2],&s_pixels[kDioramaPlane_ObjAttributes2],&s_uploads))return 0;
+  if(!s_objects.snapshot.storage && s_receivers.mask && capture.voxel_frame &&
+      EditorRoomScene_3DMode(s_room)==kAction3D_Voxel) {
+    /* Staged sprites need the same main/subscreen slot as native OBJ.
+     * Loaded object snapshots carry their own blend mask. */
+    const ActionRoomSceneFrameState *frame_state=capture.voxel_frame;
+    const uint8_t subscreen=DioramaCaptureBlend_FullAddSubscreenSources(
+        frame_state->cgwsel,frame_state->cgadsub,frame_state->screen_enabled[0],frame_state->screen_enabled[1]);
+    if(subscreen&(1u<<SR_PPU_OVERLAY_OBJ))scene.additive_plane_mask|=1u<<receiver_plane;
+  }
   ActionExposureLighting exposure={.origin_x=environment->camera_x[0]-extra-capture.obj_apron,
       .origin_y=environment->camera_y[0]-capture.authentic_y0,
       .width=SR_PPU_SURFACE_MAX_WIDTH,.height=SR_PPU_SURFACE_MAX_HEIGHT};

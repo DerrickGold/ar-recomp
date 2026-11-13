@@ -87,10 +87,9 @@ static unsigned VoxelNativeXSurfaceFixture(unsigned scenario) {
           assert(!memcmp(&v[j].color,&generic.vertices[f][j].color,sizeof(v[j].color)));
           assert(v[j].tex_coord.y==generic.vertices[f][j].tex_coord.y);
         }
-        /* Only the same contour's actor split shares atlas phase. Adjacent
+        /* Only the same contour's depth split shares atlas phase. Adjacent
          *16px native cells legitimately wrap15.9999 back to.0001 at a join. */
-        for(unsigned other=0;other<f;++other)if(probe.after_actor[other]!=probe.after_actor[f] &&
-            fabsf(probe.faces[other].world_xy[0]-x0)<.001f &&
+        for(unsigned other=0;other<f;++other)if(fabsf(probe.faces[other].world_xy[0]-x0)<.001f &&
             fabsf(probe.faces[other].world_xy[2]-x1)<.001f)
           for(unsigned k=0;k<4;++k)if(CapPointEqual(v[j].position,probe.vertices[other][k].position)) {
             assert(CapUvEqual(v[j].tex_coord,probe.vertices[other][k].tex_coord));++joins;
@@ -116,7 +115,7 @@ static unsigned VoxelNativeXSurfaceFixture(unsigned scenario) {
         }
       }
     }
-    assert(before && after && joins && narrow_samples);
+    assert(before && !after && joins && narrow_samples);
     if(frame==2)assert(clipped && probe.count<generic.count);
     if(!native_x)assert(generic_holes);
     if(!frame)generic=probe;

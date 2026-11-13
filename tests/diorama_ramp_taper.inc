@@ -66,7 +66,7 @@ static unsigned RampTaperFixture(unsigned scenario) {
     fronts+=front;tops+=top;seams+=!front&&!top;
     const int column=(int)floorf((middle_x-80)*.5f);
     if(front)assert(column>=0&&column<8&&fabsf(face->world_xy[2]-face->world_xy[0])<=2.001f);
-    if(front)assert(!probe.after_actor[f]);
+    assert(!probe.after_actor[f]);
     float depths[4];
     for(unsigned j=0;j<4;++j) {
       const float x=roundf(face->world_xy[j*2]),y=face->world_xy[j*2+1];
@@ -105,12 +105,13 @@ static unsigned RampTaperFixture(unsigned scenario) {
           assert(fabsf(z-.07f)<.0001f);
           assert(CapPointEqual(probe.vertices[f][j].position,probe.vertices[f][3-j].position));
         }
-        if(probe.after_actor[f])assert(z<=.0701f);
-        else assert(z>=.0699f);
       }
     }
     if(!front&&!top && (fabsf(depths[0]-depths[3])>.0001f || fabsf(depths[1]-depths[2])>.0001f)) {
-      if(probe.after_actor[f])++front_band;else ++rear_band;
+      const float near=fminf(fminf(depths[0],depths[1]),fminf(depths[2],depths[3]));
+      const float far=fmaxf(fmaxf(depths[0],depths[1]),fmaxf(depths[2],depths[3]));
+      assert(far<=.0701f || near>=.0699f);
+      if(far<=.0701f)++front_band;else ++rear_band;
     }
   }
   /* These left-facing internal seams are culled from the opposite yaw. */

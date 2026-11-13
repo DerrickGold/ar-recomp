@@ -150,7 +150,7 @@ static unsigned NativeAffineFixture(unsigned scenario) {
       assert(probe.atlas[y*512+x]==ActionVoxel_AuthoredColor(voxel->authored_art[0][y*16+x],NULL));
       assert(probe.atlas[y*512+16+x]==ActionVoxel_AuthoredColor(voxel->authored_art[1][y*16+x],NULL));
     }
-    unsigned caps=0,fronts=0,backs=0,before=0,after=0,shared=0;
+    unsigned caps=0,fronts=0,backs=0,before=0,after=0,shared=0,near_caps=0,rear_caps=0;
     const float split=fmaxf(0,ActionVoxel_PlayRecess(voxel)-.01f);
     for(unsigned f=0;f<probe.count;++f) {
       const DioramaVoxelPickFace *face=&probe.faces[f];
@@ -168,10 +168,13 @@ static unsigned NativeAffineFixture(unsigned scenario) {
         if(backing)assert(fabsf(raw-ActionVoxel_Depth(voxel))<.00001f);
         const ArRenderPointF expected=RootExpectedPoint(&projection,&capture,px,py,physical[j]);
         assert(CapPointEqual(expected,(ArRenderPointF){face->screen_xy[j*2],face->screen_xy[j*2+1]}));
-        if(!front && !backing) {
-          if(probe.after_actor[f])assert(physical[j]<=split+.00001f);
-          else assert(physical[j]>=split-.00001f);
-        }
+      }
+      if(!front && !backing) {
+        const float near=fminf(fminf(physical[0],physical[1]),fminf(physical[2],physical[3]));
+        const float far=fmaxf(fmaxf(physical[0],physical[1]),fmaxf(physical[2],physical[3]));
+        assert(far<=split+.00001f || near>=split-.00001f);
+        near_caps+=near<split-.00001f;
+        rear_caps+=far>split+.00001f;
       }
       if(backing)continue;
       if(front) {
@@ -211,7 +214,7 @@ static unsigned NativeAffineFixture(unsigned scenario) {
         assert(!memcmp(&v->color,&b->color,sizeof(v->color)));
       }
     }
-    assert(caps && fronts && backs && shared && before && after);
+    assert(caps && fronts && backs && shared && before && !after && near_caps && rear_caps);
   }
   /* Moving high-priority owned art into view must not depend on any original
    * high-band pixels or texture having been captured at the destination. */

@@ -4350,8 +4350,20 @@ static int VoxelGuardEffectRows(const DioramaCapture *capture,const DioramaScene
 }
 
 typedef enum VoxelDrawPhase {
-  kVoxelDrawNormal, kVoxelDrawFrontCaps, kVoxelDrawRearWater
+  kVoxelDrawNormal, kVoxelDrawRearWater
 } VoxelDrawPhase;
+/* The contact split keeps the existing surface sampling. Both halves
+ * belong in the low BG1 slot, regardless of artwork or physical depth.
+ * Submit the near half after the native face to retain the rim's coverage. */
+static bool DrawVoxelLowContact(ArRenderDevice *device,const DioramaCapture *capture,
+    const DioramaViewGeometry *geometry,const DioramaLayerDraw *layer) {
+  if(layer->description->plane!=kDioramaPlane_Bg1Far || layer->voxel_depth<=0 ||
+      layer->voxel_recess<=0 || geometry->options->voxel_inspection==kDioramaVoxelInspect_Backing)
+    return true;
+  const float split=fmaxf(0,layer->voxel_recess-.01f);
+  return DrawVoxelAuthored(device,capture,geometry,layer,true) &&
+      DrawVoxelEdges(device,capture,geometry,layer,0,split);
+}
 static PresentationOutcome DrawResolvedDioramaLayer(
     ArRenderDevice *device, const DioramaCapture *capture,
     const DioramaScene *scene, const DioramaViewGeometry *geometry,
@@ -4572,20 +4584,16 @@ static PresentationOutcome DrawResolvedDioramaLayer(
         out_projection,scene->render->source_effect_batch));
   }
   if(layer.voxel_depth>0&&description->plane==kDioramaPlane_Bg1Far){
-    const bool voxel_front_phase=voxel_phase==kVoxelDrawFrontCaps;
-    if(inspection!=kDioramaVoxelInspect_Backing&&!voxel_front_phase&&!DrawVoxelRearTrims(device,&voxel_capture,geometry,&layer,textures[kDioramaPlane_Bg1Hi]))
+    if(inspection!=kDioramaVoxelInspect_Backing&&!DrawVoxelRearTrims(device,&voxel_capture,geometry,&layer,textures[kDioramaPlane_Bg1Hi]))
       return kPresentationOutcome_CoreFailure;
-    if(inspection!=kDioramaVoxelInspect_Backing&&!voxel_front_phase&&!DrawVoxelHighDecks(device,&voxel_capture,geometry,&layer,textures[kDioramaPlane_Bg1Hi]))
+    if(inspection!=kDioramaVoxelInspect_Backing&&!DrawVoxelHighDecks(device,&voxel_capture,geometry,&layer,textures[kDioramaPlane_Bg1Hi]))
       return kPresentationOutcome_CoreFailure;
     const float split=fmaxf(0,layer.voxel_recess-.01f);
-    const float near_depth=voxel_front_phase?0:split;
-    const float far_depth=voxel_front_phase?split:layer.voxel_depth;
-    if(!DrawVoxelAuthored(device,&voxel_capture,geometry,&layer,voxel_front_phase))
+    if(!DrawVoxelAuthored(device,&voxel_capture,geometry,&layer,false))
       return kPresentationOutcome_CoreFailure;
-    if(inspection!=kDioramaVoxelInspect_Backing&&!DrawVoxelEdges(device,&voxel_capture,geometry,&layer,near_depth,far_depth))return kPresentationOutcome_CoreFailure;
-    /* The low face keeps its native slot before OBJ2. Only the solid
-     * near-side contact caps draw again after the inset actors. */
-    if(voxel_front_phase)return kPresentationOutcome_Complete;
+    if(inspection!=kDioramaVoxelInspect_Backing&&
+        !DrawVoxelEdges(device,&voxel_capture,geometry,&layer,split,layer.voxel_depth))
+      return kPresentationOutcome_CoreFailure;
   }
   if(inspection!=kDioramaVoxelInspect_Backing&&layer.voxel_depth>0&&description->plane==kDioramaPlane_Bg1Hi&&
       !DrawVoxelEdges(device,&voxel_capture,geometry,&layer,0,layer.voxel_depth))
@@ -4597,7 +4605,8 @@ static PresentationOutcome DrawResolvedDioramaLayer(
    * surface (including authored repairs), with no invented replacement art. */
   if(inspection!=kDioramaVoxelInspect_All &&
       (description->plane==kDioramaPlane_Bg1Far || description->plane==kDioramaPlane_Bg1Hi))
-    return kPresentationOutcome_Complete;
+    return DrawVoxelLowContact(device,&voxel_capture,geometry,&layer)
+        ?kPresentationOutcome_Complete:kPresentationOutcome_CoreFailure;
   PrepareDioramaLayerMesh(capture, geometry, aperture, &layer, &mesh);
   if((description->plane==SR_PPU_OVERLAY_BG2||description->plane==kDioramaPlane_Bg2Hi||description->plane==kDioramaPlane_Bg2Far)&&
       DioramaHeat_Active(&scene->background_heat))
@@ -4668,6 +4677,7 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       description->plane==kDioramaPlane_Bg1Hi) && !DrawVoxelWaterSurfaces(device,capture,geometry,&layer))
     return kPresentationOutcome_CoreFailure;
   if(layer.hollow_recess>0 && !DrawHollowLife(device,capture,geometry,&layer,1-scene->native_bloom_dimming))return kPresentationOutcome_CoreFailure;
+  if(!DrawVoxelLowContact(device,&voxel_capture,geometry,&layer))return kPresentationOutcome_CoreFailure;
   if(effect_plane<0)return outcome;
   const PresentationOutcome effect = DioramaSubmitPlaneEffect(
       output_frame, scene->plane_effect, scene->plane_effect_userdata,
@@ -5142,15 +5152,6 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
     if (scene->render->voxel_inspection!=kDioramaVoxelInspect_Backing && prop_priority>=0 && resolved_layer->alpha &&
         (scene->render->visible_planes & (1u<<resolved_layer->plane)) &&
         !DrawVoxelSprites(device,capture,&geometry,draw_scene,&output_frame,(unsigned)prop_priority,true)) goto failed;
-    if(resolved_layer->plane==kDioramaPlane_Obj2&&ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number)&&ActionVoxel_PlayRecess(scene->voxel_geometry)>0){
-      for(int i=0;i<resolved_count;++i)if(resolved[i].plane==kDioramaPlane_Bg1Far){
-        const PresentationOutcome front=DrawResolvedDioramaLayer(device,capture,draw_scene,&geometry,&aperture,textures,
-            priority_surface,guard_priority,&resolved[i],&output_frame,out_projection,kVoxelDrawFrontCaps,false);
-        outcome=PresentationOutcome_Combine(outcome,front);
-        if(!PresentationOutcome_IsUsable(front))goto failed;
-        break;
-      }
-    }
   }
 
   if(subscreen_active) {

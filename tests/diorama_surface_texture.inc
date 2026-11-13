@@ -107,7 +107,7 @@ static unsigned VoxelMaterialSkinFixture(unsigned scenario) {
           assert(CapPointEqual(v->position,plain.vertices[f][j].position));
           assert(!memcmp(&v->color,&plain.vertices[f][j].color,sizeof(v->color)));
         } else assert(CapUvEqual(v->tex_coord,skinned.vertices[f][j].tex_coord));
-        for(unsigned other=0;other<f;++other)if(probe.after_actor[other]!=probe.after_actor[f] &&
+        for(unsigned other=0;other<f;++other)if(fabsf(z-(ActionVoxel_PlayRecess(voxel)-.01f))<.001f &&
             (fabsf(probe.faces[other].world_xy[0]-probe.faces[other].world_xy[2])<.001f)==vertical)
           for(unsigned k=0;k<4;++k)if(CapPointEqual(v->position,probe.vertices[other][k].position)) {
             assert(CapUvEqual(v->tex_coord,probe.vertices[other][k].tex_coord));++joins;
@@ -125,7 +125,7 @@ static unsigned VoxelMaterialSkinFixture(unsigned scenario) {
         }
       }
     }
-    assert(before && after && joins);
+    assert(before && !after && joins);
     if(riser_skin)assert(cap_joins);
     if(frame==1)skinned=probe;
   }
@@ -180,6 +180,12 @@ static unsigned VoxelFlatRearJoinFixture(unsigned scenario) {
       assert(probe.submitted[f]);const DioramaVoxelPickFace *face=&probe.faces[f];
       const bool top=face->kind==kDioramaVoxelFace_Top;
       const bool brown=top && (face->world_xy[0]+face->world_xy[2])*.5f>96;
+      assert(!probe.after_actor[f]);
+      bool near=false;
+      for(unsigned j=0;j<4;++j) {
+        const float x=roundf(face->world_xy[j*2]),y=roundf(face->world_xy[j*2+1]);
+        near|=CapPointEqual(RootExpectedPoint(&projection,&capture,x,y,0),probe.vertices[f][j].position);
+      }
       for(unsigned j=0;j<4;++j) {
         const ArRenderVertex2D *v=&probe.vertices[f][j];
         const float x=roundf(face->world_xy[j*2]),y=roundf(face->world_xy[j*2+1]);
@@ -192,7 +198,7 @@ static unsigned VoxelFlatRearJoinFixture(unsigned scenario) {
         }
         assert(matched<3);
         if(top && x==96)++seam[matched];
-        if(brown && !probe.after_actor[f]) {
+        if(brown && !near) {
           const float expected=frame?128.5f-knots[matched]/depth:
               127.5f-7*fmaxf(0,fminf(1,(knots[matched]-contact)/(depth-contact)));
           assert(fabsf(v->tex_coord.y*SR_PPU_SURFACE_MAX_HEIGHT-expected)<.0001f);
@@ -201,7 +207,7 @@ static unsigned VoxelFlatRearJoinFixture(unsigned scenario) {
         if(frame && matched!=2) {
           bool same=false;
           for(unsigned before=0;before<original.count && !same;++before)
-            if(original.faces[before].kind==face->kind && original.after_actor[before]==probe.after_actor[f])
+            if(original.faces[before].kind==face->kind)
               for(unsigned p=0;p<4 && !same;++p)
                 same=fabsf(original.faces[before].world_xy[p*2]-face->world_xy[j*2])<.001f &&
                     fabsf(original.faces[before].world_xy[p*2+1]-face->world_xy[j*2+1])<.001f &&

@@ -1502,11 +1502,11 @@ static unsigned VoxelFoldFixture(unsigned scenario) {
     DioramaProjection projection;r.projection=&projection;
     assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
     assert(projection.valid && r.fold_faces==2);
-    if(r.fold_after_actor[0] || !r.fold_after_actor[1])
+    if(r.fold_after_actor[0] || r.fold_after_actor[1])
       fprintf(stderr,"fold scenario %u frame %u: sources %u/%u, after actor %u/%u, actor seen %u\n",
           scenario,frame,(unsigned)r.fold_sources[0].value,(unsigned)r.fold_sources[1].value,
           r.fold_after_actor[0],r.fold_after_actor[1],r.actor_seen);
-    assert(!r.fold_after_actor[0] && r.fold_after_actor[1]);
+    assert(!r.fold_after_actor[0] && !r.fold_after_actor[1]);
     assert(r.fold_sources[0].value==textures[top && frame<2?SR_PPU_OVERLAY_BG1:kDioramaPlane_Bg1Far].value);
     assert(r.fold_sources[1].value==textures[kDioramaPlane_Bg1Far].value);
     if(!frame)memcpy(reference,r.fold_vertices,sizeof(reference));
@@ -1556,9 +1556,8 @@ static void CheckCapTiling(const CapMesh *mesh,const CapMesh *plain,int sx,int s
   const ArRenderPointF outline[]={plain->vertices[4].position,plain->vertices[5].position,
       plain->vertices[2].position,plain->vertices[3].position};
   float area=0;unsigned joins=0,actor_joins=0,boundaries=0;
-  bool after=false;
   for(unsigned face=0;face<mesh->count/4;++face) {
-    assert(!after || mesh->after_actor[face]);after=mesh->after_actor[face];
+    assert(!mesh->after_actor[face]);
     const ArRenderVertex2D *v=mesh->vertices+face*4;
     area+=fabsf(CapCross(v[0].position,v[1].position,v[2].position))*.5f;
     area+=fabsf(CapCross(v[0].position,v[2].position,v[3].position))*.5f;
@@ -1574,7 +1573,8 @@ static void CheckCapTiling(const CapMesh *mesh,const CapMesh *plain,int sx,int s
           const ArRenderVertex2D *w=mesh->vertices+other*4;
           if(!CapPointEqual(a,w[(j+1)%4].position) || !CapPointEqual(b,w[j].position))continue;
           joined=true;++joins;
-          if(mesh->after_actor[face]!=mesh->after_actor[other]) {
+          if(CapPointOnEdge(a,plain->vertices[0].position,plain->vertices[1].position) &&
+             CapPointOnEdge(b,plain->vertices[0].position,plain->vertices[1].position)) {
             /* The actor split cuts through a repeat: source phase must agree. */
             assert(CapUvEqual(v[i].tex_coord,w[(j+1)%4].tex_coord));
             assert(CapUvEqual(v[(i+1)%4].tex_coord,w[j].tex_coord));
@@ -1594,7 +1594,7 @@ static void CheckCapTiling(const CapMesh *mesh,const CapMesh *plain,int sx,int s
   const float expected=(fabsf(CapCross(outline[0],outline[1],outline[2]))+
                         fabsf(CapCross(outline[0],outline[2],outline[3])))*.5f;
   assert(fabsf(area-expected)<expected*.0001f);
-  assert(!mesh->after_actor[0] && after && joins && actor_joins && boundaries);
+  assert(joins && actor_joins && boundaries);
 }
 static unsigned AuthoredContourCapFixture(unsigned scenario) {
   s_count=0;
@@ -1712,7 +1712,7 @@ static unsigned VoxelCapFixture(unsigned scenario) {
         assert(CapPointEqual(mesh.vertices[i].position,plain.vertices[i].position));
         assert(CapUvEqual(mesh.vertices[i].tex_coord,plain.vertices[i].tex_coord));
       }
-      assert(!mesh.after_actor[0] && mesh.after_actor[1]);
+      assert(!mesh.after_actor[0] && !mesh.after_actor[1]);
     } else if(frame==1) {
       CheckCapTiling(&mesh,&plain,x+14,y+6);tiled=mesh;
     } else {
@@ -1839,7 +1839,7 @@ static unsigned AuthoredAnchoredBendFixture(unsigned scenario) {
   assert(r.actor_seen);
   assert(probe.uploaded && probe.automatic_caps && !probe.transparent_front && !probe.transparent_explicit);
   const float split=fmaxf(0,ActionVoxel_PlayRecess(voxel)-.01f);
-  unsigned anchors=0,tips=0,shared_x=0,shared_y=0,seam_caps=0,before=0,after=0;
+  unsigned anchors=0,tips=0,shared_x=0,shared_y=0,seam_caps=0,near_caps=0,rear_caps=0;
   for(unsigned f=0;f<probe.count;++f) {
     const DioramaVoxelPickFace *face=&probe.faces[f];assert(probe.submitted[f]);
     const VoxelAuthoredCell *a=ActionVoxel_AuthoredCellAt(voxel,face->cell_x,face->cell_y);assert(a);
@@ -1847,15 +1847,15 @@ static unsigned AuthoredAnchoredBendFixture(unsigned scenario) {
       if((face->kind==kDioramaVoxelFace_Left || face->kind==kDioramaVoxelFace_Right) &&
           fabsf(face->world_xy[0]-96)<.001f)++seam_caps;
       if(!face->priority) {
-        if(probe.after_actor[f])++after;else ++before;
+        assert(!probe.after_actor[f]);
+        float nearest=INFINITY,farthest=-INFINITY;
         for(unsigned j=0;j<4;++j) {
           const float plane=PlaneDepth(&projection,-split,(ArRenderPointF){face->screen_xy[j*2],face->screen_xy[j*2+1]});
-          if(probe.after_actor[f]?face->depth[j]>plane+.00001f:face->depth[j]<plane-.00001f)
-            fprintf(stderr,"bend split scenario=%u sink=%d face=%u kind=%d after=%d vertex=%u source=(%.6f,%.6f) split=%.6f depth=%.9f plane=%.9f\n",
-                scenario,s_depth_fixture,f,face->kind,probe.after_actor[f],j,face->world_xy[j*2],face->world_xy[j*2+1],split,face->depth[j],plane);
-          if(probe.after_actor[f])assert(face->depth[j]<=plane+.00001f);
-          else assert(face->depth[j]>=plane-.00001f);
+          const float delta=face->depth[j]-plane;
+          nearest=fminf(nearest,delta);farthest=fmaxf(farthest,delta);
         }
+        assert(nearest>=-.00001f || farthest<=.00001f);
+        near_caps+=nearest<-.00001f;rear_caps+=farthest>.00001f;
       }
       continue;
     }
@@ -1889,7 +1889,7 @@ static unsigned AuthoredAnchoredBendFixture(unsigned scenario) {
     }
   }
   assert(anchors && tips && shared_y && (scenario==2 || shared_x));
-  assert((seam_caps>0)==(scenario==2));assert(before && after);
+  assert((seam_caps>0)==(scenario==2));assert(near_caps && rear_caps);
   assert(probe.priorities[0] && probe.priorities[1]);
   if(s_depth_fixture)assert(r.depth_draws && r.depth_actor_vertices);
   ActionVoxel_Release(voxel);Diorama_ResetCompositorResources(&device);
@@ -2207,7 +2207,7 @@ static unsigned VoxelStumpContourFixture(unsigned scenario) {
   for(unsigned i=0;i<mesh.count/4;++i) {
     before_actor|=!mesh.after_actor[i];after_actor|=mesh.after_actor[i];
   }
-  assert(visible_side && before_actor && after_actor);
+  assert(visible_side && before_actor && !after_actor);
   if(s_depth_fixture)assert(r.depth_draws && r.depth_actor_vertices);
   /* A Front-only visibility edit must filter the original front mesh while
    * retaining the stump's stepped contour and shared native donor texture.
@@ -2475,7 +2475,7 @@ static unsigned PerspectiveVoxelDeck(unsigned scenario) {
   DioramaProjection projection;r.projection=&projection;r.actor_texture=textures[kDioramaPlane_Obj2];
   assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
   assert(projection.valid && r.perspective_count==8 && r.depth_actor_vertices);
-  assert(!r.perspective_after_actor[0] && r.perspective_after_actor[1]);
+  assert(!r.perspective_after_actor[0] && !r.perspective_after_actor[1]);
   /* The first quad is behind native actor contact. Derive its clip coordinates
    * independently from the captured native edge and the public camera matrix. */
   Scene3DClipPoint expected[4];

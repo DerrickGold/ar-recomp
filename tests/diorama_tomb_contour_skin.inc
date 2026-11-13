@@ -114,13 +114,13 @@ static unsigned TombContourSkinRenderFixture(unsigned scenario) {
               assert(fabsf(v->color.g-probe.vertices[other][k].color.g)<.000001f);
               assert(fabsf(v->color.b-probe.vertices[other][k].color.b)<.000001f);++cap_riser_joins;
             }
-            if(probe.after_actor[f]!=probe.after_actor[other])++depth_joins;
+            if(fabsf(z-(ActionVoxel_PlayRecess(g)-.01f))<.001f)++depth_joins;
             if(!vertical&&!ov&&fabsf(x-(base+shift+8))<.001f)++half_joins;
           }
         }
       }
     }
-    assert(before&&after&&cap_riser_joins&&depth_joins&&half_joins&&long_wall);
+    assert(before&&!after&&cap_riser_joins&&depth_joins&&half_joins&&long_wall);
     if(frame==1)skinned=probe;
   }
   ActionVoxel_Release(g);Diorama_ResetCompositorResources(&device);

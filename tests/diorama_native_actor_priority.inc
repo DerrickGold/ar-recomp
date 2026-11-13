@@ -1,4 +1,4 @@
-/* Native-low decorative beam volumes must not erase a passing actor. Replay
+/* Native-low terrain and decorative beam volumes must not erase a passing actor. Replay
  * the actual submitted triangles against a small opaque OBJ source: ordering
  * alone is insufficient unless a foreground control really hits those pixels. */
 typedef struct NativeActorDraw {
@@ -88,8 +88,8 @@ static void NativeActorPixels(const NativeActorRecorder *test,const DioramaProje
     fprintf(stderr,"Native actor pixels: policy%u samples%u overlap%u overwritten%u commands%u output%d,%d\n",policy,samples,overlap,overwritten,test->count,projection->output_x,projection->output_y);
   }
   assert(samples>200 && overlap>20);
-  if(!policy)assert(!overwritten);
-  else assert(overwritten>5); /* High priority/generic caps prove the oracle can catch cutoff legs. */
+  if(policy!=1)assert(!overwritten);
+  else assert(overwritten>5); /* Native-high caps prove the oracle can catch cutoff legs. */
 }
 static unsigned NativeActorPriorityFixture(unsigned scenario) {
   s_count=0;const unsigned path=scenario%3;const bool shared_depth=scenario>=3;
@@ -129,19 +129,34 @@ static unsigned NativeActorPriorityFixture(unsigned scenario) {
   const DioramaRenderOptions options={.visible_planes=(1u<<kDioramaPlane_Count)-1,
       .voxel_observe_face=NativeAffineObserve,.voxel_observer_userdata=&probe};
   const DioramaDepthSink sink={.submit=DepthGeometry,.userdata=r};
-  const DioramaScene scene={.render=&options,.depth_sink=shared_depth?&sink:NULL,
+  DioramaScene scene={.render=&options,.depth_sink=shared_depth?&sink:NULL,
       .map_group=2,.map_number=1,.voxel_geometry=voxel};
   DioramaProjection projection;r->projection=&projection;r->capture=&capture;
-  for(unsigned angle=0;angle<2;++angle)for(unsigned policy=0;policy<3;++policy) {
+  for(unsigned angle=0;angle<2;++angle)for(unsigned policy=0;policy<4;++policy) {
     const bool high=policy==1,native=policy!=2;
+    /* Marahna puts both BG1 and native sprites on the same additive source.
+     * Priority must hold inside that target as well as the main output. */
+    scene.additive_plane_mask=angle?
+        (1u<<SR_PPU_OVERLAY_BG1)|(1u<<kDioramaPlane_Bg1Far)|
+        (1u<<kDioramaPlane_Bg1Hi)|(1u<<kDioramaPlane_Obj2):0;
     view.camera.tilt_y=angle?-.4f:.4f;
     memset(voxel->pass_counts,0,sizeof(voxel->pass_counts));
-    voxel->edge_count=path==2?0:4;voxel->pass_counts[high]=voxel->edge_count;
+    const bool mixed=policy==3;
+    voxel->edge_count=path==2?0:4+mixed;voxel->pass_counts[high]=voxel->edge_count;
     if(high&&path!=2){voxel->pass_counts[3]=1;voxel->pass_edges[3][0]=0;}
     for(unsigned i=0;i<4;++i) {
       VoxelEdge *e=voxel->edges+i;*e=outline[i];e->high_priority=high;e->native_actor_priority=native;
       e->surface_texture=kVoxelSurfaceTexturePatch;e->top_owned_art=1;e->top_sample_size=16;
       voxel->pass_edges[high][i]=i;
+    }
+    if(mixed && path!=2) {
+      /* Both halves of the same walking cap retain their native-low order
+       * when only one of the adjacent materials carries the old override. */
+      voxel->edges[0].length=8;
+      voxel->edges[4]=voxel->edges[0];
+      voxel->edges[4].x+=8;
+      voxel->edges[4].native_actor_priority=false;
+      voxel->pass_edges[0][4]=4;
     }
     voxel->authored_count=path?1:0;voxel->native_transform_count=path==1;
     VoxelAuthoredCell *a=voxel->authored;
@@ -149,7 +164,7 @@ static unsigned NativeActorPriorityFixture(unsigned scenario) {
         .faces=kDioramaVoxelFaceMask_All,.contour_count=path==2?4:0,
         .transform=path==1?(DioramaVoxelTransform){.px=88,.py=100,.pz=.12f,.dx=2,.dy=2,.sx=.85f,.sy=1,.sz=1}:(DioramaVoxelTransform){0}};
     for(unsigned q=0;q<4;++q) {
-      a->back[q]=ActionVoxel_Depth(voxel);a->priority[q]=high;a->native_actor_priority[q]=native;
+      a->back[q]=ActionVoxel_Depth(voxel);a->priority[q]=high;a->native_actor_priority[q]=native&&(!mixed||!(q&1));
     }
     for(unsigned art=0;art<7;++art)a->pixels[art]=voxel->authored_art[0];
     voxel->authored_at[6*(voxel->width/16)+5]=path?1:0;
@@ -158,6 +173,10 @@ static unsigned NativeActorPriorityFixture(unsigned scenario) {
       voxel->authored_contours[i]=(VoxelAuthoredContour){.x=outline[i].x-80,.y=outline[i].y-96,
           .length=outline[i].length,.side=outline[i].side};
       a->surface_sample_size[(unsigned[]){1,5,6,4}[i]]=16;
+    }
+    if(mixed && path==2) {
+      voxel->authored_contours[0].length=8;
+      voxel->authored_contours[2]=(VoxelAuthoredContour){.x=8,.y=0,.length=8,.side=0};
     }
     ++voxel->revision;probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));
     r->actor_seen=false;test.count=0;
@@ -174,9 +193,8 @@ static unsigned NativeActorPriorityFixture(unsigned scenario) {
     /* The orbit looks down on the walking cap; normal back-face culling
      * hides its underside. Every face that is actually submitted is checked. */
     assert(top&&side);
-    if(!policy)assert(before&&!after);
-    else if(high)assert(after);
-    else assert(before&&after);
+    if(high)assert(after);
+    else assert(before&&!after);
     NativeActorPixels(&test,&projection,policy);
     if(shared_depth)assert(r->depth_draws&&r->depth_actor_vertices);
   }
