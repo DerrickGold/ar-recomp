@@ -1,674 +1,537 @@
 # ActRaiser Recomp
 
-[AI disclosure](#ai-disclosure)
+**Play the full SNES ActRaiser campaign on your computer.** The Builder
+recompiles the code from your USA ROM into a native game you can launch
+directly. You can keep the original look, play in widescreen, or give the
+action stages and towns depth with optional 3D views.
 
-**A native port of ActRaiser (SNES, USA release) that recompiles your own
-cartridge dump into a standalone executable.**
+![ActRaiser Recomp title screen with the optional high-resolution logo](/assets/title-hd.png)
 
-![ActRaiser Recompiled title screen with the optional high-resolution logo](/assets/title-hd.png)
+**[Download the Builder](https://github.com/DerrickGold/ar-recomp/releases)** ·
+[Quick start](#quick-start) · [Features](#features) · [Quality of life](#quality-of-life) ·
+[Project status](#progress-at-a-glance) ·
+[Manual](docs/manual.md) · [Release notes](docs/release-notes.md) ·
+[Build from source](#build-from-source) · [AI disclosure](#ai-disclosure)
 
-The 1990 SNES game from Quintet and Enix alternates between side-scrolling
-action stages and a top-down town simulation. This project targets the USA
-cartridge dump and converts its 65816 machine code into C, which is then linked
-with a hand-written SDL3 runtime. Running the game as native code allows
-widescreen rendering, layered 3D action stages, height-mapped towns and a
-3D globe, GPU and CRT effects, replacement art and music, language packs,
-and rebindable controls. The in-game settings menu explains each option.
-
-[Click here for more details on Emulation, Recompilation, and Decompilation with an example
-based on this game's code!](https://derrickgold.github.io/emu-recomp-decomp/)
-
-**[Quick start](#quick-start)** · **[Features](#features)** ·
-**[Manual](docs/manual.md)** · **[Game documentation](docs/README.md)** ·
-**[Status](#progress-at-a-glance)** · **[Development](#development)**
-
-[![GitHub downloads (all assets, all releases)](https://img.shields.io/github/downloads/DerrickGold/ar-recomp/total)](https://github.com/DerrickGold/ar-recomp/releases)
-![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads-pre/DerrickGold/ar-recomp/latest/total)
-![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0805)
-
----
-
-## Progress at a glance
-
-**Release milestone: the full USA campaign has been successfully played from
-start to finish.** Development and visual improvements remain active.
-
-| | |
-|---|---|
-| ✅ | **Native graphics:** All six towns, all 12 acts, Death Heim, and the ending have been play-tested, including overlay access at The End. The full USA campaign is verified completable end to end. |
-| 🟡 | **Action Mode Enhancements:** Room-by-room presentation work continues in 3D Diorama mode: extending tile maps for widescreen, refining background policies, and fixing skybox rendering. Unique environmental effects now cover Fillmore Acts 1/2, Bloodpool Acts 1/2, Kasandora Acts 1/2, Aitos Act 1, and Marahna Acts 1/2. **Death Heim remains in progress**, with final-battle nebula enhancements and an optional completion scene already available. |
-| ✅ | **Platforms:** Windows, macOS arm64, and Steam Deck have been tested and boot successfully. macOS x86_64 and generic Linux still need representative launch testing. |
-| ✅ | **Localization:** Language packs, enhanced fonts, and Workshop authoring are ready. Players can create and distribute their own translations. |
-| 🔵 | **Regionalization:** Implementation is complete and ready for testing. [US, Japanese, and European gameplay presets](docs/actraiser-1/regional-settings.md) support per-campaign customization, with independent [regional artwork and music](docs/actraiser-1/regional-media.md). |
-| 🟡  | **Full Decompilation:** In progress. The goal is to produce human readable code, and decouple the game mechanics from the SNES' 60.0988 hz processing cycle for proper variable frame rate support (i.e. proper pacing at 45fps for steam deck, or at higher frame rates on more powerful machines), and remove limitations from the games memory/object management to remove limitations like max number of objects drawn/managed, increased play field handling, etc|
-| 📋 | **ActRaiser 2 support:** In planning. The [optional Master character import](docs/builder-workshop.md#actraiser-2-master) is available for ActRaiser using your own ActRaiser 2 (USA) ROM. |
-| 📋 | **Achievements:** In planning. |
-
----
+[![Total GitHub release downloads](https://img.shields.io/github/downloads/DerrickGold/ar-recomp/total)](https://github.com/DerrickGold/ar-recomp/releases)
+![Downloads for the latest GitHub release](https://img.shields.io/github/downloads-pre/DerrickGold/ar-recomp/latest/total)
+![GitHub commits since the release tag](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0900)
 
 ## AI disclosure
 
-Multiple AI coding assistants have contributed to the tooling, runtime,
-debugging infrastructure, and documentation under my direction and review.
+Multiple AI coding assistants have contributed to the tools, runtime,
+debugging, and documentation under my direction and review.
 
-Game logic is mechanically translated from the original binary and is never
-committed to this repository. The widescreen renderer, 3D presentation,
-settings system, and other host-side features are original work.
+The Builder translates the original game's code from your ROM on your
+computer. That generated code stays out of this repository. The widescreen
+renderer, 3D views, settings, and other additions are original project work.
 
 ### Reverse-engineering notes
 
-The MIT-licensed [research documents](docs/README.md) describe the original
-game rather than this implementation. They contain no ROM-derived code and may
-also be useful to an independent decompilation effort.
+The [research notes](docs/actraiser-1/README.md) describe how the original
+game works. They contain no ROM-derived code and may help people working
+on an independent decompilation.
 
----
+## Progress at a glance
+
+| Area | Status | Details |
+|---|---|---|
+| USA campaign | ✅ Playable end to end | Playtesting covered all six towns, all twelve acts, Death Heim, and the ending. |
+| Action stage graphics | 🔵 Mostly Done | Action stages in all six lands have their own environmental effects. I'm still extending artwork for widescreen and refining Diorama backgrounds, skyboxes, and Voxel rooms. |
+| Desktop platforms | ✅ Major platforms tested | Windows, Apple Silicon macOS, and Steam Deck are playable. Builds are also available for Intel macOS and desktop Linux. |
+| Android | 🟡 Preview | Build and install the preview from source. See [Android preview builds](docs/android.md). |
+| Localization | ✅ Available | Create, share, and install translations through the Workshop. See [Language packs](docs/language-packs.md). |
+| Regional rules | 🔵 Ready for more testing | US, Japanese, and European rules are implemented. More playtesting across campaigns and settings combinations is needed. |
+| Decompilation | 🟡 In progress | I'm rewriting parts of the game in code that people can read and maintain, with the goal of matching the original behavior. |
+| ActRaiser 2 | 📋 Full campaign planned | You can already [import its Master](docs/builder-workshop.md#actraiser-2-master) from your own ActRaiser 2 (USA) ROM and play as him in the first game's stages. |
+| Achievements | 📋 Planned | — |
+
+My long-term goal is to make this the definitive way to play ActRaiser. I'm
+working toward separating game timing from rendering so a handheld could draw
+fewer frames without slowing down gameplay. I'd also like to let players
+travel between the two ActRaiser worlds during a campaign. A randomizer that
+swaps stages between games is an idea for later.
 
 ## Quick start
 
-**[Download the Builder from GitHub Releases](https://github.com/DerrickGold/ar-recomp/releases)**
+You need your own unmodified **ActRaiser (USA)** cartridge dump. The Builder
+checks it before building. The download includes the build tools, and the
+build runs offline on your computer. You supply the ROM separately.
 
-The Builder includes the compiler and game dependencies. Building happens
-locally and works offline once you have downloaded it.
+<details>
+<summary>How to identify the USA ROM</summary>
 
-### What you need
-
-Provide your own legally obtained USA cartridge dump. The project does not
-include a ROM, and the Builder verifies your file before continuing.
-
-| | |
+| Field | Expected value |
 |---|---|
 | Internal title | `ACTRAISER-USA` |
-| Size | 1,048,576 bytes (1 MiB, no copier header) |
+| Size without copier header | 1,048,576 bytes (1 MiB) |
 | Internal checksum | `0x83DB` |
 | SHA-256 | `b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0` |
 | SHA-1 | `e8365852cc20178d42c93cd188a7ae9af45369d7` |
 | CRC32 | `0xEAC3358D` |
 
+</details>
+
 ### 1. Download and open the Builder
 
-Download the bundle for your machine from
-[Releases](https://github.com/DerrickGold/ar-recomp/releases) and extract it
-into a writable folder.
+Get the archive for your machine from [GitHub Releases](https://github.com/DerrickGold/ar-recomp/releases)
+and extract it to a folder you can write to.
 
-| Platform | Recommended download | Open |
+| Platform | Download | Open |
 |---|---|---|
-| macOS (Apple Silicon / Intel) | `ActRaiserRecompBuilder-macos-arm64-portable.zip` / `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder.app` |
-| Windows (x64 / ARM64) | `ActRaiserRecompBuilder-windows-x86_64-portable.zip` / `-windows-arm64-portable.zip` | The Builder `.exe` |
-| Linux (x64 / ARM64) | `actraiser-recomp-linux-x86_64.tar.xz` / `-linux-arm64.tar.xz` | `./run-build.sh` |
+| macOS (Apple Silicon or Intel) | `ActRaiserRecompBuilder-macos-arm64-portable.zip` or `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder.app` |
+| Windows (x64 or ARM64) | `ActRaiserRecompBuilder-windows-x86_64-portable.zip` or `-windows-arm64-portable.zip` | `ActRaiserRecompBuilder.exe` |
+| Linux (x64 or ARM64) | `actraiser-recomp-linux-x86_64.tar.xz` or `-linux-arm64.tar.xz` | `./run-build.sh` to open the Builder in a browser |
 | Steam Deck | `ActRaiserRecompBuilder-steam-deck-portable.tar.xz` | The Builder `.AppImage` in Desktop Mode |
 
-Keep the portable desktop Builder and its `.portable` file together; its
-build data goes into the adjacent `BuilderData` folder. App-only downloads
-are also available for macOS, Windows, and Steam Deck and use per-user storage.
-The generic Linux launcher opens the same Workshop in your browser.
-
-On Windows, a startup window shows progress while the bundled tools are prepared
-or checked. The first launch can take a few minutes on slower machines. You can
-cancel safely; opening the Builder again for the same workspace brings the
-existing window forward instead of starting another copy. The Builder window
-uses the Microsoft Edge WebView2 Runtime that Windows 10 and 11 already include;
-if it is missing, the Builder offers to open
-[Microsoft's download page](docs/desktop-packaging.md#windows-webview2-runtime).
-
-Desktop Builders on all platforms cache successful verification so later launches
-check metadata and changed files instead of rereading every bundled tool.
-See [startup verification](docs/desktop-packaging.md#faster-startup-and-full-verification)
-for the `--verify-bundle` option to request a complete check.
-
-The Windows Builder and its build tools are unsigned. If a build fails with
-**“An Application Control policy has blocked this file”**, check
-**Windows Security → App & browser control → Smart App Control settings**.
-Smart App Control has no per-app exception; turning it off affects all apps on
-that device. See [Windows Application Control](docs/desktop-packaging.md#windows-application-control)
-for recovery steps and managed-device guidance.
-
-On macOS, the Builder is locally signed but is not Developer ID signed or
-notarized. If Gatekeeper reports an unidentified developer or cannot verify the
-app, and you trust the download, try opening it once, then use
-**System Settings → Privacy & Security → Open Anyway**.
-See [macOS Gatekeeper](docs/desktop-packaging.md#macos-gatekeeper) for helper-tool
-and other startup errors.
-
-On Linux, mark an AppImage executable if necessary. AppImages need FUSE;
-`APPIMAGE_EXTRACT_AND_RUN=1 ./ActRaiserRecompBuilder-steam-deck.AppImage`
-provides a fallback. Minimal Linux installations may also need the desktop,
-audio, and font libraries listed in the download's README.
-
-![The Workshop with an animated Fillmore background and shortcuts to play, languages, assets, and the manual](/assets/builder-workshop.gif)
-
-### 2. Choose a game folder and build
-
-The desktop Builder first asks where to put the game. Its default is an
-`ActRaiserRecomp/` folder beside the Builder. Select **Update existing
-installation** to rebuild a current game, or choose a new folder when migrating
-an older `utils/` installation.
-
-Open **Build game** in the sidebar, choose your USA ROM, and press **Build game**.
-The Builder extracts the game's data, recompiles its code, and creates the playable
-application. Progress stays visible while you browse the Workshop, including
-its language tools and your own instruction manual.
-
-![Three stages of a local build: ROM selected, compilation in progress, and the completed game ready to play](/assets/builder-build.gif)
-
-### 3. Play
-
-Choose **Run game** when the build finishes. Later, open the generated game
-directly:
-
-| Platform | Playable output |
-|---|---|
-| macOS | `ActRaiserRecomp.app` |
-| Linux / Steam Deck | `ActRaiserRecomp.AppImage` |
-| Windows | `ActRaiserRecomp.exe`; keep its supporting files beside it |
-
-On Windows, double-click `ActRaiserRecomp.exe` directly—no `.bat` launcher is
-required. Keep its DLLs, `user-rom.sfc`, `tools/`, assets, settings and saves in
-the generated game folder; the `.exe` is not a single-file game package.
-
-Keep the whole output folder for a portable installation, including its
-`.portable` file on macOS/Linux, saves, settings, and assets. The game runs
-independently of the Builder. These locally generated applications contain your
-ROM and are not intended for redistribution.
+Keep the portable Builder beside its `.portable` file. On first launch, the
+Builder may take a few minutes to check and prepare its tools.
 
 <details>
-<summary>Using per-user game storage on macOS or Linux</summary>
+<summary>Troubleshoot Builder startup</summary>
 
-Copy just the generated `.app` or `.AppImage` to your preferred location,
-leaving its `.portable` file behind. On launch, it initializes data under your
-operating system's application-data directory. Subsequent app updates reuse
-that data.
-
-Moving between portable and per-user storage does not transfer saves
-automatically. The Workshop edits the game folder selected in the Builder.
-See [desktop packaging](docs/desktop-packaging.md) for data locations and
-advanced options.
+- [macOS Gatekeeper](docs/desktop-packaging.md#macos-gatekeeper)
+- [Windows WebView2](docs/desktop-packaging.md#windows-webview2-runtime)
+- [Windows Application Control](docs/desktop-packaging.md#windows-application-control)
+- [Linux AppImage startup](docs/desktop-packaging.md#inspecting-paths-and-troubleshooting)
 
 </details>
 
+### 2. Choose a game folder and build
+
+The desktop Builder asks where to put the game. It suggests an
+`ActRaiserRecomp` folder next to the Builder. Open **Build & play**, select
+your USA ROM, and click **Build game**. You can explore the Workshop while
+the build runs.
+
+![The Builder after selecting a ROM, during the build, and when the game is ready](/assets/builder-build.gif)
+
+### 3. Play
+
+Select **Run game** when the build finishes. After that, you can launch the
+game directly: open `ActRaiserRecomp.app` on macOS, `ActRaiserRecomp.exe` on
+Windows, or `ActRaiserRecomp.AppImage` on Linux and Steam Deck. On Windows,
+keep the executable and the rest of the game folder together.
+
+Press **Esc** or **F1** on the keyboard, or **L3** on your controller, to open
+settings. See the [controls guide](docs/manual.md#controls) to change bindings.
+
 ### 4. Update or import an existing installation
 
-Select your existing game folder to use its settings, assets, ROM and saves
-directly, or select an empty folder to start fresh.
+Use **Check for updates** in the Builder sidebar to find newer downloads.
 
-Back up your saves, then rebuild into the same game folder with the newer
-Builder. Saves, settings, language packs, and custom assets are retained.
-Updated bundled diorama rooms replace `diorama-layers.ini` after preserving
-the previous file in a numbered `.pre-update-N` backup; see
-[shipped content updates](docs/desktop-packaging.md#portable-and-per-user-storage).
-For a per-user macOS or Linux installation, replace only the generated application.
+> [!IMPORTANT]
+> Close the game and back up your `saves/` folder before rebuilding.
 
-On the first launch of the upgraded game, old `saves/save.srm` or
-`saves/save.ini` files are automatically imported into **Slot 1**. The older
-`saves/actraiser.srm` is also adopted when neither of those files exists.
-Original files are retained in `saves/legacy-layout`; the active save moves to
-`saves/slots/01`. Choose **Continue** at the title screen to resume. No manual
-conversion is needed. See [save migration](docs/manual.md#upgrading-older-saves)
-for format selection and recovery details.
+Open the newer Builder and build into your existing game folder. Your saves,
+settings, language packs, and custom assets carry over. If the update
+replaces bundled Diorama scenery, it keeps a backup of your previous edits.
+For per-user macOS or Linux installs, replace the generated app and keep your
+existing data folder.
 
-To copy data from a different or legacy installation, use **Import previous installation…**,
-review the detected data, and close the game before importing. The Builder
-copies the files and preserves the originals; existing destination saves,
-settings, and modified assets take priority.
-
-**Change game folder…** selects the destination for the next Builder session.
-Save your Workshop work, then close and reopen it to use that folder.
+If you're moving from another installation, use **Import previous
+installation…** in the Builder before you launch the game. On first launch,
+the game checks its selected data folder for older saves. It imports an old
+save automatically into **Slot 1** and keeps the original files in
+`saves/legacy-layout/`. Choose **Continue** to resume. See
+[Upgrading older saves](docs/manual.md#upgrading-older-saves).
 
 ### 5. Keep the game after building
 
-The desktop Builder's output folder is independent of its build tools, so you
-can retain the game without keeping the Builder. Older archive installs offer
-toolchain cleanup under **Storage & build tools**. Keep their `utils/`
-runtime data and retained helper files; download the archive again to rebuild.
-
-See the [Workshop guide](docs/builder-workshop.md) for the full installation,
-asset, and language workflows.
-
----
+You can keep playing without the Builder. To move a portable game, copy the
+whole game folder, including any `.portable` file. On macOS or Linux, copying
+just the game app or AppImage without that file uses per-user storage. Copy
+your saves and settings separately if you're switching storage modes.
+See [where your game stores its data](docs/desktop-packaging.md#portable-and-per-user-storage).
+The game you build contains data from your ROM and is for your own use.
 
 ## Features
 
-On a fresh install, the game uses 4:3 geometry and the original music and
-artwork, with the 3D and CRT presentation modes disabled. You can configure the
-enhancements from the in-game settings overlay (`Esc`, `F1`, or L3 on a pad)
-and compare them with the authentic rendering and audio at any time.
-
 ### Widescreen
 
-Widescreen supports true 16:9 and 16:10 presentation by streaming background
-layers into the wider viewport and activating sprites beyond the original
-screen bounds. This preserves the game's HDMA and parallax effects instead of
-stretching or cropping the original view. Press `F9` to cycle among authentic
-4:3, widescreen raw, and widescreen full, which places the HUD in an
-independently scaled overlay.
+See more of the stage at 16:9 or 16:10. The game draws beyond the original
+screen edges, so backgrounds still scroll at different speeds and enemies
+can appear in the extra space. **Auto** fits the view to your window. In
+action stages it adds side bars on displays wider than 16:9.
 
-**Screen ratio → Auto** adapts the view to the window's shape, including when
-resizing while paused. Wider windows reveal extra columns; taller windows can
-reveal extra rows in action stages and enhanced 3D towns and world navigation.
-The selected pixel aspect and HUD proportions are retained. See
-[display and scaling](docs/manual.md#display-and-scaling) for coverage limits.
+With widescreen set up, press `F9` to cycle between original 4:3, raw
+widescreen, and full widescreen with a separately scaled HUD.
+[Display shortcuts](docs/manual.md#host-hotkeys)
 
-![Bloodpool Act 2 in authentic 4:3 above the same scene in 16:9, with the background extending symmetrically into the extra width](/assets/widescreen-comparison.png)
+![Bloodpool Act 2 in original 4:3 and expanded 16:9](/assets/widescreen-comparison.png)
 
-### Diorama 3D for action stages
+### Diorama and Voxel 3D for action stages
 
-Diorama mode places action-stage backgrounds and sprites on separate planes
-in 3D space. Depth shading gives the scene the appearance of a physical
-diorama, while the HUD can be scaled independently.
+<a name="diorama-3d-for-action-stages"></a>
 
-Rooms can be tuned independently:
+Open **Action 3D → Scene → Action 3D** to choose how the stages look:
 
-- **Layer layout:** Each room defines its own depths and can use a stable
-  backdrop from the ROM when the live PPU view is too narrow.
-- **Camera modes:** Dynamic Cam is the default, leaning and reacting around
-  an authored pose. Free Cam supports manual orbit and zoom.
-- **Framing:** Vertical extension reveals more of the stage above and below the
-  original 224 lines. Skybox and Shoebox walls enclose finite backdrops.
-- **Enhanced completion:** An optional Death Heim ocean vista adds clouds,
-  light shafts, water reflections, cherubs and drifting feathers around the
-  original platform and hero. One switch under **Action 3D → Scene** enables
-  it with any skybox preference, preserving the original ending's timing.
+| Mode | What you'll see |
+|---|---|
+| **Off** | The original flat view. Widescreen still works. A fresh installation starts here. |
+| **Diorama** | Backgrounds and sprites sit on separate layers. The camera can tilt and pull back to show the space between them. |
+| **Voxel 3D (WIP)** | Supported rooms have modeled floors, ramps, doorways, and selected objects. They keep the original artwork and gameplay. Other rooms use Diorama. |
 
-![Aitos Act 2 gameplay with separated 3D layers and the dynamic diorama camera](/assets/gameplay-diorama.gif)
+Diorama is the default 3D option. **Dynamic Cam** moves with the action.
+**Free Cam** lets you orbit and zoom, and keeps the room centered when you
+zoom far out. Switch back to Diorama to use your saved background and layer
+settings. See [Action 3D modes](docs/manual.md#action-3d-modes).
 
-This Fillmore Act 1 comparison starts with the original 4:3 presentation,
-then shows enhanced widescreen with the camera tilting and pulling back to
-reveal the layers.
+![Voxel 3D in Northwall Act 1, with a sloped ice bridge and icicles hanging from the cave ceiling](/assets/voxel-northwall.png)
 
-![Fillmore Act 1 in original 4:3, followed by enhanced widescreen with a tilted and zoomed-out diorama camera](/assets/fillmore-rendering-comparison.gif)
+**Voxel 3D** in Northwall's ice caves.
 
-### Action scene and effects editor
+![Aitos Act 2 with separated layers and the moving Diorama camera](/assets/gameplay-diorama.gif)
 
-The offline [action editor](tools/action_editor/README.md) lets creators extend
-room scenery for widescreen, paint tile pixels, adjust depth and framing, and
-author background policies and environmental effects. **Shared renderer**
-previews rooms through the game's C renderer with regional terrain, animation,
-and camera controls.
+**Diorama** in Aitos Act 2.
 
-**Save project** or **Ctrl/Cmd-S** keeps scenery and effects together in one
-`action-project.zip`, with Undo/Redo and an **Unsaved changes** indicator.
-Collapsible panels and **Settings…** provide more room for the preview; settings
-are also accessible through right-click menus. To use a project in the game,
-extract its two INI files beside `settings.ini` and restart. See the editor guide
-for preview scope and authoring details.
-
-### 3D simulation towns
-
-Simulation mode rebuilds each town as an oblique 3D scene:
-
-- **Terrain:** A height field raises hills, plateaus, and cliff faces across
-  all six towns. A landscape slider can scale the relief back to a flat plane.
-- **Scenery:** Region-aware voxel models replace structures and foliage at
-  selectable quality levels. Stone bridges span the banks, while mountains
-  and volcanoes use camera-aligned relief.
-- **Actors and depth:** People and effects are billboards grounded against
-  the terrain, and flying actors maintain a stable altitude above it. Ridges
-  and buildings can occlude objects behind them.
-- **Lighting and interaction:** Objects cast terrain-following shadows, with
-  optional soft blur and rim lighting. Miracles and enemy attacks add local
-  lighting and particles. A connected globe continues beyond the town's borders,
-  and building placement and miracle targeting work in the tilted view.
-- **Church interiors:** An optional modeled stone church adds an altar, soft
-  light, drifting dust and a view of the town during audiences and offerings.
-  Enable **Church interior 3D** under **Town 3D → Scene**; dialogue and controls
-  retain their original behavior.
-
-![Aitos during a volcanic eruption, with fireball trails and haze, ending with a low-angle view of the voxel buildings and raised terrain](/assets/sim3d-town.gif)
-
-### 3D world navigation
-
-The Sky Palace travels over a spherical world with raised mountain ranges,
-developed towns, moving clouds, and an atmosphere against the starfield. The
-globe uses the same terrain, buildings, and regional artwork as the town view.
-
-- **Explore:** Right-drag or use the right stick to look around the globe.
-  The wheel or triggers zoom; middle-click or R3 resets the view. Travel and
-  town entry use the original menus.
-- **Sky Palace:** The optional globe backdrop shows the currently selected
-  town below the Palace, with moving clouds behind the original pillars,
-  angel, and menus.
-- **Adjust detail:** Lighting, clouds, atmosphere, town models, ground detail,
-  and mountain relief have separate controls for balancing appearance and
-  performance.
-
-![Zoomed-out travel over the 3D globe, with moving clouds and the atmosphere visible against space](/assets/globe-travel.gif)
-
-![Clouds drifting over developed Fillmore below the Sky Palace, with roads and buildings visible through the moving cloud layers](/assets/sky-palace-globe.gif)
+In Diorama and Voxel 3D, turn on **Environmental effects** to add glow and
+drifting dust to Death Heim's final battle. The **Death Heim completion scene**
+setting under **Action 3D → Scene** adds an ocean vista to the ending and works
+with any skybox setting. [Death Heim visuals](docs/manual.md#death-heim-final-battle)
 
 ### GPU and CRT effects
 
-The GPU renderer provides individually adjustable effects:
+Many **Environmental effects** work in both flat and 3D views. Watch mist drift
+over Bloodpool's marsh, lava light the rock in Aitos, and snow blow across
+Northwall. Some effects use the 3D view, including Northwall's aurora and the
+extra lava bubble animation in Aitos. See the
+[stage guide](docs/actraiser-1/action-environments.md).
 
-- **Diorama lighting and focus:** Warm rim lighting outlines sprites, depth of
-  field softens distant layers, and edge anti-aliasing smooths tilted planes.
-- **Spell effects:** Particles and local illumination follow action-stage
-  magic in both flat and 3D views.
-- **Environmental effects:** Fillmore's forest and caves gain canopy light,
-  leaves, flowers, mist, drips, moving water reflections, damp moss, and cool
-  temple opening light; Bloodpool gains moonlight with drifting cloud veils,
-  rose water reflections on timber, marsh fog, castle window light, torch glow,
-  damp-stone reflections, and occasional ivy drips. Castle ambient darkness and
-  local light also reach the player, enemies, pickups and sprite-based props.
-  These work in flat and
-  Diorama views and are controlled separately under
-  **Video → Effects → Environmental effects** (on by default). Adding unique
-  treatments across the remaining levels is ongoing.
-- **CRT presentation:** Curved glass, scanlines, and a phosphor mask can be
-  applied to any view, including authentic rendering. **Video → CRT** also
-  controls colour fringing, signal softness, corner shading, and brightness.
-- **Frame interpolation:** Optional intermediate diorama frames smooth motion
-  on high-refresh displays while normal gameplay retains its 60 Hz logic.
+Use **Action spell lighting** and **Action spell particles** to adjust magic
+effects separately from the scenery.
 
-![Aitos Act 2 with sprite rim lighting and depth-of-field blur on the distant diorama layers](/assets/gpu-effects.png)
+In **Video → General**, use **Render resolution** to choose **Native** or
+a preset from **480p** to **2160p**. **3D anti-aliasing** smooths jagged edges:
+try **FXAA** for a lighter filter or **SMAA** to keep more detail around corners.
+**3D supersampling** lets a higher preset draw above the size of the game view,
+then shrink the image. It takes more GPU time and uses its own filter in place
+of FXAA or SMAA while active. Both options start off and apply to 3D scenes,
+leaving the flat HUD and menus alone. See [Display and scaling](docs/manual.md#display-and-scaling).
 
-![Fillmore Act 2 in widescreen with curved glass, scanlines, and the CRT phosphor mask enabled](/assets/crt-effects.png)
+Under **Video → CRT**, you can add scanlines, curved glass, and a phosphor mask.
+Diorama also offers depth of field, rim lighting, and optional frame
+interpolation for smoother motion on high refresh rate displays.
 
-### High-resolution Mode 7
+![Fillmore with scanlines, curved glass, and a CRT phosphor mask](/assets/crt-effects.png)
 
-Mode 7 rendering runs at the internal render scale rather than 256×224, so its
-rotation, zoom, and per-scanline warps stay sharp instead of magnifying the
-original low-resolution sampling.
+### 3D simulation towns
 
-![Mode 7 rendering at increased internal resolution](/assets/mode7.png)
+Tilt the town map and see hills, buildings, and bridges rise from the ground.
+You can still place buildings and aim miracles in the tilted view. The optional
+3D church shows the town through its windows during audiences and offerings.
 
-### Asset and music replacements
+![A tilted view of Aitos in simulation mode, with 3D buildings, cliffs, and waterways](/assets/sim3d-town.gif)
 
-Art replacement is limited to the title logo on the title screen and in the
-animated intro, where the replacement follows the original rotation, zoom,
-and warp effects.
+### 3D world navigation
 
-![The replacement title logo with its Recompiled subtitle](/assets/title-hd.png)
+Fly the Sky Palace over a globe with mountains, clouds, and the towns you've
+built. You can turn the camera and zoom in for a closer look. The original menus
+still handle travel and town entry. With **Sky Palace globe backdrop** enabled,
+you can also see the globe behind the Palace pillars and menus.
+See the [camera controls](docs/manual.md#camera-control).
 
-Art and music replacements share the user-owned `game-assets/manifest.ini`,
-which is preserved across upgrades. The Workshop's **Assets** section provides:
-
-- previews of the included HD title art and all 17 entries in the ROM's song
-  table, including unnamed tracks identified by slot;
-- extracted previews of the original audio; and
-- controls for installing replacements or restoring the original art and music.
-
-![The Workshop's music controls with original-ROM and replacement audio previews](/assets/assets-1.png)
-
-![Split by level offering a separate Bloodpool replacement for music shared with Kasandora](/assets/assets-2.png)
-
-Music replacement supports:
-
-- OGG Vorbis files in place of the SPC driver's songs;
-- sample-accurate looping through `LOOPSTART`/`LOOPLENGTH` tags or manifest
-  keys; and
-- variants selected by game state. When the ROM shares a song across several
-  levels, **Split by level** gives each selected region and act its own OGG
-  file. The unsplit entry remains the fallback everywhere else.
-
-The SPC driver continues to handle sound effects, while only the instrument
-voices for a replaced song are muted. You can switch between the replacement
-and the original sequencer while a song is playing.
-
-### Languages and enhanced text
-
-Language packs replace the game's text without patching the ROM. Enhanced
-font rendering supports Unicode text, font fallback, and layouts that adapt
-to translated dialogue.
-
-- **Play:** Install an `.arlang` file in the Workshop's **Languages** section,
-  restart the game, and choose it under **Settings → Localization**. The
-  original US text remains available.
-- **Read:** Adjust enhanced font size and choose Crisp or Smooth sampling,
-  with full-resolution, low-resolution, or mosaic rendering independent of
-  the game graphics. The original US script can also use its native font.
-- **Create and share:** Start a translation from the US script, edit messages
-  alongside a reference, and check font coverage and side-by-side playback.
-  The v2 text format supports mixed fonts, colors, sizes, and emphasis within
-  a message, with a styling toolbar in the Workshop. Export a language pack
-  to share it. Install a new project explicitly; later saves refresh its
-  installed copy. Restart the game to load the updated text.
-
-The Workshop interface supports English, French, German, and Japanese;
-its language is independent of the game's selected pack. Translation coverage
-depends on the pack; gameplay rules are selected separately in Regional settings.
-See the [language-pack guide](docs/language-packs.md) for installation and
-authoring details.
-
-This comparison shows the same dialogue with the native font and five enhanced
-configurations. Enhanced samples use 140% font size; pixelation strengths are
-labelled in output pixels. Open the image at full size to compare the edges.
-
-![Native font compared with full-resolution Crisp and Smooth, low-resolution, and two mosaic settings](/assets/enhanced-font-comparison.png)
-
-The Sky Palace capture below uses text extracted from the original Japanese
-ROM, displayed with enhanced fonts in the US game. It demonstrates a partial
-local language pack, not a complete or bundled Japanese translation.
-
-![ROM-sourced Japanese dialogue and menu text in the Sky Palace above Fillmore](/assets/language-japanese.png)
-
-![Editing an example English rewrite alongside the original US dialogue in the Workshop](/assets/language-workshop.png)
-
-### Regional rules, artwork, and music
-
-The game still builds from your USA ROM. Under **Settings → Regions**, choose
-a US, Japanese, or European gameplay preset, or combine individual rules.
-Art and music have their own presets; neither changes your language or button
-bindings.
-
-- **Action stages:** Choose regional terrain, enemy and item placements,
-  traps, enemy stats and boss behavior, spell costs, starting lives, and
-  action-only inventory rules.
-- **Town simulation:** Select population requirements and housing support,
-  construction and development pacing, monster-lair reserves and behavior,
-  miracle costs, health/SP recovery, and regional story-event rules.
-- **Difficulty:** Apply European Beginner, Normal, or Expert adjustments over
-  any regional base. For example, keep US stage layouts while using Japanese
-  boss behavior and EU Beginner adjustments.
-- **Controls and menus:** Choose between a dedicated magic button and Japan's
-  Up + attack command, total or spare-life displays, and whether town dialogs
-  return to angel control or leave the command menu open.
-- **Artwork:** Select Japanese title and enemy artwork, Death Heim's horned
-  statue, town symbols and pyramid decoration, or European Action Mode item
-  graphics independently of their gameplay rules.
-- **Music:** Choose Fillmore Act 2's regional track assignment and the two
-  supported Japanese song versions without changing gameplay.
-
-Gameplay rules need no additional ROM. For supported regional art and music,
-use the Workshop's **Assets → Regional media** tool to extract and install
-private packages from your own donor ROMs. Missing media falls back to US
-assets while retaining your selection.
-
-Save regional choices with the Progress Log; **Continue** restores that
-campaign's rules rather than the title screen's new-game choices. Changes that
-require town redevelopment ask for confirmation and create a recovery copy
-before applying.
-
-See [regional settings](docs/actraiser-1/regional-settings.md) for the full option list
-and activation timing, and [regional media](docs/actraiser-1/regional-media.md) for artwork
-and music requirements.
+![The Sky Palace flying over the globe](/assets/globe-travel.gif)
 
 ### Live authentic comparison
 
-Bind **Compare rendering** in **Settings → Controls** to switch between the
-current enhanced presentation and the ROM's native 256×224 graphics and SPC
-audio without changing any saved settings:
+Bind **Compare rendering** under **Settings → Controls**. A quick press
+switches to or from the original SNES picture and sound. Hold the button to see
+the original picture as an inset while you keep playing in the enhanced
+view. Hold it again to close the inset.
 
-- **Short press:** Toggle the enhanced and authentic base views.
-- **Long press:** Open a persistent picture-in-picture view with the enhanced
-  presentation as the main image and the authentic game inset. Hold the control
-  again to close PiP without switching the base view, or press it briefly to
-  close PiP and switch views.
+Under **Video → General**, you can move the inset to any corner. On desktop,
+**PiP separate window** puts it in its own window. Resize it or make it
+fullscreen on a second monitor. Close that window to return to the inset.
+See [comparison controls](docs/manual.md#authenticenhanced-comparison-control).
 
-In **Settings → Video → General**, **PiP corner** selects any of the four
-corners. On desktop, **PiP separate window** opens the authentic view in a
-separate, resizable window. Move it to another monitor and enable **PiP
-fullscreen** for full-screen comparison beside the main game. Double-click
-the separate window to toggle its fullscreen mode; **Esc** leaves fullscreen.
-Closing that window returns the comparison to its inset. These placement
-preferences are saved for your next session.
+![Fillmore Act 1 in two windows, with the enhanced game on the left and the original SNES view on the right](/assets/authentic-comparison-windows.png)
 
-The comparison state is shared by action and simulation modes and resets to
-the enhanced view each time the game launches. Gameplay pauses during the
-brief transition, but quality-of-life options and cheats remain active in both
-views. The CRT pass follows the current Video settings and can be used with
-either view in the main game window. The separate comparison window shows
-the clean authentic image, including native help text, without CRT effects.
+**Separate window.** Enhanced gameplay on the left and the original SNES view on the right.
 
-![An enhanced widescreen action stage with CRT styling, with the authentic 4:3 renderer running in a framed picture-in-picture inset](/assets/picture-in-picture.png)
+<details>
+<summary>See the picture-in-picture example</summary>
 
-### Settings overlay
+![The original 4:3 view inset over an enhanced widescreen stage](/assets/picture-in-picture.png)
 
-The in-game menu retains ActRaiser's dialog frames and offers both native and
-enhanced text rendering. It groups display, 3D, audio, localization, controls,
-save, and other settings into sections accessible by keyboard or gamepad.
-
-Each setting includes an explanation. If you install an instruction manual in the
-Builder, a Manual section appears in-game to read it; without one the section is
-simply absent.
-Settings are saved automatically to `settings.ini`.
-Most sections offer a reset that restores that section's defaults after two
-confirmation presses. The settings overlay remains available on **The End**
-and **Best Player** screens to restart or exit after finishing the game.
-
-![An illustrative tour of the settings overlay using the original dialog font; the current menu also includes localization controls](/assets/overlay.gif)
-
-### Save management
-
-The **Saves** menu holds ten independent campaigns, with previews of each
-character's level, completed acts, and last save time.
-
-- Each campaign keeps its own regional rules, randomizer seed and options,
-  and enhanced character name. Language, fonts, and controls stay shared.
-- Import and export complete `.arsave` archives to move saved progress and
-  campaign settings between slots or installations. Raw SRAM and lossless
-  INI exports are also available, but do not include the enhanced campaign
-  settings.
-- Optional automatic backups preserve the previous saved campaign before
-  destructive edits or imports. Missing or damaged saves are marked
-  unavailable rather than treated as empty slots.
-
-Save with the normal **Progress Log** before switching campaigns: changing
-slots restarts the game and does not capture unsaved gameplay. See
-[save slots and recovery](docs/manual.md#save-slots) and
-[save editing, import, and export](docs/manual.md#save-editor) for details.
-
-The [experimental randomizer](docs/actraiser-1/randomizer.md) is available at the title
-screen after enabling **Show debug settings**. It supports seeded campaigns,
-including independent rolls for regional action and town rules. A complete
-randomized campaign has not yet been play-tested.
+</details>
 
 ### Quality of life
 
-| | |
+#### Gameplay and town menus
+
+<details>
+<summary>Boss rush, character switching, and town menu options</summary>
+
+| Feature | What you can do |
 |---|---|
-| **Rebindable controls** | Bind every keyboard and gamepad control independently in Settings → Controls. Keyboard bindings use physical key positions, so they remain in place when the keyboard layout changes. |
-| **Full gamepad support** | The default mapping follows a SNES-on-Xbox layout, with support for multiple hotpluggable pads and `gamecontrollerdb.txt`. Bind controls for the menu, pause, turbo, camera reset, and rendering comparison. |
-| **Modern town menu** | An optional categorized command menu remembers selections and lets you read descriptions without using a miracle or offering. It has its own scale control and works with or without 3D towns. See [Modern SIM menu](docs/manual.md#modern-sim-menu). |
-| **Native menu quick use** | Keep the Original town menu while skipping optional command explanations. Confirmations and outcomes remain, and the remappable Describe control runs the full explanation. Enable it under System → Game → Quality of life; it is off by default. See [quick use](docs/manual.md#native-sim-menu-quick-use). |
-| **Remember last town** | Continue positions the Sky Palace over the last town visited by that campaign. It works in native and enhanced views and is on by default under System → Game → Quality of life. |
-| **Restart in the same window** | Switch save slots, restart the game, or apply save edits and restart without relaunching the application. Save gameplay with the Progress Log before switching campaigns. Restart and exit controls remain available after the ending. |
-| **Steam Deck** | The dedicated bundle includes Valve's Steam Runtime SDL3. It works with the default Steam Input mapping, or with SDL's HIDAPI Steam driver in desktop mode. L3 opens the menu. |
-| **Camera controls** | The right stick orbits, the triggers zoom, and R3 recentres the view. Sensitivity, deadzone, and invert-Y are configurable, and orbit speed remains consistent across frame rates. |
-| **Turbo** | Press `T` to fast-forward at eight game frames per rendered frame, configurable from 2 to 64. |
-| **Render scale and refresh** | Choose an internal render scale from 1× to 8×, downsampled to the window. Presentation modes include renderer-paced VSync, display-relative Uncapped, a selected FPS limit, and unthrottled Unlimited, with windowed, borderless, and exclusive fullscreen options. |
-| **Automatic screen ratio** | Auto fits action stages, towns, world navigation, and the Sky Palace to the window, recalculating the view even while paused. It retains the selected pixel aspect and keeps HUD and menus at their own proportions. See [display and scaling](docs/manual.md#display-and-scaling). |
-| **Graphics API selection** | Choose an available graphics API to troubleshoot slow rendering or display problems. Changes take effect after restart, with automatic fallback if the selected API cannot start. |
-| **Independent HUD and menu scaling** | The promoted widescreen HUD and settings menu can be scaled independently of the game framebuffer, from 25–400% and 100–800% respectively. |
-| **Save editor** | Inspect town states, unlocks, levels, magic, items, and scores, then enable an explicit safety switch to apply changes. The editor preserves unedited data and maintains save checksums. |
-| **Bridge-free structure limit** | This optional fix stops completed bridges from consuming a town's 128-structure population cap. It applies retroactively while preserving bridge tiles, crossings, and 32-person support. |
-| **Original-game fixes** | Configurable fixes correct overlapping Aitos messages and keep newly built windmills still during the no-wind event. The windmill fix affects the enhanced town view only. |
-| **Cheats** | Infinite HP, MP, and SP; moonjump; invincibility; all magic; ranged sword; angel health; and a generic Pro Action Replay code pinner can all be toggled from the menu. |
-| **Audio** | Music, sound effects, and master volume have independent controls. An optional 40-voice mode preserves all eight song voices while queued native effects use 32 additional voices. Output is available at 32.04, 44.1, or 48 kHz, and dialogue blips can be muted separately. |
+| **Death Heim boss roster** | Before the final boss, fight the six Act 2 bosses, swap in the six Act 1 bosses, or take on all twelve. [Boss rush guide](docs/manual.md#death-heim-boss-rush) |
+| **Death Heim boss order** | Shuffle the selected roster with a seed saved to your campaign. Find the controls under **Randomizer → Bosses** after enabling debug settings. [Boss order settings](docs/actraiser-1/randomizer.md#death-heim-boss-order) |
+| **ActRaiser 2 Master** | Switch characters during an ActRaiser stage after importing the winged Master from your own ActRaiser 2 (USA) ROM. [Import instructions](docs/builder-workshop.md#actraiser-2-master) |
+| **Remember last town** | Start over the last town you visited when you choose **Continue**. This is on by default. |
+| **Bridge-free limit** | Keep completed bridges out of the 128-structure cap, including in existing towns. Bridges still let people cross and support 32 residents each. |
+| **Native menu quick use** | Skip optional explanations when you choose **Use** in the original town menu. Confirmations and outcomes still play as usual. [Town menu guide](docs/manual.md#native-sim-menu-quick-use) |
+| **Modern town menu** | Browse town commands by category and return to your last selection. Works in flat and 3D towns. [Modern SIM menu](docs/manual.md#modern-sim-menu) |
+| **Describe menu item** | Use a rebindable control to read a command without using it in the modern menu, or run the full original flow when Native menu quick use is on. |
+| **Town menu size** | Scale the modern town menu independently from 50% to 100%. |
+| **Pause** | Press `P` or bind a controller button to pause and resume. |
+| **Turbo multiplier** | Toggle fast-forward with `T` or a controller binding. Choose 2–64 game frames per rendered frame. The default is 8. |
+| **Correct Aitos messages** | Prevent overlapping events from showing the wrong town message. |
+| **Wind stops every windmill** | Keep newly built windmills still during Aitos's no-wind event in the enhanced town view. |
 
-![Independently scaled simulation-mode HUD in widescreen](/assets/hud-scaling.png)
+Find the boss roster, character switch, bridge limit, last-town option, quick
+use, and turbo speed under **System → Game → Quality of life**. The same menu
+has a section for fixes to the original game. [Enhancements](docs/manual.md#enhancements)
 
-See [the manual](docs/manual.md) for the complete settings and controls
-reference.
+</details>
 
----
+#### Controls and interface
+
+<details>
+<summary>Controller bindings, twin-stick shooting, and camera controls</summary>
+
+| Feature | What you can do |
+|---|---|
+| **Rebindable controls** | Set keyboard and gamepad bindings separately. Keyboard bindings follow physical key positions when you change layouts. |
+| **Gamepad selection** | Pick a connected pad or follow the first connected pad as devices are plugged in and unplugged. Use `gamecontrollerdb.txt` to add SDL controller mappings. |
+| **Controller shortcuts** | Bind settings, pause, fast-forward, camera reset, and rendering comparison to controller buttons. |
+| **Stick as D-pad** | Use the left stick for digital movement and adjust how far it must move before it counts as a direction. |
+| **Analog angel movement** | Fly in any direction in towns, vary speed with the left stick, and adjust the angel's own deadzone. |
+| **Twin-stick shooting** | Bind **Shoot up**, **Shoot down**, **Shoot left**, and **Shoot right** to fire independently of movement in towns. |
+| **Camera controls** | Orbit with the right stick or right-drag, zoom with triggers or the wheel, and recenter with R3 or middle-click. Adjust sensitivity, deadzone, and vertical inversion. |
+| **Free Cam framing** | Keep manually controlled action scenes framed near room edges and centered when zoomed out. [Camera control](docs/manual.md#camera-control) |
+| **Steam Deck controls** | Use Steam Input or the built-in pad in Desktop Mode. L3 opens settings. [Steam Deck controls](docs/manual.md#steam-deck) |
+| **Android touch controls** | Rebind the preview's on-screen buttons. They hide when a physical controller is connected. [Android controls](docs/android.md#playing) |
+| **Xbox One USB on macOS** | Use an original Xbox One controller over USB in a macOS source build. Set `AR_XBOX_USB_ROOT` to the separate bridge module when configuring CMake. [Build from source](#build-from-source) |
+| **Settings overlay** | Open settings with `Esc`, `F1`, or L3, including after the ending. Changes save automatically, and you can reset defaults by section. |
+| **In-game manual** | Install your manual through the Workshop and read it from the settings overlay. [Install your own manual](docs/builder-workshop.md#install-your-own-manual) |
+| **Enhanced text** | Adjust font size, choose Crisp or Smooth rendering, or give enhanced text a low-resolution pixel look. [Language packs](docs/language-packs.md) |
+
+See the [controls reference](docs/manual.md#controls) and the
+[settings overlay guide](docs/manual.md#the-settings-overlay).
+
+</details>
+
+#### Saves and recovery
+
+<details>
+<summary>Campaign slots, save editing, transfers, and backups</summary>
+
+| Feature | What you can do |
+|---|---|
+| **Ten campaign slots** | Preview character level, completed acts, and save time. Each slot keeps its own regional rules, randomizer setup, and character name. |
+| **Campaign import and export** | Move saved progress and campaign settings between slots or installations with a complete `.arsave` archive. |
+| **Raw saves** | Import or export SRAM for emulator use or lossless INI for tools. Choose either format when creating a new slot. |
+| **Save editor** | Inspect and edit town progress, unlocks, character stats, magic, items, and scores. Confirm changes to the active slot before applying them. |
+| **Automatic backups** | Keep a copy of the previous campaign before the first saved edit or import in a session when backups are enabled. |
+| **Save recovery** | See when a slot's save is missing or damaged and use **Import save** to restore a backup. |
+| **Restart in the same window** | Switch slots, apply save edits and restart, or restart from the menu. Save with the **Progress Log** before switching slots. |
+| **Automatic import of older saves** | The first launch in an older data folder adopts your save into Slot 1 and keeps the originals. [Upgrading older saves](docs/manual.md#upgrading-older-saves) |
+
+See [Save slots](docs/manual.md#save-slots) and the
+[Save editor](docs/manual.md#save-editor) for details.
+
+</details>
+
+#### Display
+
+<details>
+<summary>Resolution, edge smoothing, and comparison windows</summary>
+
+| Feature | What you can do |
+|---|---|
+| **Screen ratio** | Choose 4:3, 16:9, 16:10, or Stretch. |
+| **Automatic screen ratio** | Fit the game view to the window as you resize it. Action stages cap at 16:9 in Auto. |
+| **Pixel aspect** | Choose the original CRT pixel proportions or square pixels. |
+| **Window mode** | Play in a window, borderless fullscreen, or exclusive fullscreen. |
+| **Render resolution** | Use **Native** or a preset from 480p to 2160p for flat and 3D views. |
+| **3D anti-aliasing** | Smooth jagged edges with the lighter FXAA filter or use SMAA to preserve more corner detail. |
+| **3D supersampling** | Draw 3D scenes at a higher resolution and shrink them to fit for smoother edges. This takes more GPU time. |
+| **Refresh rate** | Choose Vsync, Uncapped, a custom FPS limit, or Unlimited. |
+| **Graphics API** | Choose a graphics API and restart to apply it. The game falls back to Automatic if the selected API can't start. |
+| **FPS counter** | Check how many frames the game displays each second. |
+| **Performance overlay** | Inspect frame timing while you play. [Performance overlay guide](docs/performance-overlay.md) |
+| **Widescreen HUD size** | Resize the separate widescreen HUD from 25% to 400%. |
+| **Settings menu size** | Fit the menu automatically or resize it independently, up to 800%. |
+| **Live authentic comparison** | Switch between the original SNES presentation and the enhanced view, or show the original picture as an inset. |
+| **Picture-in-picture corner** | Move the inset to any corner. |
+| **Separate comparison window** | Open the original view in a resizable desktop window. |
+| **Comparison fullscreen** | Put the separate view fullscreen on another monitor while keeping the main game in its own window mode. |
+
+See [Display and scaling](docs/manual.md#display-and-scaling),
+[graphics settings](#gpu-and-crt-effects), and
+[Live authentic comparison](#live-authentic-comparison).
+
+</details>
+
+#### Audio
+
+<details>
+<summary>Volume, dialogue sounds, and replacement music</summary>
+
+| Feature | What you can do |
+|---|---|
+| **Independent volume controls** | Set master, music, and sound-effect volume separately, or mute all output. |
+| **Dialogue text blip** | Mute the sound that plays as Sky Palace dialogue appears. |
+| **Extended sound channels** | Keep all eight music voices and add 32 voices for sound effects. |
+| **Audio frequency** | Match the device rate automatically or choose a fixed rate. SDL uses at least 44.1 kHz for output. |
+| **Audio buffer size** | Adjust the audio buffer and restart to apply it. |
+| **Enhanced music** | Switch between original and replacement music while a song is playing. |
+| **Replacement music fades** | Hear replacement tracks fade at the original game's pace during transitions, including boss entrances. |
+
+See the [audio settings](docs/manual.md#audio) and
+[music and artwork replacements](#asset-and-music-replacements).
+
+</details>
+
+#### Randomizer
+
+<details>
+<summary>Seeded campaigns, enemy shuffles, and item rolls</summary>
+
+The experimental campaign randomizer appears at the title screen with **Show
+debug settings** enabled. Full randomized campaigns still need playtesting.
+[Seeded campaigns](docs/actraiser-1/randomizer.md)
+
+| Feature | What you can do |
+|---|---|
+| **Seeded campaigns** | Use the same seed and settings to reproduce a campaign's rolls. Your save remembers the recipe. |
+| **Regional rule rolls** | Roll US, Japanese, or European rules separately for action stages and towns. |
+| **Enemy shuffle** | Shuffle enemy types on a map or across an act. |
+| **Enemy health** | Scale enemy health for a seeded campaign. |
+| **Enemy damage** | Scale damage from enemy contact and attacks. |
+| **Statue drops** | Shuffle existing rewards or roll new ones for breakable statues. |
+| **Statue placement** | Shuffle breakable statues among their existing positions on a map. |
+| **Monster lair positions** | Shuffle the lairs among their existing locations in each town. |
+| **Monster lair types** | Change which monster each lair spawns. |
+
+</details>
+
+#### Cheats and practice tools
+
+<details>
+<summary>Invulnerability, spell controls, and level warp</summary>
+
+| Feature | What you can do |
+|---|---|
+| **Infinite action health** | Keep the Master’s health full in action stages. |
+| **Infinite magic scrolls** | Keep magic scrolls available during action stages. |
+| **Infinite miracle points** | Keep SP full in towns. |
+| **Infinite angel health** | Keep the angel's health full in towns. |
+| **No knockback** | Prevent damage, knockback, and hitstun during ordinary play. |
+| **Freeze timer** | Stop the action timer. The boss clear countdown can still have issues with this cheat. |
+| **Moonjump** | Hold jump to fly upward and adjust the climb speed. |
+| **Ranged sword** | Fire a projectile with a sword swing. |
+| **All magic** | Unlock all four spells. |
+| **Cycle magic spell** | Use a rebindable control to cycle through unlocked spells during a stage. |
+| **Custom Pro Action Replay codes** | Apply your own supported codes. |
+| **Level warp** | Jump to a known room for testing from the debug tools. |
+
+See [Cheats](docs/manual.md#cheats) and [Level warp](docs/manual.md#level-warp).
+
+</details>
+
+### Action scene and effects editor
+
+Use the offline [action editor](tools/action_editor/README.md) to paint tiles,
+extend a room for widescreen, or change how its layers and effects look.
+In the Voxel preview, click a tile or a whole object. Try changes to its
+shape or artwork before applying them together. **Save project** keeps
+your scenery and effects in one archive. The guide explains how to load
+the edited room in your game.
+
+### Asset and music replacements
+
+In the Workshop, replace the title logo or pick your own music for a stage.
+The title art can follow the original Mode 7 rotation and zoom at higher
+resolution. Preview the original tracks from your ROM in the Workshop, then
+choose your own OGG files and set loop points if needed. **Split by level**
+lets Bloodpool and Kasandora use different files even when they share an
+original song. The original sound effects still play.
+[Workshop guide](docs/builder-workshop.md) · [Music loop settings](docs/manual.md#music-musicname-entries-files-under-game-assetsaudio)
+
+### Languages and enhanced text
+
+Install a translation in the Workshop and select it under **Settings →
+Localization**. You can also use the Workshop to check how your own translation
+looks in the game and export it as an `.arlang` pack for others to install.
+You can adjust font size and use fallback fonts for characters your main font
+lacks. The original US text remains available with its original font.
+See the [language pack guide](docs/language-packs.md).
+
+![Editing a translation beside the original US dialogue in the Workshop](/assets/language-workshop.png)
+
+### Regional rules, artwork, and music
+
+Build with the USA ROM, then open **Settings → Regions**. Choose US,
+Japanese, or European rules, or mix them. For example, you can use US stages
+with Japanese boss behavior. Your campaign remembers its choices. The USA ROM
+is enough to use the gameplay rules. To add regional art and music from your
+own regional ROMs, use **Assets → Regional media** in the Workshop. Your text
+language is a separate choice.
+See [regional rules](docs/actraiser-1/regional-settings.md) and
+[regional artwork and music](docs/actraiser-1/regional-media.md).
 
 ## Development
 
 ### Build from source
 
-For a local build without the packaged Builder, install Go 1.25 or newer,
-CMake 3.25 or newer, GNU Make, a C/C++ toolchain, and the development libraries
-for SDL3 3.4+ and SDL3_ttf 3.2+. On macOS, the compiler comes with Xcode Command
-Line Tools; on Windows, use a compatible native compiler and a shell with Make.
+Install Go 1.25 or newer, CMake 3.25 or newer, GNU Make, a C/C++ compiler,
+and the development libraries for SDL3 3.4+ and SDL3_ttf 3.2+. On macOS you
+can use the Xcode Command Line Tools. On Windows, use a native compiler and
+a shell with Make.
 
-From the repository root, run:
+From the repository root:
 
 ```sh
 make dev ROM=/absolute/path/to/your-usa-rom.sfc
 ./build-release/ActRaiserRecomp /absolute/path/to/your-usa-rom.sfc --config config.ini
 ```
 
-`make dev` prepares the native US language source, generates the game C files
-if they are missing, and builds the optimized `play` preset. It also creates
-`config.ini` from the stock template if you do not already have one. If your
-ROM is named `ar.sfc` in the repository root, you can omit `ROM=…`.
+`make dev` generates the game code if needed, builds the optimized
+`play` preset, and creates `config.ini` if it doesn't exist. You can omit
+`ROM=…` if your ROM is named `ar.sfc` at the repository root. To rebuild
+after editing C or C++, run `cmake --build --preset play`.
 
-For subsequent C/C++ changes, use `cmake --build --preset play`. These commands
-produce a development executable; see [desktop packaging](docs/desktop-packaging.md)
-to turn it into a self-contained `.app` or `.AppImage`.
-
-To test the Android preview, `make android ROM=…` builds a debug APK for USB
-installation without the Builder; see [Android preview builds](docs/android.md).
-
-To package releases on another machine, use `make release-remote <ssh-config-name>`.
-It sends the current source tree, streams build progress, saves a local build
-log, retrieves verified packages into `release/`, and cleans temporary remote
-files. See [remote packaging](docs/desktop-packaging.md#packaging-across-build-hosts)
-for prerequisites and cache options.
+See [Android preview builds](docs/android.md) for the debug APK and
+[desktop packaging](docs/desktop-packaging.md) to package a game or Builder.
+To split release builds across machines, use
+`make release-remote build-host other-host localhost` with your own SSH
+aliases. See [remote builds](docs/desktop-packaging.md#packaging-across-build-hosts).
 
 ### Layout and testing
 
-`src/gen/` contains mechanically generated game code, while `src/` holds the
-authored runtime. `installer/` contains the Builder, Workshop, content tools,
-and release packaging. Shared recompilation and build tooling lives in
-`snesrecomp-go/`; `snesbuild.ini` defines the runtime source list for both local
-and packaged builds.
+The recompiler translates the USA ROM's 65816 machine code into C on your
+machine. That code lives in `src/gen/` and stays out of the repository.
+`src/` contains the runtime and game enhancements. `installer/` contains the
+Builder, Workshop, and packaging. `snesrecomp-go/` contains the shared recompiler
+and build tools. `snesbuild.ini` lists the runtime sources for local and
+packaged builds.
 
-| Preset | Purpose |
+| Preset | When to use it |
 |---|---|
-| `play` | Produces an optimized local build in `build-release/` without tests or tracing. |
-| `dev` | Produces a Debug build with the unit-test suite, on-demand trace recorder, and timestamped diagnostics under `runs/`. |
-| `trace` | Extends the Debug build with generated CPU instrumentation. |
-| `asan` | Enables AddressSanitizer and UndefinedBehaviorSanitizer for corruption testing. |
-| `control` | Produces an optimized A/B control build with flat town terrain. |
+| `play` | Build an optimized game in `build-release/` to play locally. |
+| `dev` | Run tests or record diagnostics from a Debug build. |
+| `trace` | Include generated CPU instrumentation when you need a detailed trace. |
+| `asan` | Check memory errors and undefined behavior. |
+| `control` | Compare performance with an optimized build that uses flat town terrain. |
 
-For the shared quality gate, development conventions, and tooling setup, see
-[CONTRIBUTING.md](CONTRIBUTING.md). The ROM-free checks cover the game, developer
-tools, Builder, and recompiler:
+See [Contributing](CONTRIBUTING.md) for setup. Run `make check-quality` to
+check the source or `make check` to run the full set of ROM-free checks.
+Recorded gameplay replays let developers compare game state and performance.
+See the [benchmark definitions](tools/runner-bench.json) for details.
 
-```sh
-make check-quality
-make check
-```
-
-Regression testing combines CTest, Go tests, and recorded gameplay replays.
-Replay benchmarks verify equivalent game state before comparing performance.
-
-For benchmark definitions and development details, see
-[`tools/runner-bench.json`](tools/runner-bench.json), the
-[`installer` documentation](installer/README.md) and
-[`snesrecomp-go` documentation](snesrecomp-go/README.md).
+[How emulation, recompilation, and decompilation differ](https://derrickgold.github.io/emu-recomp-decomp/)
 
 ## Documentation
 
-| Document | What it is |
-|---|---|
-| [`docs/README.md`](docs/README.md) | Public application, authoring, and game-reference index |
-| [`docs/actraiser-1/README.md`](docs/actraiser-1/README.md) | AR1 gameplay, regional releases, native data, and action environments |
-| [`docs/manual.md`](docs/manual.md) | Player and power-user reference |
-| [`docs/release-notes.md`](docs/release-notes.md) | Upcoming release changes, upgrade instructions, and remaining testing |
-| [`tools/action_editor/README.md`](tools/action_editor/README.md) | Offline action scenery, background policy, and effects authoring |
-| [`docs/builder-workshop.md`](docs/builder-workshop.md) | Builder and Workshop user guide |
-| [`docs/android.md`](docs/android.md) | Building and testing the Android preview without the Builder |
-| [`docs/language-pack-format.md`](docs/language-pack-format.md) | UTF-8 translation pack authoring and validation contract |
-| [`docs/language-packs.md`](docs/language-packs.md) | Direct `.arlang` installation, sharing, and editor-free/AI authoring |
-| [`docs/actraiser-1/regional-settings.md`](docs/actraiser-1/regional-settings.md) | Regional gameplay presets, independent options, and campaign saving |
-| [`docs/actraiser-1/regional-media.md`](docs/actraiser-1/regional-media.md) | Extracting and using regional artwork and music from your own ROMs |
-| [`installer/README.md`](installer/README.md) | ActRaiser Builder ownership and developer entry points |
-| [`docs/diorama-depth-shapes.md`](docs/diorama-depth-shapes.md) | Depth effects for custom action-room layouts |
-| [`docs/actraiser-1/save-format.md`](docs/actraiser-1/save-format.md) | SRAM fields, checksums, and save editing |
-| [`docs/performance-overlay.md`](docs/performance-overlay.md) | Reading performance information and reporting slow scenes |
-| [`docs/actraiser-1/snes-native-audio-channels.md`](docs/actraiser-1/snes-native-audio-channels.md) | Original SPC channel ownership and effect sequencing |
-| [`docs/actraiser-1/rom-map.md`](docs/actraiser-1/rom-map.md) | ROM data regions and cross-release localization evidence |
+- **Play or update:** [Player manual](docs/manual.md),
+  [release notes](docs/release-notes.md), and [desktop packaging](docs/desktop-packaging.md).
+- **Make something:** [Workshop](docs/builder-workshop.md),
+  [action editor](tools/action_editor/README.md), and [language packs](docs/language-packs.md).
+- **Find a reference:** [Documentation index](docs/README.md),
+  [ActRaiser 1 research](docs/actraiser-1/README.md),
+  [Builder development](installer/README.md), and [recompiler development](snesrecomp-go/README.md).
 
 ## License
 
