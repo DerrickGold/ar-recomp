@@ -106,12 +106,18 @@ bool CrtPost_Begin(ArRenderDevice *device, const CrtPostConfig *config) {
 }
 
 ArRenderTargetBeginResult ArRenderSceneScale_Begin(
-    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset) {
+    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset,
+    bool allow_supersampling, SceneAntiAliasing antialiasing) {
   CHECK(device == &g_render_device);
   CHECK(RectsEqual(destination, kFallback));
   CHECK(preset == kRenderResolution_540p && s_stage == 2 && !s_scaled_scene);
+  CHECK(!allow_supersampling && antialiasing == kSceneAntiAliasing_Off);
   s_scaled_scene = true;
   return kArRenderTargetBegin_Ready;
+}
+
+bool PresentSceneUses3D(const FrameSlot *slot) {
+  return slot->diorama_active;
 }
 
 bool ArRenderSceneScale_Cancel(ArRenderDevice *device) {

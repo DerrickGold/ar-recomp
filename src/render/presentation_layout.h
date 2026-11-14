@@ -41,7 +41,8 @@ void ArPresentationLayout_ResolveLogicalSize(
 
 /* Fixed-height game resolution, limited to the current fitted viewport. */
 int ArPresentationLayout_RenderHeight(int preset);
-ArRenderExtentI ArPresentationLayout_RenderExtent(ArRenderRectI viewport, int preset);
+ArRenderExtentI ArPresentationLayout_RenderExtent(ArRenderRectI viewport, int preset,
+                                                 bool allow_supersampling);
 
 /* Resolve the physical output rectangle occupied by game content. Stretch is
  * the only policy that may change the content aspect ratio; widescreen is

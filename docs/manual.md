@@ -624,6 +624,16 @@ current mode. Native window sizing still reads the saved `window_scale`
 value. The separate **Voxel edge quality** setting controls edge treatment
 in 3D towns.
 
+**3D supersampling** lets a fixed preset render above the game viewport size
+and downsample the scene. On a 1280×800 display with a 16:10 view, 1080p
+renders the 3D scene at 1728×1080. Higher presets use more GPU time.
+
+**3D anti-aliasing** offers **Off**, **FXAA**, and **SMAA**. FXAA uses a single
+pass. SMAA 1x uses three passes to smooth diagonals and preserve corners.
+Both work at Native or before upscaling a lower resolution, and run before
+the flat HUD and menus. Active supersampling uses its own downsampling
+filter. Anti-aliasing and supersampling default to Off.
+
 *Refresh rate* is Vsync (timed by
 the SDL renderer), Uncapped (vsync off with a soft 2× nominal-display-refresh
 cap), Limit with a chosen target FPS, or Unlimited (vsync and host presentation

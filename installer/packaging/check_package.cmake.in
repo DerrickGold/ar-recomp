@@ -57,6 +57,7 @@ set(_required_license_files
     "utils/ACTRAISER-THIRD-PARTY-NOTICES.md"
     "utils/third_party/sheenbidi/LICENSE"
     "utils/licenses/SheenBidi/LICENSE"
+    "utils/third_party/smaa/LICENSE.txt"
     "utils/licenses/SDL3/LICENSE.txt"
     "utils/licenses/sdl-sdk.lock.json"
     "utils/game-assets/fonts/noto/OFL.txt"
@@ -168,6 +169,11 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
             "utils/src/platform/sdl/bidi_text_sdl.c")
         if(NOT EXISTS "${_root}/${_bidi_source}")
             message(FATAL_ERROR "localization distribution check: missing ${_bidi_source}")
+        endif()
+    endforeach()
+    foreach(_smaa_file IN ITEMS AreaTex.h SearchTex.h)
+        if(NOT EXISTS "${_root}/utils/third_party/smaa/${_smaa_file}")
+            message(FATAL_ERROR "SMAA distribution check: missing ${_smaa_file}")
         endif()
     endforeach()
     foreach(_language_file IN ITEMS

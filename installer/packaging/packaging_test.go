@@ -43,6 +43,7 @@ func TestLocalizationPackageGate(t *testing.T) {
 		"utils/game-assets/fonts/noto/NotoSansArabic-Bold.ttf", "utils/game-assets/fonts/noto/NotoSansHebrew-Bold.ttf",
 		"utils/LICENSE", "utils/LICENSE_SCOPE.md", "utils/ATTRIBUTION.md", "utils/THIRD_PARTY_NOTICES.md", "utils/ACTRAISER-THIRD-PARTY-NOTICES.md",
 		"utils/third_party/sheenbidi/LICENSE", "utils/licenses/SheenBidi/LICENSE",
+		"utils/third_party/smaa/LICENSE.txt", "utils/third_party/smaa/AreaTex.h", "utils/third_party/smaa/SearchTex.h",
 		"utils/licenses/SDL3/LICENSE.txt", "utils/licenses/sdl-sdk.lock.json",
 		"utils/third_party/sheenbidi/Source/SheenBidi.c", "utils/third_party/sheenbidi/Headers/SheenBidi/SheenBidi.h", "utils/src/platform/sdl/bidi_text_sdl.c",
 		"utils/game-assets/fonts/noto/OFL.txt", "utils/snesrecomp-go/runtime/LICENSE", "utils/snesrecomp-go/runtime/NOTICE.md", "utils/snesrecomp-go/runtime/PROVENANCE.md", "utils/snesrecomp-go/runtime/licenses/Snaggletooth-LICENSE.txt",

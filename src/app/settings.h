@@ -350,6 +350,8 @@ typedef struct Settings {
   int extended_aspect;
   int pixel_aspect;
   int render_resolution;    /* RenderResolution preset */
+  bool scene_supersampling;
+  int scene_antialiasing;   /* SceneAntiAliasing */
   int window_scale;         /* windowed client-size multiple */
   int window_mode;          /* WindowMode: windowed / borderless / exclusive */
   int picture_in_picture_corner; /* PictureInPictureCorner; inset placement */

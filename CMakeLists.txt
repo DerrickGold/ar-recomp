@@ -231,6 +231,7 @@ if(_AR_ENHANCED_TEXT)
         src/platform/sdl/text_preview_cli.c
         src/render/gpu_compile_log.c
         src/platform/sdl/render_sdl.c
+        src/platform/sdl/smaa_sdl.c
         src/platform/sdl/metal_drawable_sdl.c
         src/platform/sdl/host_clock_sdl.c
         src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c

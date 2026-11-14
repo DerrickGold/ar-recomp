@@ -489,6 +489,8 @@ install(DIRECTORY ${GAME_ROOT}/third_party/sheenbidi/ DESTINATION utils/third_pa
     PATTERN ".DS_Store" EXCLUDE)
 install(FILES ${GAME_ROOT}/third_party/sheenbidi/LICENSE
     DESTINATION utils/licenses/SheenBidi)
+install(DIRECTORY ${GAME_ROOT}/third_party/smaa/ DESTINATION utils/third_party/smaa
+    PATTERN ".DS_Store" EXCLUDE)
 install(FILES
     ${GAME_ROOT}/third_party/unicode/NOTICE
     ${GAME_ROOT}/third_party/unicode/utf8proc-LICENSE.md

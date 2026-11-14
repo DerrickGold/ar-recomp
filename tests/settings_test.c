@@ -2926,6 +2926,21 @@ static void TestImportedLevelSettings(void) {
   Settings_SetImportedLevelActive(false);
 }
 
+static void TestSceneAntiAliasingBootPreference(void) {
+  const char *path = "actraiser-aa-settings-test.ini";
+  FILE *file = fopen(path, "w");
+  CHECK(file != NULL);
+  if (!file) return;
+  fputs("scene_antialiasing = SMAA\n", file);
+  fclose(file);
+  const bool shaders_active = g_gpu_shaders_active;
+  g_gpu_shaders_active = false;
+  Settings_InitWithFile(path);
+  CHECK(g_settings.scene_antialiasing == kSceneAntiAliasing_Smaa);
+  g_gpu_shaders_active = shaders_active;
+  remove(path);
+}
+
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--dump-ui-catalog")) {
     DumpInterfaceInventory();
@@ -2947,6 +2962,7 @@ int main(int argc, char **argv) {
   TestConnectedWorldDefaults();
   TestCompletionSettings();
   TestVideoSettingAudit();
+  TestSceneAntiAliasingBootPreference();
   TestPictureInPictureSettings();
   TestSupportedAspectTransitions();
   TestSim3DEnvironmentLabels();

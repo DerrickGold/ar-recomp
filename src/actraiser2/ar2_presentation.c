@@ -180,8 +180,11 @@ bool Ar2Presentation_Draw(const ArImportedGameFrame *frame, uint64_t now_ns,
   (void)CrtPost_Begin(s_device, &crt);
   if (SessionFatal_Requested()) return false;
   ArRenderRectI scene_view = *viewport;
+  const bool diorama = g_settings.diorama_mode && frame->video.level;
   const ArRenderTargetBeginResult begin = ArRenderSceneScale_Begin(
-      s_device, *viewport, g_settings.render_resolution);
+      s_device, *viewport, g_settings.render_resolution,
+      diorama && g_settings.scene_supersampling,
+      diorama ? g_settings.scene_antialiasing : kSceneAntiAliasing_Off);
   if (begin == kArRenderTargetBegin_Ready)
     (void)ArRenderSceneScale_Viewport(s_device, &scene_view);
   bool ok = begin != kArRenderTargetBegin_StateLost &&

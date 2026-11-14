@@ -43,6 +43,10 @@ typedef struct {
 
 #include "shaders/blur_frag.h"
 #include "shaders/crt_frag.h"
+#include "shaders/scene_resolve_frag.h"
+#include "shaders/smaa_edges_frag.h"
+#include "shaders/smaa_weights_frag.h"
+#include "shaders/smaa_blend_frag.h"
 #include "shaders/dof_edge_frag.h"
 #include "shaders/rim_frag.h"
 #include "shaders/sim3d_billboard_rim_frag.h"
@@ -78,6 +82,24 @@ typedef struct ShaderCase {
   Uint32 uniforms;
 } ShaderCase;
 static const ShaderCase kShaders[] = {
+    {"smaa_edges",
+     {kSmaaEdgesFragMSL, kSmaaEdgesFragMSLSize, kSmaaEdgesFragSPV, kSmaaEdgesFragSPVSize,
+      kSmaaEdgesFragDXIL, kSmaaEdgesFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1},
+    {"smaa_weights",
+     {kSmaaWeightsFragMSL, kSmaaWeightsFragMSLSize, kSmaaWeightsFragSPV, kSmaaWeightsFragSPVSize,
+      kSmaaWeightsFragDXIL, kSmaaWeightsFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1},
+    {"smaa_blend",
+     {kSmaaBlendFragMSL, kSmaaBlendFragMSLSize, kSmaaBlendFragSPV, kSmaaBlendFragSPVSize,
+      kSmaaBlendFragDXIL, kSmaaBlendFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1},
+    {"scene_resolve_fragment",
+     {kSceneResolveFragMSL, kSceneResolveFragMSLSize, kSceneResolveFragSPV,
+      kSceneResolveFragSPVSize, kSceneResolveFragDXIL, kSceneResolveFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,
+     1,
+     1},
     {"sim3d_shadow_batch_vertex",
      {kSim3dShadowBatchVertMSL, kSim3dShadowBatchVertMSLSize, kSim3dShadowBatchVertSPV,
       kSim3dShadowBatchVertSPVSize, kSim3dShadowBatchVertDXIL, kSim3dShadowBatchVertDXILSize},

@@ -215,8 +215,15 @@ static bool ValidDrawState(const ArRenderDrawState *state,
   if (!state) return true;
   const ArRenderDrawStateFlags known =
       kArRenderDrawState_Tint | kArRenderDrawState_Blend |
-      kArRenderDrawState_Address | kArRenderDrawState_Filter;
+      kArRenderDrawState_Address | kArRenderDrawState_Filter |
+      kArRenderDrawState_SceneResolve;
   if (state->flags & ~known) return false;
+  if ((state->flags & kArRenderDrawState_SceneResolve) &&
+      (geometry || !textured ||
+       (state->scene_resolve != kArRenderSceneResolve_Fxaa &&
+        state->scene_resolve != kArRenderSceneResolve_Downsample &&
+        state->scene_resolve != kArRenderSceneResolve_Smaa)))
+    return false;
   if ((state->flags & kArRenderDrawState_Filter) &&
       (!textured || (state->filter != kArRenderFilter_Nearest &&
                      state->filter != kArRenderFilter_Linear)))

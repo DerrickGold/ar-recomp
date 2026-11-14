@@ -1277,7 +1277,7 @@ retry_projection:;
   if (!ArRenderSceneScale_Resolve(device, &output_viewport, kArRenderFilter_Linear)) {
     DioramaPerformance_End(presentation_performance);
     DioramaPerformance_PresentCompleted();
-    SessionFatal_Request("The renderer could not upscale the Diorama scene.");
+    SessionFatal_Request("The renderer could not scale the Diorama scene.");
     return;
   }
   /* Flat HUD mode leaves BG3 in the same RemoveFromGame capture used by flat

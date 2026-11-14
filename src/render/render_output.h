@@ -64,7 +64,8 @@ void ArRenderOutputFrame_Abort(ArRenderOutputFrame *frame);
 /* The game scene may render into a reusable smaller target. Resolve before
  * drawing flat overlays. The caller cancels any scope left by a failed scene. */
 ArRenderTargetBeginResult ArRenderSceneScale_Begin(
-    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset);
+    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset,
+    bool allow_supersampling, SceneAntiAliasing antialiasing);
 bool ArRenderSceneScale_Viewport(ArRenderDevice *device, ArRenderRectI *viewport);
 bool ArRenderSceneScale_Resolve(
     ArRenderDevice *device, ArRenderRectI *viewport, ArRenderFilter filter);

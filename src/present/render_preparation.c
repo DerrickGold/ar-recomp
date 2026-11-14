@@ -145,6 +145,18 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
     if (ok && ProbeBlend(device, sample, kArRenderBlendMode_AlphaAccumulate) &&
         ProbeBlend(device, sample, kArRenderBlendMode_AddPremultiplied))
       *supported |= kRenderFeature_SimSoftShadows;
+    if (ok) {
+      const ArRenderRectF source = {0, 0, 1, 1};
+      const ArRenderRectF destination = {0, 0, 8, 8};
+      const ArRenderDrawState resolve = {
+        .flags = kArRenderDrawState_SceneResolve | kArRenderDrawState_Filter |
+                 kArRenderDrawState_Blend,
+        .filter = kArRenderFilter_Linear,
+        .blend = kArRenderBlendMode_Opaque,
+        .scene_resolve = kArRenderSceneResolve_Fxaa,
+      };
+      (void)ArRenderDevice_DrawTextureWithState(device, sample, &source, &destination, &resolve);
+    }
     if (!ArRenderDevice_EndTarget(device, &state)) ok = false;
   }
   ArRenderDevice_DestroyTexture(device, sample);

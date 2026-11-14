@@ -2,6 +2,7 @@
 #include "app/performance_metrics.h"
 #include "platform/sdl/gpu_texture_upload_layout.h"
 #include "platform/sdl/metal_drawable_sdl.h"
+#include "shaders/scene_resolve_frag.h"
 
 #include <limits.h>
 #include <stddef.h>
@@ -595,6 +596,47 @@ static bool RestoreTextureDrawState(SDL_Texture *texture,
   return success;
 }
 
+static bool BindSceneResolve(ArSdlRenderBackend *backend, SDL_Texture *texture,
+    const SDL_FRect *source, const SDL_FRect *destination, ArRenderSceneResolve mode) {
+  if (!backend->gpu_device || !source || !destination ||
+      source->w < 1 || source->h < 1 || destination->w <= 0 || destination->h <= 0)
+    return false;
+  if (!backend->scene_resolve_attempted) {
+    static const GpuShaderBlobs blobs = {
+      kSceneResolveFragMSL, kSceneResolveFragMSLSize,
+      kSceneResolveFragSPV, kSceneResolveFragSPVSize,
+      kSceneResolveFragDXIL, kSceneResolveFragDXILSize,
+    };
+    backend->scene_resolve_attempted = true;
+    SDL_GPUShader *shader = ArSdlRenderBackend_GetFragmentShader(
+        backend, &blobs, "scene resolve", 1, 1);
+    if (shader) {
+      const SDL_GPURenderStateCreateInfo info = {.fragment_shader = shader};
+      backend->scene_resolve = SDL_CreateGPURenderState(backend->renderer, &info);
+    }
+    if (!backend->scene_resolve)
+      SDL_Log("[render] scene resolve shader unavailable (%s)", SDL_GetError());
+  }
+  float width, height;
+  if (!backend->scene_resolve || !SDL_GetTextureSize(texture, &width, &height))
+    return false;
+  const struct {
+    float uv_min[2], uv_max[2], texel[2], footprint[2];
+    int32_t downsample;
+    int32_t padding[3];
+  } uniforms = {
+    .uv_min = {(source->x + .5f) / width, (source->y + .5f) / height},
+    .uv_max = {(source->x + source->w - .5f) / width,
+               (source->y + source->h - .5f) / height},
+    .texel = {1.f / width, 1.f / height},
+    .footprint = {source->w / destination->w, source->h / destination->h},
+    .downsample = mode == kArRenderSceneResolve_Downsample,
+  };
+  return SDL_SetGPURenderStateFragmentUniforms(
+      backend->scene_resolve, 0, &uniforms, sizeof(uniforms)) &&
+      SDL_SetGPURenderState(backend->renderer, backend->scene_resolve);
+}
+
 static bool DrawTexture(void *context, ArRenderTexture texture,
                         const ArRenderRectF *source,
                         const ArRenderRectF *destination,
@@ -624,12 +666,22 @@ static bool DrawTexture(void *context, ArRenderTexture texture,
       backend->renderer, state, &saved_address);
   const bool applied = address_applied &&
       ApplyTextureDrawState(native_texture, state, &saved);
-  const bool rendered = applied && SDL_RenderTexture(
-      backend->renderer, native_texture, source_rect, destination_rect);
+  const bool resolve = applied && (state->flags & kArRenderDrawState_SceneResolve);
+  ArRenderTargetBeginResult smaa = kArRenderTargetBegin_Omitted;
+  if (resolve && state->scene_resolve == kArRenderSceneResolve_Smaa)
+    smaa = ArSdlSmaa_Draw(backend, native_texture, source_rect, destination_rect);
+  const bool fallback = applied && smaa == kArRenderTargetBegin_Omitted;
+  const ArRenderSceneResolve single_pass = state->scene_resolve == kArRenderSceneResolve_Smaa
+      ? kArRenderSceneResolve_Fxaa : state->scene_resolve;
+  const bool resolve_bound = fallback && resolve &&
+      BindSceneResolve(backend, native_texture, source_rect, destination_rect, single_pass);
+  const bool rendered = smaa == kArRenderTargetBegin_Ready ||
+      (fallback && SDL_RenderTexture(backend->renderer, native_texture, source_rect, destination_rect));
+  const bool resolve_restored = !resolve_bound || SDL_SetGPURenderState(backend->renderer, NULL);
   const bool restored = RestoreTextureDrawState(native_texture, &saved);
   const bool address_restored = RestoreTextureAddressState(
       backend->renderer, &saved_address);
-  return rendered && restored && address_restored;
+  return rendered && restored && address_restored && resolve_restored;
 }
 
 static bool DrawGeometry(void *context, ArRenderTexture texture,
@@ -867,7 +919,12 @@ SDL_GPUShader *ArSdlRenderBackend_FragmentShader(ArRenderDevice *device,
     Uint32 samplers, Uint32 uniform_buffers) {
   if (!device || device->ops != &kSdlRenderOps || !device->context || !blobs)
     return NULL;
-  ArSdlRenderBackend *backend = device->context;
+  return ArSdlRenderBackend_GetFragmentShader(device->context, blobs, label, samplers, uniform_buffers);
+}
+
+SDL_GPUShader *ArSdlRenderBackend_GetFragmentShader(ArSdlRenderBackend *backend,
+    const GpuShaderBlobs *blobs, const char *label,
+    Uint32 samplers, Uint32 uniform_buffers) {
   if (!backend->gpu_device) return NULL;
   for (ArSdlFragmentShaderEntry *entry = backend->fragment_shaders; entry; entry = entry->next)
     if (entry->blobs == blobs && entry->samplers == samplers &&
@@ -921,6 +978,12 @@ static bool FinishPreparation(void *context) {
       for (unsigned s = 0; ok && s < 3; ++s)
         ok = ArRenderDevice_DrawGeometryWithState(&device,
             ArSdlRenderBackend_BorrowTexture(s < 2 ? sample[s] : NULL), vertices, 3, indices, 3, &state);
+    }
+    if (ok && SDL_SetTextureBlendMode(sample[0], SDL_BLENDMODE_NONE) &&
+        SDL_SetTextureScaleMode(sample[0], SDL_SCALEMODE_LINEAR)) {
+      // Compile all three passes with scratch targets before a player enables SMAA.
+      const SDL_FRect rect = {0, 0, 1, 1};
+      ok = ArSdlSmaa_Draw(backend, sample[0], &rect, &rect) != kArRenderTargetBegin_StateLost;
     }
     if (ok) ok = ArSdlRenderBackend_SubmitPending(&device);
     /* GPU blits have their own SDL-owned pipeline cache, separate from the
@@ -1198,6 +1261,8 @@ void ArSdlRenderBackend_Destroy(ArRenderDevice *device) {
   SDL_GPUDevice *gpu = backend->owns_gpu_device ? backend->gpu_device : NULL;
   SDL_Window *window = backend->output_window;
   if (backend->output_target) SDL_DestroyTexture(backend->output_target);
+  if (backend->scene_resolve) SDL_DestroyGPURenderState(backend->scene_resolve);
+  ArSdlSmaa_Reset(backend);
   /* No more draw states may be used after backend teardown. */
   while (backend->fragment_shaders) {
     ArSdlFragmentShaderEntry *entry = backend->fragment_shaders;

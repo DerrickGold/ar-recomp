@@ -86,7 +86,7 @@ static void TestRenderPresetsAndActionCap(void) {
   const int widths[] = {960, 1280, 1152};
   for (unsigned i = 0; i < sizeof(images) / sizeof(images[0]); ++i) {
     const ArRenderExtentI extent =
-        ArPresentationLayout_RenderExtent(images[i], kRenderResolution_720p);
+        ArPresentationLayout_RenderExtent(images[i], kRenderResolution_720p, false);
     assert(extent.width == widths[i] && extent.height == 720);
   }
   FrameSlot slot = {.visible_width = 342, .snes_height = 224,
@@ -100,8 +100,15 @@ static void TestRenderPresetsAndActionCap(void) {
   aspect = FrameSlot_Aspect(&slot);
   assert(aspect.width == 256 * 7 && aspect.height == 224 * 6);
   const ArRenderExtentI smaller = ArPresentationLayout_RenderExtent(
-      (ArRenderRectI){0,0,640,480}, kRenderResolution_720p);
+      (ArRenderRectI){0,0,640,480}, kRenderResolution_720p, false);
   assert(smaller.width == 640 && smaller.height == 480);
+  const ArRenderRectI deck = {0,0,1280,800};
+  const ArRenderExtentI supersampled =
+      ArPresentationLayout_RenderExtent(deck, kRenderResolution_1080p, true);
+  assert(supersampled.width == 1728 && supersampled.height == 1080);
+  const ArRenderExtentI native =
+      ArPresentationLayout_RenderExtent(deck, kRenderResolution_Native, true);
+  assert(native.width == 1280 && native.height == 800);
   for (int crt = 0; crt <= 1; ++crt) {
     ActRaiserAutoCanvas wide;
     assert(DisplayGeometry_ResolveAutoCanvas(3440, 1440, crt, &wide));

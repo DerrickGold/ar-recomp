@@ -47,17 +47,22 @@ static ArRenderRectI EndCrtPost(int scan_columns, int scan_lines,
   return result;
 }
 
-static bool BeginSceneResolution(ArRenderRectI viewport) {
-  if (g_settings.render_resolution == kRenderResolution_Native) return true;
+static bool BeginSceneResolution(ArRenderRectI viewport, bool scene_3d) {
+  const SceneAntiAliasing aa = scene_3d
+      ? g_settings.scene_antialiasing : kSceneAntiAliasing_Off;
+  if (g_settings.render_resolution == kRenderResolution_Native &&
+      aa == kSceneAntiAliasing_Off) return true;
   const ArRenderTargetBeginResult result = ArRenderSceneScale_Begin(
-      &g_render_device, viewport, g_settings.render_resolution);
+      &g_render_device, viewport, g_settings.render_resolution,
+      scene_3d && g_settings.scene_supersampling, aa);
   if (result != kArRenderTargetBegin_StateLost) return true;
   SessionFatal_Request("The renderer could not restore its output while setting up render resolution.");
   return false;
 }
 
 static void EndSceneResolution(void) {
-  if (g_settings.render_resolution != kRenderResolution_Native &&
+  if ((g_settings.render_resolution != kRenderResolution_Native ||
+       g_settings.scene_antialiasing != kSceneAntiAliasing_Off) &&
       !ArRenderSceneScale_Cancel(&g_render_device))
     SessionFatal_Request("The renderer could not restore its output after drawing the game scene (%s).",
                          ArRenderDevice_LastError(&g_render_device));
@@ -108,7 +113,7 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
     (void)BeginCrtPost();
     if (SessionFatal_Requested()) return image;
     const bool scene_drawn = blank ? PresentBlankScene() :
-        BeginSceneResolution(image) && PresentAuthenticScene(slot, image);
+        BeginSceneResolution(image, false) && PresentAuthenticScene(slot, image);
     EndSceneResolution();
     if (!scene_drawn || SessionFatal_Requested()) {
       if (!SessionFatal_Requested()) RequestComparisonDrawFailure("native view");
@@ -128,7 +133,10 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
         aspect.height ? aspect.height : FrameSlot_VisibleHeight(slot), &output_size);
     (void)BeginCrtPost();
     if (SessionFatal_Requested()) return image;
-    if (blank || BeginSceneResolution(image)) PresentCompositeScene(slot, alpha);
+    const bool scene_3d = !blank &&
+        (g_settings.scene_supersampling || g_settings.scene_antialiasing) &&
+        PresentSceneUses3D(slot);
+    if (blank || BeginSceneResolution(image, scene_3d)) PresentCompositeScene(slot, alpha);
     EndSceneResolution();
     if (!blank && !SessionFatal_Requested()) PresentSimMenu_Draw(slot, image);
     if (SessionFatal_Requested()) {

@@ -70,7 +70,8 @@ static void TestScaledScene(void) {
 
   const ArRenderRectI image = {220, 0, 1280, 720};
   const ArRenderColorF black = {0, 0, 0, 1}, red = {1, 0, 0, 1};
-  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_480p) ==
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_480p,
+                                false, kSceneAntiAliasing_Off) ==
          kArRenderTargetBegin_Ready);
   ArRenderOutputFrame frame;
   assert(ArRenderOutputFrame_BeginAspectFit(&device, false, 16, 9, black, red, &frame));

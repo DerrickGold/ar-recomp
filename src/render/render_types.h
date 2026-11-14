@@ -141,7 +141,15 @@ enum {
    * sample a pixel-art texture smoothly where it is drawn magnified and
    * moved by sub-texel amounts. Meaningful only for textured submissions. */
   kArRenderDrawState_Filter = UINT32_C(1) << 3,
+  /* Apply a scene resolve filter to this texture quad. */
+  kArRenderDrawState_SceneResolve = UINT32_C(1) << 4,
 };
+
+typedef enum ArRenderSceneResolve {
+  kArRenderSceneResolve_Fxaa = 0,
+  kArRenderSceneResolve_Downsample,
+  kArRenderSceneResolve_Smaa,
+} ArRenderSceneResolve;
 
 typedef struct ArRenderDrawState {
   ArRenderDrawStateFlags flags;
@@ -150,6 +158,7 @@ typedef struct ArRenderDrawState {
   ArRenderTextureAddressMode address_u;
   ArRenderTextureAddressMode address_v;
   ArRenderFilter filter;
+  ArRenderSceneResolve scene_resolve;
 } ArRenderDrawState;
 
 typedef struct ArRenderTextureDesc {

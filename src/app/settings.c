@@ -1418,6 +1418,18 @@ const SettingDesc g_setting_descs[] = {
     (const char *const[]){"Native", "480p", "540p", "720p", "800p", "900p",
                          "1080p", "1440p", "2160p"},
     kRenderResolution_Count, NULL, NULL, NULL, NULL, .modern_env = true },
+  BOOL_SETTING_MODERN(scene_supersampling, "AR_SCENE_SUPERSAMPLING", "3D supersampling",
+    "Allow a fixed Render resolution above the viewport size for 3D scenes. "
+    "Downsampling smooths edges and uses more GPU time. Native follows the viewport.",
+    kSettingCat_Display, 0, false, NULL, NULL),
+  { "scene_antialiasing", "AR_SCENE_ANTIALIASING", "3D anti-aliasing",
+    "Smooth jagged edges in 3D scenes. FXAA is lighter and SMAA can preserve more detail. "
+    "Active supersampling uses its own filter.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Display,
+    &g_settings.scene_antialiasing, kSceneAntiAliasing_Off,
+    kSceneAntiAliasing_Off, kSceneAntiAliasing_Count-1, 1, false,
+    (const char *const[]){"Off", "FXAA", "SMAA"}, kSceneAntiAliasing_Count,
+    NULL, NULL, NULL, NULL, .modern_env = true },
   { "pixel_aspect", "AR_ASPECT_PAR", "Pixel aspect",
     "Use the original 4:3 CRT pixel stretch or square output pixels.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,

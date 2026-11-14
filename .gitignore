@@ -138,6 +138,7 @@ third_party/*
 !third_party/stb/
 !third_party/unicode/
 !third_party/sheenbidi/
+!third_party/smaa/
 third_party/unicode/*
 !third_party/unicode/NOTICE
 !third_party/unicode/utf8proc-LICENSE.md

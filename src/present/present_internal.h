@@ -1,5 +1,6 @@
 #ifndef AR_PRESENT_INTERNAL_H
 #define AR_PRESENT_INTERNAL_H
+
 /* Private scene/host-UI stages shared by present.c and present_frame.c.
  * Feature renderers declare their own entry points in their owning folders.
  * Every game-state decision arrives through the completed FrameSlot. */
@@ -10,6 +11,7 @@
 #include "render/presentation_options.h"
 #include "render/render_types.h"
 
+bool PresentSceneUses3D(const FrameSlot *slot);
 void PresentCompositeScene(const FrameSlot *slot, float alpha);
 bool PresentBlankScene(void);
 bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport);

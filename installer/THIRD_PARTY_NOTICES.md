@@ -32,6 +32,11 @@ resolution and script itemization, Copyright (C) 2014–2026 Muhammad Tayyab
 Akram, under the Apache License 2.0. Its source and license ship under
 `utils/third_party/sheenbidi` and `utils/licenses/SheenBidi`.
 
+## SMAA
+
+3D anti-aliasing uses the SMAA reference shader and lookup tables. The source
+and license ship under `utils/third_party/smaa`.
+
 ## Zig compiler
 
 Distributions bundle the pinned Zig compiler under `utils/tools/toolchain` to

@@ -9,6 +9,7 @@
 
 #include "platform/sdl/render_sdl_interop.h"
 #include "platform/sdl/gpu_shader_blob.h"
+#include "platform/sdl/smaa_sdl.h"
 
 typedef struct ArSdlRenderBackend {
   SDL_Renderer *renderer;
@@ -34,6 +35,9 @@ typedef struct ArSdlRenderBackend {
   bool present_trace_enabled;
   ArSdlPresentTrace present_trace;
   struct ArSdlFragmentShaderEntry *fragment_shaders;
+  SDL_GPURenderState *scene_resolve;
+  bool scene_resolve_attempted;
+  ArSdlSmaa smaa;
   /* One scoped external GPU batch. Its owner snapshots draw state and drains
    * before ordinary draws, resource mutation, target changes or presentation.
    * A failed drain must abandon its queued work so cleanup can still proceed. */
@@ -48,6 +52,9 @@ typedef struct ArSdlRenderBackend {
  * can select a different effect's old pipeline. Release only at backend
  * teardown, after all effect states have been reset, never in an effect. */
 SDL_GPUShader *ArSdlRenderBackend_FragmentShader(ArRenderDevice *device,
+    const GpuShaderBlobs *blobs, const char *label,
+    Uint32 samplers, Uint32 uniform_buffers);
+SDL_GPUShader *ArSdlRenderBackend_GetFragmentShader(ArSdlRenderBackend *backend,
     const GpuShaderBlobs *blobs, const char *label,
     Uint32 samplers, Uint32 uniform_buffers);
 bool ArSdlRenderBackend_WindowOutputSize(const ArRenderDevice *device,

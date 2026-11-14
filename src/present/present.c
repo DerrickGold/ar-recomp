@@ -450,6 +450,17 @@ bool PresentBlankScene(void) {
   return true;
 }
 
+bool PresentSceneUses3D(const FrameSlot *slot) {
+  const SimViewKind view = Sim3D_PresentationDecision(&slot->sim).view;
+  if (view == kSimView_Enhanced)
+    return (slot->sim.effective_features & kSimFeature_GroundProjection) != 0;
+  if (view == kSimView_WorldNavigation)
+    return !((slot->sim.world_travel.imported || slot->sim.world_travel.turning) &&
+             slot->sim.world_travel.flat);
+  return slot->diorama_active || view == kSimView_SkyPalace ||
+      PresentChurch_Active(slot);
+}
+
 void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   if (!ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_texture)) return;
@@ -581,7 +592,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   PresentActionHeat_End(&g_render_device, slot, output_viewport);
   if (SessionFatal_Requested()) return;
   if (!ArRenderSceneScale_Resolve(&g_render_device, &output_viewport, kArRenderFilter_Nearest)) {
-    SessionFatal_Request("The renderer could not upscale the game scene.");
+    SessionFatal_Request("The renderer could not scale the game scene.");
     return;
   }
   PresentHdReplacements_DrawScreen(&g_render_device, slot, output_viewport);

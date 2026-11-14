@@ -1023,6 +1023,85 @@ static void TestSimCloudEffect(ArRenderDevice *device, SDL_Renderer *renderer) {
   SimCloudEffectBackend_Reset(device);
 }
 
+static void TestSceneResolve(ArRenderDevice *device, SDL_Renderer *renderer) {
+  const ArRenderTextureDesc desc = {
+    .width = 32, .height = 32, .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming, .filter = kArRenderFilter_Linear,
+    .blend = kArRenderBlendMode_Opaque,
+  };
+  ArRenderTexture texture;
+  const bool created = ArRenderDevice_CreateTexture(device, &desc, &texture);
+  CHECK(created);
+  if (!created) return;
+  uint32_t pixels[32 * 32];
+  for (int y = 0; y < 32; ++y)
+    for (int x = 0; x < 32; ++x)
+      pixels[y * 32 + x] = x >= y ? UINT32_MAX : 0xff000000;
+  CHECK(ArRenderDevice_UpdateTexture(device, texture, NULL, pixels, 32 * 4));
+  const ArRenderRectF source = {0, 0, 32, 32};
+  unsigned fxaa_diagonal = 0;
+  const struct {
+    ArRenderSceneResolve mode;
+    ArRenderRectF source;
+    ArRenderRectF destination;
+  } cases[] = {
+    {kArRenderSceneResolve_Fxaa, {0, 0, 32, 32}, {0, 0, 32, 32}},
+    {kArRenderSceneResolve_Downsample, {0, 0, 32, 32}, {0, 0, 8, 8}},
+    {kArRenderSceneResolve_Smaa, {0, 0, 32, 32}, {0, 0, 32, 32}},
+    {kArRenderSceneResolve_Smaa, {8, 8, 16, 16}, {0, 0, 32, 32}},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    const int size = (int)cases[i].destination.w;
+    const ArRenderDrawState state = {
+      .flags = kArRenderDrawState_Filter | kArRenderDrawState_SceneResolve,
+      .filter = kArRenderFilter_Linear, .scene_resolve = cases[i].mode,
+    };
+    CHECK(ArRenderDevice_DrawTextureWithState(
+        device, texture, &cases[i].source, &cases[i].destination, &state));
+    SDL_Surface *result = SDL_RenderReadPixels(renderer, NULL);
+    CHECK(result);
+    if (result) {
+      Uint8 r, g, b, a;
+      CHECK(SDL_ReadSurfacePixel(result, size / 2, size / 2, &r, &g, &b, &a) &&
+            r > 128 && r < 248 && r == g && r == b && a == 255);
+      if (cases[i].mode == kArRenderSceneResolve_Fxaa) fxaa_diagonal = r;
+      if (cases[i].mode == kArRenderSceneResolve_Smaa) {
+        const ArSdlRenderBackend *backend = device->context;
+        CHECK(backend->smaa.width == (int)cases[i].source.w && backend->smaa.blend_pass);
+        if (cases[i].source.w == 32) CHECK(r != fxaa_diagonal);
+      }
+      CHECK(SDL_ReadSurfacePixel(result, size - 1, 0, &r, &g, &b, &a) && r == 255);
+      SDL_DestroySurface(result);
+    }
+  }
+  const ArRenderRectF destination = {0, 0, 32, 32};
+  ArSdlRenderBackend *backend = device->context;
+  const bool smaa_unavailable = backend->smaa.unavailable;
+  backend->smaa.unavailable = true;
+  const ArRenderDrawState fallback = {
+    .flags = kArRenderDrawState_Filter | kArRenderDrawState_SceneResolve,
+    .filter = kArRenderFilter_Linear, .scene_resolve = kArRenderSceneResolve_Smaa,
+  };
+  CHECK(ArRenderDevice_DrawTextureWithState(device, texture, &source, &destination, &fallback));
+  backend->smaa.unavailable = smaa_unavailable;
+  SDL_Surface *filtered = SDL_RenderReadPixels(renderer, NULL);
+  CHECK(filtered);
+  if (filtered) {
+    Uint8 r, g, b, a;
+    CHECK(SDL_ReadSurfacePixel(filtered, 16, 16, &r, &g, &b, &a) && r == fxaa_diagonal);
+    SDL_DestroySurface(filtered);
+  }
+  CHECK(ArRenderDevice_DrawTexture(device, texture, &source, &destination));
+  SDL_Surface *plain = SDL_RenderReadPixels(renderer, NULL);
+  CHECK(plain);
+  if (plain) {
+    Uint8 r, g, b, a;
+    CHECK(SDL_ReadSurfacePixel(plain, 16, 16, &r, &g, &b, &a) && r == 255 && a == 255);
+    SDL_DestroySurface(plain);
+  }
+  ArRenderDevice_DestroyTexture(device, texture);
+}
+
 int main(void) {
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     fprintf(stderr, "render_effect_backends_sdl_test: SKIP - %s\n",
@@ -1045,6 +1124,7 @@ int main(void) {
   ArRenderDevice device = {0};
   ArSdlRenderBackend backend = {0};
   CHECK(ArSdlRenderBackend_Bind(&device, &backend, renderer));
+  TestSceneResolve(&device, renderer);
   TestDioramaEffects(&device);
   TestNativeBloom(&device,renderer);
   TestRimExposure(&device, renderer);
@@ -1073,6 +1153,7 @@ int main(void) {
   CHECK(ArSdlRenderBackend_CreateForWindow(&device, window, NULL));
   if (ArRenderDevice_IsReady(&device)) {
     renderer = ArSdlRenderBackend_Renderer(&device);
+    TestSceneResolve(&device, renderer);
     TestDioramaEffects(&device);
   TestNativeBloom(&device,renderer);
     TestRimExposure(&device, renderer);

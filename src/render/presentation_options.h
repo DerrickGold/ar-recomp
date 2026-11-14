@@ -40,6 +40,13 @@ typedef enum {
   kRenderResolution_Count,
 } RenderResolution;
 
+typedef enum {
+  kSceneAntiAliasing_Off = 0,
+  kSceneAntiAliasing_Fxaa,
+  kSceneAntiAliasing_Smaa,
+  kSceneAntiAliasing_Count,
+} SceneAntiAliasing;
+
 /* Persisted corner order keeps the original inset position as the default. */
 typedef enum {
   kPictureInPicture_BottomRight = 0,

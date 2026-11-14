@@ -655,14 +655,17 @@ static void TestSceneResolution(void) {
   ArRenderDevice device = {0};
   assert(ArRenderDevice_Init(&device, &kFakeOps, &backend,
       (ArRenderCapabilities){.flags = kArRenderCapability_RenderTargets |
-                                      kArRenderCapability_ScopedRenderTargets}));
+                                      kArRenderCapability_ScopedRenderTargets |
+                                      kArRenderCapability_CustomShaders}));
   const ArRenderRectI image = {440, 0, 2560, 1440};
   const ArRenderTexture parent = {41};
   backend.target_state.target = parent;
-  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_Native) ==
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_Native,
+                                false, kSceneAntiAliasing_Off) ==
          kArRenderTargetBegin_Omitted);
   assert(backend.create_count == 0);
-  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_720p) ==
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_720p,
+                                false, kSceneAntiAliasing_Off) ==
          kArRenderTargetBegin_Ready);
   assert(backend.last_desc.width == 1280 && backend.last_desc.height == 720);
   assert(backend.target_state.target.value != parent.value);
@@ -673,14 +676,44 @@ static void TestSceneResolution(void) {
   assert(!backend.target_state.viewport_set && backend.clear_count == 1);
   assert(backend.last_source.w == 1280 && backend.last_source.h == 720);
   assert(backend.last_destination.w == 2560 && backend.last_destination.h == 1440);
+  assert(backend.last_destination.x == 440);
   assert(backend.last_draw_state.filter == kArRenderFilter_Nearest);
-  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_720p) ==
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_720p,
+                                false, kSceneAntiAliasing_Off) ==
          kArRenderTargetBegin_Ready);
   assert(backend.create_count == 1);
   assert(ArRenderSceneScale_Cancel(&device));
   assert(backend.target_state.target.value == parent.value && backend.draw_texture_count == 1);
   ArRenderSceneScale_Reset(&device);
   assert(backend.destroy_count == 1);
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_2160p,
+                                true, kSceneAntiAliasing_Smaa) == kArRenderTargetBegin_Ready);
+  assert(backend.last_desc.width == 3840 && backend.last_desc.height == 2160);
+  assert(ArRenderSceneScale_Viewport(&device, &scene));
+  assert(ArRenderSceneScale_Resolve(&device, &scene, kArRenderFilter_Linear));
+  assert(backend.last_draw_state.flags & kArRenderDrawState_SceneResolve);
+  assert(backend.last_draw_state.scene_resolve == kArRenderSceneResolve_Downsample);
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_Native,
+                                false, kSceneAntiAliasing_Fxaa) == kArRenderTargetBegin_Ready);
+  assert(ArRenderSceneScale_Viewport(&device, &scene));
+  assert(ArRenderSceneScale_Resolve(&device, &scene, kArRenderFilter_Linear));
+  assert(backend.last_draw_state.flags & kArRenderDrawState_SceneResolve);
+  assert(backend.last_draw_state.scene_resolve == kArRenderSceneResolve_Fxaa);
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_Native,
+                                false, kSceneAntiAliasing_Smaa) == kArRenderTargetBegin_Ready);
+  assert(ArRenderSceneScale_Viewport(&device, &scene));
+  assert(ArRenderSceneScale_Resolve(&device, &scene, kArRenderFilter_Linear));
+  assert(backend.last_draw_state.scene_resolve == kArRenderSceneResolve_Smaa);
+  assert(backend.target_state.target.value == parent.value);
+  const int clears = backend.clear_count;
+  const ArRenderRectI full = {0, 0, 3440, 1440};
+  assert(ArRenderSceneScale_Begin(&device, full, kRenderResolution_Native,
+                                false, kSceneAntiAliasing_Smaa) == kArRenderTargetBegin_Ready);
+  assert(ArRenderSceneScale_Viewport(&device, &scene));
+  assert(ArRenderSceneScale_Resolve(&device, &scene, kArRenderFilter_Linear));
+  assert(backend.clear_count == clears);
+  assert(backend.last_draw_state.blend == kArRenderBlendMode_Opaque);
+  ArRenderSceneScale_Reset(&device);
 }
 
 static void TestDirtyUploadWorksWithoutANativeRenderer(void) {

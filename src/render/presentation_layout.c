@@ -1,5 +1,6 @@
 #include "presentation_layout.h"
 
+#include <limits.h>
 #include <stdint.h>
 
 /* SNES scene/capture dimensions fit in 16 bits. Bounding dimensions here also
@@ -105,12 +106,15 @@ int ArPresentationLayout_RenderHeight(int preset) {
   return preset >= 0 && preset < kRenderResolution_Count ? heights[preset] : 0;
 }
 
-ArRenderExtentI ArPresentationLayout_RenderExtent(ArRenderRectI viewport, int preset) {
+ArRenderExtentI ArPresentationLayout_RenderExtent(ArRenderRectI viewport, int preset,
+                                                 bool allow_supersampling) {
   const int height = ArPresentationLayout_RenderHeight(preset);
-  if (viewport.w <= 0 || height <= 0 || viewport.h <= height)
+  if (viewport.w <= 0 || viewport.h <= 0 || height <= 0 ||
+      (!allow_supersampling && viewport.h <= height))
     return (ArRenderExtentI){viewport.w, viewport.h};
-  const int width = (int)(((int64_t)viewport.w * height + viewport.h / 2) / viewport.h);
-  return (ArRenderExtentI){width > 0 ? width : 1, height};
+  const int64_t width = ((int64_t)viewport.w * height + viewport.h / 2) / viewport.h;
+  if (width > INT_MAX) return (ArRenderExtentI){viewport.w, viewport.h};
+  return (ArRenderExtentI){width > 0 ? (int)width : 1, height};
 }
 
 ArRenderRectI ArPresentationLayout_ResolveViewport(

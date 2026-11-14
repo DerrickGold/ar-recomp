@@ -10,6 +10,7 @@ static struct {
   ArRenderExtentI extent;
   ArRenderRectI destination;
   ArRenderTargetState parent;
+  SceneAntiAliasing antialiasing;
 } s_scene_scale;
 
 static void ResetFrame(ArRenderOutputFrame *frame) {
@@ -176,11 +177,24 @@ void ArRenderOutputFrame_Abort(ArRenderOutputFrame *frame) {
 }
 
 ArRenderTargetBeginResult ArRenderSceneScale_Begin(
-    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset) {
-  const ArRenderExtentI extent = ArPresentationLayout_RenderExtent(destination, preset);
-  if (extent.width <= 0 || extent.height <= 0 || extent.height == destination.h)
-    return kArRenderTargetBegin_Omitted;
+    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset,
+    bool allow_supersampling, SceneAntiAliasing antialiasing) {
   if (s_scene_scale.parent.valid) return kArRenderTargetBegin_StateLost;
+  ArRenderExtentI extent =
+      ArPresentationLayout_RenderExtent(destination, preset, allow_supersampling);
+  const ArRenderCapabilities *caps = ArRenderDevice_Capabilities(device);
+  if (!caps || extent.width <= 0 || extent.height <= 0)
+    return kArRenderTargetBegin_Omitted;
+  if (extent.height > destination.h &&
+      ((caps->maximum_render_target_width > 0 &&
+        extent.width > caps->maximum_render_target_width) ||
+       (caps->maximum_render_target_height > 0 &&
+        extent.height > caps->maximum_render_target_height)))
+    extent = (ArRenderExtentI){destination.w, destination.h};
+  if (!ArRenderCapabilities_Has(caps, kArRenderCapability_CustomShaders))
+    antialiasing = kSceneAntiAliasing_Off;
+  if (antialiasing == kSceneAntiAliasing_Off && extent.height == destination.h)
+    return kArRenderTargetBegin_Omitted;
   if (s_scene_scale.device != device || !ArRenderTexture_IsValid(s_scene_scale.texture) ||
       extent.width != s_scene_scale.extent.width ||
       extent.height != s_scene_scale.extent.height) {
@@ -196,6 +210,7 @@ ArRenderTargetBeginResult ArRenderSceneScale_Begin(
   }
   s_scene_scale.device = device;
   s_scene_scale.destination = destination;
+  s_scene_scale.antialiasing = antialiasing;
   return ArRenderDevice_BeginTarget(device, s_scene_scale.texture, &s_scene_scale.parent);
 }
 
@@ -218,15 +233,33 @@ bool ArRenderSceneScale_Resolve(
   const ArRenderRectF source = {viewport->x, viewport->y, viewport->w, viewport->h};
   if (!ArRenderSceneScale_Cancel(device)) return false;
   *viewport = s_scene_scale.destination;
-  const ArRenderColorF black = {0, 0, 0, 1};
-  ArRenderOutputFrame output;
-  if (!ArRenderOutputFrame_Begin(device, *viewport, black, black, &output))
+  int width, height;
+  if (!ArRenderOutput_UseFull(device, &width, &height) ||
+      !ValidViewport(*viewport, width, height))
     return false;
-  const ArRenderRectF destination = {0, 0, viewport->w, viewport->h};
-  const ArRenderDrawState state = {.flags = kArRenderDrawState_Filter, .filter = filter};
-  const bool drawn = ArRenderDevice_DrawTextureWithState(
+  // The opaque resolve covers the entire destination. Only clear when
+  // letterboxing or pillarboxing leaves part of the parent uncovered.
+  if ((viewport->x || viewport->y || viewport->w != width || viewport->h != height) &&
+      !ArRenderDevice_Clear(device, (ArRenderColorF){0, 0, 0, 1}))
+    return false;
+  const ArRenderRectF destination = {viewport->x, viewport->y, viewport->w, viewport->h};
+  ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Filter | kArRenderDrawState_Blend,
+    .filter = filter,
+    .blend = kArRenderBlendMode_Opaque,
+  };
+  if (source.w > destination.w || source.h > destination.h) {
+    state.flags |= kArRenderDrawState_SceneResolve;
+    state.scene_resolve = kArRenderSceneResolve_Downsample;
+    state.filter = kArRenderFilter_Linear;
+  } else if (s_scene_scale.antialiasing != kSceneAntiAliasing_Off) {
+    state.flags |= kArRenderDrawState_SceneResolve;
+    state.scene_resolve = s_scene_scale.antialiasing == kSceneAntiAliasing_Smaa
+        ? kArRenderSceneResolve_Smaa : kArRenderSceneResolve_Fxaa;
+    state.filter = kArRenderFilter_Linear;
+  }
+  return ArRenderDevice_DrawTextureWithState(
       device, s_scene_scale.texture, &source, &destination, &state);
-  return ArRenderOutputFrame_Finish(&output) && drawn;
 }
 
 bool ArRenderSceneScale_ResolveFrame(ArRenderOutputFrame *frame, ArRenderFilter filter) {
