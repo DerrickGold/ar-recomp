@@ -14,6 +14,7 @@
 #include "action/action_effect_source.h"
 #include "action/action_effect_mask_texture.h"
 #include "diorama/diorama_capture_blend.h"
+#include "diorama/diorama_camera_policy.h"
 #include "diorama/diorama_snapshot.h"
 #include "diorama/diorama_trunk_guard_upload.h"
 #include "diorama/diorama_voxel_guard_upload.h"
@@ -99,6 +100,125 @@ static EditorObjectPreview s_objects;
 static ArRenderTexture s_textures[kDioramaPlane_Count];
 static const uint8_t *s_pixels[kDioramaPlane_Count];
 static uint32_t s_storage[7][640 * 352];
+static bool s_extended_terrain;
+static bool s_reuse_terrain_across_scroll = true;
+static bool s_free_camera_fit;
+static bool s_observe_voxel_faces = true;
+static struct {
+  DioramaVoxelTerrainCapture capture;
+  EditorRoomTerrainSource source;
+  bool source_valid;
+  unsigned raster;
+  uint32_t *pixels;
+  size_t capacity;
+} s_terrain;
+
+void RoomPreview_EnableExtendedTerrain(bool enabled) {
+  s_extended_terrain = enabled;
+}
+
+void RoomPreview_ReuseTerrainAcrossScroll(bool enabled) {
+  s_reuse_terrain_across_scroll = enabled;
+}
+
+void RoomPreview_EnableFreeCameraFit(bool enabled) {
+  s_free_camera_fit = enabled;
+}
+
+void RoomPreview_EnableVoxelFaceObservation(bool enabled) {
+  s_observe_voxel_faces = enabled;
+}
+
+typedef struct TerrainPreviewRequest {
+  const DioramaCapture *capture;
+  const DioramaScene *scene;
+  ArRenderRectI world;
+} TerrainPreviewRequest;
+
+static bool CaptureExtendedTerrain(void *userdata, const DioramaProjection *projection,
+    DioramaVoxelTerrainCapture *out) {
+  const TerrainPreviewRequest *request = userdata;
+  const DioramaCapture *capture = request->capture;
+  const ActionVoxelGeometry *geometry = request->scene->voxel_geometry;
+  const ArRenderRectI primary = {capture->bg1_camera_x - (capture->width - 256) / 2,
+      capture->camera_y - capture->authentic_y0 + 1, capture->width, capture->height};
+  const int apron = capture->bg_apron_mask & 1 ? capture->obj_apron : 0;
+  const ArRenderRectI available = {primary.x - apron, primary.y,
+      primary.w + 2 * apron, primary.h};
+  const float depth = fmaxf(ActionVoxel_Depth(geometry), ActionVoxel_BranchBackDepth(geometry));
+  ArRenderRectI need;
+  if (!Diorama_ResolveVoxelFootprint(projection, primary, request->world,
+      (ArRenderPointF){0}, 0, depth, &need) || need.w <= 0 || need.h <= 0 ||
+      (need.x >= available.x && need.y >= available.y &&
+       need.x + need.w <= available.x + available.w &&
+       need.y + need.h <= available.y + available.h)) return false;
+  const ArRenderRectI cached = s_terrain.capture.bounds;
+  const unsigned raster = EditorRoomScene_RasterCount(s_room);
+  if (s_terrain.raster == raster && need.x >= cached.x && need.y >= cached.y &&
+      need.x + need.w <= cached.x + cached.w && need.y + need.h <= cached.y + cached.h) {
+    *out = s_terrain.capture;
+    return true;
+  }
+  /* Texture extent grows in predictable steps to reuse it during orbit. */
+  const ArRenderRectI world = request->world;
+  const int x = (int)fmaxf(world.x, floorf(need.x / 64.f) * 64);
+  const int y = (int)fmaxf(world.y, floorf(need.y / 64.f) * 64);
+  const ArRenderRectI bounds = {x, y,
+      (int)fminf(world.x + world.w, ceilf((need.x + need.w) / 64.f) * 64) - x,
+      (int)fminf(world.y + world.h, ceilf((need.y + need.h) / 64.f) * 64) - y};
+  if (bounds.w > kDioramaVoxelTerrainMaximum || bounds.h > kDioramaVoxelTerrainMaximum)
+    return false;
+  EditorRoomTerrainSource source = {0};
+  const bool source_valid = s_reuse_terrain_across_scroll &&
+      EditorRoomScene_VoxelTerrainSource(s_room, &source);
+  /* Preserve the canonical draw rectangle on scroll so geometry and effect
+   * bounds don't depend on which direction the camera entered from. */
+  if (source_valid && s_terrain.source_valid &&
+      EditorRoomTerrainSource_Equals(source, s_terrain.source) &&
+      cached.x == bounds.x && cached.y == bounds.y &&
+      cached.w == bounds.w && cached.h == bounds.h) {
+    s_terrain.raster = raster;
+    *out = s_terrain.capture;
+    return true;
+  }
+  const size_t size = (size_t)bounds.w * bounds.h;
+  if (size > s_terrain.capacity) {
+    uint32_t *pixels = realloc(s_terrain.pixels, size * 4 * sizeof(*pixels));
+    if (!pixels) return false;
+    s_terrain.pixels = pixels;
+    s_terrain.capacity = size;
+  }
+  uint32_t *bands[] = {s_terrain.pixels, s_terrain.pixels + size, s_terrain.pixels + size * 2};
+  if (!EditorRoomScene_CaptureVoxelTerrain(s_room, bounds, bands, s_terrain.pixels + size * 3))
+    return false;
+  ArRenderDevice *device = DioramaPreview_Device();
+  s_terrain.raster = 0;
+  s_terrain.source_valid = false;
+  if (cached.w != bounds.w || cached.h != bounds.h) {
+    for (unsigned i = 0; i < 3; ++i) {
+      ArRenderDevice_DestroyTexture(device, s_terrain.capture.textures[i]);
+      s_terrain.capture.textures[i] = ArRenderTexture_Invalid();
+    }
+  }
+  s_terrain.capture.bounds = bounds;
+  const ArRenderTextureDesc desc = {.width = bounds.w, .height = bounds.h,
+      .format = kArRenderPixelFormat_Argb8888, .usage = kArRenderTextureUsage_Streaming,
+      .filter = kArRenderFilter_Nearest, .blend = kArRenderBlendMode_Alpha};
+  for (unsigned i = 0; i < 3; ++i) {
+    ArRenderTexture *texture = &s_terrain.capture.textures[i];
+    if (!ArRenderTexture_IsValid(*texture) && !ArRenderDevice_CreateTexture(device, &desc, texture))
+      return false;
+    if (!ArRenderDevice_UpdateTexture(device, *texture, NULL, bands[i], bounds.w * 4))
+      return false;
+  }
+  s_terrain.raster = raster;
+  s_terrain.source = source;
+  s_terrain.source_valid = source_valid;
+  *out = s_terrain.capture;
+  fprintf(stderr, "[voxel-terrain] source=%d,%d %dx%d primary=%d,%d %dx%d\n",
+      bounds.x, bounds.y, bounds.w, bounds.h, available.x, available.y, available.w, available.h);
+  return true;
+}
 static uint32_t s_next[640 * 352];
 static const int kPlanes[] = {kDioramaPlane_Backdrop, SR_PPU_OVERLAY_BG1,
   kDioramaPlane_Bg1Hi, kDioramaPlane_Bg1Far, SR_PPU_OVERLAY_BG2,
@@ -145,6 +265,7 @@ static DioramaView PreviewView(int width, int height, int pixels,
       pixels == kPixelAspect_Crt43, false).display_extra;
   DioramaView view = {.camera = s_baseline, .distance_scale = zoom,
     .camera_framing_weight = s_dynamic_camera ? 1 : 0,
+    .fit_free_camera = s_free_camera_fit && !s_dynamic_camera,
     .pixel_aspect = pixels, .ignore_aspect_ratio = s_aspect_mode == 3,
     .visible_width = 256 + 2 * canvas.extra_columns, .visible_height = 224 + 2 * canvas.extra_rows};
   view.camera.tilt_y += yaw; view.camera.tilt_x += pitch;
@@ -456,6 +577,10 @@ void RoomPreview_Reset(void) {
   DioramaVoxelGuardUpload_Reset(&s_voxel_guard, DioramaPreview_Device());
   s_voxel_pick_valid=false;s_voxel_face_count=0;s_voxel_pick_overflow=false;
   ArRenderDevice *device = DioramaPreview_Device();
+  for (unsigned i = 0; i < 3; ++i)
+    ArRenderDevice_DestroyTexture(device, s_terrain.capture.textures[i]);
+  free(s_terrain.pixels);
+  memset(&s_terrain, 0, sizeof(s_terrain));
   EditorObjectPreview_Reset(&s_objects,device);
 #ifndef __EMSCRIPTEN__
   DioramaDepthGpu_Reset(device);
@@ -930,7 +1055,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   scene.voxel_guard = s_voxel_guard.view.capture_generation ? &s_voxel_guard.view : NULL;
   scene.native_bloom_clock = (uint16_t)frame;
   DioramaRenderOptions options = *scene.render;
-  options.voxel_observe_face=ObserveVoxelFace;
+  options.voxel_observe_face=s_observe_voxel_faces?ObserveVoxelFace:NULL;
   options.voxel_observe_ground_cover=s_ground_cover_audit_enabled?ObserveGroundCover:NULL;
   options.voxel_observer_userdata=NULL;
   options.voxel_inspection=EditorRoomScene_3DMode(s_room)==kAction3D_Voxel
@@ -1000,6 +1125,20 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     scene.plane_effect = DrawPlaneEffects; scene.plane_effect_userdata = &effects;
   }
   DioramaProjection projection;
+  TerrainPreviewRequest terrain = {.capture = &capture, .scene = &scene};
+  if (s_extended_terrain && scene.voxel_geometry && !s_objects.snapshot.storage) {
+    ActionBgPlan plan;
+    if (EditorRoomScene_BgPolicy(s_room, x, y, frame, false, &plan, NULL) &&
+        DioramaCameraPolicy_FiniteLayer(&plan.layer[0])) {
+      const DioramaRoomOverride *room = EditorRoomScene_Terrain(s_room);
+      DioramaScenery_AxisExtent(room, 0, plan.layer[0].world_width, false,
+          &terrain.world.x, &terrain.world.w);
+      DioramaScenery_AxisExtent(room, 0, plan.layer[0].world_height, true,
+          &terrain.world.y, &terrain.world.h);
+      scene.capture_voxel_terrain = CaptureExtendedTerrain;
+      scene.capture_voxel_terrain_userdata = &terrain;
+    }
+  }
   DioramaAstralRift_Attach(s_effects_enabled, DioramaPreview_Device(), &scene);
   /* Match production's ActionVoxel contract. The specialized curved-tree
    * enclosure keeps its established multi-plane visibility policy. */

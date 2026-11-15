@@ -36,7 +36,7 @@ static const char *const kNames[kPerformanceStage_Count] = {
   "SIM shadows", "SIM billboards", "SIM effects", "SIM clouds", "SIM HUD",
   "world animation", "world transfer", "world prepare", "world atmosphere", "world ocean",
   "action total", "action upload", "action analysis", "action setup", "action scanout",
-  "action finish", "action host-post", "action synthesis", "action mesh", "action supersample",
+  "action finish", "action host-post", "action synthesis", "action mesh", "action layer x4",
   "action DOF", "action submit", "action callback",
   "settings write*", "battery save", "music start",
   "terrain rebuild", "terrain samples", "globe grid bake",

@@ -18,6 +18,77 @@ static bool CameraProjectionValid(
   return true;
 }
 
+void Diorama_ResolveVoxelTerrainAxis(int world_start, int world_size, int primary_start,
+    int primary_end, unsigned before, unsigned after, int *start, int *end) {
+  const int world_end = world_start + world_size;
+  const int first = fmax(world_start, fmin(primary_start, world_end));
+  const int last = fmin(world_end, fmax(primary_end, first));
+  int left = fmin(before, first - world_start);
+  int right = fmin(after, world_end - last);
+  const int extra = (int)fmax(0, kDioramaVoxelTerrainMaximum - (last - first));
+  /* Preserve the camera's bias when the margins exceed the texture budget. */
+  if (left + right > extra) {
+    left = left * extra / (left + right);
+    right = extra - left;
+  }
+  *start = first - left;
+  *end = last + right;
+}
+
+bool Diorama_ResolveVoxelFootprint(const DioramaProjection *projection,
+    ArRenderRectI capture, ArRenderRectI world, ArRenderPointF capture_offset,
+    float near_depth, float far_depth, ArRenderRectI *out) {
+  if (!projection || !out || capture.w <= 0 || capture.h <= 0 ||
+      world.w <= 0 || world.h <= 0 ||
+      (int64_t)world.x + world.w > INT32_MAX ||
+      (int64_t)world.y + world.h > INT32_MAX ||
+      !isfinite(capture_offset.x) || !isfinite(capture_offset.y) ||
+      !isfinite(projection->camera_distance) || projection->camera_distance <= 0 ||
+      !isfinite(near_depth) || !isfinite(far_depth) || near_depth > far_depth ||
+      !CameraProjectionValid(projection->matrix, projection->aspect_x,
+                            projection->height_scale, 0, 0, 0)) return false;
+  const float *m = projection->matrix;
+  const double inverse_distance = 1.0 / fmax(1.0, projection->camera_distance);
+  double left = INFINITY, top = INFINITY, right = -INFINITY, bottom = -INFINITY;
+  double first_det = 0;
+  for (unsigned corner = 0; corner < 4; ++corner) {
+    const double nx = corner & 1 ? 1 : -1, ny = corner & 2 ? 1 : -1;
+    const double a = m[0] - nx * m[3], b = m[4] - nx * m[7];
+    const double c = m[1] - ny * m[3], d = m[5] - ny * m[7];
+    const double det = a * d - b * c;
+    if (fabs(det) < 1e-12 || (corner && (det > 0) != (first_det > 0))) return false;
+    if (!corner) first_det = det;
+    /* Along each corner ray, world X/Y and clip W are affine in depth.
+     * Undoing the renderer's depth compensation divides by a positive
+     * affine scale, so the native-coordinate extrema are at the endpoints. */
+    for (unsigned end = 0; end < 2; ++end) {
+      const double depth = end ? far_depth : near_depth;
+      const double scale = 1 + depth * inverse_distance;
+      const double x_rhs = nx * (m[15] - depth * m[11]) - (m[12] - depth * m[8]);
+      const double y_rhs = ny * (m[15] - depth * m[11]) - (m[13] - depth * m[9]);
+      const double x = (x_rhs * d - b * y_rhs) / det;
+      const double y = (a * y_rhs - x_rhs * c) / det;
+      const double w = m[3] * x + m[7] * y - depth * m[11] + m[15];
+      if (scale <= 0 || w <= kScene3DMinimumProjectionDepth) return false;
+      const double px = capture.x + (x / (projection->aspect_x * scale) + 0.5) *
+          capture.w - capture_offset.x;
+      const double py = capture.y + (0.5 - y / (projection->height_scale * scale)) *
+          capture.h - capture_offset.y;
+      if (!isfinite(px) || !isfinite(py)) return false;
+      left = fmin(left, px); right = fmax(right, px);
+      top = fmin(top, py); bottom = fmax(bottom, py);
+    }
+  }
+  const double x0 = fmax(world.x, floor(left / 8) * 8);
+  const double y0 = fmax(world.y, floor(top / 8) * 8);
+  const double x1 = fmin((double)world.x + world.w, ceil(right / 8) * 8);
+  const double y1 = fmin((double)world.y + world.h, ceil(bottom / 8) * 8);
+  *out = x1 > x0 && y1 > y0
+      ? (ArRenderRectI){(int)x0, (int)y0, (int)(x1 - x0), (int)(y1 - y0)}
+      : (ArRenderRectI){0};
+  return true;
+}
+
 static void CameraShiftVertically(float matrix[16], float shift) {
   /* A clip-space translation gives every depth the same screen displacement. */
   const float clip_shift = -2.0f * shift;
@@ -513,6 +584,27 @@ bool Diorama_PlaneCaptureBounds(const DioramaProjection *projection,
   *y1 = bottom - plane->capture_offset.y;
   return isfinite(*x0) && isfinite(*y0) && isfinite(*x1) && isfinite(*y1) &&
       *x0 < *x1 && *y0 < *y1;
+}
+
+void Diorama_SetVoxelTerrainEffectBounds(DioramaProjection *projection,
+    ArRenderRectI terrain, int primary_world_x, int primary_world_y) {
+  if (!projection || projection->texture_width <= 0 ||
+      projection->texture_height <= 0 || terrain.w <= 0 || terrain.h <= 0) return;
+  const float x = (float)terrain.x - primary_world_x + projection->texture_x_origin;
+  const float y = (float)terrain.y - primary_world_y;
+  DioramaPlaneProjection *planes[] = {
+      &projection->bg1_plane, &projection->bg1_high_plane, &projection->bg1_far_plane,
+  };
+  for (unsigned i = 0; i < sizeof(planes) / sizeof(*planes); ++i) {
+    DioramaPlaneProjection *plane = planes[i];
+    if (!plane->valid || plane->native_atmosphere) continue;
+    plane->source_bounds_valid = true;
+    plane->capture_apron = 0; /* The terrain rectangle already includes the apron. */
+    plane->source_u0 = x / projection->texture_width;
+    plane->source_u1 = (x + terrain.w) / projection->texture_width;
+    plane->source_v0 = y / projection->texture_height;
+    plane->source_v1 = (y + terrain.h) / projection->texture_height;
+  }
 }
 
 static bool ProjectSkyboxBandPoint(const DioramaProjection *,

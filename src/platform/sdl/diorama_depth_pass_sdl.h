@@ -6,8 +6,8 @@
 
 typedef struct ArGpuDioramaDepthPass {
   SDL_GPUDevice *device;
-  /* Basic, scenery, actor; depth mode and blend follow. */
-  SDL_GPUGraphicsPipeline *pipelines[3][kDioramaDepth_Count][3];
+  /* Basic, scenery, actor, scenery with a texture bank. */
+  SDL_GPUGraphicsPipeline *pipelines[4][kDioramaDepth_Count][3];
   SDL_GPUTextureFormat color_format;
   SDL_GPUSampler *sampler, *nearest_sampler;
   SDL_GPUTexture *depth, *white, *black, *neutral_attributes;
@@ -22,8 +22,15 @@ typedef struct ArGpuDioramaDepthMaterial {
   const struct DioramaSceneryLightEffectParams *scenery;
   SDL_GPUTexture *illumination; /* NULL supplies zero incoming light. */
   SDL_GPUTexture *attributes, *enemy_illumination;
+  SDL_GPUTexture *additional[2];
   bool actor; /* Native receiver/rim material, independent of depth policy. */
 } ArGpuDioramaDepthMaterial;
+enum { kGpuDioramaBankMaterial = 3, kGpuDioramaMaterialCount = 4 };
+static inline unsigned ArGpuDioramaDepthMaterialKind(const ArGpuDioramaDepthMaterial *material) {
+  if (!material || !material->scenery) return 0;
+  if (material->actor) return 2;
+  return material->additional[0] ? kGpuDioramaBankMaterial : 1;
+}
 
 /* Cutout world materials, independent of SIM despite reusing its generic
  * compiled vertex and basic texture/color shaders. Scenery materials reuse

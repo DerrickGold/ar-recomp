@@ -826,6 +826,38 @@ static int test_public_vertical_margin_scanout(
     for (unsigned i = 0; i < 2; ++i) for (unsigned b = 0; b < 3; ++b)
         for (unsigned x = 0; x < 256 * 64; ++x)
             if (guard_band_pixels[i][b][x]) { failed |= check(0, "failed native guard retained partial bands"); break; }
+
+    enum { terrain_width = 704, terrain_height = 128 };
+    static uint32_t terrain_pixels[3][terrain_width * terrain_height];
+    const SrPpuBackgroundGuardRequest terrain = {.struct_size = sizeof(terrain),
+        .screen_x0 = -224, .screen_y0 = 0, .width = terrain_width, .height = terrain_height,
+        .source_width = 1024, .source_height = 512};
+    SrPpuBackgroundGuardBands terrain_bands = {.struct_size = sizeof(terrain_bands),
+        .flags = SR_PPU_BACKGROUND_GUARD_BANDS_WORLD_TERRAIN |
+            SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL};
+    for (unsigned b = 0; b < 3; ++b)
+        terrain_bands.bands[b] = (SrPpuBackgroundGuardBandOutput){terrain_pixels[b],
+            terrain_width * 4, sizeof(terrain_pixels[b])};
+    scanout.world_terrain = &terrain;
+    scanout.world_terrain_bands = &terrain_bands;
+    failed |= check((api->capabilities & SR_RUNNER_CAP_PPU_WORLD_TERRAIN) != 0,
+        "world terrain capability missing");
+    snes->ppu->inidisp = 0x80;
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_OK &&
+        (result.flags & SR_PPU_SCANOUT_WORLD_TERRAIN_READY) &&
+        (result.flags & SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY),
+        "world rectangle cannot coexist with ordinary guards");
+    snes->ppu->inidisp = 15;
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_OK &&
+        !(result.flags & SR_PPU_SCANOUT_WORLD_TERRAIN_READY),
+        "unsupported terrain broke the main scanout");
+    terrain_bands.bands[2].pixels = terrain_pixels[1];
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_INVALID_ARGUMENT,
+        "overlapping terrain lanes accepted");
+    scanout.struct_size = SR_PPU_SCANOUT_REQUEST_BACKGROUND_GUARD_BANDS_SIZE;
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_OK &&
+        !(result.flags & SR_PPU_SCANOUT_WORLD_TERRAIN_READY),
+        "old scanout request read the terrain tail");
     return failed;
 }
 
@@ -3455,15 +3487,16 @@ int main(void) {
     obj_capture_request.range_pixel_byte_size = sizeof(s_overlay_surface);
 
     {
-        static uint8_t companion[4][384u * 352u * 4u];
+        static uint32_t overlay[384u * kPpuBufHeight];
+        static uint32_t companion[4][384u * kPpuBufHeight];
         SrPpuObjAttributeCapture attributes = {0};
         for (unsigned i = 0; i < 4; ++i) {
-            attributes.pixels[i] = companion[i];
+            attributes.pixels[i] = (uint8_t *)companion[i];
             attributes.pixel_byte_size[i] = sizeof(companion[i]);
         }
         attributes.values[0] = 0xff10ff00u;
         failed |= check(PpuBindOverlaySurface(snes->ppu, kPpuOverlaySource_Obj,
-                            (uint8_t *)s_overlay_surface, 384u * 4u) &&
+                            (uint8_t *)overlay, 384u * 4u) &&
                         PpuSetOverlayCapture(snes->ppu, kPpuOverlaySource_Obj, 0, 0, 256, 224, 0) &&
                         PpuSetOverlayOamRange(snes->ppu, 0, 128), "OBJ attribute fixture binding failed");
         SrPpuObjCaptureRequest request = {.struct_size = sizeof(request),

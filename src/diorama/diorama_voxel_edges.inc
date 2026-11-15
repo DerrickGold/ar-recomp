@@ -22,6 +22,7 @@ static VoxelSide s_voxel_sides[kVoxelMaxVisibleFaces];
 static ArRenderVertex2D s_voxel_vertices[kVoxelMaxVisibleFaces * 4];
 static float s_voxel_depths[kVoxelMaxVisibleFaces * 4];
 static float s_voxel_clip_w[kVoxelMaxVisibleFaces * 4];
+static uint8_t s_voxel_texture_slots[kVoxelMaxVisibleFaces * 4];
 static ArRenderPointF s_voxel_heat_world_xy[kVoxelMaxVisibleFaces * 4];
 static int32_t s_voxel_indices[kVoxelMaxVisibleFaces * 6];
 /* Faces are ordered far-to-near through a compact key array. Sorting the
@@ -80,6 +81,69 @@ static unsigned SortVoxelSides(const DioramaViewGeometry *g, unsigned count) {
   for (unsigned i = 0; i < visible; ++i) s_voxel_order[i] = s_voxel_keys[i].index;
   return visible;
 }
+
+typedef struct VoxelScreenBounds { float left, top, right, bottom; } VoxelScreenBounds;
+static VoxelScreenBounds VoxelSideScreenBounds(const VoxelSide *side) {
+  const ArRenderPointF first=side->v[0].position;
+  VoxelScreenBounds bounds={first.x,first.y,first.x,first.y};
+  for(unsigned i=1;i<4;++i) {
+    const ArRenderPointF p=side->v[i].position;
+    bounds.left=fminf(bounds.left,p.x);bounds.right=fmaxf(bounds.right,p.x);
+    bounds.top=fminf(bounds.top,p.y);bounds.bottom=fmaxf(bounds.bottom,p.y);
+  }
+  return bounds;
+}
+
+static bool SameVoxelTextureRun(const VoxelSide *a,const VoxelSide *b) {
+  return !b->ground_cover && !b->solid_color &&
+      a->rear_source==b->rear_source && a->owned_source==b->owned_source;
+}
+static unsigned VoxelTextureSlot(const VoxelSide *face) {
+  return face->owned_source?2:face->rear_source?1:0;
+}
+
+static bool VoxelTerrainBinaryAlpha(const DioramaVoxelTerrainCapture *terrain,ArRenderTexture texture) {
+  for(unsigned i=0;i<3;++i)
+    if((terrain->binary_alpha_mask&(1u<<i)) && ArRenderTexture_Equals(texture,terrain->textures[i]))
+      return true;
+  return false;
+}
+
+/* Reduce texture switches within one alpha band. A face may move earlier
+ * only if its screen bounds miss every intervening face. The one-pixel
+ * margin keeps ties and edge coverage ordered at adjoining faces too. */
+static void JoinDisjointVoxelRuns(unsigned count) {
+  enum { kLookAhead = 12 };
+  for(unsigned first=0;first<count;) {
+    const VoxelSide *head=&s_voxel_sides[s_voxel_order[first]];
+    if(head->ground_cover || head->solid_color) {++first;continue;}
+    unsigned end=first+1;
+    while(end<count && SameVoxelTextureRun(head,&s_voxel_sides[s_voxel_order[end]])) ++end;
+    if(end+1>=count) break;
+    const VoxelSide *blocker=&s_voxel_sides[s_voxel_order[end]];
+    if(!blocker->ground_cover && !blocker->solid_color) {
+      VoxelScreenBounds blocked=VoxelSideScreenBounds(blocker);
+      const unsigned stop=end+1+kLookAhead<count?end+1+kLookAhead:count;
+      for(unsigned probe=end+1;probe<stop;++probe) {
+        const uint16_t index=s_voxel_order[probe];
+        const VoxelSide *face=&s_voxel_sides[index];
+        if(face->ground_cover || face->solid_color) break;
+        const VoxelScreenBounds bounds=VoxelSideScreenBounds(face);
+        const bool disjoint=bounds.right+1<blocked.left || bounds.left>blocked.right+1 ||
+            bounds.bottom+1<blocked.top || bounds.top>blocked.bottom+1;
+        if(disjoint && SameVoxelTextureRun(head,face)) {
+          memmove(s_voxel_order+end+1,s_voxel_order+end,(probe-end)*sizeof(*s_voxel_order));
+          s_voxel_order[end++]=index;
+        } else {
+          blocked.left=fminf(blocked.left,bounds.left);blocked.top=fminf(blocked.top,bounds.top);
+          blocked.right=fmaxf(blocked.right,bounds.right);blocked.bottom=fmaxf(blocked.bottom,bounds.bottom);
+        }
+      }
+    }
+    first=end;
+  }
+}
+
 static bool VoxelProjectWithW(const DioramaViewGeometry *g, float x, float y, float z,
                           ArRenderPointF *point, float *distance, float *depth,float *clip_w) {
   Scene3DClipPoint clip;
@@ -98,6 +162,29 @@ static bool VoxelProjectWithW(const DioramaViewGeometry *g, float x, float y, fl
   }
   *distance += clip.w * .25f;
   return true;
+}
+
+/* Source X/Y grow with depth compensation. Bound the products at their
+ * endpoints before the camera test so tapered and curved faces fit too. */
+static bool VoxelSourceBoxOutsideViewport(const DioramaViewGeometry *g,
+    ArRenderRectF rect, float near_depth, float far_depth) {
+  const float inverse_distance = 1 / fmaxf(1, g->camera.distance);
+  const float near_scale = 1 + near_depth * inverse_distance;
+  const float far_scale = 1 + far_depth * inverse_distance;
+  if (!(near_scale > 0 && near_scale <= far_scale)) return false;
+  const float x0 = ((rect.x / SR_PPU_SURFACE_MAX_WIDTH - g->u0) /
+      (g->u1 - g->u0) - .5f) * g->aspect_x;
+  const float x1 = (((rect.x + rect.w) / SR_PPU_SURFACE_MAX_WIDTH - g->u0) /
+      (g->u1 - g->u0) - .5f) * g->aspect_x;
+  const float y0 = (.5f - ((rect.y + rect.h) / SR_PPU_SURFACE_MAX_HEIGHT - g->v0) /
+      (g->v1 - g->v0)) * g->height_scale;
+  const float y1 = (.5f - (rect.y / SR_PPU_SURFACE_MAX_HEIGHT - g->v0) /
+      (g->v1 - g->v0)) * g->height_scale;
+  const float lower[] = {x0 * (x0 < 0 ? far_scale : near_scale),
+      y0 * (y0 < 0 ? far_scale : near_scale), -far_depth};
+  const float upper[] = {x1 * (x1 > 0 ? far_scale : near_scale),
+      y1 * (y1 > 0 ? far_scale : near_scale), -near_depth};
+  return DioramaVoxelBoxOutsideViewport(g->matrix, lower, upper, g->width, g->height);
 }
 static bool VoxelProject(const DioramaViewGeometry *g, float x, float y, float z,
                           ArRenderPointF *point, float *distance, float *depth) {
@@ -382,6 +469,46 @@ static bool DrawVoxelDoorInteriors(ArRenderDevice *device, const DioramaViewGeom
   }
   return true;
 }
+/* Room edges already have a stable order. Cache their native world endpoints
+ * and actor-band depth intervals without retaining any camera or texture state. */
+typedef struct VoxelContour {
+  int x0, y0, x1, y1;
+  VoxelEdgeSpan span;
+  uint8_t state; /* 0 unresolved, 1 empty, 2 ready */
+} VoxelContour;
+
+typedef struct VoxelContourCache {
+  uint64_t revision, last_use;
+  float near_depth, far_depth;
+  VoxelEdgePass pass;
+  VoxelContour contours[kVoxelMaxEdges];
+} VoxelContourCache;
+
+static VoxelContourCache s_voxel_contours[4];
+static uint64_t s_voxel_contour_use;
+
+static VoxelContourCache *GetVoxelContourCache(const ActionVoxelGeometry *geometry,
+    VoxelEdgePass pass, float near_depth, float far_depth) {
+  const uint64_t revision = ActionVoxel_Revision(geometry);
+  VoxelContourCache *oldest = &s_voxel_contours[0];
+  for (unsigned i = 0; i < sizeof(s_voxel_contours) / sizeof(*s_voxel_contours); ++i) {
+    VoxelContourCache *cache = &s_voxel_contours[i];
+    if (cache->revision == revision && cache->pass == pass &&
+        cache->near_depth == near_depth && cache->far_depth == far_depth) {
+      cache->last_use = ++s_voxel_contour_use;
+      return cache;
+    }
+    if (cache->last_use < oldest->last_use) oldest = cache;
+  }
+  memset(oldest->contours, 0, sizeof(oldest->contours));
+  oldest->revision = revision;
+  oldest->last_use = ++s_voxel_contour_use;
+  oldest->pass = pass;
+  oldest->near_depth = near_depth;
+  oldest->far_depth = far_depth;
+  return oldest;
+}
+
 static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capture,
                                const DioramaViewGeometry *g, const DioramaLayerDraw *layer,
                                float near_depth, float far_depth, VoxelEdgePass pass) {
@@ -590,6 +717,8 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     }
   }
   const uint16_t *indices = NULL;
+  const VoxelEdgeChunk *chunks = layer->voxel_terrain && !native_transforms
+      ? ActionVoxel_EdgeChunksForPass(castle,pass,high_priority) : NULL;
   total = 0;
   if (!rear_grass) indices = ActionVoxel_EdgesForPass(castle, pass, high_priority, &total);
   if (!rear_grass && pass == kVoxelEdgeNative && far_depth == depth) {
@@ -626,20 +755,34 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       s_voxel_sides[count++] = face;
     }
   }
+  VoxelContourCache *contour_cache = total && !native_transforms
+      ? GetVoxelContourCache(castle, pass, near_depth, far_depth) : NULL;
   for (unsigned i = 0; i < total; ++i) {
-    VoxelEdge e = edges[indices[i]];
+    if(chunks && i%kVoxelEdgeChunkSize==0) {
+      const VoxelEdgeChunk *chunk=&chunks[i/kVoxelEdgeChunkSize];
+      if(chunk->right<ox || chunk->left>ox+capture->width ||
+          chunk->bottom<oy || chunk->top>oy+capture->height) {
+        i+=kVoxelEdgeChunkSize-1;
+        continue;
+      }
+    }
+    const unsigned edge_index = indices[i];
+    VoxelEdge e = edges[edge_index];
     if (e.high_priority != high_priority) continue;
     const VoxelAuthoredCell *transformed=native_transforms?NativeTransformCell(castle,e.x,e.y):NULL;
     const unsigned face_mask[]={kDioramaVoxelFaceMask_Top,kDioramaVoxelFaceMask_Right,kDioramaVoxelFaceMask_Bottom,kDioramaVoxelFaceMask_Left};
     if(transformed && !(transformed->faces&face_mask[e.side]))continue;
-    float x0 = e.x - ox, y0 = e.y - oy, x1 = x0, y1 = y0;
-    if (e.side & 1) {
-      if (e.side == 1) x0 = x1 = x0 + 1;
-      y1 += e.length;
-    } else {
-      if (e.side == 2) y0 = y1 = y0 + 1;
-      x1 += e.length;
+    VoxelContour native = {0};
+    VoxelContour *contour = contour_cache ? &contour_cache->contours[edge_index] : &native;
+    if (contour->state == 1) continue;
+    if (!contour->state) {
+      contour->x0 = e.x + (e.side == 1);
+      contour->y0 = e.y + (e.side == 2);
+      contour->x1 = contour->x0 + ((e.side & 1) ? 0 : e.length);
+      contour->y1 = contour->y0 + ((e.side & 1) ? e.length : 0);
     }
+    float x0 = contour->x0 - ox, y0 = contour->y0 - oy;
+    float x1 = contour->x1 - ox, y1 = contour->y1 - oy;
     if (!transformed && (fmaxf(x0, x1) < 0 || fminf(x0, x1) > capture->width || fmaxf(y0, y1) < 0 ||
         fminf(y0, y1) > capture->height)
       )continue;
@@ -673,7 +816,14 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
         if(!any)span=part;else {span.near_depth=fminf(span.near_depth,part.near_depth);span.far_depth=fmaxf(span.far_depth,part.far_depth);}any=true;
       }
       if(!any)continue;
-    } else if (!ActionVoxel_ResolveEdgeSpan(castle, &e, pass, near_depth, far_depth, &span)) continue;
+    } else {
+      if (!contour->state) {
+        contour->state = ActionVoxel_ResolveEdgeSpan(castle, &e, pass, near_depth,
+            far_depth, &contour->span) ? 2 : 1;
+      }
+      if (contour->state == 1) continue;
+      span = contour->span;
+    }
     /* Stay inside the captured texture; neighbouring views rebuild only projection. */
     if(!transformed) {
       x0 = fmaxf(0, fminf(capture->width, x0));
@@ -684,6 +834,15 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     /* A contour touching the capture boundary can clip to a point. It owns
      * no face or receiving surface; snow support requires a real interval. */
     if ((e.side & 1) ? y1 <= y0 : x1 <= x0) continue;
+    if (layer->voxel_terrain && !g->options->voxel_observe_face &&
+        !(s_ground_cover.active_count && e.side == 0) &&
+        !transformed && !e.trunk_curve && !column_curve && !neighbor_curve) {
+      const float fold = e.flat_rear_join ? 0 : fmaxf(e.rear_fold_top, e.rear_fold_bottom);
+      const ArRenderRectF box = {fminf(x0, x1), fminf(y0, y1) - fold,
+          fabsf(x1 - x0), fabsf(y1 - y0) + fold};
+      if (VoxelSourceBoxOutsideViewport(g, box,
+          rear_offset + span.near_depth, rear_offset + span.far_depth)) continue;
+    }
     if (e.side == 2 || e.side == 3) {
       float t = x0;
       x0 = x1;
@@ -739,7 +898,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     const VoxelTrunkCurve *cut_curve=trunk_curve?trunk_curve:column_curve?column_curve:neighbor_curve;
     const bool curved_side = cut_curve && (e.side & 1);
     const float clipped_y0 = y0, clipped_y1 = y1;
-    float ycuts[(SR_PPU_SURFACE_MAX_HEIGHT+kDioramaVoxelGuardRows)/8+12];
+    float ycuts[kDioramaVoxelTerrainMaximum/8+12];
     unsigned ycount = curved_side ? VoxelTrunkCuts(cut_curve,
         fminf(y0,y1),fmaxf(y0,y1),oy,true,ycuts) : 2;
     /* Both native contact sections can change depth along an internal
@@ -986,12 +1145,12 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
                      : shade_side == 2 ? .54f
                                    : .72f) *
                     (1 - (soft?.18f:.38f) * local_z / depth) * (rear ? .88f : 1);
-      shade *= 1 - SceneryDimming_Amount(layer->dimming, layer->dimming_ramp, next.v[j].tex_coord.x,
-                                         next.v[j].tex_coord.y);
+      const float primary_u = next.v[j].tex_coord.x - layer->voxel_primary_offset.x;
+      const float primary_v = next.v[j].tex_coord.y - layer->voxel_primary_offset.y;
+      shade *= 1 - SceneryDimming_Amount(layer->dimming, layer->dimming_ramp, primary_u, primary_v);
       if (layer->exposure && layer->exposure->sample)
         shade *= layer->exposure->sample(layer->exposure->userdata, next.v[j].tex_coord.x,
-                                         next.v[j].tex_coord.y, next.v[j].tex_coord.x,
-                                         next.v[j].tex_coord.y);
+                                         next.v[j].tex_coord.y, primary_u, primary_v);
       next.v[j].color = (ArRenderColorF){tint.r * shade, tint.g * shade,
                                          tint.b * shade, ramp_join?tint.a:1};
       if(live_surface) {
@@ -1052,11 +1211,29 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
   }
   const int32_t *quad_indices = VoxelQuadIndices();
   DioramaSceneryLightEffectParams light = layer->lighting;
+  const bool far_terrain=g->depth_sink && layer->voxel_terrain &&
+      layer->description->plane==kDioramaPlane_Bg1Far && !DioramaHeat_Active(&light.heat);
+  const bool banked=far_terrain && g->depth_sink->texture_banks && !layer->voxel_guard &&
+      layer->blend==kArRenderBlendMode_Alpha && ArRenderTexture_IsValid(layer->texture) &&
+      ArRenderTexture_IsValid(layer->voxel_rear_texture) && ArRenderTexture_IsValid(VoxelAuthoredAtlas());
+  const bool binary_slots[]={banked && VoxelTerrainBinaryAlpha(layer->voxel_terrain,layer->texture),
+      banked && VoxelTerrainBinaryAlpha(layer->voxel_terrain,layer->voxel_rear_texture),true};
+  const DioramaDepthTextureBank bank={{layer->voxel_rear_texture,VoxelAuthoredAtlas()},s_voxel_texture_slots};
+  if(far_terrain && !banked)
+    JoinDisjointVoxelRuns((unsigned)count);
   light.mode = blur > 0 ? 1 : 0;
   light.blur_radius = blur;
   light.attributes_uv = (ArRenderRectF){0, 0, 1, 1};
   light.texel_width = 1.f / SR_PPU_SURFACE_MAX_WIDTH;
   light.texel_height = 1.f / SR_PPU_SURFACE_MAX_HEIGHT;
+  if (layer->voxel_terrain) {
+    light.texel_width = 1.f / layer->voxel_terrain->bounds.w;
+    light.texel_height = 1.f / layer->voxel_terrain->bounds.h;
+    light.attributes_uv = (ArRenderRectF){-layer->voxel_primary_offset.x,
+        -layer->voxel_primary_offset.y,
+        layer->voxel_terrain->bounds.w / (float)SR_PPU_SURFACE_MAX_WIDTH,
+        layer->voxel_terrain->bounds.h / (float)SR_PPU_SURFACE_MAX_HEIGHT};
+  }
   const bool bind_dof = !g->depth_sink && blur > 0 && !ArRenderTexture_IsValid(light.illumination);
   bool dof_active=false;
   if (bind_dof) {
@@ -1072,22 +1249,31 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
     dof_active=true;
   }
   bool ok = true;
-  /* Keep distance order on painter backends as well as depth backends.
-   * Only adjacent faces with the same native source share a submission. */
+  /* Banked faces share a submission in sorted order using their original
+   * UVs. Keep cover, untextured faces, and fractional alpha in their runs. */
   for (int first = 0; first < count && ok;) {
-    const bool rear_source = s_voxel_sides[s_voxel_order[first]].rear_source;
-    const bool owned_source = s_voxel_sides[s_voxel_order[first]].owned_source;
+    const VoxelSide *head=&s_voxel_sides[s_voxel_order[first]];
+    const bool rear_source = head->rear_source;
+    const bool owned_source = head->owned_source;
     const bool cover=s_voxel_sides[s_voxel_order[first]].ground_cover!=0;
     const bool solid=s_voxel_sides[s_voxel_order[first]].solid_color;
     const bool untextured=cover||solid;
+    bool use_bank=banked && !untextured;
+    const bool bank_binary=use_bank && binary_slots[VoxelTextureSlot(head)];
+    unsigned used_slots=1u<<VoxelTextureSlot(head);
     const bool heat_owned=g->depth_sink && owned_source && !cover && DioramaHeat_Active(&light.heat);
     const bool heat_finite=s_voxel_sides[s_voxel_order[first]].heat_finite;
     int end = first + 1;
-    while (end < count && s_voxel_sides[s_voxel_order[end]].rear_source == rear_source &&
-        s_voxel_sides[s_voxel_order[end]].owned_source == owned_source&&
-        s_voxel_sides[s_voxel_order[end]].solid_color == solid &&
-        (!heat_owned || s_voxel_sides[s_voxel_order[end]].heat_finite==heat_finite)&&
-        (s_voxel_sides[s_voxel_order[end]].ground_cover!=0)==cover) ++end;
+    while(end<count) {
+      const VoxelSide *next=&s_voxel_sides[s_voxel_order[end]];
+      if(next->solid_color!=solid || (next->ground_cover!=0)!=cover) break;
+      if(use_bank ? binary_slots[VoxelTextureSlot(next)]!=bank_binary :
+          (next->rear_source!=rear_source || next->owned_source!=owned_source ||
+           (heat_owned && next->heat_finite!=heat_finite))) break;
+      used_slots|=1u<<VoxelTextureSlot(next);
+      ++end;
+    }
+    use_bank&=(used_slots&(used_slots-1))!=0;
     if(untextured&&dof_active){ok=DioramaEffectBackend_Unbind(device);dof_active=false;}
     if(!untextured&&bind_dof&&!dof_active) {
       const DioramaDofEdgeEffectParams params={.texel_width=light.texel_width,.texel_height=light.texel_height,
@@ -1099,6 +1285,13 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
       const VoxelSide *face = &s_voxel_sides[s_voxel_order[first+i]];
       if(cover)GroundCoverCopyFace(face->ground_cover-1,s_voxel_vertices+i*4,s_voxel_depths+i*4,s_voxel_clip_w+i*4);
       else memcpy(s_voxel_vertices+i*4,face->v,sizeof(face->v));
+      if(use_bank) memset(s_voxel_texture_slots+i*4,VoxelTextureSlot(face),4);
+      if (layer->voxel_terrain && !untextured && !face->owned_source)
+        for (int j = 0; j < 4; ++j) {
+          ArRenderPointF *uv = &s_voxel_vertices[i*4+j].tex_coord;
+          uv->x *= SR_PPU_SURFACE_MAX_WIDTH * light.texel_width;
+          uv->y *= SR_PPU_SURFACE_MAX_HEIGHT * light.texel_height;
+        }
       if(g->depth_sink&&!cover) {
         memcpy(s_voxel_depths+i*4,face->depths,sizeof(face->depths));
         memcpy(s_voxel_clip_w+i*4,face->clip_w,sizeof(face->clip_w));
@@ -1110,10 +1303,16 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
       ok=ok&&RenderVoxelNativeSources(device,layer,rear_source?layer->voxel_rear_texture:layer->texture,
           s_voxel_vertices,s_voxel_depths,g->depth_sink?s_voxel_clip_w:NULL,packed*4,quad_indices,packed*6,
           layer->blend,NULL,(ArRenderRectF){0,0,1,1},&light,g->depth_sink,false,rear_source,false);
-    } else ok = ok&&RenderShadedDioramaDepthGeometryWithReceiver(device,
-        untextured?ArRenderTexture_Invalid():owned_source ? VoxelAuthoredAtlas() : rear_source ? layer->voxel_rear_texture : layer->texture,
-        s_voxel_vertices,s_voxel_depths,g->depth_sink?s_voxel_clip_w:NULL,heat_owned?s_voxel_heat_world_xy:NULL,packed*4,quad_indices,packed*6,
-        untextured?kArRenderBlendMode_Alpha:layer->blend,NULL,(ArRenderRectF){0,0,1,1},untextured?NULL:&light,g->depth_sink,layer->description->plane,false);
+    } else {
+      const ArRenderTexture art=use_bank?layer->texture:untextured?ArRenderTexture_Invalid():owned_source?
+          VoxelAuthoredAtlas():rear_source?layer->voxel_rear_texture:layer->texture;
+      /* The authored atlas is converted from one-bit RGB555 opacity. */
+      const bool binary_alpha=use_bank?bank_binary:layer->voxel_terrain && !untextured &&
+          (owned_source || VoxelTerrainBinaryAlpha(layer->voxel_terrain,art));
+      ok = ok&&RenderShadedDioramaDepthGeometryWithReceiver(device,art,
+          s_voxel_vertices,s_voxel_depths,g->depth_sink?s_voxel_clip_w:NULL,heat_owned?s_voxel_heat_world_xy:NULL,packed*4,quad_indices,packed*6,
+          untextured?kArRenderBlendMode_Alpha:layer->blend,NULL,(ArRenderRectF){0,0,1,1},untextured?NULL:&light,g->depth_sink,layer->description->plane,false,binary_alpha,use_bank?&bank:NULL);
+    }
     first = end;
   }
   if(dof_active)ok=DioramaEffectBackend_Unbind(device)&&ok;
@@ -1385,6 +1584,42 @@ static unsigned BuildVoxelWaterfallFaces(const DioramaCapture *capture,const Dio
   return count;
 }
 
+/* Extended terrain clips the same source rectangles on every presentation.
+ * Retain their camera-independent quad topology and reproject it each time. */
+enum { kVoxelFrontMeshSlots=48,kVoxelFrontMeshQuads=512 };
+typedef struct VoxelFrontQuad {
+  float x0,y0,x1,y1,depth;
+  VoxelTrunkCurve curve;
+  bool curved,column;
+} VoxelFrontQuad;
+
+typedef struct VoxelFrontMesh {
+  uint64_t revision,last_use;
+  int ox,oy,width;
+  float left,top,right,bottom;
+  bool high,desert_columns_only,complete;
+  unsigned count;
+  VoxelFrontQuad quads[kVoxelFrontMeshQuads];
+} VoxelFrontMesh;
+
+static VoxelFrontMesh s_voxel_front_meshes[kVoxelFrontMeshSlots];
+static uint64_t s_voxel_front_mesh_use;
+
+static bool ProjectVoxelFrontQuad(const DioramaViewGeometry *g,const DioramaLayerDraw *layer,
+    const VoxelFrontQuad *quad,int oy,VoxelSide *face) {
+  return quad->curved?VoxelCurveQuad(g,layer,&quad->curve,quad->x0,quad->y0,quad->x1,quad->y1,oy,quad->column,face):
+      VoxelSourceQuad(g,layer,quad->x0,quad->y0,quad->x1,quad->y1,quad->depth,quad->depth,false,false,0,0,1,face);
+}
+
+static bool CacheVoxelFrontQuad(VoxelFrontMesh *mesh,const DioramaViewGeometry *g,
+    const DioramaLayerDraw *layer,const VoxelFrontQuad *quad,int oy,VoxelSide *face) {
+  if(mesh && mesh->complete) {
+    if(mesh->count<kVoxelFrontMeshQuads)mesh->quads[mesh->count++]=*quad;
+    else mesh->complete=false;
+  }
+  return ProjectVoxelFrontQuad(g,layer,quad,oy,face);
+}
+
 /* Keep material relief on its compiled depth (forest contact or temple
  * architecture). The native front texture separates rear plants and priorities;
  * partition at world cell boundaries so neighbouring materials cannot bend.
@@ -1401,12 +1636,36 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
   const float right=bounded?left+layer->voxel_source_rect.w:g->u1*SR_PPU_SURFACE_MAX_WIDTH;
   const float top=bounded?layer->voxel_source_rect.y:g->v0*SR_PPU_SURFACE_MAX_HEIGHT;
   const float bottom=bounded?top+layer->voxel_source_rect.h:g->v1*SR_PPU_SURFACE_MAX_HEIGHT;
+  const bool high=layer->description->plane==kDioramaPlane_Bg1Hi;
+  unsigned count=0;
+  VoxelFrontMesh *mesh=NULL;
+  if (layer->voxel_terrain && bounded && !g->options->voxel_observe_face) {
+    const uint64_t revision=ActionVoxel_Revision(layer->voxel_geometry);
+    for(unsigned i=0;i<kVoxelFrontMeshSlots;++i) {
+      VoxelFrontMesh *candidate=&s_voxel_front_meshes[i];
+      if(candidate->complete && candidate->revision==revision && candidate->high==high &&
+          candidate->desert_columns_only==layer->desert_columns_only &&
+          candidate->ox==ox && candidate->oy==oy && candidate->width==capture->width &&
+          candidate->left==left && candidate->top==top && candidate->right==right && candidate->bottom==bottom) {
+        candidate->last_use=++s_voxel_front_mesh_use;
+        for(unsigned q=0;q<candidate->count;++q)
+          if(ProjectVoxelFrontQuad(g,layer,&candidate->quads[q],oy,&s_voxel_sides[count]))++count;
+        return count;
+      }
+      if(!mesh || candidate->last_use<mesh->last_use)mesh=candidate;
+    }
+    mesh->revision=0; /* Publish only after the complete topology was built. */
+    mesh->last_use=++s_voxel_front_mesh_use;
+    mesh->ox=ox;mesh->oy=oy;mesh->width=capture->width;
+    mesh->left=left;mesh->top=top;mesh->right=right;mesh->bottom=bottom;
+    mesh->high=high;mesh->desert_columns_only=layer->desert_columns_only;
+    mesh->count=0;mesh->complete=true;
+  }
   enum { columns=SR_PPU_SURFACE_MAX_WIDTH/8+1,rows=SR_PPU_SURFACE_MAX_HEIGHT/8+1 };
   unsigned char cells[columns*rows]={0};
   const int tx0=(int)floorf((left+ox)/8),ty0=(int)floorf((top+oy)/8);
   const int nx=(int)ceilf((right+ox)/8)-tx0,ny=(int)ceilf((bottom+oy)/8)-ty0;
   if(nx<=0 || ny<=0 || nx>columns || ny>rows)return 0;
-  const bool high=layer->description->plane==kDioramaPlane_Bg1Hi;
   const bool hidden_fronts=ActionVoxel_HasHiddenNativeFronts(layer->voxel_geometry);
   for(int y=0;y<ny;++y)for(int x=0;x<nx;++x) {
     const float recess=ActionVoxel_FrontRecess(layer->voxel_geometry,tx0+x,ty0+y);
@@ -1442,7 +1701,6 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
         for(int xx=x;xx<x+width/8;++xx)
           if(xx>=0 && xx<nx)cells[y*nx+xx]|=2;
   }
-  unsigned count=0;
   for(int y=0;y<ny;++y)for(int x=0;x<nx;++x) {
     const unsigned tag=cells[y*nx+x];
     if((tag&2) || (layer->desert_columns_only && !(tag&8)))continue;
@@ -1475,7 +1733,8 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
         if(x1<=x0 || y1<=y0)continue;
         if(count==kVoxelMaxVisibleFaces)return 0;
         const float depth=depths[plane];
-        if(VoxelSourceQuad(g,layer,x0,y0,x1,y1,depth,depth,false,false,0,0,1,
+        const VoxelFrontQuad quad={.x0=x0,.y0=y0,.x1=x1,.y1=y1,.depth=depth};
+        if(CacheVoxelFrontQuad(mesh,g,layer,&quad,oy,
             &s_voxel_sides[count]))++count;
       }
       cells[y*nx+x]|=2;
@@ -1512,16 +1771,20 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
         float cuts[4];const unsigned n=VoxelTrunkCuts(&section,y0,y1,oy,false,cuts);
         for(unsigned i=0;i+1<n;++i) {
           if(count==kVoxelMaxVisibleFaces)return 0;
-          if(VoxelCurveQuad(g,layer,&section,sx0,cuts[i],sx1,cuts[i+1],oy,!!(tag&8),&s_voxel_sides[count]))++count;
+          const VoxelFrontQuad quad={.x0=sx0,.y0=cuts[i],.x1=sx1,.y1=cuts[i+1],
+              .curve=section,.curved=true,.column=(tag&8)!=0};
+          if(CacheVoxelFrontQuad(mesh,g,layer,&quad,oy,&s_voxel_sides[count]))++count;
         }
       }
       continue;
     }
     if(count==kVoxelMaxVisibleFaces)return 0;
     const float depth=ActionVoxel_FrontRecess(layer->voxel_geometry,tx0+x,ty0+y);
-    if(VoxelSourceQuad(g,layer,x0,y0,x1,y1,depth,depth,false,false,0,0,1,
+    const VoxelFrontQuad quad={.x0=x0,.y0=y0,.x1=x1,.y1=y1,.depth=depth};
+    if(CacheVoxelFrontQuad(mesh,g,layer,&quad,oy,
         &s_voxel_sides[count]))++count;
   }
+  if(mesh && mesh->complete)mesh->revision=ActionVoxel_Revision(layer->voxel_geometry);
   if(g->options->voxel_observe_face)for(unsigned i=0;i<count;++i) {
     float world_xy[8];
     for(unsigned j=0;j<4;++j) {

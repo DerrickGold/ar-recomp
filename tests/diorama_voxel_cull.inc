@@ -25,6 +25,21 @@ static void VoxelCullBoundaryCases(void) {
   for(unsigned j=0;j<4;++j)v[j].position=(ArRenderPointF){-50,20};
   v[0].position.y=NAN;assert(!DioramaVoxelQuadOutsideViewport(v,960,600));
   v[0].position.y=20;assert(!DioramaVoxelQuadOutsideViewport(v,0,600));
+
+  const float identity[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+  const float offscreen[][3]={{-2,0,0},{1.1f,0,0},{0,-2,0},{0,1.1f,0}};
+  for(unsigned i=0;i<4;++i) {
+    const float *lo=offscreen[i];
+    const float hi[]={lo[0]+.5f,lo[1]+.5f,1};
+    assert(DioramaVoxelBoxOutsideViewport(identity,lo,hi,960,600));
+  }
+  const float fringe[]={1.002f,0,0},right[]={2,1,1};
+  assert(!DioramaVoxelBoxOutsideViewport(identity,fringe,right,960,600));
+  const float perspective[16]={1,0,0,0,0,1,0,0,0,0,1,1,0,0,0,1};
+  const float rear[]={1.1f,0,0},deep[]={1.5f,.5f,1};
+  assert(!DioramaVoxelBoxOutsideViewport(perspective,rear,deep,960,600));
+  const float camera_crossing[]={3,0,-2},far[]={4,1,1};
+  assert(!DioramaVoxelBoxOutsideViewport(perspective,camera_crossing,far,960,600));
 }
 static unsigned VoxelCullFixture(unsigned scenario) {
   s_count=0;VoxelCullBoundaryCases();

@@ -393,7 +393,8 @@ typedef struct VoxelWaterfall {
   unsigned char high_priority;
 } VoxelWaterfall;
 const VoxelWaterfall *ActionVoxel_Waterfalls(const ActionVoxelGeometry *c, unsigned *count);
-/* World-anchored continuous recession of reviewed rear-wall rock details. */
+/* World-anchored rear-wall relief is bounded by this maximum recession. */
+#define kActionVoxelMaxRearRelief .075f
 bool ActionVoxel_HasRearRelief(const ActionVoxelGeometry *c);
 float ActionVoxel_RearRelief(const ActionVoxelGeometry *c, float world_x, float world_y);
 float ActionVoxel_RearFaceDepth(const ActionVoxelGeometry *c);
@@ -469,4 +470,11 @@ typedef struct VoxelLintelReturn {
 const VoxelLintelReturn *ActionVoxel_LintelReturns(const ActionVoxelGeometry *c, unsigned *count);
 const uint16_t *ActionVoxel_EdgesForPass(const ActionVoxelGeometry *c, VoxelEdgePass pass,
                                              bool high, unsigned *count);
+enum { kVoxelEdgeChunkSize = 32 };
+typedef struct VoxelEdgeChunk {
+  int left, top, right, bottom;
+} VoxelEdgeChunk;
+/* Consecutive groups in pass order, so rejecting a group preserves tie order. */
+const VoxelEdgeChunk *ActionVoxel_EdgeChunksForPass(const ActionVoxelGeometry *c,
+    VoxelEdgePass pass,bool high);
 #endif

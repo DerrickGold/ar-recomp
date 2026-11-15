@@ -22,6 +22,11 @@ unsigned RoomPreview_ObjectInfo(void);
 int RoomPreview_SetReceivers(int mask, int player_x, int player_y, int enemy_x, int enemy_y);
 int RoomPreview_ReceiverStyle(unsigned flipped, unsigned rim);
 void RoomPreview_EnableEffects(int enabled);
+void RoomPreview_EnableExtendedTerrain(bool enabled);
+void RoomPreview_ReuseTerrainAcrossScroll(bool enabled);
+void RoomPreview_EnableFreeCameraFit(bool enabled);
+/* The benchmark has no picking or voxel-audit consumer. */
+void RoomPreview_EnableVoxelFaceObservation(bool enabled);
 /* Toggle the solid SNES backdrop independently of the BG2/skybox mode. */
 void RoomPreview_ShowBackdrop(int enabled);
 unsigned RoomPreview_EffectCount(void);

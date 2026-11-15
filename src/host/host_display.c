@@ -163,6 +163,8 @@ bool HostDisplay_CanPresentDuringProduction(void) {
 static void RetainFrame(const FrameSlot *slot) {
   ActionVoxel_Retain(slot->diorama_voxel);
   ActionVoxel_Release(s_retained_frame.slot.diorama_voxel);
+  DioramaTerrainSource_Retain(slot->diorama_terrain);
+  DioramaTerrainSource_Release(s_retained_frame.slot.diorama_terrain);
   s_retained_frame.slot = *slot;
   s_retained_frame.valid = true;
   s_retained_upload_complete = false;
@@ -176,6 +178,8 @@ static void RetainFrame(const FrameSlot *slot) {
     memset(&retained->ppu_surfaces, 0, sizeof(retained->ppu_surfaces));
     memset(&retained->sim3d_output_surfaces, 0, sizeof(retained->sim3d_output_surfaces));
     retained->sim_inputs = NULL;
+    retained->background_packet = NULL;
+    retained->background_owner = NULL;
     retained->hud_icon.surface = (SrPpuSurfaceView){0};
     retained->diorama_skybox_surface = (SrPpuSurfaceView){0};
     retained->diorama_trunk_guard.pixels = NULL;
@@ -765,6 +769,8 @@ void HostDisplay_InvalidatePresentHistory(void) {
   HostDisplayReseed_Invalidate(&s_camera_reseed);
   ActionVoxel_Release(s_retained_frame.slot.diorama_voxel);
   s_retained_frame.slot.diorama_voxel = NULL;
+  DioramaTerrainSource_Release(s_retained_frame.slot.diorama_terrain);
+  s_retained_frame.slot.diorama_terrain = NULL;
   s_retained_frame.valid = false;
   DioramaFrameGeneration_InvalidateHistory();
 }
@@ -907,9 +913,18 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
 static bool StagePreparedFrame(const FrameSlot *slot) {
   PerformanceContextForFrame(slot, kHostDisplayPresent_GameTick);
   const PerformanceScope upload = PerformanceMetrics_Begin(kPerformance_Upload);
+  static int trace_staging = -1;
+  if (trace_staging < 0) trace_staging = getenv("AR_TRACE_FRAME_STAGING") != NULL;
+  const uint64_t start = trace_staging ? SDL_GetTicksNS() : 0;
   PresentUpload(slot);
+  const uint64_t uploaded = trace_staging ? SDL_GetTicksNS() : 0;
   RetainFrame(slot);
-  PresentActionEffects_PrepareSourcePackets(&s_retained_frame.slot);
+  const uint64_t retained = trace_staging ? SDL_GetTicksNS() : 0;
+  PresentActionEffects_PrepareSourcePackets(&s_retained_frame.slot, slot);
+  if (trace_staging && slot->diorama_voxel_mode && slot->diorama_active)
+    fprintf(stderr, "[frame-staging] start=%" PRIu64 " upload=%" PRIu64
+        " retain=%" PRIu64 " effects=%" PRIu64 "\n", start,
+        uploaded - start, retained - uploaded, SDL_GetTicksNS() - retained);
   PerformanceMetrics_End(upload);
   return s_retained_frame.valid;
 }

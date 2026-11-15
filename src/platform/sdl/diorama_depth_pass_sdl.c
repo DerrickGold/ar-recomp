@@ -5,6 +5,7 @@
 #include "shaders/diorama_depth_vert.h"
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/scenery_depth_frag.h"
+#include "shaders/scenery_bank_depth_frag.h"
 #include "shaders/actor_depth_frag.h"
 #include "diorama/diorama_scenery_uniforms.h"
 
@@ -29,7 +30,7 @@ static int BlendIndex(ArRenderBlendMode blend) {
 void ArGpuDioramaDepthPass_Destroy(ArGpuDioramaDepthPass *p) {
   if (!p || !p->device) return;
   ArGpuDioramaDepthAlpha_Destroy(p);
-  for (unsigned m = 0; m < 3; ++m)
+  for (unsigned m = 0; m < kGpuDioramaMaterialCount; ++m)
     for (unsigned d = 0; d < kDioramaDepth_Count; ++d)
       for (unsigned b = 0; b < 3; ++b)
         if (p->pipelines[m][d][b]) SDL_ReleaseGPUGraphicsPipeline(p->device, p->pipelines[m][d][b]);
@@ -78,12 +79,16 @@ static bool CreateSolid(ArGpuDioramaDepthPass *p, SDL_GPUTexture **texture, uint
 
 static bool CreatePipelines(ArGpuDioramaDepthPass *p, unsigned material) {
   SDL_GPUDevice *device = p->device;
-  const GpuShaderBlobs vb = material==1
+  const bool bank=material==kGpuDioramaBankMaterial;
+  const GpuShaderBlobs vb = material==1 || bank
       ? (GpuShaderBlobs){kDioramaDepthVertMSL,kDioramaDepthVertMSLSize,
           kDioramaDepthVertSPV,kDioramaDepthVertSPVSize,kDioramaDepthVertDXIL,kDioramaDepthVertDXILSize}
       : (GpuShaderBlobs){kSim3dDepthVertMSL, kSim3dDepthVertMSLSize,
           kSim3dDepthVertSPV, kSim3dDepthVertSPVSize, kSim3dDepthVertDXIL, kSim3dDepthVertDXILSize};
-  const GpuShaderBlobs fb = material == 2 ? (GpuShaderBlobs){
+  const GpuShaderBlobs fb = bank ? (GpuShaderBlobs){
+      kSceneryBankDepthFragMSL,kSceneryBankDepthFragMSLSize,
+      kSceneryBankDepthFragSPV,kSceneryBankDepthFragSPVSize,kSceneryBankDepthFragDXIL,kSceneryBankDepthFragDXILSize}
+      : material == 2 ? (GpuShaderBlobs){
       kActorDepthFragMSL, kActorDepthFragMSLSize, kActorDepthFragSPV,
       kActorDepthFragSPVSize, kActorDepthFragDXIL, kActorDepthFragDXILSize}
       : material == 1 ? (GpuShaderBlobs){
@@ -92,7 +97,8 @@ static bool CreatePipelines(ArGpuDioramaDepthPass *p, unsigned material) {
       : (GpuShaderBlobs){kSim3dDepthFragMSL, kSim3dDepthFragMSLSize,
           kSim3dDepthFragSPV, kSim3dDepthFragSPVSize, kSim3dDepthFragDXIL, kSim3dDepthFragDXILSize};
   SDL_GPUShader *vs = GpuShaderBlob_Create(device, &vb, "action depth", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-  SDL_GPUShader *fs = GpuShaderBlob_CreateFragment(device, &fb, "action cutout", material == 2 ? 4 : material == 1 ? 2 : 1, material ? 1 : 0);
+  SDL_GPUShader *fs = GpuShaderBlob_CreateFragment(device, &fb, "action cutout",
+      bank || material==2 ? 4 : material==1 ? 2 : 1, material ? 1 : 0);
   const SDL_GPUVertexBufferDescription buffer = {.slot = 0, .pitch = sizeof(DioramaDepthVertex),
       .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX};
   const SDL_GPUVertexAttribute attributes[] = {
@@ -102,6 +108,7 @@ static bool CreatePipelines(ArGpuDioramaDepthPass *p, unsigned material) {
       {3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, 40}};
   bool ok = vs && fs;
   for (unsigned d = 0; ok && d < kDioramaDepth_Count; ++d) for (unsigned b = 0; ok && b < 3; ++b) {
+    if (bank && d != kDioramaDepth_Write) continue;
     if (d == kDioramaDepth_Write && b == 2) continue;
     const SDL_GPUColorTargetDescription color = {.format = p->color_format,
       .blend_state = {.enable_blend = b != 0,
@@ -113,7 +120,7 @@ static bool CreatePipelines(ArGpuDioramaDepthPass *p, unsigned material) {
         .alpha_blend_op = SDL_GPU_BLENDOP_ADD}};
     const SDL_GPUGraphicsPipelineCreateInfo info = {
       .vertex_shader = vs, .fragment_shader = fs,
-      .vertex_input_state = {&buffer, 1, attributes, material==1?4:3},
+      .vertex_input_state = {&buffer, 1, attributes, material==1||bank?4:3},
       .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
       .rasterizer_state = {.fill_mode = SDL_GPU_FILLMODE_FILL, .cull_mode = SDL_GPU_CULLMODE_NONE,
           .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE, .enable_depth_clip = true},
@@ -222,7 +229,7 @@ bool ArGpuDioramaDepthPass_Prepare(ArGpuDioramaDepthPass *p, unsigned width, uns
   if (!p || !p->device || !p->white || !p->black || !p->neutral_attributes ||
       !width || !height || width > 16384 || height > 16384 ||
       vertices > kDioramaDepthMaximumVertices || indices > kDioramaDepthMaximumIndices) return false;
-  for (unsigned m = 1; m < 3; ++m)
+  for (unsigned m = 1; m < kGpuDioramaMaterialCount; ++m)
     if (!p->pipelines[m][kDioramaDepth_Write][0] && !CreatePipelines(p, m)) return false;
   return Reserve(p, vertices, indices) && EnsureDepth(p, width, height);
 }
@@ -239,7 +246,7 @@ bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUComm
       (count && (!draws || !sources)) ||
       (!clear_depth && (!p->depth_initialized || p->width != width || p->height != height))) return false;
   unsigned nv = 0, ni = 0;
-  bool material_needed[3] = {0};
+  bool material_needed[kGpuDioramaMaterialCount] = {0};
   /* Validate the complete batch before allocating or recording partial work. */
   for (unsigned i = 0; i < count; ++i) {
     const DioramaDepthDraw *d = &draws[i];
@@ -257,9 +264,13 @@ bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUComm
       const DioramaSceneryLightEffectParams *m = binding->scenery;
       if (!d->textured || m->mode > 2 || (!binding->actor && ArRenderTexture_IsValid(m->attributes)) ||
           (!binding->actor && m->mode == 2 && (m->priority.width <= 0 || m->priority.height <= 0))) return false;
-      SDL_GPUTexture *samples[] = {binding->illumination, binding->attributes, binding->enemy_illumination};
-      for (unsigned sample = 0; sample < 3; ++sample)
+      SDL_GPUTexture *samples[] = {binding->illumination, binding->attributes, binding->enemy_illumination,
+          binding->additional[0],binding->additional[1]};
+      for (unsigned sample = 0; sample < sizeof(samples)/sizeof(*samples); ++sample)
         if (samples[sample] && (samples[sample] == target || samples[sample] == p->depth)) return false;
+      if ((binding->additional[0] || binding->additional[1]) &&
+          (!binding->additional[0] || !binding->additional[1] || binding->actor || !d->nearest ||
+           d->depth_mode!=kDioramaDepth_Write || DioramaHeat_Active(&m->heat) || m->heat_owned.mode>0)) return false;
       if (binding->actor) {
         DioramaActorUniforms uniforms;
         DioramaActorUniforms_Init(&uniforms, m, (int)width, (int)height);
@@ -270,9 +281,10 @@ bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUComm
         DioramaSceneryUniforms_Init(&uniforms, m, (int)width, (int)height);
         if (!Finite(&uniforms, sizeof(uniforms))) return false;
       }
-      material_needed[binding->actor ? 2 : 1] = true;
+      material_needed[ArGpuDioramaDepthMaterialKind(binding)] = true;
     } else if (materials && (materials[i].illumination || materials[i].attributes ||
-        materials[i].enemy_illumination || materials[i].actor)) return false;
+        materials[i].enemy_illumination || materials[i].additional[0] || materials[i].additional[1] ||
+        materials[i].actor)) return false;
     for (unsigned j = 0; j < d->vertex_count; ++j)
       if (!Finite(&d->vertices[j], sizeof(d->vertices[j])) || d->vertices[j].clip[3] <= 0 ||
           /* Only the basic SIM shader reserves negative U for untextured
@@ -284,7 +296,7 @@ bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUComm
       if (d->indices[j] < 0 || (unsigned)d->indices[j] >= d->vertex_count) return false;
     nv += d->vertex_count; ni += d->index_count;
   }
-  for (unsigned m = 1; m < 3; ++m)
+  for (unsigned m = 1; m < kGpuDioramaMaterialCount; ++m)
     if (material_needed[m] && !p->pipelines[m][kDioramaDepth_Write][0] && !CreatePipelines(p, m)) return false;
   if (!Reserve(p, nv, ni) || !EnsureDepth(p, width, height)) return false;
   if (nv) {
@@ -323,7 +335,7 @@ bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUComm
   unsigned va = 0, ia = 0;
   for (unsigned i = 0; i < count; ++i) {
     const DioramaDepthDraw *d = &draws[i];
-    const unsigned material = materials && materials[i].scenery ? (materials[i].actor ? 2 : 1) : 0;
+    const unsigned material = ArGpuDioramaDepthMaterialKind(materials?&materials[i]:NULL);
     SDL_BindGPUGraphicsPipeline(pass, p->pipelines[material][d->depth_mode][BlendIndex(d->blend)]);
     if (material == 2) {
       DioramaActorUniforms uniforms;
@@ -334,13 +346,18 @@ bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUComm
           {materials[i].illumination ? materials[i].illumination : p->black, p->sampler},
           {materials[i].enemy_illumination ? materials[i].enemy_illumination : p->black, p->sampler}};
       SDL_BindGPUFragmentSamplers(pass, 1, samples, 3);
-    } else if (material == 1) {
+    } else if (material != 0) {
       DioramaSceneryUniforms uniforms;
       DioramaSceneryUniforms_Init(&uniforms, materials[i].scenery, (int)width, (int)height);
       SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, sizeof(uniforms));
       const SDL_GPUTextureSamplerBinding light = {
           materials[i].illumination ? materials[i].illumination : p->black, p->sampler};
       SDL_BindGPUFragmentSamplers(pass, 1, &light, 1);
+      if(material==kGpuDioramaBankMaterial) {
+        const SDL_GPUTextureSamplerBinding additional[]={{materials[i].additional[0],p->nearest_sampler},
+            {materials[i].additional[1],p->nearest_sampler}};
+        SDL_BindGPUFragmentSamplers(pass,2,additional,2);
+      }
     }
     const SDL_GPUTextureSamplerBinding sample = {d->textured ? sources[i] : p->white,
         d->nearest ? p->nearest_sampler : p->sampler};

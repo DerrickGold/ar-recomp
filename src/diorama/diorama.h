@@ -254,6 +254,10 @@ bool Diorama_ProjectCapturedBetweenBackgroundsPoint(const DioramaProjection *,
 bool Diorama_PlaneCaptureBounds(const DioramaProjection *, const DioramaPlaneProjection *,
     float *x0, float *y0, float *x1, float *y1);
 
+/* Publish the extended terrain's source extent for BG1 effects. */
+void Diorama_SetVoxelTerrainEffectBounds(DioramaProjection *projection,
+    ArRenderRectI terrain, int primary_world_x, int primary_world_y);
+
 bool Diorama_SkyboxCaptureBounds(const DioramaProjection *projection,
                                  float *x0, float *y0, float *x1, float *y1);
 
@@ -426,6 +430,17 @@ struct DioramaTrunkGuardView;
 struct DioramaVoxelGuardView;
 struct ActionSceneEffectFrame;
 struct DioramaDepthSink;
+enum { kDioramaVoxelTerrainMaximum = 1024 };
+typedef struct DioramaVoxelTerrainCapture {
+  ArRenderRectI bounds;
+  ArRenderRectI visible; /* Optional conservative world footprint inside bounds. */
+  ArRenderTexture textures[3]; /* Rear, native high and foreground. */
+  uint8_t binary_alpha_mask; /* Bits match textures[] and certify all texels. */
+} DioramaVoxelTerrainCapture;
+
+typedef bool (*DioramaCaptureVoxelTerrainFn)(void *userdata,
+    const DioramaProjection *projection, DioramaVoxelTerrainCapture *out);
+
 typedef struct DioramaScene {
   const DioramaRenderOptions *render; /* Required immutable policy for this draw. */
   uint8_t map_group, map_number, layer_section;
@@ -434,6 +449,9 @@ typedef struct DioramaScene {
   const struct ActionTrunkAssets *trunk;
   const struct DioramaTrunkGuardView *trunk_guard;
   const struct DioramaVoxelGuardView *voxel_guard;
+  DioramaCaptureVoxelTerrainFn capture_voxel_terrain;
+  void *capture_voxel_terrain_userdata;
+  const DioramaVoxelTerrainCapture *voxel_terrain;
   DioramaTrunkSettings trunk_settings;
   const struct ActionSceneEffectFrame *trunk_effects;
   /* Optional native snow lighting; omitted by geometry-only replay tools. */
@@ -514,6 +532,19 @@ bool Diorama_ResolveCaptureCameraRange(const DioramaCapture *capture,
 bool Diorama_ResolveCaptureFootprint(const DioramaCapture *capture,
     const DioramaView *view, const DioramaScene *scene, int plane,
     ArRenderRectF *out);
+
+/* The native world rectangle behind the unexpanded Voxel projection, clipped
+ * to finite room bounds and rounded outward to tile boundaries. The result
+ * covers the whole depth interval, including the actor plane between its ends.
+ * Empty intersections succeed. A horizon crossing or invalid input leaves
+ * the result untouched so callers can retain their existing capture. */
+bool Diorama_ResolveVoxelFootprint(const DioramaProjection *projection,
+    ArRenderRectI capture, ArRenderRectI world, ArRenderPointF capture_offset,
+    float near_depth, float far_depth, ArRenderRectI *out);
+/* Fit the requested margins around the native capture, within the room and
+ * the terrain texture budget. The primary interval is retained in full. */
+void Diorama_ResolveVoxelTerrainAxis(int world_start, int world_size, int primary_start,
+    int primary_end, unsigned before, unsigned after, int *start, int *end);
 
 /* Draws in viewport-local coordinates, restoring the full output viewport.
  * Enter without a custom GPU state bound; the compositor owns all effects it

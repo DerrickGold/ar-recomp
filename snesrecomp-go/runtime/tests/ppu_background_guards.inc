@@ -109,6 +109,28 @@ static void test_background_guards(void) {
         CHECK(!memcmp(saved_main, main_pixels[0], sizeof(saved_main)));
         CHECK(!memcmp(saved_bands, bands[0], sizeof(saved_bands)));
         CHECK(!memcmp(saved_content, p[0]->overlayRenderContentMask, sizeof(saved_content)));
+        if (variant >= 16) {
+            enum { terrain_width = 704, terrain_height = 128 };
+            static uint32_t terrain_pixels[3][terrain_width * terrain_height];
+            SrPpuBackgroundGuardRequest terrain = bands_only;
+            terrain.width = terrain_width;
+            terrain.height = terrain_height;
+            terrain.screen_x0 = -128;
+            SrPpuBackgroundGuardBands terrain_bands = {.struct_size = sizeof(terrain_bands),
+                .flags = SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL};
+            for (unsigned b = 0; b < 3; ++b)
+                terrain_bands.bands[b] = (SrPpuBackgroundGuardBandOutput){terrain_pixels[b],
+                    terrain_width * 4, sizeof(terrain_pixels[b])};
+            CHECK(!PpuBackgroundGuardStorageValid(p[0], &terrain, &terrain_bands));
+            terrain_bands.flags |= SR_PPU_BACKGROUND_GUARD_BANDS_WORLD_TERRAIN;
+            CHECK(PpuRenderBackgroundGuardBands(p[0], &terrain, &terrain_bands));
+            for (unsigned b = 0; b < 3; ++b)
+                for (unsigned y = 0; y < ROWS; ++y)
+                    CHECK(!memcmp(terrain_pixels[b] + y * terrain_width + 128,
+                        bands[1][b] + y * W, W * sizeof(uint32_t)));
+            CHECK(!memcmp(saved_main, main_pixels[0], sizeof(saved_main)));
+            CHECK(!memcmp(saved_bands, bands[0], sizeof(saved_bands)));
+        }
         /* Finite clipping overrides even opaque transparent-fill contracts. */
         guard.source_x0 = 140; guard.source_width = 200;
         guard.source_y0 = 77; guard.source_height = 6;

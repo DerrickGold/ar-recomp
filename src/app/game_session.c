@@ -259,6 +259,7 @@ static GameSessionResult StopSession(void) {
   SimPhase0Trace_Close();
   SimRenderMetadata_TraceClose();
   SimFrameCapture_Shutdown();
+  ActRaiser_ResetDioramaTerrain();
   ActRaiserActionBg_Shutdown();
   ActRaiserActorArt_Shutdown();
   HostLocalization_Shutdown();
@@ -307,13 +308,51 @@ static GameSessionResult StopSession(void) {
   };
 }
 
+typedef struct VoxelRoomWorker {
+  SDL_Semaphore *ready;
+  SDL_Thread *thread;
+  SDL_AtomicInt stopping;
+} VoxelRoomWorker;
+
+static int RunVoxelRoomWorker(void *context) {
+  VoxelRoomWorker *worker = context;
+  for (;;) {
+    SDL_WaitSemaphore(worker->ready);
+    if (SDL_GetAtomicInt(&worker->stopping)) return 0;
+    ActRaiserActionBg_BuildVoxelPrebuild();
+  }
+}
+
+static bool WakeVoxelRoomWorker(void *context) {
+  VoxelRoomWorker *worker = context;
+  if (!worker->thread) {
+    if (!worker->ready) worker->ready = SDL_CreateSemaphore(0);
+    if (!worker->ready) return false;
+    worker->thread = SDL_CreateThread(RunVoxelRoomWorker, "voxel-room", worker);
+    if (!worker->thread) return false;
+  }
+  SDL_SignalSemaphore(worker->ready);
+  return true;
+}
+
 GameSessionResult GameSession_Run(const GameSessionConfig *config) {
   PrepareSubsystems(config);
   StartRunner(config);
   fprintf(stderr, "[lifecycle] game session ready; window %u; frame %d\n",
           g_window ? SDL_GetWindowID(g_window) : 0, snes_frame_counter);
   ActRaiserLocalizationRuntime_ApplySettings();
+  VoxelRoomWorker room_worker = {0};
+  const char *prebuild = getenv("AR_VOXEL_ROOM_PREBUILD");
+  if (!config->headless && (!prebuild || strcmp(prebuild, "0")))
+    ActRaiserActionBg_SetVoxelPrebuildWake(WakeVoxelRoomWorker, &room_worker);
   if (!HostLocalization_ExitRequested()) GameLoop_Run(config);
+  if (room_worker.thread) {
+    SDL_SetAtomicInt(&room_worker.stopping, 1);
+    SDL_SignalSemaphore(room_worker.ready);
+    SDL_WaitThread(room_worker.thread, NULL);
+  }
+  ActRaiserActionBg_SetVoxelPrebuildWake(NULL, NULL);
+  if (room_worker.ready) SDL_DestroySemaphore(room_worker.ready);
 
   const bool reset = RuntimeSettings_LifecycleRequest() == kRuntimeLifecycle_Restart;
   GameSessionResult result = StopSession();

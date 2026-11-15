@@ -6,6 +6,9 @@
 #include "host/host_ppu_output.h"
 #include "host/host_frame_surfaces.h"
 #include "diorama/diorama_gpu_policy.h"
+#include "diorama/diorama_camera_policy.h"
+#include "action/action_voxel.h"
+#include <math.h>
 #include "actraiser/actraiser_church_capture.h"
 
 /* The diorama skybox view the last frame published; ActRaiser_LiveDioramaSkybox
@@ -25,6 +28,8 @@ void ActRaiser_LiveDioramaTrunkGuard(DioramaTrunkGuardSource *out) {
 void ActRaiser_LiveDioramaVoxelGuard(DioramaVoxelGuardSource *out) {
   if (out) *out = s_live_diorama_voxel_guard;
 }
+#include "actraiser_diorama_terrain.inc"
+
 static SrPpuBgPacket s_default_background_packet;
 static SrPpuBgPacket *s_background_packet = &s_default_background_packet;
 static const SrPpuBgPacket *s_live_background_packet;
@@ -471,6 +476,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
 
 void ActRaiserDrawPpuFrame(void) {
   ActRaiserChurchCapture_BeginFrame();
+  s_live_terrain = NULL;
+  s_live_terrain_world = (ArRenderRectI){0};
   s_live_background_packet = NULL;
   s_background_packet->words[2] = 0;
   ActRaiserSimMenu_ObserveScene(ActRaiser_ReadWram16(kActRaiserWram_MapGroup));
@@ -689,6 +696,18 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     scanout_request.background_guard_bands[0] = &voxel_guard_bands;
   }
 
+  SrPpuBackgroundGuardRequest terrain_request;
+  SrPpuBackgroundGuardBands terrain_bands;
+  DioramaTerrainSource *terrain = NULL;
+  if (scanout_ready && profile_diorama && !trunk_guard_count && !voxel_guard_count &&
+      (scanout_api->capabilities & SR_RUNNER_CAP_PPU_WORLD_TERRAIN)) {
+    terrain = PrepareLiveTerrain(context, ActRaiserActionBg_TerrainWorldSerial(),
+        &terrain_request, &terrain_bands);
+    if (terrain) {
+      scanout_request.world_terrain = &terrain_request;
+      scanout_request.world_terrain_bands = &terrain_bands;
+    }
+  }
   DioramaPerformance_End(producer_setup_performance);
   PerformanceMetrics_End(pipeline);
   pipeline = PerformanceMetrics_Begin(kPerformance_PpuScanout);
@@ -719,6 +738,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   if (profile_diorama)
     producer_finish_performance =
         DioramaPerformance_Begin(kDioramaPerformance_ProducerFinish);
+  FinishLiveTerrain(context, terrain, scanout_status, &scanout_result);
   ActRaiser_FinishSceneCapture();
   ActRaiser_PublishFrameCapture(scanout_status, &scanout_result);
 

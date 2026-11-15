@@ -5,6 +5,7 @@
 
 struct SrSceneRenderer {
     Ppu *ppu;
+    bool rendered;
     uint32_t pixels[7][SR_SCENE_WIDTH * SR_SCENE_HEIGHT];
     SrPpuVirtualTilemapBinding bindings[2];
     uint32_t pages[2][256 * 256];
@@ -256,6 +257,45 @@ bool sr_scene_renderer_render(SrSceneRenderer *r, const SrSceneFrame *f,
                 .pixel_byte_size = sizeof(r->pages[bg]), .flags = SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE,
             };
             if (PpuRenderNativeBackgroundView(p, &view)) out->native_pages[bg] = r->pages[bg];
+        }
+    }
+    r->rendered = true;
+    return true;
+}
+
+bool sr_scene_renderer_capture_terrain(SrSceneRenderer *r, unsigned layer,
+    int x, int y, unsigned width, unsigned height, uint32_t *bands[3]) {
+    if (!r || !r->rendered || layer >= 2 || !width || !height ||
+        width > 1024 || height > 1024 || x < -65535 || x > 65535 ||
+        y < -65535 || y > 65535 || !bands || !bands[0] || !bands[1] || !bands[2])
+        return false;
+    const SrPpuVirtualTilemapBinding *binding = &r->bindings[layer];
+    uint32_t scratch[3][64 * 64];
+    for (unsigned row = 0; row < height; row += 64) {
+        const unsigned rows = height - row < 64 ? height - row : 64;
+        for (unsigned col = 0; col < width; col += 64) {
+            const unsigned columns = width - col < 64 ? width - col : 64;
+            const SrPpuBackgroundGuardRequest request = {
+                .struct_size = sizeof(request), .layer = layer,
+                .screen_x0 = x + (int)col - binding->camera_x,
+                .screen_y0 = y + (int)row - binding->camera_y - 1,
+                .width = columns, .height = rows, .source_x0 = x, .source_y0 = y,
+                .source_width = width, .source_height = height,
+            };
+            SrPpuBackgroundGuardBands output = {
+                .struct_size = sizeof(output),
+                .flags = SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL,
+            };
+            for (unsigned band = 0; band < 3; ++band)
+                output.bands[band] = (SrPpuBackgroundGuardBandOutput){
+                    .pixels = scratch[band], .pitch_bytes = 64 * sizeof(uint32_t),
+                    .pixel_byte_size = sizeof(scratch[band]),
+                };
+            if (!PpuRenderBackgroundGuardBands(r->ppu, &request, &output)) return false;
+            for (unsigned band = 0; band < 3; ++band)
+                for (unsigned i = 0; i < rows; ++i)
+                    memcpy(bands[band] + (row + i) * width + col,
+                        scratch[band] + i * 64, columns * sizeof(uint32_t));
         }
     }
     return true;

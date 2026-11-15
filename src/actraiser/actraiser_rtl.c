@@ -596,6 +596,9 @@ void ActRaiser_OnInidispWrite(uint8_t value) {
   unsigned frames = ActionLoadPacing_ForceBlankHoldFrames(
       g_ram[kActRaiserWram_MapGroup],
       g_ram[kActRaiserWram_DestinationMapGroup], block, value);
+  if (frames)
+    ActRaiser_PrepareUpcomingVoxelRoom(g_ram[kActRaiserWram_DestinationMapGroup],
+        g_ram[kActRaiserWram_DestinationMap]);
   if (!frames || ActRaiser_DeveloperFlagEnabled(
                      kActRaiserDeveloperFlag_DisableActionLoadPacing))
     return;

@@ -1,3 +1,4 @@
+#include "present/owned_bg_packet.h"
 #include "host/frame_queue.h"
 #include "action/action_voxel.h"
 #include "action/action_trunk.h"
@@ -142,13 +143,20 @@ static void TestBackgroundPacket(HostFramePacket *p) {
          p->frame.hud_icon.surface.data != (const uint8_t *)pixels);
   free(packet);
   SrPpuBgPacket *direct = HostFramePacket_BackgroundTarget(p);
-  assert(direct && direct == p->background_storage);
+  assert(direct && direct == &p->background_storage->packet);
   SrPpuBgPacket_Begin(direct, 2, 2);
   direct->words[2] = direct->owned_sources = 3;
   p->frame = (FrameSlot){.diorama_active = true, .background_packet = direct};
   assert(HostFramePacket_OwnPixels(p));
   assert(p->copied_bytes == 0 && p->frame.background_packet == direct);
   assert(direct->words[2] == 3);
+  OwnedBgPacket *retained = p->frame.background_owner;
+  OwnedBgPacket_Retain(retained);
+  SrPpuBgPacket *replacement = HostFramePacket_BackgroundTarget(p);
+  assert(replacement && replacement != direct);
+  SrPpuBgPacket_Begin(replacement, 4, 4);
+  assert(retained->packet.words[0] == 2 && retained->packet.words[2] == 3);
+  OwnedBgPacket_Release(retained);
   /* A recycled slot with CPU-only output must not retain the previous export. */
   p->frame = (FrameSlot){.diorama_active = true};
   assert(HostFramePacket_OwnPixels(p) && p->copied_bytes == 0);
@@ -291,7 +299,7 @@ static void AssertHeldPacket(const HostFramePacket *held, unsigned tick) {
     assert(held->frame.sim_inputs->vram[9] == tick + 7);
     assert(((const uint32_t *)held->frame.sim3d_output_surfaces.atlas.data)[0] == tick);
   } else {
-    assert(held->frame.background_packet == held->background_storage);
+    assert(held->frame.background_packet == &held->background_storage->packet);
     assert(held->frame.background_packet->words[SR_PPU_BG_PACKET_ARENA_BASE] == tick);
   }
   assert(((const uint32_t *)held->frame.hud_icon.surface.data)[0] == tick);
@@ -482,7 +490,31 @@ static void TestVoxelGuardOwnership(void) {
   HostFrameQueue_Destroy(q); free(input);
 }
 
+static void TestTerrainSourceOwnership(void) {
+  HostFrameQueue *q = HostFrameQueue_Create();
+  assert(q);
+  DioramaTerrainSource *source = calloc(1, sizeof(*source) + sizeof(uint32_t));
+  assert(source);
+  atomic_init(&source->references, 1);
+  source->pixels[0] = 0xff123456;
+  HostFramePacket *packet = HostFrameQueue_BeginWrite(q);
+  assert(packet);
+  uint32_t pixels[] = {1, 2, 3, 4};
+  packet->frame = (FrameSlot){.diorama_active = true,
+      .diorama_plane_request_mask = 1u << kDioramaPlane_Bg1Hi,
+      .diorama_plane_content_mask = 1u << kDioramaPlane_Bg1Hi};
+  packet->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][1] = View(pixels);
+  packet->frame.diorama_terrain = source;
+  assert(HostFramePacket_OwnPixels(packet));
+  assert(packet->copied_bytes == sizeof(pixels));
+  assert(packet->terrain_storage == source);
+  DioramaTerrainSource_Release(source);
+  assert(packet->frame.diorama_terrain->pixels[0] == 0xff123456);
+  HostFrameQueue_Destroy(q);
+}
+
 int main(void) {
+  TestTerrainSourceOwnership();
   TestTrunkGuardOwnership();
   TestVoxelGuardOwnership();
   TestCastleOwnership();

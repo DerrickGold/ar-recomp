@@ -38,6 +38,8 @@
 #include "sim/world_nav/present_world_nav.h"
 #include "sim/world_nav/completion_vista_backend.h"
 
+#include "present_diorama_terrain.inc"
+
 static ArRenderTexture s_plane_textures[kDioramaPlane_Count];
 static ArRenderTexture s_resolved_textures[kDioramaPlane_Count];
 static uint32_t *s_bg_fallback[kDioramaPlane_Count + 1];
@@ -188,6 +190,7 @@ static DioramaCameraPresenter s_diorama_camera = DIORAMA_CAMERA_PRESENTER_INIT;
 void PresentDiorama_DestroyPlanes(ArRenderDevice *device) {
   DioramaTrunkGuardUpload_Reset(&s_trunk_guard, device);
   DioramaVoxelGuardUpload_Reset(&s_voxel_guard, device);
+  ResetLiveTerrain(device);
   DioramaVoxelSourceCache_Reset(&s_voxel_source_cache);
   DioramaDepthGpu_Reset(device);
   ResetVoxelSprites(device);
@@ -539,8 +542,8 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   const DioramaPerformanceScope gpu_capture_scope =
       DioramaPerformance_Begin(kDioramaPerformance_Upload);
   ArRenderTexture gpu_skybox = ArRenderTexture_Invalid();
-  uint32_t gpu_mask = DioramaBgGpu_Resolve(device,
-      slot->background_packet, upload_mask & ~castle_planes, s_resolved_textures, &gpu_skybox, &gpu_changed);
+  uint32_t gpu_mask = DioramaBgGpu_ResolveOwned(device,
+      slot->background_packet, slot->diorama_voxel_mode ? slot->background_owner : NULL, upload_mask & ~castle_planes, s_resolved_textures, &gpu_skybox, &gpu_changed);
   if (ArRenderTexture_IsValid(gpu_skybox)) {
     skybox_changed = (gpu_changed & (1u << kDioramaPlane_Count)) != 0;
     if (skybox_changed) ++s_diorama_skybox_view.revision;
@@ -1221,6 +1224,12 @@ retry_projection:;
       return;
     }
   }
+  PresentTerrainRequest terrain = {device, slot->diorama_terrain, &capture,
+      scene.voxel_geometry, slot->diorama_terrain_world, (scene.map_group << 8) | scene.map_number};
+  if (shared_depth && terrain.world.w > 0 && terrain.world.h > 0) {
+    scene.capture_voxel_terrain = CaptureLiveTerrain;
+    scene.capture_voxel_terrain_userdata = &terrain;
+  }
   const PresentationOutcome diorama = Diorama_Composite(
       device, &capture, &view, &scene, &action_projection);
   if (PresentationOutcome_IsUsable(diorama))
@@ -1303,6 +1312,7 @@ retry_projection:;
 void PresentDiorama_Reset(ArRenderDevice *device) {
   DioramaTrunkGuardUpload_Reset(&s_trunk_guard, device);
   DioramaVoxelGuardUpload_Reset(&s_voxel_guard, device);
+  ResetLiveTerrain(device);
   DioramaVoxelSourceCache_Reset(&s_voxel_source_cache);
   DioramaDepthGpu_Reset(device);
   ResetVoxelSprites(device);

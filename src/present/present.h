@@ -9,6 +9,7 @@
 #include "diorama/diorama.h"
 #include "diorama/diorama_trunk_guard.h"
 #include "diorama/diorama_voxel_guard.h"
+#include "diorama/diorama_terrain_source.h"
 #include "sim/sim3d/sim3d.h"
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
@@ -117,6 +118,7 @@ typedef struct FrameSlot {
    * ticks, but never across a runner tick/reset/load or PPU surface rebind. */
   SrPpuSurfaceSnapshot ppu_surfaces;
   const SrPpuBgPacket *background_packet;
+  struct OwnedBgPacket *background_owner; /* Borrowed from the queue during upload. */
   /* Application-owned products that coexist with, rather than replace, the
    * PPU's current host bindings during separated SIM capture. */
   Sim3DOutputSurfaceViews sim3d_output_surfaces;
@@ -133,6 +135,8 @@ typedef struct FrameSlot {
   /* Optional native BG1 strips from this exact capture, never a newer tick. */
   DioramaTrunkGuardSource diorama_trunk_guard;
   DioramaVoxelGuardSource diorama_voxel_guard;
+  const DioramaTerrainSource *diorama_terrain;
+  ArRenderRectI diorama_terrain_world;
   int32_t diorama_skybox_world_x;
   /* Sub-texel part of the skybox view's world origin, 0..1. */
   float diorama_skybox_world_x_fraction;

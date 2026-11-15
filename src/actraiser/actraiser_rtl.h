@@ -11,6 +11,7 @@
 #include "action/action_bg_plan.h"
 #include "diorama/diorama_trunk_guard.h"
 #include "diorama/diorama_voxel_guard.h"
+#include "diorama/diorama_terrain_source.h"
 #include "snesrecomp/game.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/runtime.h"
@@ -67,6 +68,9 @@ void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x,
 /* Complete native source strips belonging to the same selected frame. */
 void ActRaiser_LiveDioramaTrunkGuard(DioramaTrunkGuardSource *out);
 void ActRaiser_LiveDioramaVoxelGuard(DioramaVoxelGuardSource *out);
+const DioramaTerrainSource *ActRaiser_LiveDioramaTerrain(void);
+ArRenderRectI ActRaiser_LiveDioramaTerrainWorld(void);
+void ActRaiser_ResetDioramaTerrain(void);
 const SrPpuBgPacket *ActRaiser_LiveBackgroundPacket(void);
 /* Scanout-owner only. A non-null target must live through frame consumption.
  * Reset before yielding ownership; this retains the last publication for
@@ -140,6 +144,7 @@ void ActRaiser_RequestMagicCycle(void);
 uint8 ActRaiser_SelectedMagic(void);
 /* Stage the native level transition from a host debug action between ticks. */
 void ActRaiser_Warp(unsigned region, unsigned map);
+void ActRaiser_PrepareUpcomingVoxelRoom(uint8 group, uint8 room);
 
 /* BG-only widescreen presentation helpers. The Sky Palace pair temporarily
  * decodes a box-free source map into only BG2's margin columns, then restores

@@ -300,6 +300,36 @@ static void TrunkGuardModes(EditorRoomScene *scene) {
 
 #include "action_editor_voxel_guard.inc"
 
+static void VoxelTerrainSourceScroll(EditorRoomScene *scene, const char *ini) {
+  assert(EditorRoomScene_Configure(scene, ini));
+  EditorRoomScene_Set3DMode(scene, kAction3D_Voxel);
+  const ArRenderRectI region = {1280, 256, 64, 64};
+  uint32_t before[3][64 * 64], after[3][64 * 64], native_low[64 * 64];
+  uint32_t *first[] = {before[0], before[1], before[2]};
+  uint32_t *second[] = {after[0], after[1], after[2]};
+  EditorRoomTerrainSource original, moved, edited;
+  assert(EditorRoomScene_Render(scene, 1450, 260, 0, 120, 64, NULL));
+  assert(EditorRoomScene_VoxelTerrainSource(scene, &original));
+  assert(EditorRoomScene_CaptureVoxelTerrain(scene, region, first, native_low));
+  const unsigned rasters = EditorRoomScene_RasterCount(scene);
+  assert(EditorRoomScene_Render(scene, 1510, 268, 0, 120, 64, NULL));
+  assert(EditorRoomScene_RasterCount(scene) != rasters);
+  assert(EditorRoomScene_VoxelTerrainSource(scene, &moved));
+  assert(EditorRoomTerrainSource_Equals(original, moved));
+  assert(EditorRoomScene_CaptureVoxelTerrain(scene, region, second, native_low));
+  assert(!memcmp(before, after, sizeof(before)));
+
+  assert(EditorRoomScene_Configure(scene,
+      "[layers:02:01]\n"
+      "bg1-pixels = cell:80,16 black:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n"));
+  assert(!EditorRoomScene_VoxelTerrainSource(scene, &edited));
+  assert(EditorRoomScene_Render(scene, 1510, 268, 0, 120, 64, NULL));
+  assert(EditorRoomScene_VoxelTerrainSource(scene, &edited));
+  assert(!EditorRoomTerrainSource_Equals(moved, edited));
+  assert(EditorRoomScene_CaptureVoxelTerrain(scene, region, second, native_low));
+  assert(memcmp(before, after, sizeof(before)));
+}
+
 int main(int argc, char **argv) {
   if (argc < 3) {
     fprintf(stderr, "usage: %s diorama-layers.ini room.arscene ...\n", argv[0]); return 2;
@@ -345,7 +375,10 @@ int main(int argc, char **argv) {
         assert(EditorRoomScene_Hash(scene) == projected);
       }
     }
-    if(assets->scene.group==2 && assets->scene.map==1) VoxelMarshModes(scene,&assets->scene);
+    if(assets->scene.group==2 && assets->scene.map==1) {
+      VoxelMarshModes(scene,&assets->scene);
+      VoxelTerrainSourceScroll(scene,ini);
+    }
     if(assets->scene.group==1 && assets->scene.map==2) VoxelCutoutModes(scene);
     if(assets->scene.group==1 && (assets->scene.map==3 || assets->scene.map==4))
       VoxelPolicyModes(scene,1,assets->scene.map);

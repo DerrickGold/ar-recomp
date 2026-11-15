@@ -460,6 +460,15 @@ const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void) {
   return DioramaLayerManifest_TerrainRoom(room, ActRaiserRegional_TerrainSnapshot());
 }
 
+void ActRaiser_PrepareUpcomingVoxelRoom(uint8 group, uint8 room) {
+  if (g_settings.diorama_mode != kAction3D_Voxel || !ActRaiser_IsActionMap(group, room)) return;
+  uint8_t profile, mosaic;
+  if (!ActRaiserRegional_PeekRoomVariants(&profile, &mosaic)) return;
+  const DioramaRoomOverride *overrides = DioramaLayerOrder_FindSection(
+      DioramaLayerManifest_Table(), group, room, kDioramaLayerSection_Room);
+  ActRaiserActionBg_RequestVoxelPrebuild(group, room, profile, mosaic, overrides);
+}
+
 static bool ActRaiser_CommitPpuFramePolicy(
     const SrPpuFramePolicy *policy) {
   const SrResult result = RtlGameApplyPpuFramePolicy(policy);

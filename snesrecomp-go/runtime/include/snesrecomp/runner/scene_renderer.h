@@ -81,6 +81,12 @@ bool sr_scene_renderer_render(SrSceneRenderer *renderer,
                                const SrSceneFrame *frame,
                                SrSceneSurfaces *out);
 
+/* Decode a finite BG rectangle in the current scene using the same native
+ * decoder as background guards. Output bands are tightly packed. */
+bool sr_scene_renderer_capture_terrain(SrSceneRenderer *renderer,
+    unsigned layer, int x, int y, unsigned width, unsigned height,
+    uint32_t *bands[3]);
+
 #ifdef __cplusplus
 }
 #endif

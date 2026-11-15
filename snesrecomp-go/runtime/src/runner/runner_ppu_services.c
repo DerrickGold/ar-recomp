@@ -437,6 +437,12 @@ static SrResult run_ppu_scanout(
     if (!guards_ready) for (unsigned i = 0; i < guard_count; ++i)
         PpuClearBackgroundGuard(&guards[i],
             guard_bands ? request->background_guard_bands[i] : NULL);
+    const bool terrain_ready = request->struct_size >= SR_PPU_SCANOUT_REQUEST_WORLD_TERRAIN_SIZE &&
+        request->world_terrain &&
+        PpuRenderBackgroundGuardBands(ppu, request->world_terrain, request->world_terrain_bands);
+    if (!terrain_ready && request->struct_size >= SR_PPU_SCANOUT_REQUEST_WORLD_TERRAIN_SIZE &&
+        request->world_terrain)
+        PpuClearBackgroundGuard(request->world_terrain, request->world_terrain_bands);
     if (native_view)
         view_ready = PpuRenderNativeBackgroundView(ppu, view);
     if (!view_ready && ppu->backgroundPacket) {
@@ -451,6 +457,7 @@ static SrResult run_ppu_scanout(
     out_result->flags =
         (view_ready ? SR_PPU_SCANOUT_BACKGROUND_VIEW_READY : 0u) |
         (guards_ready ? SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY : 0u) |
+        (terrain_ready ? SR_PPU_SCANOUT_WORLD_TERRAIN_READY : 0u) |
         (PpuAuthenticSurfaceReady(ppu)
             ? SR_PPU_SCANOUT_AUTHENTIC_SURFACE_READY : 0u) |
         (PpuAuthenticCameraFrameReady(

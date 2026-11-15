@@ -9,7 +9,8 @@
  * each composite explicitly; its finish callback closes the scope even after
  * failure. Reset before the GPU device is destroyed. Queued geometry/material
  * parameters are copied; borrowed GPU resources are drained before mutation.
- * Consecutive draws batch until an SDL ordering boundary or bounded capacity.
+ * Hybrid draws batch until an SDL ordering boundary. Storage grows up to a
+ * safety limit. The legacy cutout adapter can flush at its upload capacity.
  * Direct SDL/GPU callers must SubmitPending before recording outside work. */
 typedef struct ArSdlDioramaDepthSink {
   SDL_GPUDevice *device;

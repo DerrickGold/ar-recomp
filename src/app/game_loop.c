@@ -12,6 +12,7 @@
 #include "actraiser/actraiser_rtl.h"
 #include "actraiser/actraiser_angel.h"
 #include "actraiser_game.h"
+#include "action/present_action_effects.h"
 #include "app/input_replay.h"
 #include "app/input_map.h"
 #include "app/performance_metrics.h"
@@ -88,6 +89,9 @@ static bool RunOneRecompiledFrame(uint32 live_inputs, uint32 angel_stick, uint8 
   const bool live_policy = InputReplay_PolicyChangesAllowed();
   ActRaiserAngel_SetInput(live_policy ? angel_stick : 0, live_policy ? angel_shot : 0,
       g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap]);
+  if (g_ram[kActRaiserWram_TransitionRequest] & kActRaiserTransitionRequestBit)
+    ActRaiser_PrepareUpcomingVoxelRoom(g_ram[kActRaiserWram_DestinationMapGroup],
+        g_ram[kActRaiserWram_DestinationMap]);
   (void)RtlRunFrame(WorldNavigationTravel_Input(
       g_ram, kSnesWramSize, Ar2Content_Atlas(), replay.inputs));
   OracleTrace_CompleteTick();
@@ -308,6 +312,7 @@ static void ProduceFrameStream(void *context) {
     const uint64_t cpu_end = cpu_start ? HostFrameProducer_ThreadCpuTimeNs() : 0;
     packet->cpu_ns = cpu_end >= cpu_start ? cpu_end - cpu_start : 0;
     HostRuntimeDiagnostics_EndDraw(profile);
+    PresentActionEffects_QueueSourcePreparation(&packet->frame);
     HostFrameQueue_Publish(stream->queue);
     ++stream->frames;
     stream->next_ns += stream->interval_ns;
@@ -1116,6 +1121,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
     if (stream_allowed && HostDisplay_CanPresentDuringProduction()) {
       HostDisplay_SetProducerPacing(true);
       stream.sim_town = !Diorama_IsActiveThisFrame();
+      if (!stream.sim_town && g_settings.diorama_mode == kAction3D_Voxel)
+        PresentActionEffects_StartSourceWorker();
       stream.underlay_serial = stream.sim_town ? SimWorldMap_Serial() : 0;
       stream.map_group = g_ram[kActRaiserWram_MapGroup];
       stream.map_number = g_ram[kActRaiserWram_CurrentMap];
@@ -1280,6 +1287,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
   }
   if (stream_pending) HostFrameQueue_RequestPause(stream.queue);
   HostFrameProducer_Shutdown();
+  PresentActionEffects_StopSourceWorker();
   HostFrameQueue_Destroy(stream.queue);
   if (stream_trace) fclose(stream_trace);
   if (pacing_trace) fclose(pacing_trace);

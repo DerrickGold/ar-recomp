@@ -32,6 +32,13 @@ struct ActionTrunkAssets;
 /* Producer-owned immutable publication; retained frames take a reference.
  * Prepare runs before capture policy, after the native gameplay pass. */
 struct ActionVoxelGeometry;
+/* The game owner queues an immutable room job. Host code owns the worker
+ * lifetime and joins it before releasing the action background session. */
+typedef bool (*ActRaiserVoxelPrebuildWake)(void *context);
+void ActRaiserActionBg_SetVoxelPrebuildWake(ActRaiserVoxelPrebuildWake wake, void *context);
+void ActRaiserActionBg_RequestVoxelPrebuild(uint8_t group, uint8_t room,
+    uint8_t profile, uint8_t mosaic, const struct DioramaRoomOverride *overrides);
+void ActRaiserActionBg_BuildVoxelPrebuild(void);
 void ActRaiserActionBg_PrepareVoxel(bool enabled, const struct DioramaRoomOverride *terrain);
 const struct ActionVoxelGeometry *ActRaiserActionBg_VoxelGeometry(unsigned group, unsigned room);
 const struct ActionTrunkAssets *ActRaiserActionBg_TrunkAssets(unsigned group,unsigned room,
@@ -341,6 +348,7 @@ void ActRaiserActionBg_ConfigureLavaBubbles(const ActionSurfaceField *, uint16_t
 /* A current world binding with ordinary live-world edges and no tuned caps
  * can supply diorama guard columns without requiring authored tile edits. */
 bool ActRaiserActionBg_WorldApronAvailable(unsigned bg);
+uint32_t ActRaiserActionBg_TerrainWorldSerial(void);
 /* The bound finite source, including active pasted terrain, in screen X.
  * Uses the same raster-scroll delta as native/scenery lookup. False for
  * unbound or cyclic worlds; outputs are cleared on failure. */

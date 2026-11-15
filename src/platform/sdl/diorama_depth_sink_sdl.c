@@ -9,12 +9,12 @@
 #include <string.h>
 
 typedef struct ArSdlDioramaDepthBatch {
-  DioramaDepthDraw draws[kDioramaDepthMaximumDraws];
-  SDL_GPUTexture *sources[kDioramaDepthMaximumDraws];
-  ArGpuDioramaDepthMaterial materials[kDioramaDepthMaximumDraws];
-  DioramaSceneryLightEffectParams params[kDioramaDepthMaximumDraws];
+  DioramaDepthDraw *draws;
+  SDL_GPUTexture **sources;
+  ArGpuDioramaDepthMaterial *materials;
+  DioramaSceneryLightEffectParams *params;
   SDL_GPUTexture *target;
-  unsigned slot, width, height;
+  unsigned slot, width, height, capacity;
 } ArSdlDioramaDepthBatch;
 
 static SDL_GPUTexture *Texture(SDL_Texture *texture) {
@@ -42,6 +42,7 @@ static bool Flush(void *context) {
      * borrowed views only now, after the complete batch has been retained. */
     batch->draws[i].vertices=s->vertices+va;
     batch->draws[i].indices=s->indices+ia;
+    batch->materials[i].scenery=batch->sources[i]?&batch->params[i]:NULL;
     va+=batch->draws[i].vertex_count;ia+=batch->draws[i].index_count;
   }
   SDL_GPUCommandBuffer *cmd=SDL_AcquireGPUCommandBuffer(s->device);
@@ -85,7 +86,12 @@ void ArSdlDioramaDepthSink_Reset(ArSdlDioramaDepthSink *s) {
   if (!s) return;
   if (s->owner) (void)Finish(s,s->owner,false);
   for (unsigned i=0;i<4;++i) ArGpuDioramaDepthPass_Destroy(&s->targets[i].pass);
-  free(s->vertices);free(s->indices);free(s->batch);
+  if(s->batch) {
+    free(s->batch->draws);free(s->batch->sources);
+    free(s->batch->materials);free(s->batch->params);
+    free(s->batch);
+  }
+  free(s->vertices);free(s->indices);
   *s=(ArSdlDioramaDepthSink){0};
 }
 
@@ -102,16 +108,37 @@ static unsigned Capacity(unsigned count,unsigned maximum) {
   while (n<count && n<maximum) n*=2;
   return n<maximum?n:maximum;
 }
-static bool Reserve(ArSdlDioramaDepthSink *s,unsigned nv,unsigned ni) {
+static bool Reserve(ArSdlDioramaDepthSink *s,unsigned nd,unsigned nv,unsigned ni) {
+  const unsigned max_draws=s->hybrid?kDioramaDepthHybridMaximumDraws:kDioramaDepthMaximumDraws;
+  const unsigned max_vertices=s->hybrid?kDioramaDepthHybridMaximumVertices:kDioramaDepthMaximumVertices;
+  const unsigned max_indices=s->hybrid?kDioramaDepthHybridMaximumIndices:kDioramaDepthMaximumIndices;
+  if(nd>max_draws || nv>max_vertices || ni>max_indices) return false;
   if (!s->batch && !(s->batch=calloc(1,sizeof(*s->batch)))) return false;
+  ArSdlDioramaDepthBatch *batch=s->batch;
+  if(nd>batch->capacity) {
+    const unsigned capacity=Capacity(nd,max_draws);
+    DioramaDepthDraw *draws=realloc(batch->draws,capacity*sizeof(*draws));
+    if(!draws)return false;
+    batch->draws=draws;
+    SDL_GPUTexture **sources=realloc(batch->sources,capacity*sizeof(*sources));
+    if(!sources)return false;
+    batch->sources=sources;
+    ArGpuDioramaDepthMaterial *materials=realloc(batch->materials,capacity*sizeof(*materials));
+    if(!materials)return false;
+    batch->materials=materials;
+    DioramaSceneryLightEffectParams *params=realloc(batch->params,capacity*sizeof(*params));
+    if(!params)return false;
+    batch->params=params;
+    batch->capacity=capacity;
+  }
   if (nv>s->capacity) {
-    const unsigned capacity=Capacity(nv,kDioramaDepthMaximumVertices);
+    const unsigned capacity=Capacity(nv,max_vertices);
     DioramaDepthVertex *vertices=realloc(s->vertices,capacity*sizeof(*vertices));
     if (!vertices) return false;
     s->vertices=vertices;s->capacity=capacity;
   }
   if (ni>s->index_capacity) {
-    const unsigned capacity=Capacity(ni,kDioramaDepthMaximumIndices);
+    const unsigned capacity=Capacity(ni,max_indices);
     int32_t *indices=realloc(s->indices,capacity*sizeof(*indices));
     if (!indices) return false;
     s->indices=indices;s->index_capacity=capacity;
@@ -156,7 +183,7 @@ bool ArSdlDioramaDepthSink_PrepareTarget(ArSdlDioramaDepthSink *s,ArRenderDevice
     return false;
   s->device=gpu;
   const unsigned slot=TargetSlot(s,target,format);
-  return slot<4 && Reserve(s,vertices,indices) &&
+  return slot<4 && Reserve(s,kDioramaDepthMaximumDraws,vertices,indices) &&
       ArGpuDioramaDepthPass_Prepare(&s->targets[slot].pass,width,height,vertices,indices);
 }
 
@@ -177,7 +204,10 @@ static bool Submit(void *context,ArRenderDevice *device,const DioramaDepthSubmis
   if (s->failed || s->owner!=device || !draw) return false;
   SDL_Renderer *renderer=ArSdlRenderBackend_Renderer(device);
   SDL_Texture *target=Target(device), *art=ArSdlRenderBackend_UnwrapTexture(draw->texture);
-  SDL_GPUTexture *destination=Texture(target), *source=Texture(art);
+  /* Target mutation drains this scope. Reuse the validated size, format
+   * slot and GPU attachment while it still owns the same SDL target. */
+  const bool same_target=s->count && target==s->targets[s->batch->slot].target;
+  SDL_GPUTexture *destination=same_target?s->batch->target:Texture(target), *source=Texture(art);
   SDL_Rect viewport,clip;
   float scale_x,scale_y;
   if (!renderer || !destination || s->device!=ArSdlRenderBackend_GpuDevice(device) ||
@@ -192,12 +222,20 @@ static bool Submit(void *context,ArRenderDevice *device,const DioramaDepthSubmis
     for (int i=0;i<draw->vertex_count;++i)
       if (!isfinite(draw->clip_w[i]) || draw->clip_w[i]<=0) return false;
   }
-  const SDL_PropertiesID properties=SDL_GetTextureProperties(target);
-  const int width=(int)SDL_GetNumberProperty(properties,SDL_PROP_TEXTURE_WIDTH_NUMBER,0);
-  const int height=(int)SDL_GetNumberProperty(properties,SDL_PROP_TEXTURE_HEIGHT_NUMBER,0);
-  const SDL_GPUTextureFormat format=SDL_GetGPUTextureFormatFromPixelFormat((SDL_PixelFormat)
-      SDL_GetNumberProperty(properties,SDL_PROP_TEXTURE_FORMAT_NUMBER,SDL_PIXELFORMAT_UNKNOWN));
-  if (width<=0 || height<=0) return false;
+  int width,height;
+  unsigned slot;
+  if(same_target) {
+    width=(int)s->batch->width;height=(int)s->batch->height;slot=s->batch->slot;
+  } else {
+    const SDL_PropertiesID properties=SDL_GetTextureProperties(target);
+    width=(int)SDL_GetNumberProperty(properties,SDL_PROP_TEXTURE_WIDTH_NUMBER,0);
+    height=(int)SDL_GetNumberProperty(properties,SDL_PROP_TEXTURE_HEIGHT_NUMBER,0);
+    const SDL_GPUTextureFormat format=SDL_GetGPUTextureFormatFromPixelFormat((SDL_PixelFormat)
+        SDL_GetNumberProperty(properties,SDL_PROP_TEXTURE_FORMAT_NUMBER,SDL_PIXELFORMAT_UNKNOWN));
+    if(s->count && !Flush(s))return false;
+    slot=TargetSlot(s,target,format);
+  }
+  if (width<=0 || height<=0 || slot==4) return false;
   clip=viewport;
   if (SDL_RenderClipEnabled(renderer)) {
     SDL_Rect local;
@@ -207,14 +245,14 @@ static bool Submit(void *context,ArRenderDevice *device,const DioramaDepthSubmis
   }
   const SDL_Rect bounds={0,0,width,height};
   if (!SDL_GetRectIntersection(&clip,&bounds,&clip)) return true;
-  if (s->count && (s->batch->target!=destination || s->batch->width!=(unsigned)width ||
-      s->batch->height!=(unsigned)height || s->count==kDioramaDepthMaximumDraws ||
-      (unsigned)draw->vertex_count>kDioramaDepthMaximumVertices-s->vertex_count ||
-      (unsigned)draw->index_count>kDioramaDepthMaximumIndices-s->index_count)) {
+  /* A hybrid scope must retain both passes until a real ordering boundary.
+   * Flushing mid-scope would resolve fractional faces against partial depth. */
+  if (s->count && !s->hybrid &&
+      (s->count==kDioramaDepthMaximumDraws ||
+       (unsigned)draw->vertex_count>kDioramaDepthMaximumVertices-s->vertex_count ||
+       (unsigned)draw->index_count>kDioramaDepthMaximumIndices-s->index_count)) {
     if (!Flush(s)) return false;
   }
-  const unsigned slot=TargetSlot(s,target,format);
-  if (slot==4) return false;
   SDL_ScaleMode filter=SDL_SCALEMODE_NEAREST;
   if (art && !SDL_GetTextureScaleMode(art,&filter)) return false;
   DioramaSceneryLightEffectParams params=draw->lighting?*draw->lighting:
@@ -227,6 +265,20 @@ static bool Submit(void *context,ArRenderDevice *device,const DioramaDepthSubmis
   const bool lit=ArRenderTexture_IsValid(params.illumination);
   ArGpuDioramaDepthMaterial material={
       .actor=source && draw->native_actor && (!lit || ArRenderTexture_IsValid(params.attributes))};
+  const DioramaDepthTextureBank *bank=draw->texture_bank;
+  if(bank) {
+    if(!bank->slots || !source || filter!=SDL_SCALEMODE_NEAREST || draw->native_actor ||
+        draw->blend==kArRenderBlendMode_Add || draw->heat_world_xy ||
+        DioramaHeat_Active(&params.heat) || params.heat_owned.mode>0) return false;
+    for(unsigned i=0;i<2;++i) {
+      SDL_Texture *alternate=ArSdlRenderBackend_UnwrapTexture(bank->additional[i]);
+      SDL_ScaleMode alternate_filter;
+      material.additional[i]=Texture(alternate);
+      if(!material.additional[i] || !SDL_GetTextureScaleMode(alternate,&alternate_filter) ||
+          alternate_filter!=SDL_SCALEMODE_NEAREST) return false;
+    }
+    for(int i=0;i<draw->vertex_count;++i)if(bank->slots[i]>2)return false;
+  }
   if (lit) {
     material.illumination=Source(params.illumination);
     if (!material.illumination) return false;
@@ -243,21 +295,25 @@ static bool Submit(void *context,ArRenderDevice *device,const DioramaDepthSubmis
       params.texel_height=1.f/SR_PPU_SURFACE_MAX_HEIGHT;
     }
   }
-  if (!Reserve(s,s->vertex_count+(unsigned)draw->vertex_count,
+  if (!Reserve(s,s->count+1,s->vertex_count+(unsigned)draw->vertex_count,
       s->index_count+(unsigned)draw->index_count)) return false;
   /* Close preceding SDL work once at the start of an uninterrupted batch.
    * The backend drains this batch before the next ordinary draw or mutation. */
   if (!s->count && !ArSdlRenderBackend_SubmitPending(device)) return false;
   ArSdlDioramaDepthBatch *batch=s->batch;
   batch->target=destination;batch->slot=slot;batch->width=width;batch->height=height;
+  bool cutout=draw->binary_texture_alpha && source && filter==SDL_SCALEMODE_NEAREST &&
+      !draw->native_actor && draw->blend==kArRenderBlendMode_Alpha && params.mode<=.5f;
   for (int i=0;i<draw->vertex_count;++i) {
     const ArRenderVertex2D *v=&draw->vertices[i];
+    cutout &= v->color.a==1.f;
     const float w=draw->clip_w?draw->clip_w[i]:1;
     s->vertices[s->vertex_count+(unsigned)i]=(DioramaDepthVertex){
         .clip={(2*(v->position.x+viewport.x)/width-1)*w,
             (1-2*(v->position.y+viewport.y)/height)*w,draw->depths[i]*w,w},
         .color=v->color,.uv=v->tex_coord,
-        .heat_world_xy=draw->heat_world_xy?draw->heat_world_xy[i]:(ArRenderPointF){0}};
+        .heat_world_xy=bank?(ArRenderPointF){bank->slots[i],0}:
+            draw->heat_world_xy?draw->heat_world_xy[i]:(ArRenderPointF){0}};
   }
   memcpy(s->indices+s->index_count,draw->indices,(size_t)draw->index_count*sizeof(*s->indices));
   batch->draws[s->count]=(DioramaDepthDraw){
@@ -265,9 +321,9 @@ static bool Submit(void *context,ArRenderDevice *device,const DioramaDepthSubmis
       .depth_mode=draw->native_actor?kDioramaDepth_NativeActor:
           draw->blend==kArRenderBlendMode_Add?kDioramaDepth_Read:kDioramaDepth_Write,
       .blend=draw->blend,.textured=source!=NULL,.nearest=filter==SDL_SCALEMODE_NEAREST,
+      .cutout=cutout,
       .clip_enabled=true,.clip={clip.x,clip.y,clip.w,clip.h}};
   batch->params[s->count]=params;
-  material.scenery=source?&batch->params[s->count]:NULL;
   batch->materials[s->count]=material;
   batch->sources[s->count]=source;
   ++s->count;s->vertex_count+=(unsigned)draw->vertex_count;s->index_count+=(unsigned)draw->index_count;
@@ -280,7 +336,7 @@ const DioramaDepthSink *ArSdlDioramaDepthSink_Begin(ArSdlDioramaDepthSink *s,ArR
   if (!ArSdlRenderBackend_SetExternalFlush(device,Flush,s)) return NULL;
   s->device=gpu;s->owner=device;s->failed=false;
   s->hybrid=false;
-  s->sink=(DioramaDepthSink){.submit=Submit,.userdata=s,.clear=Clear,.finish=Finish};
+  s->sink=(DioramaDepthSink){.submit=Submit,.userdata=s,.texture_banks=true,.clear=Clear,.finish=Finish};
   s->stats.draws=s->stats.submissions=s->stats.largest_batch=0;
   for (unsigned i=0;i<4;++i) s->targets[i].valid=false;
   return &s->sink;

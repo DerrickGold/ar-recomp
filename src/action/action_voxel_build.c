@@ -2399,6 +2399,23 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
   if(!BuildLintelReturns(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
   BuildCastleTerminalMatte(c,s,terrain,stamps,native,palette,tiles,tile_pitch);
   BuildJungleTerminal(c,s,terrain,stamps,native,palette,tiles,tile_pitch);
+  /* Store bounds for consecutive edge runs after all authored/appended edges
+   * have been indexed. Match the renderer's native capture test exactly. */
+  for(unsigned pass=0;pass<kVoxelPassLists;++pass) {
+    for(unsigned i=0;i<c->pass_counts[pass];++i) {
+      const VoxelEdge *edge=&c->edges[c->pass_edges[pass][i]];
+      const int x=edge->x+(edge->side==1),y=edge->y+(edge->side==2);
+      const int right=x+((edge->side&1)?0:edge->length),bottom=y+((edge->side&1)?edge->length:0);
+      VoxelEdgeChunk *chunk=&c->pass_chunks[pass][i/kVoxelEdgeChunkSize];
+      if(i%kVoxelEdgeChunkSize==0) *chunk=(VoxelEdgeChunk){x,y,right,bottom};
+      else {
+        if(x<chunk->left)chunk->left=x;
+        if(y<chunk->top)chunk->top=y;
+        if(right>chunk->right)chunk->right=right;
+        if(bottom>chunk->bottom)chunk->bottom=bottom;
+      }
+    }
+  }
   return true;
 }
 

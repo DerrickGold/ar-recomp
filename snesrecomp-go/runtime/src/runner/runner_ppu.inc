@@ -1244,6 +1244,7 @@ static bool valid_background_guard(const Ppu *ppu,
         const SrPpuBackgroundGuardRequest *guard,
         const SrPpuBackgroundGuardBands *bands) {
     if (!ppu || !PpuBackgroundGuardStorageValid(ppu, guard, bands) ||
+        (bands && (bands->flags & SR_PPU_BACKGROUND_GUARD_BANDS_WORLD_TERRAIN)) ||
         !guard->source_width || guard->source_width > UINT16_MAX ||
         !guard->source_height || guard->source_height > UINT16_MAX ||
         (int64_t)guard->source_x0 + guard->source_width > INT32_MAX ||
@@ -1307,6 +1308,31 @@ static SrResult run_ppu_scanout_with_background_view(
                     (int64_t)prior->screen_x0 < (int64_t)guard->screen_x0 + guard->width)
                     return SR_RESULT_INVALID_ARGUMENT;
             }
+        }
+    }
+    if (request->struct_size >= SR_PPU_SCANOUT_REQUEST_WORLD_TERRAIN_SIZE &&
+        (request->world_terrain || request->world_terrain_bands)) {
+        const SrPpuBackgroundGuardRequest *terrain = request->world_terrain;
+        const SrPpuBackgroundGuardBands *bands = request->world_terrain_bands;
+        if (!bands || !PpuBackgroundGuardStorageValid(snes->ppu, terrain, bands) ||
+            terrain->pixels || bands->flags !=
+                (SR_PPU_BACKGROUND_GUARD_BANDS_WORLD_TERRAIN |
+                 SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL) ||
+            !terrain->source_width || terrain->source_width > UINT16_MAX ||
+            !terrain->source_height || terrain->source_height > UINT16_MAX ||
+            terrain->screen_x0 < -65535 || terrain->screen_x0 > 65535 ||
+            terrain->screen_y0 < -65535 || terrain->screen_y0 > 65535)
+            return SR_RESULT_INVALID_ARGUMENT;
+        for (unsigned i = 0; i < request->background_guard_count; ++i)
+            if (PpuBackgroundGuardsStorageOverlap(terrain, bands,
+                    &request->background_guards[i], request->background_guard_bands[i]))
+                return SR_RESULT_INVALID_ARGUMENT;
+        if (view) for (unsigned b = 0; b < 3; ++b) {
+            const SrPpuBackgroundGuardBandOutput *output = &bands->bands[b];
+            const SrPpuBackgroundViewRequest storage = {.pixels = output->pixels,
+                .pitch_bytes = output->pitch_bytes, .height = terrain->height};
+            if (background_view_overlaps(&storage, view->pixels, view->pitch_bytes * view->height))
+                return SR_RESULT_INVALID_ARGUMENT;
         }
     }
     memset(out_result, 0, SR_PPU_SCANOUT_RESULT_V2_SIZE);

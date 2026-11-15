@@ -65,8 +65,13 @@ void PresentActionHeat_End(
  * with an unchanged timestamp (save-state loads and editor changes). */
 void PresentActionEffects_InvalidateSourcePackets(void);
 /* Presentation owner, after retaining an immutable capture. Builds source
- * geometry before drawing; no GPU calls or live game state are consumed. */
-void PresentActionEffects_PrepareSourcePackets(const struct FrameSlot *slot);
+ * geometry before drawing, using the original slot as the worker job identity. */
+void PresentActionEffects_PrepareSourcePackets(const FrameSlot *slot, const FrameSlot *owned);
+/* Start before streaming and stop after the producer joins. Only the frame
+ * producer queues work, using the immutable capture before publication. */
+void PresentActionEffects_StartSourceWorker(void);
+void PresentActionEffects_QueueSourcePreparation(const FrameSlot *slot);
+void PresentActionEffects_StopSourceWorker(void);
 
 /* Called on render-device reset and shutdown, outside any active pass. */
 void PresentActionEffects_Reset(ArRenderDevice *device);

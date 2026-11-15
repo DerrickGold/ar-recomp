@@ -6812,14 +6812,18 @@ static bool guard_storage_overlaps(SrPpuBackgroundGuardBandOutput output,
 bool PpuBackgroundGuardStorageValid(const Ppu *ppu,
         const SrPpuBackgroundGuardRequest *guard,
         const SrPpuBackgroundGuardBands *bands) {
-    if (!guard || guard->struct_size < sizeof(*guard) ||
-        guard->layer >= 2 || !guard->width || guard->width > kPpuSurfaceWidth ||
-        !guard->height || guard->height > 64 ||
-        (!guard->pixels && (!bands || guard->pitch_bytes || guard->pixel_byte_size)))
-        return false;
     if (bands && ((uintptr_t)bands % _Alignof(SrPpuBackgroundGuardBands) ||
         bands->struct_size < SR_PPU_BACKGROUND_GUARD_BANDS_V1_SIZE ||
-        (bands->flags & ~SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL)))
+        (bands->flags & ~(SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL |
+                          SR_PPU_BACKGROUND_GUARD_BANDS_WORLD_TERRAIN))))
+        return false;
+    const bool terrain = bands && (bands->flags & SR_PPU_BACKGROUND_GUARD_BANDS_WORLD_TERRAIN);
+    const unsigned max_width = terrain ? SR_PPU_WORLD_TERRAIN_MAXIMUM : kPpuSurfaceWidth;
+    const unsigned max_height = terrain ? SR_PPU_WORLD_TERRAIN_MAXIMUM : 64;
+    if (!guard || guard->struct_size < sizeof(*guard) ||
+        guard->layer >= 2 || !guard->width || guard->width > max_width ||
+        !guard->height || guard->height > max_height ||
+        (!guard->pixels && (!bands || guard->pitch_bytes || guard->pixel_byte_size)))
         return false;
     for (unsigned i = 0; i < 4; ++i) {
         const SrPpuBackgroundGuardBandOutput output = PpuBackgroundGuardOutput(guard, bands, i);
@@ -6827,7 +6831,7 @@ bool PpuBackgroundGuardStorageValid(const Ppu *ppu,
         if (i && !bands) break;
         if (!output.pixels || (uintptr_t)output.pixels % _Alignof(uint32_t) ||
             output.pitch_bytes < (uint64_t)guard->width * 4 ||
-            output.pitch_bytes > (uint64_t)kPpuSurfaceWidth * 4 ||
+            output.pitch_bytes > (uint64_t)max_width * 4 ||
             output.pitch_bytes % 4 ||
             output.pixel_byte_size < output.pitch_bytes * guard->height ||
             output.pitch_bytes * guard->height > UINTPTR_MAX - (uintptr_t)output.pixels)
@@ -6912,8 +6916,8 @@ bool PpuRenderBackgroundGuardBands(Ppu *ppu, const SrPpuBackgroundGuardRequest *
     const int64_t world_left = (int64_t)world->camera_x + guard->screen_x0 +
         wrapped_delta10(ppu->hScroll[layer], world->hscroll_anchor);
     const uint32_t fill = PpuOverlayTransparentFillColor(ppu, (PpuOverlaySource)layer);
-    uint32_t bands[3][kPpuSurfaceWidth];
-    uint8_t coverage[kPpuSurfaceWidth];
+    uint32_t bands[3][SR_PPU_WORLD_TERRAIN_MAXIMUM];
+    uint8_t coverage[SR_PPU_WORLD_TERRAIN_MAXIMUM];
     NativeOverlayLinePlan colors = {0};
     colors.primary = bands[0]; colors.bands[0] = bands[1]; colors.bands[1] = bands[2];
     colors.tile_coverage = coverage; colors.guard = true; colors.cpu_pixels = true;
@@ -6928,7 +6932,9 @@ bool PpuRenderBackgroundGuardBands(Ppu *ppu, const SrPpuBackgroundGuardRequest *
         if (wy64 < guard->source_y0 || wy64 >= source_bottom ||
             wy64 < INT_MIN || wy64 > INT_MAX) continue;
         const int wy = (int)wy64, ty = floor_div8(wy), fy = wy - ty * 8;
-        memset(bands, 0, sizeof(bands)); memset(coverage, 0, sizeof(coverage));
+        for (unsigned band = 0; band < 3; ++band)
+            memset(bands[band], 0, guard->width * sizeof(uint32_t));
+        memset(coverage, 0, guard->width);
         colors.screen_y = sy;
         for (unsigned x = 0; x < guard->width;) {
             const int64_t wx64 = world_left + x;

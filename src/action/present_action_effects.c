@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <SDL3/SDL.h>
+
 #include "action/action_effect_projection.h"
 #include "action/action_effect_render.h"
 #include "action/action_effect_source.h"
@@ -55,11 +57,9 @@ typedef struct ActionHeatMeshCache {
 static ActionHeatPassState s_action_heat_saved_state;
 static ActionHeatMeshCache s_action_heat_mesh_cache;
 
-/* Effect builders are synchronous and presentation runs on one render thread,
- * so one reusable workspace covers actor and every depth-ordered decoration
- * pass. Keep these large bounded arrays out of automatic storage: the scene
- * batch alone is roughly half a MiB and can exhaust default Windows/custom
- * thread stacks before a backend driver gets its own frame. */
+/* One reusable workspace per owner covers actors and depth-ordered decorations.
+ * Keep these large arrays off the stack. The scene batch alone is roughly half
+ * a MiB and can exhaust a default thread stack before a driver call. */
 typedef struct ActionEffectRenderScratch {
   ActionEffectRenderBatch spell;
   ActionSceneEffectRenderBatch scene;
@@ -496,8 +496,11 @@ _Static_assert(kActionEffectObjPriorityCount ==
                "action effects and diorama must agree on OBJ bands");
 
 /* Retained bounded staging; only the presenter uses this workspace. */
-static ActionEffectSourcePrimitive s_source_primitives[kActionSourceMaximumPrimitives];
-static ActionEffectSourceLightJob s_source_lights[kActionSourceMaxLightJobs];
+typedef struct ActionSourceWorkspace {
+  ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+  ActionEffectSourceLightJob lights[kActionSourceMaxLightJobs];
+} ActionSourceWorkspace;
+static ActionSourceWorkspace s_source_workspace;
 
 /* Source geometry normally depends only on the immutable capture, not the
  * current interpolation phase or skybox band. Keep one bounded packet per pass
@@ -573,23 +576,9 @@ static bool UpdateSourceParticleBounds(ActionSourcePacketCache *cache,
   return changed;
 }
 
-static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
-    const ActionEffectProjectionContext *projection, unsigned pass,
-    bool lighting, bool particles) {
-  if (s_source_slot != slot || s_source_timestamp != slot->timestamp_ns) {
-    PresentActionEffects_InvalidateSourcePackets();
-    s_source_slot = slot;
-    s_source_timestamp = slot->timestamp_ns;
-    if (s_source_group != slot->diorama_map_group || s_source_room != slot->diorama_map_number) {
-      for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) s_source_packets[i].requested = false;
-      s_source_group = slot->diorama_map_group;
-      s_source_room = slot->diorama_map_number;
-    }
-  }
-  const unsigned category = projection->light_receiver == kActionReceiver_Player ? 2 :
-      projection->light_receiver == kActionReceiver_Enemies ? 3 : projection->scenery_lighting_only ? 1 : 0;
-  const unsigned packet_slot = pass + category * kActionSourceCompositePacketSlots;
-  ActionSourcePacketCache *cache = &s_source_packets[packet_slot];
+static void BuildSourcePacket(ActionSourcePacketCache *cache, const FrameSlot *slot,
+    const ActionEffectProjectionContext *projection, unsigned pass, bool lighting, bool particles,
+    ActionSourceWorkspace *workspace, ActionEffectRenderScratch *scratch) {
   const bool voxel_scenery=projection->diorama_projection
       ?projection->diorama_projection->voxel_scenery:projection->staged_voxel_scenery;
   const uint64_t *published_claims=projection->diorama_projection
@@ -620,19 +609,19 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
       cache->scenery_exposure_in_mesh != projection->scenery_exposure_in_mesh ||
       cache->scenery_lighting_in_material != projection->scenery_lighting_in_material) {
     ActionEffectSourceBatch source = {.context = *projection,
-        .primitives = s_source_primitives, .capacity = kActionSourceMaximumPrimitives,
-        .lights = s_source_lights, .light_capacity = kActionSourceMaxLightJobs};
+        .primitives = workspace->primitives, .capacity = kActionSourceMaximumPrimitives,
+        .lights = workspace->lights, .light_capacity = kActionSourceMaxLightJobs};
     bool built;
     if (pass < kActionEffectRenderLayer_Count)
       built = ActionSceneDecorationRender_Build(&slot->action_scene_effects, pass,
           lighting, particles, ActionEffectSource_ProjectPoint, ActionEffectSource_ClipBounds,
-          &source, &s_action_effect_render_scratch.scene);
+          &source, &scratch->scene);
     else if (pass == kActionEffectRenderLayer_Count)
       built = ActionSceneEffectRender_Build(&slot->action_scene_effects, lighting, particles,
-          ActionEffectSource_ProjectPoint, &source, &s_action_effect_render_scratch.scene);
+          ActionEffectSource_ProjectPoint, &source, &scratch->scene);
     else
       built = ActionEffectRender_Build(&slot->action_effects, lighting, particles,
-          ActionEffectSource_ProjectPoint, &source, &s_action_effect_render_scratch.spell);
+          ActionEffectSource_ProjectPoint, &source, &scratch->spell);
     cache->failed = !built || !RetainSourcePacket(cache, &source);
     cache->scenery_exposure_in_mesh=projection->scenery_exposure_in_mesh;
     cache->scenery_lighting_in_material=projection->scenery_lighting_in_material;
@@ -642,9 +631,35 @@ static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
     cache->lighting = lighting;
     cache->particles = particles;
     cache->valid = true;
-    if (++s_source_revision == 0) ++s_source_revision;
-    cache->revision = s_source_revision;
+    cache->revision = 0;
   }
+}
+
+static void AssignSourceRevision(ActionSourcePacketCache *cache) {
+  if (++s_source_revision == 0) ++s_source_revision;
+  cache->revision = s_source_revision;
+}
+
+static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
+    const ActionEffectProjectionContext *projection, unsigned pass,
+    bool lighting, bool particles) {
+  if (s_source_slot != slot || s_source_timestamp != slot->timestamp_ns) {
+    PresentActionEffects_InvalidateSourcePackets();
+    s_source_slot = slot;
+    s_source_timestamp = slot->timestamp_ns;
+    if (s_source_group != slot->diorama_map_group || s_source_room != slot->diorama_map_number) {
+      for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) s_source_packets[i].requested = false;
+      s_source_group = slot->diorama_map_group;
+      s_source_room = slot->diorama_map_number;
+    }
+  }
+  const unsigned category = projection->light_receiver == kActionReceiver_Player ? 2 :
+      projection->light_receiver == kActionReceiver_Enemies ? 3 : projection->scenery_lighting_only ? 1 : 0;
+  const unsigned packet_slot = pass + category * kActionSourceCompositePacketSlots;
+  ActionSourcePacketCache *cache = &s_source_packets[packet_slot];
+  BuildSourcePacket(cache, slot, projection, pass, lighting, particles,
+      &s_source_workspace, &s_action_effect_render_scratch);
+  if (!cache->revision) AssignSourceRevision(cache);
   return cache;
 }
 
@@ -877,33 +892,222 @@ static ActionEffectProjectionContext DecorationProjection(
   };
 }
 
-void PresentActionEffects_PrepareSourcePackets(const FrameSlot *slot) {
+typedef struct ActionSourceRecipe {
+  bool requested, lighting, particles, voxel_scenery;
+  bool scenery_exposure_in_mesh, scenery_lighting_in_material;
+  uint64_t ground_cover_claims[2];
+} ActionSourceRecipe;
+
+typedef struct ActionSourceWorker {
+  SDL_Thread *thread;
+  SDL_Mutex *lock;
+  SDL_Semaphore *work;
+  bool stop, busy, ready;
+  unsigned group, room;
+  unsigned queued, built, accepted;
+  uint64_t work_ns;
+  const FrameSlot *queued_slot;
+  FrameSlot input;
+  ActionSourceRecipe recipes[kActionSourcePacketSlots], job[kActionSourcePacketSlots];
+  ActionSourcePacketCache packets[kActionSourcePacketSlots];
+  ActionSourceWorkspace workspace;
+  ActionEffectRenderScratch scratch;
+} ActionSourceWorker;
+
+static ActionSourceWorker *s_source_worker;
+
+static ActionSourceRecipe SourceRecipe(const ActionSourcePacketCache *cache) {
+  return (ActionSourceRecipe){
+    .requested = cache->requested, .lighting = cache->lighting, .particles = cache->particles,
+    .voxel_scenery = cache->voxel_scenery,
+    .scenery_exposure_in_mesh = cache->scenery_exposure_in_mesh,
+    .scenery_lighting_in_material = cache->scenery_lighting_in_material,
+    .ground_cover_claims = {cache->ground_cover_claims[0], cache->ground_cover_claims[1]},
+  };
+}
+
+static bool SourceNeedsView(const FrameSlot *slot, unsigned pass, ActionSourceRecipe recipe) {
+  if (!recipe.particles) return false;
+  for (unsigned j = 0; j < slot->action_scene_effects.authored_count && j < kActionAuthoredMaxInstances; ++j) {
+    const ActionEffectInstance *e = &slot->action_scene_effects.authored[j];
+    if (e->kind == kActionEffect_AuthoredParticleArea && e->render_layer == pass) return true;
+  }
+  return false;
+}
+
+static ActionEffectProjectionContext StagedSourceProjection(
+    const FrameSlot *slot, unsigned category, ActionSourceRecipe recipe) {
+  ActionEffectProjectionContext context = DecorationProjection(slot, (ArRenderRectI){0}, NULL);
+  memcpy(context.staged_ground_cover_claims, recipe.ground_cover_claims, sizeof(recipe.ground_cover_claims));
+  context.staged_voxel_scenery = recipe.voxel_scenery;
+  context.scenery_exposure_in_mesh = recipe.scenery_exposure_in_mesh;
+  context.scenery_lighting_in_material = recipe.scenery_lighting_in_material;
+  context.scenery_lighting_only = category != 0;
+  context.light_receiver = category == 2 ? kActionReceiver_Player : category == 3 ? kActionReceiver_Enemies : 0;
+  return context;
+}
+
+static int PrepareSourceWorker(void *context) {
+  ActionSourceWorker *worker = context;
+  for (;;) {
+    SDL_WaitSemaphore(worker->work);
+    SDL_LockMutex(worker->lock);
+    const bool stop = worker->stop;
+    SDL_UnlockMutex(worker->lock);
+    if (stop) return 0;
+    const uint64_t start = SDL_GetTicksNS();
+    unsigned built = 0;
+    for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) {
+      const ActionSourceRecipe recipe = worker->job[i];
+      ActionSourcePacketCache *cache = &worker->packets[i];
+      cache->valid = false;
+      const unsigned pass = i % kActionSourceCompositePacketSlots;
+      if (!recipe.requested || SourceNeedsView(&worker->input, pass, recipe)) continue;
+      const ActionEffectProjectionContext projection = StagedSourceProjection(
+          &worker->input, i / kActionSourceCompositePacketSlots, recipe);
+      BuildSourcePacket(cache, &worker->input, &projection, pass, recipe.lighting,
+          recipe.particles, &worker->workspace, &worker->scratch);
+      if (!cache->failed) ++built;
+    }
+    SDL_LockMutex(worker->lock);
+    worker->work_ns += SDL_GetTicksNS() - start;
+    worker->built += built;
+    worker->busy = false;
+    worker->ready = true;
+    SDL_UnlockMutex(worker->lock);
+  }
+}
+
+void PresentActionEffects_StartSourceWorker(void) {
+  if (s_source_worker) return;
+  const char *enabled = getenv("AR_CPU_EFFECT_PREP_WORKER");
+  if (enabled && strcmp(enabled, "1")) return;
+  ActionSourceWorker *worker = calloc(1, sizeof(*worker));
+  if (!worker) return;
+  worker->lock = SDL_CreateMutex();
+  worker->work = SDL_CreateSemaphore(0);
+  if (worker->lock && worker->work)
+    worker->thread = SDL_CreateThread(PrepareSourceWorker, "action-source", worker);
+  if (worker->thread) {
+    s_source_worker = worker;
+  } else {
+    SDL_DestroySemaphore(worker->work);
+    SDL_DestroyMutex(worker->lock);
+    free(worker);
+  }
+}
+
+void PresentActionEffects_StopSourceWorker(void) {
+  ActionSourceWorker *worker = s_source_worker;
+  if (!worker) return;
+  SDL_LockMutex(worker->lock);
+  worker->stop = true;
+  SDL_UnlockMutex(worker->lock);
+  SDL_SignalSemaphore(worker->work);
+  SDL_WaitThread(worker->thread, NULL);
+  fprintf(stderr, "[effect-worker] queued=%u built=%u accepted=%u work-ms=%.3f\n",
+      worker->queued, worker->built, worker->accepted, worker->work_ns / 1e6);
+  for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) {
+    free(worker->packets[i].primitives);
+    free(worker->packets[i].lights);
+  }
+  SDL_DestroySemaphore(worker->work);
+  SDL_DestroyMutex(worker->lock);
+  free(worker);
+  s_source_worker = NULL;
+}
+
+void PresentActionEffects_QueueSourcePreparation(const FrameSlot *slot) {
+  ActionSourceWorker *worker = s_source_worker;
+  /* A single Voxel job never increases the frame queue depth or blocks the
+   * frame producer. Ordinary Diorama and flat captures use the inline path. */
+  if (!worker || !slot->diorama_voxel_mode || !slot->diorama_active ||
+      !SDL_TryLockMutex(worker->lock)) return;
+  bool queued = false;
+  if (!worker->busy && !worker->ready && worker->group == slot->diorama_map_group &&
+      worker->room == slot->diorama_map_number) {
+    for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) queued |= worker->recipes[i].requested;
+    if (queued) {
+      worker->busy = true;
+      worker->queued_slot = slot;
+      worker->input = *slot;
+      memcpy(worker->job, worker->recipes, sizeof(worker->job));
+      ++worker->queued;
+    }
+  }
+  SDL_UnlockMutex(worker->lock);
+  if (queued) SDL_SignalSemaphore(worker->work);
+}
+
+/* Light jobs must refer to the retained capture once the worker reuses its own copy. */
+static bool RebindSourceLights(ActionSourcePacketCache *cache,
+    const FrameSlot *input, const FrameSlot *retained) {
+  for (unsigned i = 0; i < cache->light_count; ++i) {
+    const ActionMoonlightOcclusion **occlusion = &cache->lights[i].occlusion;
+    if (*occlusion == &input->action_scene_effects.scenery)
+      *occlusion = &retained->action_scene_effects.scenery;
+    else if (*occlusion == &input->action_scene_effects.moonlight)
+      *occlusion = &retained->action_scene_effects.moonlight;
+    else if (*occlusion)
+      return false;
+  }
+  return true;
+}
+
+static void AdoptPreparedPackets(const FrameSlot *owned, const FrameSlot *retained) {
+  ActionSourceWorker *worker = s_source_worker;
+  /* A late job is optional. The caller still builds any missing packets
+   * inline, and later draws can rebuild if the live projection differs. */
+  if (!worker || !retained->diorama_voxel_mode || !SDL_TryLockMutex(worker->lock)) return;
+  worker->group = retained->diorama_map_group;
+  worker->room = retained->diorama_map_number;
+  for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) worker->recipes[i] = SourceRecipe(&s_source_packets[i]);
+  if (worker->ready && worker->input.timestamp_ns <= owned->timestamp_ns) {
+    worker->ready = false;
+    if (worker->queued_slot == owned && worker->input.timestamp_ns == owned->timestamp_ns &&
+        worker->input.diorama_map_group == retained->diorama_map_group &&
+        worker->input.diorama_map_number == retained->diorama_map_number) {
+      for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) {
+        ActionSourcePacketCache *result = &worker->packets[i];
+        ActionSourcePacketCache *cache = &s_source_packets[i];
+        const ActionSourceRecipe latest = worker->recipes[i];
+        const ActionSourceRecipe prepared = worker->job[i];
+        if (!latest.requested || !result->valid || result->failed ||
+            latest.lighting != prepared.lighting || latest.particles != prepared.particles ||
+            latest.voxel_scenery != prepared.voxel_scenery ||
+            latest.scenery_exposure_in_mesh != prepared.scenery_exposure_in_mesh ||
+            latest.scenery_lighting_in_material != prepared.scenery_lighting_in_material ||
+            memcmp(latest.ground_cover_claims, prepared.ground_cover_claims, sizeof(latest.ground_cover_claims)) ||
+            !RebindSourceLights(result, &worker->input, retained)) continue;
+        ActionSourcePacketCache previous = *cache;
+        *cache = worker->packets[i];
+        worker->packets[i] = previous;
+        cache->requested = true;
+        AssignSourceRevision(cache);
+        ++worker->accepted;
+      }
+    }
+  }
+  SDL_UnlockMutex(worker->lock);
+}
+
+void PresentActionEffects_PrepareSourcePackets(const FrameSlot *slot, const FrameSlot *owned) {
   if (!slot || !slot->diorama_active) return;
-  /* Prepare the passes actually consumed by the previous presentation of this
-   * room. Their source geometry depends on the immutable capture, not screen
-   * projection. First-use passes still build lazily. Particle birth cells need
-   * the current full projection, so leave those passes to the normal builder. */
+  /* Prepare only passes consumed by the previous presentation of this room.
+   * Particle birth cells still use the current full projection. */
   if (s_source_group != slot->diorama_map_group || s_source_room != slot->diorama_map_number) return;
+  s_source_slot = slot;
+  s_source_timestamp = slot->timestamp_ns;
+  AdoptPreparedPackets(owned, slot);
   for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) {
     ActionSourcePacketCache *cache = &s_source_packets[i];
     if (!cache->requested) continue;
     const unsigned pass = i % kActionSourceCompositePacketSlots;
-    const unsigned category = i / kActionSourceCompositePacketSlots;
-    bool view_dependent = false;
-    if (cache->particles)
-      for (unsigned j = 0; j < slot->action_scene_effects.authored_count && j < kActionAuthoredMaxInstances; ++j) {
-        const ActionEffectInstance *e = &slot->action_scene_effects.authored[j];
-        view_dependent |= e->kind == kActionEffect_AuthoredParticleArea && e->render_layer == pass;
-      }
-    if (!view_dependent) {
-      ActionEffectProjectionContext context = DecorationProjection(slot, (ArRenderRectI){0}, NULL);
-      memcpy(context.staged_ground_cover_claims,cache->ground_cover_claims,sizeof(cache->ground_cover_claims));
-      context.staged_voxel_scenery=cache->voxel_scenery;
-      context.scenery_exposure_in_mesh = cache->scenery_exposure_in_mesh;
-      context.scenery_lighting_in_material = cache->scenery_lighting_in_material;
-      context.scenery_lighting_only = category != 0;
-      context.light_receiver = category == 2 ? kActionReceiver_Player : category == 3 ? kActionReceiver_Enemies : 0;
-      (void)PrepareSourcePacket(slot, &context, pass, cache->lighting, cache->particles);
+    const ActionSourceRecipe recipe = SourceRecipe(cache);
+    if (!cache->valid && !SourceNeedsView(slot, pass, recipe)) {
+      const ActionEffectProjectionContext projection = StagedSourceProjection(
+          slot, i / kActionSourceCompositePacketSlots, recipe);
+      (void)PrepareSourcePacket(slot, &projection, pass, recipe.lighting, recipe.particles);
     }
     cache->requested = false;
   }

@@ -522,7 +522,7 @@ float ActionVoxel_RearRelief(const ActionVoxelGeometry *c,float world_x,float wo
   const float tx=x-ix,ty=y-iy,sx=tx*tx*(3-2*tx),sy=ty*ty*(3-2*ty);
   const float a=ReliefCell(c,ix,iy)*(1-sx)+ReliefCell(c,ix+1,iy)*sx;
   const float b=ReliefCell(c,ix,iy+1)*(1-sx)+ReliefCell(c,ix+1,iy+1)*sx;
-  return .075f*(a*(1-sy)+b*sy);
+  return kActionVoxelMaxRearRelief*(a*(1-sy)+b*sy);
 }
 bool ActionVoxel_Active(const ActionVoxelGeometry *c, unsigned group, unsigned room) {
   return c && c->ready && group == c->active_group && room == c->active_room &&
@@ -915,12 +915,16 @@ bool ActionVoxel_Split(const ActionVoxelGeometry *c, int ox, int oy, int width, 
   }
   return true;
 }
+static unsigned EdgePassList(VoxelEdgePass pass,bool high) {
+  return pass==kVoxelEdgeRearTrim?2:pass==kVoxelEdgeHighDeckBehind?3:high?1:0;
+}
 const uint16_t *ActionVoxel_EdgesForPass(const ActionVoxelGeometry *c, VoxelEdgePass pass,
                                              bool high, unsigned *count) {
-  const unsigned list = pass == kVoxelEdgeRearTrim         ? 2
-                        : pass == kVoxelEdgeHighDeckBehind ? 3
-                        : high                              ? 1
-                                                            : 0;
+  const unsigned list=EdgePassList(pass,high);
   *count = c ? c->pass_counts[list] : 0;
   return c ? c->pass_edges[list] : NULL;
+}
+const VoxelEdgeChunk *ActionVoxel_EdgeChunksForPass(const ActionVoxelGeometry *c,
+    VoxelEdgePass pass,bool high) {
+  return c?c->pass_chunks[EdgePassList(pass,high)]:NULL;
 }

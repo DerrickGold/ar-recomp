@@ -18,6 +18,11 @@ enum {
   kDioramaDepthMaximumDraws = 256,
   kDioramaDepthMaximumVertices = 131072,
   kDioramaDepthMaximumIndices = 393216,
+  /* A hybrid scope ends at a render-order boundary. Its storage may grow
+   * beyond the legacy upload budget without changing how alpha is resolved. */
+  kDioramaDepthHybridMaximumVertices = 4 * kDioramaDepthMaximumVertices,
+  kDioramaDepthHybridMaximumIndices = 4 * kDioramaDepthMaximumIndices,
+  kDioramaDepthHybridMaximumDraws = kDioramaDepthHybridMaximumIndices / 3,
 };
 
 typedef struct DioramaDepthVertex {
@@ -54,12 +59,17 @@ typedef struct DioramaDepthDraw {
    * explicit native-priority depth reset, independent of color blending. */
   ArRenderBlendMode blend;
   bool textured, nearest;
+  bool cutout; /* Nearest binary source, unit vertex alpha and no alpha filtering. */
   bool clip_enabled;
   ArRenderRectI clip; /* Target pixels, independent of camera projection. */
 } DioramaDepthDraw;
 
 struct ArRenderDevice;
 struct DioramaSceneryLightEffectParams;
+typedef struct DioramaDepthTextureBank {
+  ArRenderTexture additional[2];
+  const uint8_t *slots; /* 0 selects the draw texture, 1–2 select additional[]. */
+} DioramaDepthTextureBank;
 /* Bridge from the existing material/exposure compositor. Positions are local
  * viewport pixels; depths use the same projection's [0,1] GPU mapping. UVs,
  * color and depth have already undergone the same triangle clipping. The
@@ -74,6 +84,8 @@ typedef struct DioramaDepthSubmission {
   const int32_t *indices;
   int vertex_count, index_count, plane;
   bool native_actor;
+  bool binary_texture_alpha; /* The caller verified every sampled texel. */
+  const DioramaDepthTextureBank *texture_bank; /* Optional nearest world sources. */
   ArRenderBlendMode blend;
   const struct DioramaSceneryLightEffectParams *lighting;
   /* Optional homogeneous W for projected generated-world faces. XY and
@@ -91,6 +103,7 @@ typedef struct DioramaDepthSubmission {
 typedef struct DioramaDepthSink {
   bool (*submit)(void *userdata, struct ArRenderDevice *, const DioramaDepthSubmission *);
   void *userdata;
+  bool texture_banks;
   /* A native color-math target was cleared and begins a new visibility group.
    * The backend invalidates depth for the currently bound target only. */
   bool (*clear)(void *userdata, struct ArRenderDevice *);

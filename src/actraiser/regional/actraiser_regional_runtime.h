@@ -42,6 +42,8 @@ ArRegionalCollisionSnapshot ActRaiserRegional_CollisionSnapshot(void);
 uint8_t ActRaiserRegional_HazardSnapshot(void);
 uint8_t ActRaiserRegional_TerrainSnapshot(void);
 uint8_t ActRaiserRegional_MosaicSnapshot(void);
+/* Read the upcoming room's requested art rules without activating them. */
+bool ActRaiserRegional_PeekRoomVariants(uint8_t *terrain, uint8_t *mosaic);
 uint8_t ActRaiserRegional_PoseSnapshot(void);
 uint8_t ActRaiserRegional_ArtworkSnapshot(void);
 /* Zero-based action area. A read is side-effect-free; only the real sprite

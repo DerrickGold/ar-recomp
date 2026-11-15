@@ -18,6 +18,80 @@ static int s_failures;
 
 static bool Near(float actual, float expected) { return fabsf(actual - expected) < 0.001f; }
 
+static void TestVoxelTerrainAxis(void) {
+  int start, end;
+  Diorama_ResolveVoxelTerrainAxis(0, 2048, 600, 1000, 64, 128, &start, &end);
+  CHECK(start == 536 && end == 1128);
+  Diorama_ResolveVoxelTerrainAxis(0, 2048, 600, 1000, 256, 768, &start, &end);
+  CHECK(start == 444 && end == 1468);
+  CHECK(end - start == kDioramaVoxelTerrainMaximum);
+  Diorama_ResolveVoxelTerrainAxis(-128, 768, -160, 352, 256, 512, &start, &end);
+  CHECK(start == -128 && end == 640);
+  Diorama_ResolveVoxelTerrainAxis(0, 2048, 400, 1400, 0, 0, &start, &end);
+  CHECK(start == 400 && end == 1400);
+}
+
+static void TestVoxelFootprint(void) {
+  const ArRenderRectI capture = {640, 256, 496, 352};
+  const ArRenderRectI world = {0, 0, 2048, 1536};
+  DioramaProjection projection = {
+      .aspect_x = capture.w / 224.f,
+      .height_scale = capture.h / 224.f,
+      .camera_distance = 3.25f,
+  };
+  const float yaws[] = {-.6f, 0.f, .6f};
+  const float pitches[] = {-.4f, 0.f, .4f};
+  const ArRenderPointF offset = {3.25f, -1.5f};
+  for (unsigned yaw = 0; yaw < 3; ++yaw) {
+    for (unsigned pitch = 0; pitch < 3; ++pitch) {
+      const Scene3DCamera camera = {pitches[pitch], yaws[yaw], 3.25f, .4f};
+      Scene3D_BuildViewProjection(&camera, 1280, 800, projection.matrix);
+      ArRenderRectI bounds;
+      CHECK(Diorama_ResolveVoxelFootprint(
+          &projection, capture, world, offset, 0, .75f, &bounds));
+      CHECK(bounds.w > 0 && bounds.h > 0);
+      CHECK(!(bounds.x % 8 || bounds.y % 8 || bounds.w % 8 || bounds.h % 8));
+      /* Check intermediate depths independently using forward projection. */
+      for (int layer = 0; layer <= 6; ++layer) {
+        const float depth = .125f * layer;
+        const float scale = 1 + depth / projection.camera_distance;
+        for (int y = 64; y < 900; y += 8) {
+          for (int x = 350; x < 1500; x += 8) {
+            const float u = ((x + offset.x - capture.x) / capture.w - .5f) *
+                projection.aspect_x * scale;
+            const float v = (.5f - (y + offset.y - capture.y) / capture.h) *
+                projection.height_scale * scale;
+            Scene3DPoint point;
+            if (!Scene3D_ProjectWorldPoint(
+                    projection.matrix, u, v, -depth, 1280, 800, &point) ||
+                point.x < 0 || point.x > 1280 || point.y < 0 || point.y > 800) continue;
+            CHECK(x >= bounds.x && x <= bounds.x + bounds.w);
+            CHECK(y >= bounds.y && y <= bounds.y + bounds.h);
+          }
+        }
+      }
+      const ArRenderRectI clipped = {820, 384, 67, 73};
+      CHECK(Diorama_ResolveVoxelFootprint(
+          &projection, capture, clipped, offset, 0, .75f, &bounds));
+      CHECK(!memcmp(&bounds, &clipped, sizeof(bounds)));
+      const ArRenderRectI offscreen = {1900, 1400, 100, 100};
+      CHECK(Diorama_ResolveVoxelFootprint(
+          &projection, capture, offscreen, offset, 0, .75f, &bounds));
+      CHECK(!bounds.w && !bounds.h);
+    }
+  }
+  ArRenderRectI bounds = {1, 2, 3, 4};
+  const ArRenderRectI before = bounds;
+  CHECK(!Diorama_ResolveVoxelFootprint(
+      &projection, capture, world, offset, 1, 0, &bounds));
+  CHECK(!memcmp(&bounds, &before, sizeof(bounds)));
+  const Scene3DCamera side_on = {0, 1.45f, 3.25f, .4f};
+  Scene3D_BuildViewProjection(&side_on, 1280, 800, projection.matrix);
+  CHECK(!Diorama_ResolveVoxelFootprint(
+      &projection, capture, world, offset, 0, .75f, &bounds));
+  CHECK(!memcmp(&bounds, &before, sizeof(bounds)));
+}
+
 static DioramaProjection Projection(void) {
   DioramaProjection projection = {
       .valid = true,
@@ -55,6 +129,39 @@ static DioramaProjection Projection(void) {
   projection.bg2_plane = projection.bg1_plane;
   projection.object_planes[0] = projection.bg1_plane;
   return projection;
+}
+
+static void TestVoxelTerrainEffectBounds(void) {
+  DioramaProjection projection = Projection();
+  projection.texture_width = 640;
+  projection.texture_height = 352;
+  projection.texture_x_origin = 64;
+  projection.bg1_plane = (DioramaPlaneProjection){
+    .valid = true, .u0 = .14f, .u1 = .8f, .v0 = .05f, .v1 = .95f,
+    .capture_apron = 64, .capture_offset = {2, -3}, .z_world = -.25f,
+  };
+  projection.bg1_high_plane = projection.bg1_far_plane = projection.bg1_plane;
+  projection.bg2_plane = projection.bg1_plane;
+  projection.object_planes[2] = projection.bg1_plane;
+  const DioramaProjection original = projection;
+  ArRenderPointF before, after;
+  CHECK(Diorama_ProjectCapturedBg1Point(&projection, 200, 100, &before, NULL, NULL));
+  Diorama_SetVoxelTerrainEffectBounds(
+      &projection, (ArRenderRectI){1344, 0, 704, 512}, 1552, 160);
+  CHECK(Diorama_ProjectCapturedBg1Point(&projection, 200, 100, &after, NULL, NULL));
+  CHECK(Near(before.x, after.x) && Near(before.y, after.y));
+  CHECK(!memcmp(&projection.bg2_plane, &original.bg2_plane, sizeof(projection.bg2_plane)));
+  CHECK(!memcmp(projection.object_planes, original.object_planes,
+                sizeof(projection.object_planes)));
+  const DioramaPlaneProjection *planes[] = {
+    &projection.bg1_plane, &projection.bg1_high_plane, &projection.bg1_far_plane,
+  };
+  for (unsigned i = 0; i < sizeof(planes)/sizeof(*planes); ++i) {
+    float x0, y0, x1, y1;
+    CHECK(Diorama_PlaneCaptureBounds(&projection, planes[i], &x0, &y0, &x1, &y1));
+    CHECK(Near(x0, -210) && Near(x1, 494));
+    CHECK(Near(y0, -157) && Near(y1, 355));
+  }
 }
 
 static void FocalBounds(const DioramaProjection *projection, float t0, float t1, float *top,
@@ -1106,6 +1213,9 @@ static void TestSkyWeatherBandMerging(void) {
 }
 
 int main(void) {
+  TestVoxelTerrainAxis();
+  TestVoxelFootprint();
+  TestVoxelTerrainEffectBounds();
   TestFreeCameraFraming();
   TestSkyWeatherBandMerging();
   TestHorizontalCameraStopsFollowProjectedViewport();

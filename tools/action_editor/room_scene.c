@@ -1451,6 +1451,39 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   return true;
 }
 const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *r) { return &r->capture; }
+bool EditorRoomScene_VoxelTerrainSource(const EditorRoomScene *r,
+    EditorRoomTerrainSource *out) {
+  if (!r || !out || !r->raster_valid || !r->scene.voxel_geometry ||
+      !DioramaCameraPolicy_FiniteLayer(&r->layers[0].plan) ||
+      r->layers[0].bubbles.characters) return false;
+  /* The terrain decoder reads the last raster row. For BG1 it requires
+   * anchor scroll and no mosaic. With a uniform world policy its tile
+   * lookups, including authored edits, then depend only on world coordinates. */
+  const ActionRoomSceneFrameState *f = &r->raster_frame;
+  const int last = kActionRoomSceneFrameHeight - 1;
+  if (f->bg_hscroll[0][last] != (f->layer_camera_x[0] & 1023) ||
+      f->bg_vscroll[0][last] != (f->layer_camera_y[0] & 1023) ||
+      ((f->mosaic[last] & 1) && (f->mosaic[last] >> 4))) return false;
+  *out = (EditorRoomTerrainSource){
+    .geometry_revision = ActionVoxel_Revision(r->scene.voxel_geometry),
+    .fixed_color = f->fixed_color, .animation_phase = f->animation_phase,
+    .brightness = f->brightness, .cgwsel = f->cgwsel, .cgadsub = f->cgadsub,
+    .main_screen = f->screen_enabled[0], .sub_screen = f->screen_enabled[1],
+  };
+  return true;
+}
+
+bool EditorRoomScene_CaptureVoxelTerrain(EditorRoomScene *r, ArRenderRectI bounds,
+    uint32_t *bands[3], uint32_t *native_low) {
+  if (!r || !r->raster_valid || !r->scene.voxel_geometry || !bands ||
+      !bands[0] || !bands[1] || !bands[2] || !native_low ||
+      bounds.w <= 0 || bounds.h <= 0) return false;
+  uint32_t *native[] = {native_low, bands[1], bands[2]};
+  return sr_scene_renderer_capture_terrain(r->renderer, 0, bounds.x, bounds.y,
+      bounds.w, bounds.h, native) &&
+      ActionVoxel_Split(r->scene.voxel_geometry, bounds.x, bounds.y, bounds.w, bounds.h,
+          bounds.w, &r->frame, native_low, bounds.w, bands[0], bands[2]);
+}
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *r) { return &r->scene; }
 const DioramaRoomOverride *EditorRoomScene_Terrain(const EditorRoomScene *r) { return r ? &r->terrain : NULL; }
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *r) { return &r->surfaces; }

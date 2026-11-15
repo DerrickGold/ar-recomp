@@ -707,10 +707,13 @@ static bool DioramaLayerIsDrawable(
       scene->voxel_guard->source_revision==ActionVoxel_Revision(scene->voxel_geometry)&&
       (layer->plane==SR_PPU_OVERLAY_BG1||layer->plane==kDioramaPlane_Bg1Hi||layer->plane==kDioramaPlane_Bg1Far)&&
       ArRenderTexture_IsValid(scene->voxel_guard->textures[layer->plane==SR_PPU_OVERLAY_BG1?0:layer->plane==kDioramaPlane_Bg1Hi?1:2]);
+  const bool extended = layer && scene->voxel_terrain &&
+      (layer->plane == SR_PPU_OVERLAY_BG1 || layer->plane == kDioramaPlane_Bg1Hi ||
+       layer->plane == kDioramaPlane_Bg1Far);
   return layer && Diorama_PlaneEligible(
       layer->plane, (scene->render->visible_planes & (1u << layer->plane)) != 0,
-      ArRenderTexture_IsValid(textures[layer->plane])||guarded,
-      pixels[layer->plane] != NULL||guarded,
+      ArRenderTexture_IsValid(textures[layer->plane])||guarded||extended,
+      pixels[layer->plane] != NULL||guarded||extended,
       scene->render->hud_flat,
       SkyboxReplacesPlane(scene, layer->plane),
       scene->additive_plane_mask);
@@ -1191,7 +1194,7 @@ static bool RenderShadedDioramaDepthGeometryWithReceiver(ArRenderDevice *device,
     const ArRenderVertex2D *v,const float *depths,const float *clip_w,const ArRenderPointF *heat_world_xy,int nv,const int32_t *indices,int ni,
     ArRenderBlendMode blend,const SceneryShadingField *field,ArRenderRectF source_uv,
     const DioramaSceneryLightEffectParams *lighting,const DioramaDepthSink *sink,
-    int plane,bool native_actor) {
+    int plane,bool native_actor,bool binary_texture_alpha,const DioramaDepthTextureBank *texture_bank) {
   if(!sink)return RenderShadedDioramaGeometry(device,texture,v,nv,indices,ni,blend,field,source_uv,lighting);
   if(!sink->submit || !depths)return false;
   /* Generated caps are clipped in world/source space before projection and
@@ -1200,7 +1203,8 @@ static bool RenderShadedDioramaDepthGeometryWithReceiver(ArRenderDevice *device,
   if((clip_w && (field || native_actor)) || (heat_world_xy && !clip_w))return false;
   DioramaDepthShadingSubmit submit={.device=device,.sink=sink,
       .draw={.texture=texture,.blend=blend,.lighting=lighting,.plane=plane,
-          .native_actor=native_actor,.clip_w=clip_w,.heat_world_xy=heat_world_xy},
+          .native_actor=native_actor,.binary_texture_alpha=binary_texture_alpha,.texture_bank=texture_bank,
+          .clip_w=clip_w,.heat_world_xy=heat_world_xy},
       .performance=DioramaPerformance_Begin(kDioramaPerformance_Mesh)};
   const bool ok=clip_w?SubmitShadedDioramaDepth(&submit,v,depths,nv,indices,ni):
       SceneryShading_DrawDepth(field,source_uv,v,depths,nv,indices,ni,SubmitShadedDioramaDepth,&submit);
@@ -1213,7 +1217,7 @@ static bool RenderShadedDioramaDepthGeometryWithW(ArRenderDevice *device,ArRende
     const DioramaSceneryLightEffectParams *lighting,const DioramaDepthSink *sink,
     int plane,bool native_actor) {
   return RenderShadedDioramaDepthGeometryWithReceiver(device,texture,v,depths,clip_w,NULL,nv,indices,ni,
-      blend,field,source_uv,lighting,sink,plane,native_actor);
+      blend,field,source_uv,lighting,sink,plane,native_actor,false,NULL);
 }
 static bool RenderShadedDioramaDepthGeometry(ArRenderDevice *device,ArRenderTexture texture,
     const ArRenderVertex2D *v,const float *depths,int nv,const int32_t *indices,int ni,
@@ -2937,6 +2941,25 @@ static void PrepareDioramaView(const DioramaCapture *capture,
   }
 }
 
+/* Keep the primary capture's camera and signed native UV space. The wider
+ * texture changes where a native sample is stored, not where it projects. */
+static void UseVoxelTerrainCapture(const DioramaVoxelTerrainCapture *terrain,
+    DioramaCapture *capture, DioramaViewGeometry *g) {
+  const int x = capture->bg1_camera_x - (capture->width - 256) / 2 - capture->obj_apron;
+  const int y = capture->camera_y - capture->authentic_y0 + 1;
+  const ArRenderRectI bounds = terrain->bounds;
+  const float du = (float)(x - bounds.x) / SR_PPU_SURFACE_MAX_WIDTH;
+  const float dv = (float)(y - bounds.y) / SR_PPU_SURFACE_MAX_HEIGHT;
+  g->u0 += du; g->u1 += du;
+  g->v0 += dv; g->v1 += dv;
+  capture->width = bounds.w;
+  capture->height = bounds.h;
+  capture->bg1_camera_x = bounds.x + (bounds.w - 256) / 2;
+  capture->camera_y = bounds.y - 1;
+  capture->obj_apron = capture->authentic_y0 = 0;
+  capture->coverage_masks = NULL;
+}
+
 bool Diorama_ResolveCaptureCameraRange(const DioramaCapture *capture,
     const DioramaView *view, const DioramaScene *scene, int camera_x,
     int *minimum, int *maximum) {
@@ -3342,12 +3365,14 @@ typedef struct DioramaLayerDraw {
   ArRenderRectF light_viewport;
   ArRenderBlendMode blend;
   const DioramaVoxelGuardView *voxel_guard;
+  const DioramaVoxelTerrainCapture *voxel_terrain;
   DioramaVoxelGuardFilter *voxel_guard_filter;
   bool voxel_guard_priority;
   const DioramaDesertColumnMask *desert_columns;
   bool desert_columns_only;
   int voxel_source_plane; /* -1 follows face ownership; helpers name their native source. */
   ArRenderRectF voxel_source_rect; /* Optional primary-relative native domain. */
+  ArRenderPointF voxel_primary_offset;
 } DioramaLayerDraw;
 
 static void ShadeDioramaVertices(const DioramaLayerDraw *layer,
@@ -3355,7 +3380,8 @@ static void ShadeDioramaVertices(const DioramaLayerDraw *layer,
   if (layer->dimming <= 0) return;
   for (int i = 0; i < count; i++) {
     float light = 1-SceneryDimming_Amount(layer->dimming,layer->dimming_ramp,
-        vertices[i].tex_coord.x,vertices[i].tex_coord.y);
+        vertices[i].tex_coord.x - layer->voxel_primary_offset.x,
+        vertices[i].tex_coord.y - layer->voxel_primary_offset.y);
     vertices[i].color.r *= light;
     vertices[i].color.g *= light;
     vertices[i].color.b *= light;
@@ -4331,6 +4357,115 @@ static PresentationOutcome DrawVoxelGuardBody(ArRenderDevice *device,const Diora
   return outcome;
 }
 
+static bool DrawVoxelTerrainBody(ArRenderDevice *device, const DioramaCapture *capture,
+    const DioramaViewGeometry *g, const DioramaLayerDraw *layer, ArRenderRectI primary) {
+  const bool rear = layer->description->plane == SR_PPU_OVERLAY_BG1;
+  const bool relief = rear && ActionVoxel_HasRearRelief(layer->voxel_geometry);
+  const float z = layer->authored->z - .5f;
+  DioramaViewGeometry flat_view = *g;
+  if (rear && !relief) {
+    /* Retain the original layer depth compensation on the flat faces. */
+    const float scale = VoxelPlaneScale(g, layer->voxel_geometry,
+        layer->description->plane, layer->authored->z);
+    const float compensation = 1 - z / fmaxf(1, g->camera.distance);
+    flat_view.aspect_x *= scale / compensation;
+    flat_view.height_scale *= scale / compensation;
+  }
+  DioramaSceneryLightEffectParams lighting = layer->lighting;
+  lighting.attributes_uv = (ArRenderRectF){
+    -layer->voxel_primary_offset.x, -layer->voxel_primary_offset.y,
+    capture->width / (float)SR_PPU_SURFACE_MAX_WIDTH,
+    capture->height / (float)SR_PPU_SURFACE_MAX_HEIGHT,
+  };
+  lighting.texel_width = 1.f / capture->width;
+  lighting.texel_height = 1.f / capture->height;
+  if (rear && DofBlurEnabled(device, g->options)) {
+    lighting.blur_radius = DofRadiusForLayer(layer->authored->z);
+    if (lighting.blur_radius >= .05f) lighting.mode = 1;
+  }
+  const int left = primary.x < 0 ? 0 : primary.x > capture->width ? capture->width : primary.x;
+  const int top = primary.y < 0 ? 0 : primary.y > capture->height ? capture->height : primary.y;
+  const int right = (int)fminf(capture->width, fmaxf(left, primary.x + primary.w));
+  const int bottom = (int)fminf(capture->height, fmaxf(top, primary.y + primary.h));
+  const ArRenderRectI strips[] = {
+    {0, 0, capture->width, top},
+    {0, bottom, capture->width, capture->height-bottom},
+    {0, top, left, bottom-top},
+    {right, top, capture->width-right, bottom-top},
+  };
+  /* Raised scenery can sit ahead of the playfield. Keep that lift, recessed
+   * columns and the full rear relief inside the conservative body bounds. */
+  const float near_depth = !rear ? -layer->voxel_depth * .125f :
+      relief ? layer->voxel_depth : -z;
+  const float far_depth = !rear ? fmaxf(layer->voxel_depth,
+      ActionVoxel_SceneryRecess(layer->voxel_geometry)) :
+      relief ? layer->voxel_depth + kActionVoxelMaxRearRelief : -z;
+  const DioramaViewGeometry *body_view = rear && !relief ? &flat_view : g;
+  const ArRenderRectI visible = layer->voxel_terrain->visible;
+  const int draw_left = visible.w > 0 ? visible.x - layer->voxel_terrain->bounds.x : 0;
+  const int draw_top = visible.h > 0 ? visible.y - layer->voxel_terrain->bounds.y : 0;
+  const int draw_right = visible.w > 0 ? draw_left + visible.w : capture->width;
+  const int draw_bottom = visible.h > 0 ? draw_top + visible.h : capture->height;
+  for (unsigned i = 0; i < sizeof(strips) / sizeof(*strips); ++i) {
+    const ArRenderRectI strip = strips[i];
+    for (int y = strip.y; y < strip.y + strip.h; y += 128) {
+      if (y + 128 <= draw_top || y >= draw_bottom) continue;
+      for (int x = strip.x; x < strip.x + strip.w; x += 128) {
+        if (x + 128 <= draw_left || x >= draw_right) continue;
+        const ArRenderRectF rect = {x, y, fminf(128, strip.x + strip.w - x),
+            fminf(128, strip.y + strip.h - y)};
+        if (!g->options->voxel_observe_face &&
+            VoxelSourceBoxOutsideViewport(body_view, rect, near_depth, far_depth)) continue;
+        DioramaLayerDraw bounded = *layer;
+        bounded.voxel_source_rect = rect;
+        unsigned count = 0;
+        if (!rear) {
+          count = BuildVoxelFrontFaces(capture, g, &bounded);
+        } else if (relief) {
+          DioramaLayerMesh mesh = {.has_depth = g->depth_sink != NULL};
+          PrepareVoxelRearMesh(capture, g, &bounded, &mesh);
+          for (int i = 0; i < mesh.vertex_count; ++i) {
+            mesh.vertices[i].tex_coord.x *= SR_PPU_SURFACE_MAX_WIDTH * lighting.texel_width;
+            mesh.vertices[i].tex_coord.y *= SR_PPU_SURFACE_MAX_HEIGHT * lighting.texel_height;
+          }
+          if (mesh.index_count && !RenderShadedDioramaDepthGeometry(
+              device, layer->texture, mesh.vertices, mesh.depths, mesh.vertex_count,
+              mesh.indices, mesh.index_count, layer->blend, layer->exposure,
+              lighting.attributes_uv, &lighting, g->depth_sink,
+              layer->description->plane, false)) return false;
+          continue;
+        } else {
+          count = VoxelSourceQuad(&flat_view, layer, rect.x, rect.y,
+              rect.x + rect.w, rect.y + rect.h, -z, -z, false, false, 0, 0, 1,
+              s_voxel_sides);
+        }
+        count = SortVoxelSides(g, count);
+        if (!count) continue;
+        for (unsigned i = 0; i < count; ++i) {
+          const VoxelSide *side = &s_voxel_sides[s_voxel_order[i]];
+          for (unsigned j = 0; j < 4; ++j) {
+            ArRenderVertex2D *vertex = &s_voxel_vertices[i*4+j];
+            *vertex = side->v[j];
+            ShadeDioramaVertices(layer, vertex, 1);
+            vertex->tex_coord.x *= SR_PPU_SURFACE_MAX_WIDTH * lighting.texel_width;
+            vertex->tex_coord.y *= SR_PPU_SURFACE_MAX_HEIGHT * lighting.texel_height;
+            s_voxel_depths[i*4+j] = side->depths[j];
+            s_voxel_clip_w[i*4+j] = side->clip_w[j];
+          }
+        }
+        /* Exposure uses the same affine source clipping as primary faces. */
+        const float *clip_w = layer->exposure ? NULL : s_voxel_clip_w;
+        if (!RenderShadedDioramaDepthGeometryWithW(device, layer->texture,
+            s_voxel_vertices, s_voxel_depths, clip_w, count*4,
+            VoxelQuadIndices(), count*6, layer->blend, layer->exposure,
+            lighting.attributes_uv, &lighting, g->depth_sink,
+            layer->description->plane, false)) return false;
+      }
+    }
+  }
+  return true;
+}
+
 /* The perspective viewport can see beyond the ordinary scanout window.
  * Draw captured OBJ guards as well as verified BG guards, scaling both UVs
  * and world width so every existing pixel retains its position and size. */
@@ -4534,6 +4669,28 @@ static PresentationOutcome DrawResolvedDioramaLayer(
     }
     geometry = &layer_geometry;
   }
+  const DioramaCapture *primary_capture = capture;
+  const DioramaViewGeometry primary_geometry = *geometry;
+  const DioramaCapture native_voxel_capture = voxel_capture;
+  const DioramaLayerDraw primary_layer = layer;
+  DioramaCapture terrain_capture;
+  DioramaViewGeometry terrain_geometry;
+  ArRenderTexture high_texture = textures[kDioramaPlane_Bg1Hi];
+  if (scene->voxel_terrain && scenery && layer.voxel_depth > 0) {
+    terrain_capture = *capture;
+    terrain_geometry = *geometry;
+    UseVoxelTerrainCapture(scene->voxel_terrain, &terrain_capture, &terrain_geometry);
+    layer.voxel_primary_offset = (ArRenderPointF){
+        terrain_geometry.u0 - geometry->u0, terrain_geometry.v0 - geometry->v0};
+    capture = &terrain_capture;
+    geometry = &terrain_geometry;
+    voxel_capture = terrain_capture;
+    layer.voxel_terrain = scene->voxel_terrain;
+    layer.voxel_rear_texture = layer.voxel_terrain->textures[0];
+    high_texture = layer.voxel_terrain->textures[1];
+    layer.texture = description->plane == SR_PPU_OVERLAY_BG1 ? layer.voxel_rear_texture :
+        description->plane == kDioramaPlane_Bg1Hi ? high_texture : layer.voxel_terrain->textures[2];
+  }
   if (description->plane == SR_PPU_OVERLAY_BG2 ||
       description->plane == kDioramaPlane_Bg2Hi ||
       description->plane == kDioramaPlane_Bg2Far) {
@@ -4599,9 +4756,9 @@ static PresentationOutcome DrawResolvedDioramaLayer(
         out_projection,scene->render->source_effect_batch));
   }
   if(layer.voxel_depth>0&&description->plane==kDioramaPlane_Bg1Far){
-    if(inspection!=kDioramaVoxelInspect_Backing&&!DrawVoxelRearTrims(device,&voxel_capture,geometry,&layer,textures[kDioramaPlane_Bg1Hi]))
+    if(inspection!=kDioramaVoxelInspect_Backing&&!DrawVoxelRearTrims(device,&voxel_capture,geometry,&layer,high_texture))
       return kPresentationOutcome_CoreFailure;
-    if(inspection!=kDioramaVoxelInspect_Backing&&!DrawVoxelHighDecks(device,&voxel_capture,geometry,&layer,textures[kDioramaPlane_Bg1Hi]))
+    if(inspection!=kDioramaVoxelInspect_Backing&&!DrawVoxelHighDecks(device,&voxel_capture,geometry,&layer,high_texture))
       return kPresentationOutcome_CoreFailure;
     const float split=fmaxf(0,layer.voxel_recess-.01f);
     if(!DrawVoxelAuthored(device,&voxel_capture,geometry,&layer,false))
@@ -4622,6 +4779,26 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       (description->plane==kDioramaPlane_Bg1Far || description->plane==kDioramaPlane_Bg1Hi))
     return DrawVoxelLowContact(device,&voxel_capture,geometry,&layer)
         ?kPresentationOutcome_Complete:kPresentationOutcome_CoreFailure;
+  if (layer.voxel_terrain) {
+    const ArRenderRectI primary = {
+        (int)lroundf(layer.voxel_primary_offset.x * SR_PPU_SURFACE_MAX_WIDTH),
+        (int)lroundf(layer.voxel_primary_offset.y * SR_PPU_SURFACE_MAX_HEIGHT),
+        primary_capture->width, primary_capture->height};
+    if (!DrawVoxelTerrainBody(device, capture, geometry, &layer, primary))
+      return kPresentationOutcome_CoreFailure;
+    if (forest && description->plane == SR_PPU_OVERLAY_BG1 &&
+        !DrawVoxelEdges(device, capture, geometry, &layer, 0, layer.voxel_depth))
+      return kPresentationOutcome_CoreFailure;
+    if (!ArRenderTexture_IsValid(primary_layer.texture))
+      return effect_plane < 0 ? kPresentationOutcome_Complete :
+          DioramaSubmitPlaneEffect(output_frame, scene->plane_effect,
+              scene->plane_effect_userdata, effect_plane, out_projection,
+              scene->render->source_effect_batch);
+    capture = primary_capture;
+    geometry = &primary_geometry;
+    voxel_capture = native_voxel_capture;
+    layer = primary_layer;
+  }
   PrepareDioramaLayerMesh(capture, geometry, aperture, &layer, &mesh);
   if((description->plane==SR_PPU_OVERLAY_BG2||description->plane==kDioramaPlane_Bg2Hi||description->plane==kDioramaPlane_Bg2Far)&&
       DioramaHeat_Active(&scene->background_heat))
@@ -4684,6 +4861,7 @@ static PresentationOutcome DrawResolvedDioramaLayer(
   if(layer.voxel_depth>0 && description->plane==SR_PPU_OVERLAY_BG1 &&
       !DrawVoxelNativeTransformedBacking(device,&voxel_capture,geometry,&layer))return kPresentationOutcome_CoreFailure;
   if(inspection!=kDioramaVoxelInspect_Backing&&layer.voxel_depth>0 && forest && description->plane==SR_PPU_OVERLAY_BG1 &&
+      !scene->voxel_terrain &&
       !DrawVoxelEdges(device,&voxel_capture,geometry,&layer,0,layer.voxel_depth))
     return kPresentationOutcome_CoreFailure;
   if(layer.voxel_depth>0 && (description->plane==SR_PPU_OVERLAY_BG2 ||
@@ -4966,6 +5144,26 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
   PublishDioramaView(capture, view, &geometry, out_projection);
   PublishDioramaPlanes(capture, scene, &geometry, textures, resolved,
                        resolved_count, out_projection);
+  DioramaVoxelTerrainCapture terrain;
+  DioramaScene terrain_scene;
+  if (out_projection && geometry.depth_sink && out_projection->voxel_scenery &&
+      scene->capture_voxel_terrain &&
+      scene->render->voxel_inspection == kDioramaVoxelInspect_All &&
+      !scene->voxel_guard && !HollowPlaySpace(scene) &&
+      scene->capture_voxel_terrain(scene->capture_voxel_terrain_userdata,
+                                  out_projection, &terrain) &&
+      terrain.bounds.w > 0 && terrain.bounds.w <= kDioramaVoxelTerrainMaximum &&
+      terrain.bounds.h > 0 && terrain.bounds.h <= kDioramaVoxelTerrainMaximum &&
+      ArRenderTexture_IsValid(terrain.textures[0]) &&
+      ArRenderTexture_IsValid(terrain.textures[1]) &&
+      ArRenderTexture_IsValid(terrain.textures[2])) {
+    terrain_scene = *scene;
+    terrain_scene.voxel_terrain = &terrain;
+    scene = &terrain_scene;
+    Diorama_SetVoxelTerrainEffectBounds(out_projection, terrain.bounds,
+        capture->bg1_camera_x - (capture->width - 256) / 2,
+        capture->camera_y - capture->authentic_y0 + 1);
+  }
   if(!GroundCoverPrepare(scene,out_projection))goto failed;
   DioramaProjection cover_projection;
   if(!out_projection&&s_ground_cover.active_count) {

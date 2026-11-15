@@ -1,4 +1,5 @@
 #include "diorama/diorama_bg_gpu.h"
+#include "present/owned_bg_packet.h"
 
 #include <SDL3/SDL.h>
 #include <stdlib.h>
@@ -24,6 +25,7 @@ static struct {
   SDL_GPUTransferBuffer *upload;
   SDL_GPUTexture *native_planes[3][3];
   SrPpuBgPacket *previous;
+  OwnedBgPacket *previous_owner;
   uint32_t valid_mask;
   bool attempted, ready, reuse_equal_data;
 } s_bg;
@@ -47,9 +49,17 @@ static bool PacketWordsEqual(const uint32_t *a, const uint32_t *b, unsigned coun
   return true;
 }
 
-static void RetainPacket(const SrPpuBgPacket *packet) {
+static void RetainPacket(const SrPpuBgPacket *packet, OwnedBgPacket *owned) {
+  if (owned && packet == &owned->packet) {
+    OwnedBgPacket_Retain(owned);
+    OwnedBgPacket_Release(s_bg.previous_owner);
+    s_bg.previous_owner = owned;
+    return;
+  }
   const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_BgCacheCopy);
   memcpy(s_bg.previous, packet, SrPpuBgPacket_Size(packet));
+  OwnedBgPacket_Release(s_bg.previous_owner);
+  s_bg.previous_owner = NULL;
   PerformanceMetrics_End(scope);
 }
 
@@ -140,7 +150,7 @@ static uint32_t SourceMask(unsigned bg) {
 }
 
 static bool SourceChanged(const SrPpuBgPacket *p, unsigned bg) {
-  const SrPpuBgPacket *old = s_bg.previous;
+  const SrPpuBgPacket *old = s_bg.previous_owner ? &s_bg.previous_owner->packet : s_bg.previous;
   if (!s_bg.valid_mask || p->words[0] != old->words[0] || p->words[1] != old->words[1] ||
       ((p->words[2] ^ old->words[2]) & (1u << bg))) return true;
   if (bg == 2 && !PacketWordsEqual(p->words + 4, old->words + 4, 3)) return true;
@@ -169,7 +179,7 @@ static bool SourceChanged(const SrPpuBgPacket *p, unsigned bg) {
 }
 
 static bool FullAddChanged(const SrPpuBgPacket *p) {
-  const SrPpuBgPacket *old = s_bg.previous;
+  const SrPpuBgPacket *old = s_bg.previous_owner ? &s_bg.previous_owner->packet : s_bg.previous;
   if (!!p->words[7] != !!old->words[7] || p->words[0] != old->words[0] || p->words[1] != old->words[1])
     return true;
   if (!p->words[7]) return false;
@@ -190,6 +200,7 @@ void DioramaBgGpu_Reset(ArRenderDevice *device) {
   for (unsigned bg = 0; bg < 3; ++bg) for (unsigned band = 0; band < 3; ++band)
     SDL_DestroyTexture(s_bg.planes[bg][band]);
   ReleaseNative();
+  OwnedBgPacket_Release(s_bg.previous_owner);
   free(s_bg.previous);
   memset(&s_bg, 0, sizeof(s_bg));
 }
@@ -303,7 +314,7 @@ static uint32_t ResolveNative(ArRenderDevice *device, const SrPpuBgPacket *p,
   return requested;
 }
 
-static uint32_t Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
+static uint32_t Resolve(ArRenderDevice *device, const SrPpuBgPacket *p, OwnedBgPacket *owned,
     uint32_t requested, ArRenderTexture textures[kDioramaPlane_Count], ArRenderTexture *skybox, uint32_t *changed) {
   if (changed) *changed = 0;
   if (!p || !textures || !p->words[2]) return 0;
@@ -329,7 +340,8 @@ static uint32_t Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
   for (unsigned bg = 0; bg < 3; ++bg)
     if (SourceChanged(p, bg)) dirty_mask |= SourceMask(bg);
   /* A BG or OBJ change can alter the other BG's winning pixels. */
-  if ((p->words[7] || s_bg.previous->words[7]) &&
+  const SrPpuBgPacket *previous = s_bg.previous_owner ? &s_bg.previous_owner->packet : s_bg.previous;
+  if ((p->words[7] || previous->words[7]) &&
       ((dirty_mask & (SourceMask(0) | SourceMask(1))) || FullAddChanged(p)))
     dirty_mask |= SourceMask(0) | SourceMask(1);
   if ((p->words[2] & 4u) && p->words[6] < 2 && (dirty_mask & SourceMask(p->words[6])))
@@ -344,7 +356,7 @@ static uint32_t Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
       s_bg.valid_mask = 0;
       s_bg.ready = false; // Use the caller's CPU fallback until renderer reset.
     }
-    if (resolved && (!s_bg.reuse_equal_data || dirty_mask)) RetainPacket(p);
+    if (resolved && (!s_bg.reuse_equal_data || dirty_mask)) RetainPacket(p, owned);
     return resolved;
   }
   if (dirty) {
@@ -417,15 +429,22 @@ static uint32_t Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
   /* Equal packets may use different arena offsets. Retain the prior packet
    * and its offsets together until any source changes, including sources not
    * requested this frame. No producer-owned pointers survive this call. */
-  if (!s_bg.reuse_equal_data || dirty_mask) RetainPacket(p);
+  if (!s_bg.reuse_equal_data || dirty_mask) RetainPacket(p, owned);
+  return resolved;
+}
+
+uint32_t DioramaBgGpu_ResolveOwned(ArRenderDevice *device, const SrPpuBgPacket *p,
+    OwnedBgPacket *owned,
+    uint32_t requested, ArRenderTexture textures[kDioramaPlane_Count],
+    ArRenderTexture *skybox, uint32_t *changed) {
+  const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_BgResolve);
+  const uint32_t resolved = Resolve(device, p, owned, requested, textures, skybox, changed);
+  PerformanceMetrics_End(scope);
   return resolved;
 }
 
 uint32_t DioramaBgGpu_Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
     uint32_t requested, ArRenderTexture textures[kDioramaPlane_Count],
     ArRenderTexture *skybox, uint32_t *changed) {
-  const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_BgResolve);
-  const uint32_t resolved = Resolve(device, p, requested, textures, skybox, changed);
-  PerformanceMetrics_End(scope);
-  return resolved;
+  return DioramaBgGpu_ResolveOwned(device, p, NULL, requested, textures, skybox, changed);
 }

@@ -181,6 +181,14 @@ int main(void) {
     DioramaDepthDraw d[]={Draw(vertices[reverse]),Draw(vertices[1-reverse])};
     HybridCheck(&p,target,d,textures,pixels,2,false,false,0);
   }
+  /* The optimized cutout still writes opaque depth and retains its holes
+   * when a fractional face at the same depth arrives later. */
+  Quad(vertices[0],.5f,.5f,(ArRenderColorF){1,0,0,1});
+  Quad(vertices[1],.5f,.5f,(ArRenderColorF){0,0,1,.5f});
+  DioramaDepthDraw cutouts[]={Draw(vertices[0]),Draw(vertices[1])};
+  cutouts[0].cutout=true;
+  HybridCheck(&p,target,cutouts,textures,pixels,1,false,false,0);
+  HybridCheck(&p,target,cutouts,textures,pixels,2,false,false,0);
   /* Seven stacked fractional layers all composite; nothing is capped or dropped. */
   for(unsigned i=0;i<7;++i){Quad(vertices[i],.1f+i*.1f,.1f+i*.1f,(ArRenderColorF){1,.25f,0,.25f});draws[i]=Draw(vertices[i]);}
   HybridCheck(&p,target,draws,textures,pixels,7,false,false,0);

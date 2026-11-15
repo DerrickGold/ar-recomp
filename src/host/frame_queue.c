@@ -1,4 +1,5 @@
 #include "host/frame_queue.h"
+#include "present/owned_bg_packet.h"
 #include "action/action_voxel.h"
 
 #include <stdatomic.h>
@@ -39,8 +40,9 @@ void HostFrameQueue_Destroy(HostFrameQueue *q) {
   if (!q) return;
   for (int i = 0; i < kQueueCapacity; ++i) {
     ActionVoxel_Release(q->packets[i].voxel_storage);
+    DioramaTerrainSource_Release(q->packets[i].terrain_storage);
     free(q->packets[i].pixels);
-    free(q->packets[i].background_storage);
+    OwnedBgPacket_Release(q->packets[i].background_storage);
     free(q->packets[i].trunk_guard_storage);
     free(q->packets[i].voxel_guard_storage);
     free(q->packets[i].sim_storage);
@@ -120,8 +122,15 @@ static bool CopyView(HostFramePacket *p, SrPpuSurfaceView *view, bool needed) {
 
 SrPpuBgPacket *HostFramePacket_BackgroundTarget(HostFramePacket *p) {
   if (!p) return NULL;
-  if (!p->background_storage) p->background_storage = malloc(sizeof(SrPpuBgPacket));
-  return p->background_storage;
+  OwnedBgPacket *owned = p->background_storage;
+  if (owned && atomic_load_explicit(&owned->references, memory_order_acquire) == 1)
+    return &owned->packet;
+  OwnedBgPacket *next = malloc(sizeof(*next));
+  if (!next) return NULL;
+  atomic_init(&next->references, 1);
+  OwnedBgPacket_Release(owned);
+  p->background_storage = next;
+  return &next->packet;
 }
 
 struct SimFrameInputs *HostFramePacket_SimTarget(HostFramePacket *p) {
@@ -213,6 +222,9 @@ bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   const ActionVoxelGeometry *castle = ActionVoxel_Retain(f->diorama_voxel);
   ActionVoxel_Release(p->voxel_storage);
   p->voxel_storage = castle;
+  const DioramaTerrainSource *terrain = DioramaTerrainSource_Retain(f->diorama_terrain);
+  DioramaTerrainSource_Release(p->terrain_storage);
+  p->terrain_storage = terrain;
   if (!HostFramePacket_Supports(f)) return false;
   if (f->sim.view == kSimView_Enhanced) return OwnSimPixels(p);
   const uint32_t mask = f->diorama_plane_request_mask & f->diorama_plane_content_mask &
@@ -230,12 +242,14 @@ bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   p->copied_bytes = 0;
   size_t background_copied = 0;
   if (f->background_packet) {
-    if (!HostFramePacket_BackgroundTarget(p)) return false;
-    if (f->background_packet != p->background_storage) {
+    SrPpuBgPacket *target = HostFramePacket_BackgroundTarget(p);
+    if (!target) return false;
+    if (f->background_packet != target) {
       background_copied = SrPpuBgPacket_Size(f->background_packet);
-      memcpy(p->background_storage, f->background_packet, background_copied);
+      memcpy(target, f->background_packet, background_copied);
     }
-    f->background_packet = p->background_storage;
+    f->background_packet = target;
+    f->background_owner = p->background_storage;
   }
   if (!CopyView(p, &f->ppu_surfaces.main, (mask & (1u << kDioramaPlane_Backdrop)) != 0) ||
       !CopyView(p, &f->hud_icon.surface, true))

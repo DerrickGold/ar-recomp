@@ -1113,6 +1113,9 @@ typedef struct SrPpuBackgroundGuardBands {
  * source but is offset from the declared world rectangle. A mismatch makes
  * this guard unavailable, without changing ordinary scanout. */
 #define SR_PPU_BACKGROUND_GUARD_BANDS_REQUIRE_ANCHOR_SCROLL UINT32_C(0x00000001)
+/* Scene-sized independent sampling, only through the world-terrain request. */
+#define SR_PPU_BACKGROUND_GUARD_BANDS_WORLD_TERRAIN UINT32_C(0x00000002)
+#define SR_PPU_WORLD_TERRAIN_MAXIMUM 1024u
 
 #define SR_PPU_BACKGROUND_GUARD_BANDS_V1_SIZE                             \
     ((uint32_t)(offsetof(SrPpuBackgroundGuardBands, bands) +             \
@@ -1146,7 +1149,17 @@ typedef struct SrPpuScanoutRequest {
      * outside the guard array preserves its original element stride. READY
      * covers every requested union and band output together. */
     const SrPpuBackgroundGuardBands *background_guard_bands[2];
+    /* Independent end-of-scanout sample of a finite world rectangle.
+     * Offsets are relative to the virtual provider's camera anchors.
+     * All three lanes are required. Failure clears WORLD_TERRAIN_READY
+     * without affecting the main scanout or ordinary guards. */
+    const SrPpuBackgroundGuardRequest *world_terrain;
+    const SrPpuBackgroundGuardBands *world_terrain_bands;
 } SrPpuScanoutRequest;
+
+#define SR_PPU_SCANOUT_REQUEST_WORLD_TERRAIN_SIZE \
+    ((uint32_t)(offsetof(SrPpuScanoutRequest, world_terrain_bands) + \
+                sizeof(((SrPpuScanoutRequest *)0)->world_terrain_bands)))
 
 #define SR_PPU_SCANOUT_REQUEST_BACKGROUND_GUARDS_SIZE                     \
     ((uint32_t)(offsetof(SrPpuScanoutRequest, background_guard_reserved) + \
@@ -1168,6 +1181,7 @@ typedef struct SrPpuScanoutRequest {
 #define SR_PPU_SCANOUT_PRESENTATION_DIGEST_VALID UINT32_C(0x00000008)
 #define SR_PPU_SCANOUT_BACKGROUND_VIEW_READY UINT32_C(0x00000010)
 #define SR_PPU_SCANOUT_BACKGROUND_GUARDS_READY UINT32_C(0x00000020)
+#define SR_PPU_SCANOUT_WORLD_TERRAIN_READY UINT32_C(0x00000040)
 
 /** Optional independent Mode-1 background view. By default this is a
  * horizontally bounded virtual BG view; the NATIVE_PAGE flag instead requests

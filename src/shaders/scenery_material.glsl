@@ -87,7 +87,14 @@ vec3 grade_art(vec3 color) {
 
 // Keep the same premultiplied filtering and complementary priority coverage
 // as the ordinary DOF/priority materials. Illumination never changes alpha.
-vec4 sample_art(vec2 uv) { return texture(u_texture, uv); }
+vec4 sample_art(vec2 uv) {
+#ifdef AR_SCENERY_TEXTURE_BANK
+    // A bank uses the unused world heat coordinates for its constant face slot.
+    if (v_heat_world_xy.x > 1.5) return texture(u_texture_2, uv);
+    if (v_heat_world_xy.x > .5) return texture(u_texture_1, uv);
+#endif
+    return texture(u_texture, uv);
+}
 void accumulate(inout vec4 sum, vec4 c, float weight) {
     sum += vec4(c.rgb * c.a, c.a) * weight;
 }

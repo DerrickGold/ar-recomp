@@ -3,6 +3,8 @@
 #include "actraiser/actraiser_death_heim_runtime.h"
 #include "actraiser/regional/actraiser_regional_editor.h"
 #include "regional/session/regional_session_action.h"
+#include "regional/action/regional_terrain.h"
+#include "regional/presentation/regional_mosaic.h"
 #include "actraiser/enhancements/actraiser_world_resume.h"
 #include "actraiser/actraiser_stage_placements.h"
 #include "actraiser/regional/actraiser_regional_media.h"
@@ -653,6 +655,16 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestDifficulty(
 uint8_t ActRaiserRegional_HazardSnapshot(void) { return s_action.hazards; }
 uint8_t ActRaiserRegional_TerrainSnapshot(void) { return s_action.terrain; }
 uint8_t ActRaiserRegional_MosaicSnapshot(void) { return s_action.mosaic; }
+bool ActRaiserRegional_PeekRoomVariants(uint8_t *terrain, uint8_t *mosaic) {
+  if (!terrain || !mosaic) return false;
+  if (!s_campaign.active_valid) {
+    *terrain = *mosaic = 0;
+    return true;
+  }
+  const ArRegionalRules *rules = &s_campaign.active.requested;
+  return ArRegionalTerrain_Resolve(rules->terrain, terrain) &&
+      ArRegionalMosaic_Resolve(rules->mosaic, mosaic);
+}
 uint8_t ActRaiserRegional_PoseSnapshot(void) { return s_action.poses; }
 uint8_t ActRaiserRegional_ArtworkSnapshot(void) { return s_action.artwork; }
 bool ActRaiserRegional_BeginTitleArtwork(uint8_t *mask) {

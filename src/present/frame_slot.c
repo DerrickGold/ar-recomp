@@ -295,6 +295,8 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
                                 &dst->diorama_skybox_periodic);
       ActRaiser_LiveDioramaTrunkGuard(&dst->diorama_trunk_guard);
       ActRaiser_LiveDioramaVoxelGuard(&dst->diorama_voxel_guard);
+      dst->diorama_terrain = ActRaiser_LiveDioramaTerrain();
+      dst->diorama_terrain_world = ActRaiser_LiveDioramaTerrainWorld();
       /* Only the Diorama skybox holds raster bands with its edge clamp. */
       dst->bg2_raster_camera_sensitivity_valid = g_diorama_frame_active &&
           ActRaiserActionBg_LiveRasterCameraSensitivity(

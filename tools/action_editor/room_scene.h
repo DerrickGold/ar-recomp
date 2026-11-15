@@ -65,6 +65,25 @@ bool EditorRoomScene_Render(EditorRoomScene *room, int x, int y, uint32_t frame,
 bool EditorRoomScene_RenderFlat(EditorRoomScene *room, int x, int y, uint32_t frame,
                                 int extra_x, EditorRoomCamera *camera);
 const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *room);
+typedef struct EditorRoomTerrainSource {
+  uint64_t geometry_revision;
+  uint16_t fixed_color;
+  uint8_t animation_phase, brightness, cgwsel, cgadsub, main_screen, sub_screen;
+} EditorRoomTerrainSource;
+static inline bool EditorRoomTerrainSource_Equals(EditorRoomTerrainSource a,
+                                                 EditorRoomTerrainSource b) {
+  return a.geometry_revision == b.geometry_revision &&
+      a.fixed_color == b.fixed_color && a.animation_phase == b.animation_phase &&
+      a.brightness == b.brightness && a.cgwsel == b.cgwsel && a.cgadsub == b.cgadsub &&
+      a.main_screen == b.main_screen && a.sub_screen == b.sub_screen;
+}
+/* Returns a camera-independent identity only for a supported finite BG1
+ * source. Compare identities within the same loaded room. */
+bool EditorRoomScene_VoxelTerrainSource(const EditorRoomScene *room,
+    EditorRoomTerrainSource *out);
+/* Prototype finite BG1 raster. Bands are rear, native high and foreground. */
+bool EditorRoomScene_CaptureVoxelTerrain(EditorRoomScene *room,
+    ArRenderRectI bounds, uint32_t *bands[3], uint32_t *native_low);
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *room);
 const DioramaRoomOverride *EditorRoomScene_Terrain(const EditorRoomScene *room);
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *room);

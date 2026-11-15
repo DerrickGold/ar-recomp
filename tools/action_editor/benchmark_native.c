@@ -287,6 +287,9 @@ int main(int argc, char **argv) {
             "AR_BENCH_WIDTH/HEIGHT (1280/800), AR_BENCH_EFFECTS (1), AR_BENCH_SKY (1),\n"
             "AR_BENCH_WARMUP (one full route), AR_BENCH_CLOCK (0), AR_BENCH_STEP (2).\n"
             "AR_BENCH_SHOT saves a PNG after the last measured frame.\n"
+            "AR_BENCH_EXTENDED_TERRAIN=1 enables the variable BG1 capture prototype.\n"
+            "AR_BENCH_REUSE_TERRAIN=0 disables its cross-scroll cache for A/B testing.\n"
+            "AR_BENCH_FREE_CAMERA=1 uses the gameplay free-camera fit, including for baseline captures.\n"
             "AR_BENCH_PROFILE=path.csv adds owner-thread CPU and submission diagnostics.\n"
             "AR_BENCH_FRAME_PROBE=library enables the optional Vulkan timestamp probe.\n"
             "AR_BENCH_CAPTURE=directory captures every frame instead of timing.\n"
@@ -407,7 +410,13 @@ int main(int argc, char **argv) {
   RoomPreview_EnableEffects(enabled);
   fprintf(stderr, "[benchmark] presentation=%s\n", flat ? "flat-widescreen" : "diorama");
   RoomPreview_SetSourceProjection(Effects, Skybox);
-  if (!RoomPreview_SetView(3.25f, 0, 0, 1, 1)) goto cleanup;
+  const bool free_camera = getenv("AR_BENCH_FREE_CAMERA") != NULL;
+  RoomPreview_EnableFreeCameraFit(free_camera);
+  RoomPreview_EnableExtendedTerrain(getenv("AR_BENCH_EXTENDED_TERRAIN") != NULL);
+  const char *terrain_reuse = getenv("AR_BENCH_REUSE_TERRAIN");
+  RoomPreview_ReuseTerrainAcrossScroll(!terrain_reuse || strcmp(terrain_reuse, "0") != 0);
+  RoomPreview_EnableVoxelFaceObservation(false);
+  if (!RoomPreview_SetView(3.25f, 0, 0, 1, !free_camera)) goto cleanup;
   result = 4;
   operation = "open output trace";
   trace = fopen(argv[1], "w");

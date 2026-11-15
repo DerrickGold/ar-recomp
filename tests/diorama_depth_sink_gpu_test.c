@@ -88,6 +88,46 @@ static bool Overlay(ArRenderDevice *device,ArRenderTexture white,float x,float y
   return ArRenderDevice_DrawTextureWithState(device,white,NULL,&rect,&state);
 }
 
+static void TextureBankChecks(ArSdlDioramaDepthSink *state,ArRenderDevice *device,
+    ArRenderTexture target,ArRenderTexture white) {
+  const ArRenderTexture green=Make(device,false,0xff00ff00);
+  const ArRenderTexture blue=Make(device,false,0xff0000ff);
+  for(unsigned fractional=0;fractional<1u+(unsigned)hybrid;++fractional) {
+    const DioramaDepthSink *sink=Begin(state,device,target);
+    assert(sink->texture_banks);
+    ArRenderVertex2D vertices[12];
+    float depths[12];
+    int32_t indices[18];
+    uint8_t slots[12];
+    const ArRenderColorF one={1,1,1,1};
+    for(unsigned q=0;q<3;++q) {
+      const float x=4+12*q;
+      const ArRenderVertex2D quad[]={{{x,4},one,{0,0}},{{x+8,4},one,{1,0}},
+          {{x+8,12},one,{1,1}},{{x,12},one,{0,1}}};
+      memcpy(vertices+4*q,quad,sizeof(quad));
+      for(unsigned v=0;v<4;++v) {depths[q*4+v]=.5f;slots[q*4+v]=q;}
+      const int32_t order[]={0,1,2,0,2,3};
+      for(unsigned i=0;i<6;++i)indices[q*6+i]=(int32_t)q*4+order[i];
+    }
+    DioramaDepthTextureBank bank={{green,blue},slots};
+    const DioramaDepthSubmission draw={.texture=white,.vertices=vertices,.depths=depths,
+        .indices=indices,.vertex_count=12,.index_count=18,.blend=kArRenderBlendMode_Alpha,
+        .binary_texture_alpha=true,.texture_bank=&bank};
+    assert(sink->submit(sink->userdata,device,&draw));
+    memset(slots,0,sizeof(slots));bank=(DioramaDepthTextureBank){0};
+    if(fractional)
+      assert(Quad(sink,device,white,28,4,.2f,(ArRenderColorF){1,0,0,.5f},false,NULL));
+    assert(sink->finish(sink->userdata,device,true));
+    SDL_Surface *pixels=ReadTarget(device,target);
+    CheckPixel(pixels,8,8,0xffffffff);
+    CheckPixel(pixels,20,8,0xff00ff00);
+    CheckPixel(pixels,32,8,fractional?0xff800080:0xff0000ff);
+    SDL_DestroySurface(pixels);
+  }
+  ArRenderDevice_DestroyTexture(device,blue);
+  ArRenderDevice_DestroyTexture(device,green);
+}
+
 /* Intentionally no SubmitPending here: the caller proves the boundary before
  * recording native work. Downloading in this command observes the actual GPU
  * order without an SDL readback accidentally submitting delayed drawing. */
@@ -279,7 +319,7 @@ int main(int argc,char **argv) {
   SDL_Texture *bound=SDL_GetRenderTarget(ArSdlRenderBackend_Renderer(&device));
   assert(!ArSdlDioramaDepthSink_PrepareTarget(&state,&device,white,1024,1536));
   assert(!ArSdlDioramaDepthSink_PrepareTarget(&state,&device,target,kDioramaDepthMaximumVertices+1,1536));
-  assert(ArSdlDioramaDepthSink_PrepareTarget(&state,&device,target,1024,1536));
+  assert(ArSdlDioramaDepthSink_PrepareTarget(&state,&device,target,2048,3072));
   assert(ArSdlDioramaDepthSink_PrepareTarget(&state,&device,other,1024,1536));
   assert(ArSdlDioramaDepthSink_PrepareTarget(&state,&device,ArRenderTexture_Invalid(),1024,1536));
   assert(state.targets[0].target!=state.targets[1].target && !state.owner);
@@ -356,6 +396,17 @@ int main(int argc,char **argv) {
       assert(sink->finish(sink->userdata,&device,true));
       Check(&device,target,8,8,0xff800080);
     }
+    /* The old descriptor limit bisected the world band. A fractional face
+     * from before the limit must still blend over a later opaque face. */
+    sink=Begin(&state,&device,target);
+    assert(Quad(sink,&device,white,4,4,.2f,half_red,false,NULL));
+    for(unsigned i=1;i<kDioramaDepthMaximumDraws;++i)
+      assert(Quad(sink,&device,white,4,4,.9f,(ArRenderColorF){0,0,0,0},false,NULL));
+    assert(state.stats.submissions==0);
+    assert(Quad(sink,&device,white,4,4,.8f,blue,false,NULL));
+    assert(sink->finish(sink->userdata,&device,true));
+    assert(state.stats.submissions==1);
+    Check(&device,target,8,8,0xff800080);
     /* Ordinary effect draws keep their authored boundary; no pending
      * transparency can escape and cover the later SDL overlay. */
     sink=Begin(&state,&device,target);
@@ -370,7 +421,8 @@ int main(int argc,char **argv) {
   for(unsigned i=0;i<kDioramaDepthMaximumDraws+1;++i)
     assert(Quad(sink,&device,white,4,4,.2f,i==kDioramaDepthMaximumDraws?blue:red,false,NULL));
   assert(sink->finish(sink->userdata,&device,true));
-  assert(state.stats.draws==kDioramaDepthMaximumDraws+1 && state.stats.submissions==2);
+  assert(state.stats.draws==kDioramaDepthMaximumDraws+1 &&
+      state.stats.submissions==(hybrid?1u:2u));
   Check(&device,target,8,8,0xff0000ff);
 
   sink=Begin(&state,&device,target);
@@ -406,6 +458,7 @@ int main(int argc,char **argv) {
 
   ExternalSubmissionChecks(&state,&device,target,white);
   PerspectiveChecks(&state,&device,target,white);
+  TextureBankChecks(&state,&device,target,white);
 
   assert(submit_scopes==submit_ends && submit_scopes>10);
   assert(state.vertices==prepared_vertices && state.indices==prepared_indices);

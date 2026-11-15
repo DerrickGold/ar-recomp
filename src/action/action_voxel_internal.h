@@ -68,6 +68,7 @@ struct ActionVoxelGeometry {
   unsigned waterfall_count;
   uint16_t pass_edges[kVoxelPassLists][kVoxelMaxEdges];
   unsigned pass_counts[kVoxelPassLists];
+  VoxelEdgeChunk pass_chunks[kVoxelPassLists][(kVoxelMaxEdges+kVoxelEdgeChunkSize-1)/kVoxelEdgeChunkSize];
   ActionVoxelSettings settings;
   bool ready;
   bool mixed_scenery; /* Reviewed front trim and rear-mounted details coexist. */
