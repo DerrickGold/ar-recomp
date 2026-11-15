@@ -1,4 +1,5 @@
 #include "diorama/diorama_trunk_gpu.h"
+#include "diorama/diorama_terrain_transfer.h"
 #include "diorama/diorama_trunk_guard_upload.h"
 #include "diorama/diorama_voxel_guard_upload.h"
 #include "action/action_trunk.h"
@@ -1313,6 +1314,7 @@ void PresentDiorama_Reset(ArRenderDevice *device) {
   DioramaTrunkGuardUpload_Reset(&s_trunk_guard, device);
   DioramaVoxelGuardUpload_Reset(&s_voxel_guard, device);
   ResetLiveTerrain(device);
+  s_terrain_transfer_failed = false;
   DioramaVoxelSourceCache_Reset(&s_voxel_source_cache);
   DioramaDepthGpu_Reset(device);
   ResetVoxelSprites(device);

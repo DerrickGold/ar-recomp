@@ -9,12 +9,13 @@
 
 /* Opaque identity tokens, never dereferenced as SDL objects. */
 static max_align_t s_renderer, s_window, s_target, s_source, s_swapchain, s_device, s_commands;
+static max_align_t s_region_staging;
 static uint64_t s_clock;
 static uint64_t TestTicks(void) { return s_clock += 100; }
 static struct {
   bool wrong_target, fail_flush, fail_producer, no_source, no_commands;
   bool fail_acquire, no_swapchain, fail_submit;
-  unsigned flushed, producers, acquired, cancelled, blitted, submitted;
+  unsigned flushed, producers, acquired, cancelled, blitted, submitted, released_transfers;
 } s_test;
 
 static SDL_Texture *TestGetRenderTarget(SDL_Renderer *renderer) {
@@ -61,6 +62,11 @@ static bool TestSubmit(SDL_GPUCommandBuffer *commands) {
   ++s_test.submitted;
   return !s_test.fail_submit;
 }
+static void TestReleaseTransfer(SDL_GPUDevice *device, SDL_GPUTransferBuffer *staging) {
+  assert(device == (SDL_GPUDevice *)&s_device);
+  assert(staging == (SDL_GPUTransferBuffer *)&s_region_staging);
+  ++s_test.released_transfers;
+}
 static void TestBlit(SDL_GPUCommandBuffer *commands, const SDL_GPUBlitInfo *blit) {
   assert(commands == (SDL_GPUCommandBuffer *)&s_commands && !s_test.no_swapchain);
   assert(blit->source.texture == (SDL_GPUTexture *)&s_source);
@@ -80,6 +86,7 @@ static void TestBlit(SDL_GPUCommandBuffer *commands, const SDL_GPUBlitInfo *blit
 #define SDL_WaitAndAcquireGPUSwapchainTexture TestAcquireSwapchain
 #define SDL_CancelGPUCommandBuffer TestCancel
 #define SDL_SubmitGPUCommandBuffer TestSubmit
+#define SDL_ReleaseGPUTransferBuffer TestReleaseTransfer
 #define SDL_BlitGPUTexture TestBlit
 #define SDL_GetTicksNS TestTicks
 #include "../src/platform/sdl/render_sdl.c"
@@ -186,6 +193,12 @@ int main(void) {
   };
   ArRenderDevice device;
   assert(ArRenderDevice_Init(&device, &kSdlRenderOps, &backend, (ArRenderCapabilities){0}));
+  backend.region_staging = (SDL_GPUTransferBuffer *)&s_region_staging;
+  backend.region_staging_capacity = 4096;
+  ArSdlRenderBackend_ResetTextureTransfers(&device);
+  assert(!backend.region_staging && !backend.region_staging_capacity);
+  ArSdlRenderBackend_ResetTextureTransfers(&device);
+  assert(s_test.released_transfers == 1);
   ArSdlRenderBackend_EnablePresentTrace(&device, true);
   assert(ArRenderDevice_Present(&device));
   const ArSdlPresentTrace trace = ArSdlRenderBackend_LastPresentTrace(&device);

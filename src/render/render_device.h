@@ -3,6 +3,19 @@
 
 #include "render_types.h"
 
+typedef struct ArRenderTextureRegionCopy {
+  ArRenderTexture source, destination;
+  ArRenderRectI source_rect;
+  int destination_x, destination_y;
+} ArRenderTextureRegionCopy;
+
+typedef struct ArRenderTextureRegionUpload {
+  ArRenderTexture texture;
+  ArRenderRectI rect;
+  const void *pixels;
+  int pitch_bytes;
+} ArRenderTextureRegionUpload;
+
 /* One dispatch occurs per resource operation or draw batch, never per pixel or
  * per vertex. Backends own resource storage; portable code sees only typed
  * opaque handles. */
@@ -47,6 +60,9 @@ typedef struct ArRenderBackendOps {
   /* Optional pair; see BeginTextureUploads/EndTextureUploads below. */
   bool (*begin_texture_uploads)(void *context);
   bool (*end_texture_uploads)(void *context, bool commit);
+  /* Ordered owner-thread transfer of compatible native 32-bit textures. */
+  bool (*transfer_texture_regions)(void *context, const ArRenderTextureRegionCopy *copies,
+      unsigned copy_count, const ArRenderTextureRegionUpload *uploads, unsigned upload_count);
 } ArRenderBackendOps;
 
 typedef struct ArRenderDevice {
@@ -88,6 +104,12 @@ bool ArRenderDevice_UpdateTexture(ArRenderDevice *device,
  * relying on unchanged old texture contents after a failure. */
 bool ArRenderDevice_BeginTextureUploads(ArRenderDevice *device);
 bool ArRenderDevice_EndTextureUploads(ArRenderDevice *device, bool commit);
+/* Copies run before uploads. Upload-only batches use ordinary texture uploads.
+ * Source and destination of a copy must be different textures.
+ * Invalidate destination contents on failure. */
+bool ArRenderDevice_TransferTextureRegions(ArRenderDevice *device,
+    const ArRenderTextureRegionCopy *copies, unsigned copy_count,
+    const ArRenderTextureRegionUpload *uploads, unsigned upload_count);
 /* An invalid target selects the platform's default output. NULL viewport or
  * clip rectangles restore the complete target extent / disable clipping. */
 bool ArRenderDevice_SetRenderTarget(ArRenderDevice *device,

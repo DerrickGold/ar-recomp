@@ -206,6 +206,7 @@ enum {
   /* Capture and restore a temporary render target together with its viewport
    * and clip. This is optional even when ordinary render targets exist. */
   kArRenderCapability_ScopedRenderTargets = UINT64_C(1) << 9,
+  kArRenderCapability_TextureRegionTransfer = UINT64_C(1) << 10,
 };
 
 typedef struct ArRenderCapabilities {

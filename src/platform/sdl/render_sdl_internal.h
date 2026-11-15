@@ -28,6 +28,8 @@ typedef struct ArSdlRenderBackend {
   /* Upload-only owner scope; commands are acquired lazily on the first update. */
   SDL_GPUCommandBuffer *upload_commands;
   SDL_GPUCopyPass *upload_copy;
+  SDL_GPUTransferBuffer *region_staging;
+  Uint32 region_staging_capacity;
   bool upload_open, upload_failed;
   bool owns_renderer;
   bool owns_context;

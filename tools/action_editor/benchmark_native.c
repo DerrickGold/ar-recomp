@@ -279,11 +279,16 @@ static bool InitMotion(SDL_GPUDevice *gpu) {
   SDL_ReleaseGPUTransferBuffer(gpu, upload);
   return ok;
 }
+int TerrainUploadBenchmark_Main(int argc, char **argv);
+
 int main(int argc, char **argv) {
+  if (argc > 1 && !strcmp(argv[1], "--terrain-uploads"))
+    return TerrainUploadBenchmark_Main(argc, argv);
   if (argc != 12) {
     fprintf(stderr,
             "usage: %s output.csv layers.ini effects.ini room.arscene x y end-x end-y player-x "
             "player-y frames\n"
+            "       %s --terrain-uploads output.csv layers.ini room.arscene windows.csv repeats\n"
             "AR_BENCH_WIDTH/HEIGHT (1280/800), AR_BENCH_EFFECTS (1), AR_BENCH_SKY (1),\n"
             "AR_BENCH_WARMUP (one full route), AR_BENCH_CLOCK (0), AR_BENCH_STEP (2).\n"
             "AR_BENCH_SHOT saves a PNG after the last measured frame.\n"
@@ -301,7 +306,7 @@ int main(int argc, char **argv) {
             "its recorded camera and native clock drive the route (requires player-x=-1).\n"
             "AR_BENCH_FLAT=1 selects standard widescreen (requires effects=0, player-x=-1);\n"
             "flat mode ignores the Diorama layer/effect INIs.\n",
-            argv[0]);
+            argv[0], argv[0]);
     return 2;
   }
   int width, height, frames, warmup, clock, step, sky, enabled, flat, x, y, ex, ey, px, py;

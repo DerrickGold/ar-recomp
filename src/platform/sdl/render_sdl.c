@@ -130,6 +130,21 @@ static bool FlushExternal(ArSdlRenderBackend *backend) {
   return UploadBoundary(backend) && DrainExternal(backend, NULL);
 }
 
+static bool SubmitPendingSdl(ArSdlRenderBackend *backend) {
+  bool sdl_idle = false;
+  if (!UploadBoundary(backend) || !DrainExternal(backend, &sdl_idle)) return false;
+  /* RenderPresent does not propagate recording failures from its own flush. */
+  if (!SDL_FlushRenderer(backend->renderer)) return false;
+  return !backend->output_window || sdl_idle || SDL_RenderPresent(backend->renderer);
+}
+
+static void ReleaseRegionStaging(ArSdlRenderBackend *backend) {
+  if (backend->region_staging)
+    SDL_ReleaseGPUTransferBuffer(backend->gpu_device, backend->region_staging);
+  backend->region_staging = NULL;
+  backend->region_staging_capacity = 0;
+}
+
 static bool CancelTextureUploads(ArSdlRenderBackend *backend) {
   if (backend->upload_copy) SDL_EndGPUCopyPass(backend->upload_copy);
   backend->upload_copy = NULL;
@@ -335,6 +350,8 @@ static bool UpdateTexture(void *context, ArRenderTexture texture,
   if (!ok && backend->upload_open) backend->upload_failed = true;
   return ok;
 }
+
+#include "render_texture_regions_sdl.inc"
 
 static bool EnsureOutputTarget(ArSdlRenderBackend *backend) {
   if (!backend->output_window) return true;
@@ -842,6 +859,7 @@ static const ArRenderBackendOps kSdlRenderOps = {
   .finish_preparation = FinishPreparation,
   .begin_texture_uploads = BeginTextureUploads,
   .end_texture_uploads = EndTextureUploads,
+  .transfer_texture_regions = TransferTextureRegions,
 };
 
 void ArSdlRenderBackend_EnablePresentTrace(const ArRenderDevice *device, bool enabled) {
@@ -870,15 +888,11 @@ SDL_GPUDevice *ArSdlRenderBackend_GpuDevice(const ArRenderDevice *device) {
 }
 
 bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device) {
-  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
-  if (!renderer) return false;
-  ArSdlRenderBackend *backend = device->context;
-  bool sdl_idle = false;
-  if (!UploadBoundary(backend) || !DrainExternal(backend, &sdl_idle)) return false;
-  /* Preserve the explicit recording-failure check before submission: SDL's
-   * RenderPresent does not propagate its internal command-flush result. */
-  if (!SDL_FlushRenderer(renderer)) return false;
-  return !backend->output_window || sdl_idle || SDL_RenderPresent(renderer);
+  return ArSdlRenderBackend_Renderer(device) && SubmitPendingSdl(device->context);
+}
+
+void ArSdlRenderBackend_ResetTextureTransfers(const ArRenderDevice *device) {
+  if (ArSdlRenderBackend_Renderer(device)) ReleaseRegionStaging(device->context);
 }
 
 bool ArSdlRenderBackend_CertifyExternalSdlIdle(const ArRenderDevice *device, void *userdata) {
@@ -1155,6 +1169,7 @@ static bool CreateForWindowWithDriver(ArRenderDevice *device,
       return false;
     }
     backend->output_window = window;
+    device->capabilities.flags |= kArRenderCapability_TextureRegionTransfer;
     backend->reuse_texture_uploads = SDL_GetHintBoolean("AR_SDL_GPU_UPLOAD_REUSE",
         !strcmp(SDL_GetGPUDeviceDriver(gpu), "direct3d12") ||
         !strcmp(SDL_GetGPUDeviceDriver(gpu), "vulkan"));
@@ -1262,6 +1277,7 @@ void ArSdlRenderBackend_Destroy(ArRenderDevice *device) {
   SDL_Window *window = backend->output_window;
   if (backend->output_target) SDL_DestroyTexture(backend->output_target);
   if (backend->scene_resolve) SDL_DestroyGPURenderState(backend->scene_resolve);
+  ReleaseRegionStaging(backend);
   ArSdlSmaa_Reset(backend);
   /* No more draw states may be used after backend teardown. */
   while (backend->fragment_shaders) {

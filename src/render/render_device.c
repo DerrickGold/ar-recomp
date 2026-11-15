@@ -85,6 +85,23 @@ bool ArRenderDevice_EndTextureUploads(ArRenderDevice *device, bool commit) {
        device->ops->end_texture_uploads(device->context, commit));
 }
 
+bool ArRenderDevice_TransferTextureRegions(ArRenderDevice *device,
+    const ArRenderTextureRegionCopy *copies, unsigned copy_count,
+    const ArRenderTextureRegionUpload *uploads, unsigned upload_count) {
+  if (!ArRenderDevice_IsReady(device) || (copy_count && !copies) || (upload_count && !uploads)) return false;
+  if (!copy_count && !upload_count) return true;
+  if (copy_count)
+    return device->ops->transfer_texture_regions &&
+        ArRenderCapabilities_Has(&device->capabilities, kArRenderCapability_TextureRegionTransfer) &&
+        device->ops->transfer_texture_regions(device->context, copies, copy_count, uploads, upload_count);
+  if (!ArRenderDevice_BeginTextureUploads(device)) return false;
+  bool ok = true;
+  for (unsigned i = 0; ok && i < upload_count; ++i)
+    ok = ArRenderDevice_UpdateTexture(device, uploads[i].texture, &uploads[i].rect,
+        uploads[i].pixels, uploads[i].pitch_bytes);
+  return ArRenderDevice_EndTextureUploads(device, ok) && ok;
+}
+
 bool ArRenderDevice_SetRenderTarget(ArRenderDevice *device,
                                     ArRenderTexture target) {
   return ArRenderDevice_IsReady(device) &&

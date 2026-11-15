@@ -1713,6 +1713,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_render_sdl_present_test
         tests/render_sdl_present_test.c src/platform/sdl/host_clock_sdl.c
         src/platform/sdl/metal_drawable_sdl.c
+        src/platform/sdl/smaa_sdl.c
         src/render/gpu_compile_log.c)
     target_link_libraries(actraiser_render_sdl_present_test PRIVATE
         actraiser_performance_test_support
@@ -2829,7 +2830,8 @@ if(BUILD_TESTING)
     get_target_property(_room_gpu_sources actraiser_action_room_gpu_compare SOURCES)
     list(REMOVE_ITEM _room_gpu_sources tools/action_editor/check_native_projection.c)
     add_executable(actraiser_action_room_benchmark
-        tools/action_editor/benchmark_native.c src/platform/sdl/frame_producer_sdl.c ${_room_gpu_sources})
+        tools/action_editor/benchmark_native.c tools/voxel_terrain/terrain_upload_benchmark.c
+        src/platform/sdl/frame_producer_sdl.c ${_room_gpu_sources})
     get_target_property(_room_gpu_includes actraiser_action_room_gpu_compare INCLUDE_DIRECTORIES)
     target_include_directories(actraiser_action_room_benchmark PRIVATE ${_room_gpu_includes})
     target_link_libraries(actraiser_action_room_benchmark PRIVATE actraiser_render_sdl_test_support)

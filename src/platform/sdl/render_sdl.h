@@ -29,6 +29,8 @@ const char *ArSdlRenderBackend_GpuDriver(const ArRenderDevice *device);
 /* Submit preceding offscreen commands without presenting the window or
  * waiting for a fence/readback. Legacy adapters retain their Flush behavior. */
 bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device);
+/* Drop the native staging buffer after a graphics resource reset. */
+void ArSdlRenderBackend_ResetTextureTransfers(const ArRenderDevice *device);
 
 /* Opt-in owner-thread CPU scopes, not GPU timestamps or scanout timings. */
 typedef struct ArSdlPresentTrace {

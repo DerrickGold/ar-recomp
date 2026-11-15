@@ -42,6 +42,7 @@
 #include "host/frame_queue.h"
 #include "host/frame_playout.h"
 #include "manual/manual_reader.h"
+#include "platform/sdl/render_sdl.h"
 #include "present/present.h"
 #include "present/presentation_frame_generation.h"
 #include "present/presentation_textures.h"
@@ -400,6 +401,7 @@ static void RunPostTickHousekeeping(void) {
 static void AppLoop_HandleGraphicsReset(const GameSessionConfig *config, Uint32 event_type) {
   HostComparisonWindow_Destroy();
   HostDisplay_ResetVsyncPacing();
+  ArSdlRenderBackend_ResetTextureTransfers(&g_render_device);
   if (event_type == SDL_EVENT_RENDER_DEVICE_RESET) {
     CrtPost_Shutdown(&g_render_device);
     Diorama_ResetRendererResources(&g_render_device);
