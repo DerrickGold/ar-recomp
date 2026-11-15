@@ -33,6 +33,7 @@ typedef struct ActionEffectProjectionContext {
    * supplied live projection always overrides these staging-only claims. */
   uint64_t staged_ground_cover_claims[2];
   bool staged_voxel_scenery;
+  uint8_t staged_voxel_fog_claims;
   bool scenery_exposure_in_mesh; /* no duplicate alpha/light overlay */
   bool scenery_lighting_in_material;
   bool atmosphere_unlit; /* Global lighting switch; cloud matter remains visible. */

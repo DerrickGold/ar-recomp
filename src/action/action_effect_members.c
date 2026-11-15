@@ -1,5 +1,4 @@
 #include "action_effect_members.h"
-#include "action_light_kinds.h"
 #include "action_ray_field.h"
 #include "action_castle_field.h"
 #include "action_water_field.h"
@@ -76,28 +75,4 @@ bool ActionEffectMembers_Angled(unsigned kind, unsigned group, unsigned room, un
     return ActionCastleField_Bundled(room)->sources[id-1].kind!=kActionCastleSource_Torch;
   }
   return false;
-}
-const ActionNativeMember *ActionEffectMembers_Find(const ActionNativeMembers *members,
-                                                   unsigned kind, unsigned index) {
-  if (!members || members->count > kActionNativeMemberMax) return NULL;
-  for (unsigned i = 0; i < members->count; ++i)
-    if (members->records[i].kind == kind && members->records[i].index == index)
-      return &members->records[i];
-  return NULL;
-}
-void ActionEffectMembers_Tint(const ActionNativeMember *m, ArRenderVertex2D *v, int begin, int end,
-                              bool multiply) {
-  if (!m) return;
-  const float gain = multiply ? m->intensity : ActionLightIntensity_Gain(m->intensity);
-  const float opacity = ActionLightIntensity_Opacity(m->intensity);
-  const float red = ((m->color >> 16) & 255) / 255.f, green = ((m->color >> 8) & 255) / 255.f,
-              blue = (m->color & 255) / 255.f;
-  for (int i = begin; i < end; ++i) {
-    v[i].color.r *= red;
-    v[i].color.g *= green;
-    v[i].color.b *= blue;
-    if (gain != 1) { v[i].color.r *= gain; v[i].color.g *= gain; v[i].color.b *= gain; }
-    if (!multiply)
-      v[i].color.a = fminf(1, v[i].color.a * opacity);
-  }
 }

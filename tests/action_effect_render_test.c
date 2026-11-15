@@ -389,6 +389,11 @@ static ActionEffectInstance SceneEffect(uint8_t kind, int world_x) {
     effect.velocity_x = 3;
     effect.phase = kActionEffectPhase_EnemyFireballFlight;
     break;
+  case kActionEffect_FillmoreStatueOrb:
+    effect.velocity_x = 3;
+    effect.visual = 0x1B;
+    effect.phase = kActionEffectPhase_EnemyFireballFlight;
+    break;
   case kActionEffect_MarahnaFireball:
     effect.velocity_x = 3;
     effect.visual = 0x08;
@@ -1570,6 +1575,71 @@ static void TestSwordBeamLighting(void) {
   for (int i = trail; i < lighting.vertex_count; ++i) {
     CHECK(fabsf(repeat.vertices[i].position.x + lighting.vertices[i].position.x - 600.0f) < 0.01f);
     CHECK(fabsf(repeat.vertices[i].position.y + lighting.vertices[i].position.y - 206.0f) < 0.01f);
+  }
+}
+
+static void TestVoxelCombatMaterialLighting(void) {
+  static ActionSceneEffectRenderBatch light, moved, glow;
+  static ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+  ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
+  DioramaProjection projection = RakedApronProjection();
+  projection.texture_x_origin = 0;
+  projection.texture_width = 512;
+  projection.texture_height = 256;
+  projection.object_planes[2] = (DioramaPlaneProjection){.valid=true,.u1=1,.v1=1,.z_world=-.08f};
+  ActionEffectProjectionContext context = {.diorama_projection=&projection,.scenery_lighting_only=true};
+  const unsigned layer = kActionEffectRenderLayer_Bg1Plane;
+  const unsigned attacks[] = {kActionEffect_SwordBeam, kActionEffect_EnemyFireball,
+      kActionEffect_FillmoreStatueOrb, kActionEffect_AitosLavaFireball,
+      kActionEffect_IceDragonIceBall, kActionEffect_BloodpoolBossLightning};
+  for (unsigned i = 0; i < sizeof(attacks)/sizeof(*attacks); ++i) {
+    ActionEffectInstance *attack = &frame.effects[0];
+    *attack = SceneEffect(attacks[i], 240);
+    attack->age_ticks = 24;
+    attack->obj_priority = 2;
+    CHECK(!ActionEffectReceivers_HasSurfaceLights(&frame));
+    CHECK(ActionEffectReceivers_HasSurfaceLightsForView(&frame, true));
+    projection.voxel_scenery = false;
+    CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, false,
+        ActionEffectProjection_ProjectPoint, NULL, &context, &light));
+    CHECK(light.vertex_count == 0);
+    context.scenery_lighting_only = false;
+    CHECK(ActionSceneEffectRender_Build(&frame, true, false,
+        ActionEffectProjection_ProjectPoint, &context, &glow));
+    projection.voxel_scenery = true;
+    CHECK(ActionSceneEffectRender_Build(&frame, true, false,
+        ActionEffectProjection_ProjectPoint, &context, &moved));
+    /* The material pass adds a receiver without changing the attack overlay. */
+    CHECK(SceneBatchesEqual(&glow, &moved));
+    context.scenery_lighting_only = true;
+    CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, false,
+        ActionEffectProjection_ProjectPoint, NULL, &context, &light));
+    CHECK(light.index_count > 0);
+    attack->world_x += 24;
+    CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, false,
+        ActionEffectProjection_ProjectPoint, NULL, &context, &moved));
+    CHECK(moved.index_count == light.index_count);
+    if (light.vertex_count && moved.vertex_count)
+      CHECK(moved.vertices[0].position.x > light.vertices[0].position.x);
+
+    ActionEffectSourceBatch source = {
+      .context={.scenery_lighting_only=true,.staged_voxel_scenery=true},
+      .primitives=primitives,.capacity=kActionSourceMaximumPrimitives,
+    };
+    CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, false,
+        ActionEffectSource_ProjectPoint, NULL, &source, &moved));
+    CHECK(source.count > 0 && !source.failed);
+    if (source.count) CHECK(primitives[0].meta[2] == attack->obj_priority);
+
+    attack->tuning.light_receivers_set = true;
+    attack->tuning.light_receivers = kActionReceiver_Player;
+    CHECK(!ActionEffectReceivers_HasSurfaceLightsForView(&frame, true));
+    CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, false,
+        ActionEffectProjection_ProjectPoint, NULL, &context, &moved));
+    CHECK(moved.vertex_count == 0);
+    attack->tuning.light_receivers_set = false;
+    attack->flags |= kActionEffectFlag_LightingOff;
+    CHECK(!ActionEffectReceivers_HasSurfaceLightsForView(&frame, true));
   }
 }
 
@@ -2876,6 +2946,46 @@ static void TestVoxelContactPlanes(void) {
       CHECK(frame.decorations[0].projection_plane==original);
     }
   }
+  frame.decoration_count=0;
+  frame.authored_count=1;
+  frame.authored[0]=(ActionEffectInstance){
+    .kind=kActionEffect_AuthoredSpray,.flags=kActionEffectFlag_Visible,
+    .world_x=128,.world_y=192,.particle_count=12,.particle_lifetime=64,.pulse_ticks=31,
+    .render_layer=kActionEffectRenderLayer_WorldDust,.projection_plane=kActionEffectProjectionPlane_Bg1,
+    .tuning={.active=1,.intensity=1,.color=0xffffff},
+    .particle_style={.size_min=.25f,.size_max=.65f,.color_end=0x91b6c9,.seed=195},
+    .field_style={.placement=2,.activity=1},
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-32,-30,32,30}},
+  };
+  ActionEffectInstance *authored=&frame.authored[0];
+  for(unsigned family=0;family<4;++family) {
+    /* Spray, ordinary drips, grit with dust impact, grit with molten impact. */
+    authored->kind=family?kActionEffect_AuthoredDrips:kActionEffect_AuthoredSpray;
+    authored->field_style.debris=family>=2;
+    authored->field_style.landing=family>=2?family-1:0;
+    for(unsigned voxel=0;voxel<2;++voxel) {
+      const bool contact=voxel&&family!=1;
+      const unsigned plane=contact?7u:kActionEffectProjectionPlane_Bg1;
+      ActionEffectSourceBatch source={.context={.staged_voxel_scenery=voxel},
+          .primitives=primitives,.capacity=kActionSourceMaximumPrimitives};
+      CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldDust,false,true,
+          ActionEffectSource_ProjectPoint,NULL,&source,&scratch));
+      CHECK(source.count>0 && !source.failed);
+      for(unsigned i=0;i<source.count;++i)CHECK(primitives[i].meta[1]==plane);
+      projection.voxel_scenery=voxel;
+      ActionEffectProjectionContext context={.diorama_projection=&projection};
+      CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldDust,false,true,
+          ActionEffectProjection_ProjectPoint,NULL,&context,&actual));
+      DioramaProjection reference=projection;
+      reference.voxel_scenery=false;
+      if(contact)reference.bg1_plane=projection.object_planes[2];
+      context.diorama_projection=&reference;
+      CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldDust,false,true,
+          ActionEffectProjection_ProjectPoint,NULL,&context,&expected));
+      CHECK(actual.vertex_count>0 && SceneBatchesEqual(&actual,&expected));
+      CHECK(authored->projection_plane==kActionEffectProjectionPlane_Bg1);
+    }
+  }
 }
 static void TestLandingParticleGeometry(void) {
   ActionSceneEffectFrame frame = {.decoration_count = kActionLandingDustMaxPuffs};
@@ -3316,6 +3426,38 @@ static void TestBloodpoolGeometry(void) {
         IdentityProjection,NULL,NULL,&again));
     frame.decoration_count = 1;
   }
+}
+
+static void TestVoxelMarshMistOwnership(void) {
+  ActionSceneEffectFrame frame = {.decoration_count=1,.decoration_visible_count=1};
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind=kActionEffect_BloodpoolMist,.phase=kActionEffectPhase_BloodpoolEnvironment,
+    .flags=kActionEffectFlag_Visible,.source_mask=1,.world_x=512,.world_y=480,
+    .render_layer=kActionEffectRenderLayer_Bg2HighAlpha,.projection_plane=kActionEffectProjectionPlane_Bg1,
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-384,-48,384,32}},
+  };
+  DioramaProjection projection = RakedApronProjection();
+  projection.texture_x_origin=0;projection.texture_width=1024;projection.texture_height=512;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1};
+  ActionEffectProjectionContext context={.diorama_projection=&projection};
+  static ActionSceneEffectRenderBatch batch;
+  const unsigned layer=kActionEffectRenderLayer_Bg2HighAlpha;
+  projection.voxel_fog_claims=kDioramaFog_Floor;
+  CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,
+      ActionEffectProjection_ProjectPoint,NULL,&context,&batch));
+  CHECK(batch.index_count>0); /* Floor mist does not own the water bank. */
+  projection.voxel_fog_claims=kDioramaFog_Marsh;
+  CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,
+      ActionEffectProjection_ProjectPoint,NULL,&context,&batch));
+  CHECK(batch.index_count==0);
+  static ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+  ActionEffectSourceBatch source={
+    .context={.staged_voxel_fog_claims=kDioramaFog_Marsh},
+    .primitives=primitives,.capacity=kActionSourceMaximumPrimitives,
+  };
+  CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,
+      ActionEffectSource_ProjectPoint,NULL,&source,&batch));
+  CHECK(source.count==0 && !source.failed);
 }
 
 static bool MoonWaterPerspective(void *userdata, const ActionEffectInstance *effect,
@@ -4659,6 +4801,51 @@ static void TestAuthoredFloorMist(void) {
       IdentityProjection,FloorClip,&clip,&b));CHECK(!b.vertex_count && !b.index_count);
 }
 
+static void TestVoxelGroundFogOwnership(void) {
+  static ActionSceneEffectFrame frame;
+  static ActionSceneEffectRenderBatch batch;
+  static ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+  const uint8_t layer = kActionEffectRenderLayer_Bg1Mist;
+  const ActionEffectInstance floor_mist = {
+    .flags=kActionEffectFlag_Visible, .world_x=128, .world_y=192, .render_layer=layer,
+    .projection_plane=kActionEffectProjectionPlane_Bg1, .particle_lifetime=240,
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={0,-26,64,0}},
+  };
+  frame.decoration_count=2;
+  frame.decorations[0]=floor_mist;
+  frame.decorations[0].kind=kActionEffect_CastleMist;
+  frame.decorations[0].phase=kActionEffectPhase_CastleEnvironment;
+  frame.decorations[0].visual=8;
+  frame.decorations[1]=floor_mist;
+  frame.decorations[1].kind=kActionEffect_TempleGroundMist;
+  frame.decorations[1].phase=kActionEffectPhase_CaveEnvironment;
+  frame.decorations[1].visual=3;
+  frame.authored_count=1;
+  frame.authored[0]=floor_mist;
+  frame.authored[0].kind=kActionEffect_AuthoredFloorMist;
+  frame.authored[0].tuning=(ActionEffectTuning){.color=0x91bedf,.intensity=1,.active=1};
+  frame.authored_floor[0]=(ActionEffectFloorField){.count=1,.spans={{128,192,192,26}}};
+  DioramaProjection projection=RakedApronProjection();
+  projection.texture_x_origin=0;projection.texture_width=512;projection.texture_height=256;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1};
+  ActionEffectProjectionContext context={.diorama_projection=&projection};
+  CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,ActionEffectProjection_ProjectPoint,
+      ActionEffectProjection_ClipBounds,&context,&batch));
+  CHECK(batch.vertex_count>0);
+  projection.voxel_fog_claims=kDioramaFog_Floor;
+  CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,ActionEffectProjection_ProjectPoint,
+      ActionEffectProjection_ClipBounds,&context,&batch));
+  CHECK(batch.vertex_count==0 && batch.index_count==0);
+
+  /* The worker stages packets without the final view projection. It must
+   * honor the same ownership or the planar mist is drawn a second time. */
+  ActionEffectSourceBatch source={.context={.staged_voxel_fog_claims=kDioramaFog_Floor},
+      .primitives=primitives,.capacity=kActionSourceMaximumPrimitives};
+  CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,ActionEffectSource_ProjectPoint,
+      ActionEffectSource_ClipBounds,&source,&batch));
+  CHECK(source.count==0 && !source.failed);
+}
+
 static void TestGroundSnowCover(void) {
   static ActionSceneEffectFrame frame;
   static ActionSceneEffectRenderBatch still,pressed,changed,clipped,top,top_pressed;
@@ -5139,6 +5326,7 @@ int main(void) {
   TestStarfieldGeometry();
   TestAuthoredMoteStyle();
   TestAuthoredFloorMist();
+  TestVoxelGroundFogOwnership();
   TestGroundSnowCover();
   TestVoxelGroundCoverLightingAndClaims();
   TestReactiveSnow();
@@ -5154,6 +5342,7 @@ int main(void) {
   TestBloodpoolWaterMoonlight();
   TestMoonDependencyScope();
   TestBloodpoolGeometry();
+  TestVoxelMarshMistOwnership();
   TestBloodpoolMoonlight();
   TestCavePolishGeometry();
   TestLandingParticleGeometry();
@@ -5196,6 +5385,7 @@ int main(void) {
   TestMarahnaLightningLinksAndOrientations();
   TestMarahnaBossLightningStagesAndOrientations();
   TestSwordBeamLighting();
+  TestVoxelCombatMaterialLighting();
   TestSwordBeamMoteLifecycle();
   TestSwordBeamFacingsAndSourceParity();
   TestSceneCapacityAndMalformedInput();

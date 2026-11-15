@@ -360,6 +360,10 @@ static bool AddVoxelAuthoredFace(ArRenderDevice *device,const DioramaCapture *ca
   const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
   const float oy=capture->camera_y-capture->authentic_y0+1;
   const bool cover_top=s_ground_cover.active_count&&kind==kDioramaVoxelFace_Top;
+  const bool fog_top=kind==kDioramaVoxelFace_Top &&
+      GroundFogMayTouch(cell->x,cell->x+16,xy[1],xy[3]);
+  const bool wet_top=kind==kDioramaVoxelFace_Top &&
+      WetSurfaceMayTouch(cell->x,cell->x+16,xy[1],xy[3],false);
   DioramaGroundCoverCap cover={.actor_z=ActionVoxel_PlayRecess(layer->voxel_geometry),
       .contact_radius=6*g->aspect_x/((g->u1-g->u0)*SR_PPU_SURFACE_MAX_WIDTH)};
   if(cover_top&&cell->native_front_art&&((cell->automatic_art&(1u<<art))||material_sample)&&
@@ -372,7 +376,7 @@ static bool AddVoxelAuthoredFace(ArRenderDevice *device,const DioramaCapture *ca
     const float sy=xy[j*2+1];float dx,dy,dz;AuthoredBendOffsets(cell,sx,sy,&dx,&dy,&dz);
     float x,y,z;ActionVoxel_TransformPoint(&cell->transform,xy[j*2]+dx,sy+dy,depths[j]+dz,&x,&y,&z);
     face.heat_world_xy[j]=(ArRenderPointF){x,y};
-    if(cover_top) {
+    if(cover_top || fog_top || wet_top) {
       if(j==0) {
         cover.from=(ActionGroundCoverPoint){sx,sy};
         const unsigned qx=(unsigned)fminf(1,fmaxf(0,floorf((sx-cell->x+.0001f)/8)));
@@ -417,6 +421,8 @@ static bool AddVoxelAuthoredFace(ArRenderDevice *device,const DioramaCapture *ca
   }
   if(g->options->voxel_observe_face)g->options->voxel_observe_face(g->options->voxel_observer_userdata,&pick);
   s_voxel_sides[(*count)++]=face;
+  if (fog_top) GroundFogGather(capture, g, &cover, kDioramaFog_Floor, -INFINITY, INFINITY);
+  if (wet_top) WetSurfaceGather(capture, g, &cover, false);
   if(cover_top) {
     int used=(int)*count;
     if(!GatherVoxelGroundCover(capture,g,layer,&cover,1,&used))return false;

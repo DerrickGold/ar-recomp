@@ -1,7 +1,14 @@
 /* Solid sides split around actors. Native high-priority trim owns its own
  * shallow caps, drawn in the original BG1-high slot. */
 #include "diorama_voxel_cull.h"
+#include "diorama_capture_blend.h"
 #include "diorama_sand_surface.h"
+enum {
+  kVoxelRoomCap_Flat = 1,
+  kVoxelRoomCap_Lit,
+  kVoxelCapPaletteWidth = 256,
+  kVoxelCapPaletteHeight = 128,
+};
 typedef struct VoxelSide {
   ArRenderVertex2D v[4];
   float depths[4];
@@ -9,7 +16,8 @@ typedef struct VoxelSide {
   ArRenderPointF heat_world_xy[4];
   bool heat_finite;
   float distance;
-  bool rear_source,owned_source,solid_color;
+  bool rear_source,owned_source;
+  uint8_t solid_color;
   uint16_t crisp_page; /* One-based native-front filtered source, zero unchanged. */
   uint16_t ground_cover; /* One-based painter-only staged snow triangle. */
 } VoxelSide;
@@ -18,6 +26,39 @@ static ArRenderTexture VoxelAuthoredAtlas(void);
 static DioramaHeatOwned VoxelOwnedHeat(unsigned,bool);
 static ArRenderPointF VoxelOwnedArtUv(unsigned,float,float);
 static bool VoxelOwnedArtReady(unsigned);
+static ArRenderTexture s_voxel_cap_palette;
+static unsigned s_voxel_cap_palette_key;
+
+static void ResetVoxelCapPalette(ArRenderDevice *device) {
+  ArRenderDevice_DestroyTexture(device, s_voxel_cap_palette);
+  s_voxel_cap_palette = ArRenderTexture_Invalid();
+}
+
+/* A solid closure has its own source color, but uses the same material
+ * shader as native art. One palette supplies all caps in the same batch.
+ * Only native brightness and BG1 fixed-color subtraction change its ink. */
+static bool PrepareVoxelCapPalette(ArRenderDevice *device, const ActionRoomSceneFrameState *frame) {
+  const unsigned subtract = frame && DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+      frame->cgwsel, frame->cgadsub, frame->fixed_color, 1) ? frame->fixed_color & 0x7fff : 0;
+  const unsigned key = ((frame ? frame->brightness : 15u) << 15) | subtract;
+  if (ArRenderTexture_IsValid(s_voxel_cap_palette) && key == s_voxel_cap_palette_key) return true;
+  const ArRenderTextureDesc desc = {kVoxelCapPaletteWidth, kVoxelCapPaletteHeight,
+      kArRenderPixelFormat_Argb8888, kArRenderTextureUsage_Static, kArRenderFilter_Nearest,
+      kArRenderBlendMode_Alpha};
+  if (!ArRenderTexture_IsValid(s_voxel_cap_palette) &&
+      !ArRenderDevice_CreateTexture(device, &desc, &s_voxel_cap_palette)) return false;
+  _Alignas(16) static uint32_t colors[kVoxelCapPaletteWidth * kVoxelCapPaletteHeight];
+  for (unsigned i = 0; i < sizeof(colors) / sizeof(*colors); ++i)
+    colors[i] = ActionVoxel_AuthoredColor(i | 0x8000, frame);
+  if (!ArRenderDevice_UpdateTexture(device, s_voxel_cap_palette, NULL, colors,
+          kVoxelCapPaletteWidth * sizeof(*colors))) {
+    ResetVoxelCapPalette(device);
+    return false;
+  }
+  s_voxel_cap_palette_key = key;
+  return true;
+}
+
 static VoxelSide s_voxel_sides[kVoxelMaxVisibleFaces];
 static ArRenderVertex2D s_voxel_vertices[kVoxelMaxVisibleFaces * 4];
 static float s_voxel_depths[kVoxelMaxVisibleFaces * 4];
@@ -534,6 +575,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       (rear || rear_grass) && DofBlurEnabled(device, g->options)
           ? DofRadiusForLayer(.5f - (rear_grass ? depth : rear_offset)) : 0;
   int count = 0;
+  bool cap_palette_checked = false, cap_palette_ready = false;
   GroundCoverBeginBatch();
   /* Carry the native transparent grating across the opening behind the
    * foreground trim. The source still controls its alpha and priority. */
@@ -953,15 +995,25 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     if (face_far <= face_near || (sampled_top && x1 <= x0)) continue;
     const bool owned_top=sampled_top && e.top_owned_art;
     VoxelSide next = {.owned_source=owned_top || sampled_surface || transformed,
-        .solid_color=room_cap};float observer_xy[8];
+        .solid_color=room_cap ? kVoxelRoomCap_Flat : 0};float observer_xy[8];
     ArRenderColorF tint=layer->shade;
     if(room_cap) {
-      const uint32_t color=ActionVoxel_AuthoredColor(e.room_edge_color,capture->voxel_frame);
-      tint.r*=((color>>16)&255)/255.f;
-      tint.g*=((color>>8)&255)/255.f;
-      tint.b*=(color&255)/255.f;
+      if (!cap_palette_checked && g->depth_sink && ArRenderTexture_IsValid(layer->lighting.illumination)) {
+        cap_palette_ready = PrepareVoxelCapPalette(device, capture->voxel_frame);
+        cap_palette_checked = true;
+      }
+      if (cap_palette_ready) next.solid_color = kVoxelRoomCap_Lit;
+      else {
+        const uint32_t color=ActionVoxel_AuthoredColor(e.room_edge_color,capture->voxel_frame);
+        tint.r*=((color>>16)&255)/255.f;
+        tint.g*=((color>>8)&255)/255.f;
+        tint.b*=(color&255)/255.f;
+      }
     }
     const bool cover_top=s_ground_cover.active_count&&e.side==0;
+    const bool fog_top=e.side==0 && e.colliding && GroundFogMayTouch(x0+ox,x1+ox,y0+oy,y1+oy);
+    const bool wet_top=e.side==0 && !e.near_rank && pass==kVoxelEdgeNative &&
+        WetSurfaceMayTouch(x0+ox,x1+ox,y0+oy,y1+oy,false);
     DioramaGroundCoverCap cover={.from={x0+ox,y0+oy},.to={x1+ox,y1+oy},
         .actor_z=ActionVoxel_PlayRecess(castle),.contact_radius=6*g->aspect_x/(du*SR_PPU_SURFACE_MAX_WIDTH)};
     if(e.soft_surface&&e.far_rank==2&&ActionVoxel_Profile(castle)==kActionVoxelProfile_NorthwallSnow)
@@ -1023,7 +1075,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       if(transformed)ActionVoxel_TransformPoint(&transformed->transform,px,py,z,&px,&py,&z);
       next.heat_world_xy[j]=(ArRenderPointF){px,py};
       next.heat_finite=transformed && !sampled_surface && !owned_top;
-      if(cover_top) {
+      if(cover_top || fog_top || wet_top) {
         VoxelEdge raw=e;raw.high_priority=false;raw.colliding=false;VoxelEdgeSpan full;
         if(!ActionVoxel_ResolveEdgeSpanAtY(castle,&raw,kVoxelEdgeNative,-INFINITY,INFINITY,native_y+oy,&full))return false;
         const float full_local_z=back?full.far_depth:full.near_depth;
@@ -1175,6 +1227,8 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       }
     }
     if (!ok) continue;
+    if (fog_top) GroundFogGather(capture, g, &cover, kDioramaFog_Floor, -INFINITY, INFINITY);
+    if (wet_top) WetSurfaceGather(capture, g, &cover, false);
     const ArRenderPointF a = next.v[0].position, b = next.v[1].position, c = next.v[2].position;
     float orientation = (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
     if (trunk_curve || column_side) {
@@ -1193,6 +1247,12 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
         e.side==2?kDioramaVoxelFace_Bottom:kDioramaVoxelFace_Side;
     ObserveVoxelFace(g,layer,&next,observer_xy,pick_kind,
         sampled_top||sampled_surface?&e:NULL);
+    if (next.solid_color == kVoxelRoomCap_Lit) {
+      const unsigned ink = e.room_edge_color & 0x7fff;
+      const ArRenderPointF uv = {(ink % kVoxelCapPaletteWidth + .5f) / kVoxelCapPaletteWidth,
+          (ink / kVoxelCapPaletteWidth + .5f) / kVoxelCapPaletteHeight};
+      for (unsigned j = 0; j < 4; ++j) next.v[j].tex_coord = uv;
+    }
     if (!ReserveVoxelSide(device, g, layer, &count, blur)) return false;
     s_voxel_sides[count++] = next;
     if(cover_top&&!GatherVoxelGroundCover(capture,g,layer,&cover,0,&count))return false;
@@ -1211,6 +1271,10 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
   }
   const int32_t *quad_indices = VoxelQuadIndices();
   DioramaSceneryLightEffectParams light = layer->lighting;
+  const DioramaSceneryLightEffectParams cap_light = {
+      .illumination = light.illumination, .shade = light.shade, .grade = light.grade,
+      .light_uv = light.light_uv,
+  };
   const bool far_terrain=g->depth_sink && layer->voxel_terrain &&
       layer->description->plane==kDioramaPlane_Bg1Far && !DioramaHeat_Active(&light.heat);
   const bool banked=far_terrain && g->depth_sink->texture_banks && !layer->voxel_guard &&
@@ -1256,9 +1320,10 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
     const bool rear_source = head->rear_source;
     const bool owned_source = head->owned_source;
     const bool cover=s_voxel_sides[s_voxel_order[first]].ground_cover!=0;
-    const bool solid=s_voxel_sides[s_voxel_order[first]].solid_color;
-    const bool untextured=cover||solid;
-    bool use_bank=banked && !untextured;
+    const unsigned solid=head->solid_color;
+    const bool lit_cap=solid==kVoxelRoomCap_Lit;
+    const bool terrain_art=!cover&&!solid;
+    bool use_bank=banked && terrain_art;
     const bool bank_binary=use_bank && binary_slots[VoxelTextureSlot(head)];
     unsigned used_slots=1u<<VoxelTextureSlot(head);
     const bool heat_owned=g->depth_sink && owned_source && !cover && DioramaHeat_Active(&light.heat);
@@ -1274,8 +1339,8 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
       ++end;
     }
     use_bank&=(used_slots&(used_slots-1))!=0;
-    if(untextured&&dof_active){ok=DioramaEffectBackend_Unbind(device);dof_active=false;}
-    if(!untextured&&bind_dof&&!dof_active) {
+    if(!terrain_art&&dof_active){ok=DioramaEffectBackend_Unbind(device);dof_active=false;}
+    if(terrain_art&&bind_dof&&!dof_active) {
       const DioramaDofEdgeEffectParams params={.texel_width=light.texel_width,.texel_height=light.texel_height,
           .blur_radius=blur,.u_max=1,.v_max=1};
       ok=ok&&DioramaEffectBackend_BindDofEdge(device,&params);dof_active=ok;
@@ -1286,7 +1351,7 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
       if(cover)GroundCoverCopyFace(face->ground_cover-1,s_voxel_vertices+i*4,s_voxel_depths+i*4,s_voxel_clip_w+i*4);
       else memcpy(s_voxel_vertices+i*4,face->v,sizeof(face->v));
       if(use_bank) memset(s_voxel_texture_slots+i*4,VoxelTextureSlot(face),4);
-      if (layer->voxel_terrain && !untextured && !face->owned_source)
+      if (layer->voxel_terrain && terrain_art && !face->owned_source)
         for (int j = 0; j < 4; ++j) {
           ArRenderPointF *uv = &s_voxel_vertices[i*4+j].tex_coord;
           uv->x *= SR_PPU_SURFACE_MAX_WIDTH * light.texel_width;
@@ -1299,19 +1364,30 @@ static bool SubmitVoxelSides(ArRenderDevice *device, const DioramaViewGeometry *
       }
     }
     light.heat_owned=heat_owned?VoxelOwnedHeat(0,heat_finite):(DioramaHeatOwned){0};
-    if(!untextured&&!owned_source&&layer->voxel_guard) {
+    if(terrain_art&&!owned_source&&layer->voxel_guard) {
       ok=ok&&RenderVoxelNativeSources(device,layer,rear_source?layer->voxel_rear_texture:layer->texture,
           s_voxel_vertices,s_voxel_depths,g->depth_sink?s_voxel_clip_w:NULL,packed*4,quad_indices,packed*6,
           layer->blend,NULL,(ArRenderRectF){0,0,1,1},&light,g->depth_sink,false,rear_source,false);
     } else {
-      const ArRenderTexture art=use_bank?layer->texture:untextured?ArRenderTexture_Invalid():owned_source?
-          VoxelAuthoredAtlas():rear_source?layer->voxel_rear_texture:layer->texture;
-      /* The authored atlas is converted from one-bit RGB555 opacity. */
-      const bool binary_alpha=use_bank?bank_binary:layer->voxel_terrain && !untextured &&
-          (owned_source || VoxelTerrainBinaryAlpha(layer->voxel_terrain,art));
+      ArRenderTexture art = ArRenderTexture_Invalid();
+      const DioramaSceneryLightEffectParams *material = NULL;
+      bool binary_alpha = false;
+      if (lit_cap) {
+        art = s_voxel_cap_palette;
+        material = &cap_light;
+        binary_alpha = true;
+      } else if (terrain_art) {
+        art = use_bank ? layer->texture : owned_source ? VoxelAuthoredAtlas()
+            : rear_source ? layer->voxel_rear_texture : layer->texture;
+        material = &light;
+        /* The authored atlas is converted from one-bit RGB555 opacity. */
+        binary_alpha = use_bank ? bank_binary : layer->voxel_terrain &&
+            (owned_source || VoxelTerrainBinaryAlpha(layer->voxel_terrain, art));
+      }
       ok = ok&&RenderShadedDioramaDepthGeometryWithReceiver(device,art,
           s_voxel_vertices,s_voxel_depths,g->depth_sink?s_voxel_clip_w:NULL,heat_owned?s_voxel_heat_world_xy:NULL,packed*4,quad_indices,packed*6,
-          untextured?kArRenderBlendMode_Alpha:layer->blend,NULL,(ArRenderRectF){0,0,1,1},untextured?NULL:&light,g->depth_sink,layer->description->plane,false,binary_alpha,use_bank?&bank:NULL);
+          terrain_art?layer->blend:kArRenderBlendMode_Alpha,NULL,(ArRenderRectF){0,0,1,1},
+          material,g->depth_sink,layer->description->plane,false,binary_alpha,use_bank?&bank:NULL);
     }
     first = end;
   }
@@ -1459,7 +1535,19 @@ static bool DrawVoxelWaterSurfaces(ArRenderDevice *device, const DioramaCapture 
                                         layer->shade.g*surface_light,layer->shade.b*surface_light,
                                         layer->shade.a*(p.opaque || main_water?1.f:.85f)};
     }
-    if (!ok || DioramaVoxelQuadOutsideViewport(face.v, g->width, g->height)) continue;
+    if (!ok) continue;
+    if (!bg2) GroundFogGatherWater(capture, g, &p, x0+ox, x1+ox, y+oy, layer->voxel_depth);
+    if (!bg2 && jungle && WetSurfaceMayTouch(x0+ox,x1+ox,y+oy,y+oy,true)) {
+      DioramaGroundCoverCap cap = {.from={x0+ox,y+oy}, .to={x1+ox,y+oy}};
+      for (unsigned j = 0; j < 4; ++j) {
+        const bool end = j == 1 || j == 2, back = j >= 2;
+        cap.corners[j] = (DioramaGroundCoverCorner){
+            .position={(end?x1:x0)+ox,y+oy,back?layer->voxel_depth:0},
+            .lift={0,-1,0},.depth_fraction=back?1:0};
+      }
+      WetSurfaceGather(capture, g, &cap, true);
+    }
+    if (DioramaVoxelQuadOutsideViewport(face.v, g->width, g->height)) continue;
     /* Mixed edited/native runs retain their original submission order. Flush
      * only when the material changes; native Jungle still needs one draw. */
     if (count && texture.value!=draw_texture.value) {

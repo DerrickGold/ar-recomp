@@ -1177,7 +1177,9 @@ retry_projection:;
           DioramaLayerOrder_SceneryGrade(render.layers,slot->diorama_map_group,
               slot->diorama_map_number,slot->diorama_layer_section) : (DioramaSceneryGrade){0},
       .scenery_light = slot->action_environmental_effects &&
-          ActionEffectReceivers_HasSurfaceLights(&slot->action_scene_effects)
+          ActionEffectReceivers_HasSurfaceLightsForView(&slot->action_scene_effects,
+              slot->diorama_voxel_mode && ActionVoxel_Active(slot->diorama_voxel,
+                  slot->diorama_map_group, slot->diorama_map_number))
           ? PresentActionEffects_DrawSceneryLight : NULL,
       .actor_light = slot->action_environmental_effects ? PresentActionEffects_DrawActorLight : NULL,
       .sky_weather = slot->action_environmental_effects &&

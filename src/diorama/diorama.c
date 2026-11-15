@@ -200,7 +200,7 @@ static DioramaScratchPool s_diorama_dof_source;
 static DioramaScratchPool s_diorama_sky_weather;
 static DioramaScratchPool s_diorama_lightmap;
 static DioramaScratchPool s_diorama_bloom[3];
-static ArRenderTexture s_diorama_unlit_map;
+static ArRenderTexture s_diorama_unlit_map, s_diorama_white_pixel;
 static DioramaScratchPool s_diorama_actor_lightmaps[2];
 static DioramaScratchPool s_diorama_voxel_subscreen;
 static bool s_diorama_dof_source_unavailable;
@@ -253,19 +253,23 @@ static ArRenderTexture EnsureDioramaScratchTarget(
   return target->texture;
 }
 
-static ArRenderTexture UnlitSceneryMap(ArRenderDevice *device) {
-  if (!ArRenderTexture_IsValid(s_diorama_unlit_map)) {
+static ArRenderTexture DioramaSolidPixel(ArRenderDevice *device, ArRenderTexture *texture,
+    uint32_t color) {
+  if (!ArRenderTexture_IsValid(*texture)) {
     const ArRenderTextureDesc desc={1,1,kArRenderPixelFormat_Argb8888,
         kArRenderTextureUsage_Static,kArRenderFilter_Nearest,kArRenderBlendMode_Alpha};
-    const uint32_t black=0xff000000u;
     const ArRenderRectI pixel={0,0,1,1};
-    if (!ArRenderDevice_CreateTexture(device,&desc,&s_diorama_unlit_map) ||
-        !ArRenderDevice_UpdateTexture(device,s_diorama_unlit_map,&pixel,&black,sizeof(black))) {
-      ArRenderDevice_DestroyTexture(device,s_diorama_unlit_map);
-      s_diorama_unlit_map=ArRenderTexture_Invalid();
+    if (!ArRenderDevice_CreateTexture(device,&desc,texture) ||
+        !ArRenderDevice_UpdateTexture(device,*texture,&pixel,&color,sizeof(color))) {
+      ArRenderDevice_DestroyTexture(device,*texture);
+      *texture=ArRenderTexture_Invalid();
     }
   }
-  return s_diorama_unlit_map;
+  return *texture;
+}
+
+static ArRenderTexture UnlitSceneryMap(ArRenderDevice *device) {
+  return DioramaSolidPixel(device, &s_diorama_unlit_map, 0xff000000u);
 }
 
 static void ResetDioramaSupersample(ArRenderDevice *device) {
@@ -3627,6 +3631,8 @@ static void PrepareHollowRegionMesh(const DioramaCapture *capture,
 }
 
 #include "diorama_ground_cover_render.inc"
+#include "diorama_ground_fog.inc"
+#include "diorama_wet_surface.inc"
 #include "diorama_trunk_edges.inc"
 #include "diorama_voxel_edges.inc"
 #include "diorama_voxel_authored.inc"
@@ -4975,7 +4981,8 @@ static bool PrepareNativeBloom(ArRenderDevice *device, const DioramaCapture *cap
       continue;
     }
     ok=PresentationOutcome_IsUsable(DrawResolvedDioramaLayer(device,capture,&background,
-        geometry,&aperture,textures,priority,guard_priority,layer,&frame,projection,kVoxelDrawNormal,false));
+        geometry,&aperture,textures,priority,guard_priority,layer,&frame,projection,kVoxelDrawNormal,false)) &&
+        GroundFogSubmit(device, geometry, layer->plane, scene->scenery_lightmap);
     mask|=1u<<layer->plane;
   }
   if(ok)ok=DioramaAstralRift_DrawDust(device,scene,capture,projection);
@@ -5165,11 +5172,12 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
         capture->camera_y - capture->authentic_y0 + 1);
   }
   if(!GroundCoverPrepare(scene,out_projection))goto failed;
+  GroundFogPrepare(scene, &geometry);
+  WetSurfacePrepare(scene, &geometry);
   DioramaProjection cover_projection;
-  if(!out_projection&&s_ground_cover.active_count) {
-    /* Even a caller that does not retain projection output needs per-bank
-     * ownership during its effect callbacks, or the old flat top duplicates
-     * the replacement. Other NULL-projection paths remain unchanged. */
+  if(!out_projection&&(s_ground_cover.active_count || s_ground_fog.span_count)) {
+    /* Effect callbacks still need projection ownership when the caller does
+     * not retain it, so they skip the replaced effects. */
     memset(&cover_projection,0,sizeof(cover_projection));out_projection=&cover_projection;
     PublishDioramaView(capture,view,&geometry,out_projection);
     PublishDioramaPlanes(capture,scene,&geometry,textures,resolved,resolved_count,out_projection);
@@ -5178,6 +5186,7 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
       out_projection->voxel_ground_cover_claims[bank/64]|=UINT64_C(1)<<(bank%64);
     }
   }
+  if (out_projection) out_projection->voxel_fog_claims = s_ground_fog.claims;
   PresentationOutcome outcome = scene->backdrop
       ? scene->backdrop(scene->backdrop_userdata,
           (ArRenderRectI){0, 0, geometry.width, geometry.height})
@@ -5193,6 +5202,8 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
   ArRenderTexture bloom_light=ArRenderTexture_Invalid();
   const bool bloom=scene->render->voxel_inspection==kDioramaVoxelInspect_All && PrepareNativeBloom(device,capture,&illuminated,&geometry,textures,resolved,
       resolved_count,&output_frame,out_projection,&bloom_planes,&bloom_light);
+  /* Failed bloom extraction can leave staged faces from its scratch target. */
+  s_ground_fog.section_count = 0;
   uint8_t sky_group,sky_room,sky_bg;
   /* A named native BG backdrop belongs to that screen too. Seed the
    * subscreen with it before lighting preparation, then keep it beneath the
@@ -5359,7 +5370,11 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
         device, capture, draw_scene, &geometry, &aperture, textures,
         priority_surface,guard_priority, &resolved[draw_order[draw]], &output_frame, out_projection,kVoxelDrawNormal,subscreen_active&&terminal_main_coverage);
     outcome = PresentationOutcome_Combine(outcome, layer);
-    if (!PresentationOutcome_IsUsable(layer))
+    /* Native OBJ draws reset depth at their covered pixels. Keep surface
+     * overlays in their terrain slot so later actor or foreground priority wins. */
+    if (!PresentationOutcome_IsUsable(layer) ||
+        !GroundFogSubmit(device, &geometry, resolved_layer->plane, scene->scenery_lightmap) ||
+        !WetSurfaceSubmit(device, &geometry, resolved_layer->plane))
       goto failed;
     if (scene->render->voxel_inspection!=kDioramaVoxelInspect_Backing && prop_priority>=0 && resolved_layer->alpha &&
         (scene->render->visible_planes & (1u<<resolved_layer->plane)) &&
@@ -5399,6 +5414,7 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
 void Diorama_ResetCompositorResources(ArRenderDevice *device) {
   ResetDesertColumnScratch();
   ResetVoxelAuthoredAtlas(device);
+  ResetVoxelCapPalette(device);
   ResetVoxelWaterColors(device);
   ResetJungleTerminalColors(device);
   DioramaAstralRift_Reset(device);
@@ -5407,6 +5423,8 @@ void Diorama_ResetCompositorResources(ArRenderDevice *device) {
   HollowResetMaterial(device);
   ArRenderDevice_DestroyTexture(device,s_diorama_unlit_map);
   s_diorama_unlit_map=ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(device,s_diorama_white_pixel);
+  s_diorama_white_pixel=ArRenderTexture_Invalid();
   ResetDioramaScratchPool(device, &s_diorama_lightmap);
   for (unsigned i=0;i<3;++i) ResetDioramaScratchPool(device,&s_diorama_bloom[i]);
   for(unsigned role=0;role<2;++role)ResetDioramaScratchPool(device, &s_diorama_actor_lightmaps[role]);

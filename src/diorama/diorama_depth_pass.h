@@ -84,6 +84,7 @@ typedef struct DioramaDepthSubmission {
   const int32_t *indices;
   int vertex_count, index_count, plane;
   bool native_actor;
+  bool read_only_depth; /* Translucent 3D effects test against the world without blocking it. */
   bool binary_texture_alpha; /* The caller verified every sampled texel. */
   const DioramaDepthTextureBank *texture_bank; /* Optional nearest world sources. */
   ArRenderBlendMode blend;

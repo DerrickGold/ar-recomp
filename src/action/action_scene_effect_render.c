@@ -51,7 +51,13 @@ static bool IncludeSurfaceLighting(const ActionEffectInstance *effect, unsigned 
   if (ActionEffectReceivers_IsLight(effect->kind) &&
       !(ActionEffectReceivers_Mask(effect) & kActionReceiver_Scenery) &&
       (material || !volume)) return false;
-  if (material) return ActionEffectReceivers_SurfaceLayer(effect) == layer;
+  if (material) {
+    const bool voxel = context->diorama_projection ? context->diorama_projection->voxel_scenery
+                                                   : context->staged_voxel_scenery;
+    if (voxel && layer == kActionEffectRenderLayer_Bg1Plane &&
+        ActionEffectReceivers_VoxelCombatLight(effect)) return true;
+    return ActionEffectReceivers_SurfaceLayer(effect) == layer;
+  }
   if (ActionEffectReceivers_Layer(effect) != layer) return false;
   if (!context) return true;
   const bool surface = ActionEffectReceivers_SurfaceLight(effect);
@@ -2059,6 +2065,11 @@ static SceneEnvironmentFamily SceneEnvironmentFamilyFor(uint8_t kind) {
   }
 }
 
+static bool VoxelOwnsFog(const ActionEffectProjectionContext *projection, unsigned claim) {
+  return projection && ((projection->diorama_projection
+      ? projection->diorama_projection->voxel_fog_claims : projection->staged_voxel_fog_claims) & claim);
+}
+
 static bool
 BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
                      const ActionMoonlightOcclusion *moonlight,
@@ -2131,6 +2142,8 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
         (!lighting_enabled && !particles_enabled && !lake_detail) ||
         effect->projection_plane > kActionEffectProjectionPlane_BetweenBackgrounds)
       continue;
+    if ((effect->kind == kActionEffect_CastleMist || effect->kind == kActionEffect_TempleGroundMist) &&
+        VoxelOwnsFog(projection, kDioramaFog_Floor)) continue;
     /* Generated terrain has distinct front and walking planes. Keep native
      * source records unchanged; the same resolved copy feeds CPU and deferred
      * GPU primitives, so ceiling drops and contact dust cannot lag behind on
@@ -2225,6 +2238,8 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
         !AppendBloodpoolMoonlight(moon_field, &writer,effect,moonlight,&batch->moonlight,project_point,
             clip_bounds,project_userdata))
       return false;
+    const bool marsh_mist_owned = effect->kind == kActionEffect_BloodpoolMist &&
+        VoxelOwnsFog(projection, kDioramaFog_Marsh);
     if (family == kSceneEnvironment_Bloodpool) {
       /* Resolve once, lazily: unrelated passes must not fail because a moon
        * they never consume is malformed or duplicated. */
@@ -2252,7 +2267,7 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
       if (particles_enabled && effect->kind == kActionEffect_BloodpoolMoonReflection &&
           !AppendBloodpoolWaveCaps(moon_field, &writer,effect,bloodpool,project_point,clip_bounds,
               project_userdata)) return false;
-      if (particles_enabled &&
+      if (particles_enabled && !marsh_mist_owned &&
           !AppendBloodpoolDetailParticles(moon_field, marsh_field, &writer,effect,moon,bloodpool,
               project_point,clip_bounds,project_userdata)) return false;
     }
@@ -2265,7 +2280,7 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
     if (lighting_enabled && !AppendSceneLighting(&writer, effect, ray_field, water_field, atmosphere_field, glow_field, arc_field, projectile_field, surface_field, members, project_point,
                                                  clip_bounds, project_userdata))
       return false;
-    if (particles_enabled && !AppendSceneParticles(&writer, effect, ray_field, water_field, atmosphere_field, moon_field, marsh_field, glow_field, arc_field, projectile_field, surface_field, members, project_point,
+    if (particles_enabled && !marsh_mist_owned && !AppendSceneParticles(&writer, effect, ray_field, water_field, atmosphere_field, moon_field, marsh_field, glow_field, arc_field, projectile_field, surface_field, members, project_point,
                                                    clip_bounds, project_userdata))
       return false;
     if(lake_detail) {
@@ -2443,6 +2458,21 @@ bool ActionSceneDecorationRender_Build(
     const ActionEffectInstance *e=&frame->authored[i];
     const ActionEffectProjectionContext *projection=writer.source?&writer.source->context:
         project_point==ActionEffectProjection_ProjectPoint?project_userdata:NULL;
+    if (e->kind == kActionEffect_AuthoredFloorMist && VoxelOwnsFog(projection, kDioramaFog_Floor)) continue;
+    const bool falling_contact = e->kind == kActionEffect_AuthoredSpray ||
+        (e->kind == kActionEffect_AuthoredDrips && e->field_style.debris && e->field_style.landing);
+    ActionEffectInstance contact;
+    if (falling_contact && e->projection_plane == kActionEffectProjectionPlane_Bg1 &&
+        e->field_style.placement == 2 && projection &&
+        (projection->diorama_projection ? projection->diorama_projection->voxel_scenery :
+                                          projection->staged_voxel_scenery)) {
+      /* Foreground impacts meet the walking depth. Flight and impact share
+       * this projection so a grain cannot jump in depth as it lands. */
+      contact = *e;
+      contact.projection_plane = kActionEffectProjectionPlane_Obj;
+      contact.obj_priority = 2;
+      e = &contact;
+    }
     const bool ground_cover=e->kind==kActionEffect_AuthoredCloud&&
         e->render_layer==kActionEffectRenderLayer_WorldDust&&
         e->field_style.ground_depth>0&&e->field_style.ground_width>0;

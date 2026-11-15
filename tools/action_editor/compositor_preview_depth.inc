@@ -67,7 +67,7 @@ static bool DepthSubmit(void *userdata, ArRenderDevice *device,
     return false;
   }
   const DioramaDepthMode mode = draw->native_actor ? kDioramaDepth_NativeActor :
-      draw->blend == kArRenderBlendMode_Add ? kDioramaDepth_Read : kDioramaDepth_Write;
+      (draw->read_only_depth || draw->blend == kArRenderBlendMode_Add) ? kDioramaDepth_Read : kDioramaDepth_Write;
   const bool drawn = WebDepthGeometry((int)draw->texture.value, draw->vertices,
       draw->vertex_count, draw->indices, draw->index_count, draw->blend,
       0, 0, -1, draw->depths, draw->clip_w, mode,draw->heat_world_xy) != 0;

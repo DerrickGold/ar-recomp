@@ -212,8 +212,10 @@ typedef struct DioramaSkyboxProjection {
  * source UV windows and per-room BG1/BG2/OBJ plane shapes used
  * by the captured planes; consumers therefore cannot duplicate auto-fit or
  * guess a parallel depth. */
+enum { kDioramaFog_Floor = 1u << 0, kDioramaFog_Marsh = 1u << 1 };
 typedef struct DioramaProjection {
   bool valid;
+  uint8_t voxel_fog_claims; /* The compositor owns these surface mist passes. */
   bool voxel_scenery; /* Physical terrain/actor depths are published below. */
   /* Per-authored-effect ownership of the widened snow top. Ready empty
    * support still claims its bank; the WorldDust lip/grains stay independent. */

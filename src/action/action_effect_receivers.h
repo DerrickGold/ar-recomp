@@ -20,6 +20,8 @@ uint8_t ActionEffectReceivers_Layer(const ActionEffectInstance *effect);
 uint8_t ActionEffectReceivers_SurfaceLayer(const ActionEffectInstance *effect);
 bool ActionEffectReceivers_SurfaceLight(const ActionEffectInstance *effect);
 bool ActionEffectReceivers_HasSurfaceLights(const ActionSceneEffectFrame *frame);
+bool ActionEffectReceivers_HasSurfaceLightsForView(const ActionSceneEffectFrame *frame, bool voxel);
+bool ActionEffectReceivers_VoxelCombatLight(const ActionEffectInstance *effect);
 /* Resolve after recipe application, so native defaults and member overrides
  * cannot be accidentally excluded by a separate manifest-only fast path. */
 bool ActionEffectReceivers_MapsMatch(const ActionSceneEffectFrame *, unsigned a, unsigned b);

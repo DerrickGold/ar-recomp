@@ -513,6 +513,7 @@ typedef struct ActionSourcePacketCache {
   uint64_t revision;
   bool valid, failed, requested, lighting, particles, scenery_exposure_in_mesh, scenery_lighting_in_material, atmosphere_unlit, weather_only;
   bool voxel_scenery;
+  uint8_t voxel_fog_claims;
   uint64_t ground_cover_claims[2];
   unsigned particle_count;
   uint8_t particle_indices[kActionAuthoredMaxInstances];
@@ -581,6 +582,11 @@ static void BuildSourcePacket(ActionSourcePacketCache *cache, const FrameSlot *s
     ActionSourceWorkspace *workspace, ActionEffectRenderScratch *scratch) {
   const bool voxel_scenery=projection->diorama_projection
       ?projection->diorama_projection->voxel_scenery:projection->staged_voxel_scenery;
+  const unsigned fog_pass = pass == kActionEffectRenderLayer_Bg1Mist ? kDioramaFog_Floor :
+      pass == kActionEffectRenderLayer_Bg2HighAlpha ? kDioramaFog_Marsh : 0;
+  const uint8_t voxel_fog_claims = fog_pass &
+      (projection->diorama_projection?projection->diorama_projection->voxel_fog_claims:
+       projection->staged_voxel_fog_claims);
   const uint64_t *published_claims=projection->diorama_projection
       ?projection->diorama_projection->voxel_ground_cover_claims:projection->staged_ground_cover_claims;
   const bool ground_cover_pass=pass==kActionEffectRenderLayer_Bg1Mist ||
@@ -603,7 +609,7 @@ static void BuildSourcePacket(ActionSourcePacketCache *cache, const FrameSlot *s
       UpdateSourceParticleBounds(cache, &slot->action_scene_effects, projection))
     cache->valid = false;
   if (!cache->valid || cache->lighting != lighting || cache->particles != particles ||
-      cache->voxel_scenery != voxel_scenery ||
+      cache->voxel_scenery != voxel_scenery || cache->voxel_fog_claims != voxel_fog_claims ||
       memcmp(cache->ground_cover_claims,ground_cover_claims,sizeof(ground_cover_claims)) ||
       cache->atmosphere_unlit != projection->atmosphere_unlit ||
       cache->scenery_exposure_in_mesh != projection->scenery_exposure_in_mesh ||
@@ -627,6 +633,7 @@ static void BuildSourcePacket(ActionSourcePacketCache *cache, const FrameSlot *s
     cache->scenery_lighting_in_material=projection->scenery_lighting_in_material;
     cache->atmosphere_unlit=projection->atmosphere_unlit;
     cache->voxel_scenery=voxel_scenery;
+    cache->voxel_fog_claims=voxel_fog_claims;
     memcpy(cache->ground_cover_claims,ground_cover_claims,sizeof(ground_cover_claims));
     cache->lighting = lighting;
     cache->particles = particles;
@@ -894,6 +901,7 @@ static ActionEffectProjectionContext DecorationProjection(
 
 typedef struct ActionSourceRecipe {
   bool requested, lighting, particles, voxel_scenery;
+  uint8_t voxel_fog_claims;
   bool scenery_exposure_in_mesh, scenery_lighting_in_material;
   uint64_t ground_cover_claims[2];
 } ActionSourceRecipe;
@@ -920,6 +928,7 @@ static ActionSourceRecipe SourceRecipe(const ActionSourcePacketCache *cache) {
   return (ActionSourceRecipe){
     .requested = cache->requested, .lighting = cache->lighting, .particles = cache->particles,
     .voxel_scenery = cache->voxel_scenery,
+    .voxel_fog_claims = cache->voxel_fog_claims,
     .scenery_exposure_in_mesh = cache->scenery_exposure_in_mesh,
     .scenery_lighting_in_material = cache->scenery_lighting_in_material,
     .ground_cover_claims = {cache->ground_cover_claims[0], cache->ground_cover_claims[1]},
@@ -940,6 +949,7 @@ static ActionEffectProjectionContext StagedSourceProjection(
   ActionEffectProjectionContext context = DecorationProjection(slot, (ArRenderRectI){0}, NULL);
   memcpy(context.staged_ground_cover_claims, recipe.ground_cover_claims, sizeof(recipe.ground_cover_claims));
   context.staged_voxel_scenery = recipe.voxel_scenery;
+  context.staged_voxel_fog_claims = recipe.voxel_fog_claims;
   context.scenery_exposure_in_mesh = recipe.scenery_exposure_in_mesh;
   context.scenery_lighting_in_material = recipe.scenery_lighting_in_material;
   context.scenery_lighting_only = category != 0;
@@ -1075,6 +1085,7 @@ static void AdoptPreparedPackets(const FrameSlot *owned, const FrameSlot *retain
         if (!latest.requested || !result->valid || result->failed ||
             latest.lighting != prepared.lighting || latest.particles != prepared.particles ||
             latest.voxel_scenery != prepared.voxel_scenery ||
+            latest.voxel_fog_claims != prepared.voxel_fog_claims ||
             latest.scenery_exposure_in_mesh != prepared.scenery_exposure_in_mesh ||
             latest.scenery_lighting_in_material != prepared.scenery_lighting_in_material ||
             memcmp(latest.ground_cover_claims, prepared.ground_cover_claims, sizeof(latest.ground_cover_claims)) ||

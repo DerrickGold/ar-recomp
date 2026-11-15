@@ -72,7 +72,16 @@ uint8_t ActionEffectReceivers_SurfaceLayer(const ActionEffectInstance *e) {
 bool ActionEffectReceivers_SurfaceLight(const ActionEffectInstance *e) {
   return ActionEffectReceivers_SurfaceLayer(e) != kActionEffectRenderLayer_Count;
 }
-bool ActionEffectReceivers_HasSurfaceLights(const ActionSceneEffectFrame *frame) {
+bool ActionEffectReceivers_VoxelCombatLight(const ActionEffectInstance *e) {
+  /* Keep the visible attack in WorldOverlay. A separate material pass
+   * receives its light while both projections use the same moving OBJ. */
+  return e->render_layer == kActionEffectRenderLayer_WorldOverlay &&
+      e->projection_plane == kActionEffectProjectionPlane_Obj &&
+      ActionEffectReceivers_IsLight(e->kind) &&
+      (ActionEffectReceivers_Mask(e) & kActionReceiver_Scenery);
+}
+
+bool ActionEffectReceivers_HasSurfaceLightsForView(const ActionSceneEffectFrame *frame, bool voxel) {
   if (!frame || frame->decoration_count > kActionSceneDecorationMaxInstances ||
       frame->authored_count > kActionAuthoredMaxInstances || frame->effect_count > kActionSceneEffectMaxInstances)
     return false;
@@ -86,11 +95,17 @@ bool ActionEffectReceivers_HasSurfaceLights(const ActionSceneEffectFrame *frame)
       const ActionEffectInstance *e = &effective;
       if ((e->flags & kActionEffectFlag_Visible) && !(e->flags & kActionEffectFlag_LightingOff) &&
           (ActionEffectReceivers_Mask(e) & kActionReceiver_Scenery) &&
-          ActionEffectReceivers_SurfaceLight(e)) return true;
+          (ActionEffectReceivers_SurfaceLight(e) ||
+           (voxel && list == 2 && ActionEffectReceivers_VoxelCombatLight(e)))) return true;
     }
   }
   return false;
 }
+
+bool ActionEffectReceivers_HasSurfaceLights(const ActionSceneEffectFrame *frame) {
+  return ActionEffectReceivers_HasSurfaceLightsForView(frame, false);
+}
+
 bool ActionEffectReceivers_HasActors(const ActionSceneEffectFrame *frame, bool lighting_enabled) {
   if (!frame || frame->decoration_count > kActionSceneDecorationMaxInstances ||
       frame->authored_count > kActionAuthoredMaxInstances || frame->effect_count > kActionSceneEffectMaxInstances)

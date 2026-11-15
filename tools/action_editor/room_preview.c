@@ -1116,7 +1116,8 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     scene.actor_light_reuse[0]=ActionEffectReceivers_MapsMatch(effects.frame,1,2)?1:0;
     scene.actor_light_reuse[1]=ActionEffectReceivers_MapsMatch(effects.frame,1,4)?1:
         ActionEffectReceivers_MapsMatch(effects.frame,2,4)?2:0;
-    scene.scenery_light = ActionEffectReceivers_HasSurfaceLights(effects.frame) ? DrawSceneryLight : NULL;
+    scene.scenery_light = ActionEffectReceivers_HasSurfaceLightsForView(effects.frame,
+        ActionVoxel_Active(scene.voxel_geometry, scene.map_group, scene.map_number)) ? DrawSceneryLight : NULL;
     scene.bg1_dimming = ActionEnvironment_Bg1Dimming(effects.frame, environment->group, environment->room);
     scene.bg1_dimming_ramp = SceneryDimming_ToUv(ActionEnvironment_Bg1DimmingRamp(effects.frame,environment->group, environment->room),
         exposure.origin_x,exposure.origin_y,exposure.width,exposure.height);

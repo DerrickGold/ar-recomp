@@ -319,7 +319,7 @@ static bool Submit(void *context,ArRenderDevice *device,const DioramaDepthSubmis
   batch->draws[s->count]=(DioramaDepthDraw){
       .vertex_count=(unsigned)draw->vertex_count,.index_count=(unsigned)draw->index_count,
       .depth_mode=draw->native_actor?kDioramaDepth_NativeActor:
-          draw->blend==kArRenderBlendMode_Add?kDioramaDepth_Read:kDioramaDepth_Write,
+          (draw->read_only_depth || draw->blend==kArRenderBlendMode_Add)?kDioramaDepth_Read:kDioramaDepth_Write,
       .blend=draw->blend,.textured=source!=NULL,.nearest=filter==SDL_SCALEMODE_NEAREST,
       .cutout=cutout,
       .clip_enabled=true,.clip={clip.x,clip.y,clip.w,clip.h}};
