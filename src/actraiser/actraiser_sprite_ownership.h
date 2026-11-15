@@ -39,6 +39,7 @@ typedef struct ActRaiserSpriteOwnership {
   /* Verified visual props, paired with the exact completed OAM build. */
   uint16_t prop_owner[kActRaiserSpriteSlots];
   uint8_t prop_shape[kActRaiserSpriteSlots];
+  uint8_t prop_retraction[kActRaiserSpriteSlots];
   /* All non-player action compositions are eligible for explicit visual
    * authoring. These immutable facts alone do not activate modeling. */
   uint16_t visual_owner[kActRaiserSpriteSlots], visual_source[kActRaiserSpriteSlots];
@@ -96,6 +97,8 @@ enum {
   kActRaiserSpriteProp_WallTorch,
   kActRaiserSpriteProp_Generic,
   kActRaiserSpriteProp_IcePlatform,
+  kActRaiserSpriteProp_CastleChainPlatform,
+  kActRaiserSpriteProp_CastleWallPlatform,
 };
 void ActRaiserSpriteOwnership_RecordActionVisual(uint16_t source,uint16_t record,
     uint16_t animation,uint8_t bank,uint16_t composition,

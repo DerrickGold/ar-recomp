@@ -112,15 +112,15 @@ int main(void) {
   const struct {size_t offset;uint32_t value;} bad[]={
     {4,kDioramaObjectSnapshotVersion+1},{16,64},{20,8},{24,9},{28,3},{32,3},{36,65536},{40,399},
     {68,641},{72,353},{76,2},{80,16},{84,17},{88,81},{92,34},{120,1},
-    {128,0},{132,kActionVoxelSpriteIceShape+1},{136,4},{140,65},{144,33},{148,129},
+    {128,0},{132,kActRaiserSpriteProp_CastleWallPlatform+1},{136,4},{140,65},{144,33},{148,129},
     {176,0x7fc00000},{180,0x3f000000},{184,0x7f800000},
     {200,3},{204,16},{216,0}, /* mode, flags and explicit zero width */
-    {220,8},{240,8}, /* p0 width3 cannot own bit3 in joins or rows. */
-    {128+2*368+16*4,4}, /* native actor priority */
-    {128+2*368+17*4,2}, /* native actor visible */
-    {128+2*368+25*4,0x7fc00000}, /* native actor wake strength */
-    {128+2*368+2*108,8}, /* too many runs for13pixels */
-    {128+2*368+2*108+4,0}, /* zero-length run */
+    {220,8},{240,1},{244,8}, /* invalid join, unexpected retraction and invalid row */
+    {128+2*372+16*4,4}, /* native actor priority */
+    {128+2*372+17*4,2}, /* native actor visible */
+    {128+2*372+25*4,0x7fc00000}, /* native actor wake strength */
+    {128+2*372+2*108,8}, /* too many runs for13pixels */
+    {128+2*372+2*108+4,0}, /* zero-length run */
   };
   for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);++i)BadWord(size,bad[i].offset,bad[i].value,&owned);
   memcpy(packet,original,size);
@@ -137,25 +137,38 @@ int main(void) {
   assert(DioramaObjectSnapshot_Encode(&torch,packet,sizeof(packet),&torch_size));
   assert(DioramaObjectSnapshot_Decode(packet,torch_size,&owned));
   assert(owned.view.voxel_sprites.sprites[0].shape==kActionVoxelSpriteGenericShape);
-  Put(4,2);Rehash(torch_size);
-  assert(DioramaObjectSnapshot_Decode(packet,torch_size,&owned));
-  assert(owned.view.voxel_sprites.sprites[0].shape==kActionVoxelSpriteGenericShape);
   torch.voxel_sprites.sprites[0].shape=kActionVoxelSpriteIceShape;
   assert(DioramaObjectSnapshot_Encode(&torch,packet,sizeof(packet),&torch_size));
   assert(DioramaObjectSnapshot_Decode(packet,torch_size,&owned));
   assert(owned.view.voxel_sprites.sprites[0].shape==kActionVoxelSpriteIceShape);
-  Put(4,2);Rehash(torch_size);
-  Rejected(torch_size,&owned);
+  torch.voxel_sprites.sprites[0].shape=kActRaiserSpriteProp_CastleWallPlatform;
+  torch.voxel_sprites.sprites[0].retraction=3;
+  assert(DioramaObjectSnapshot_Encode(&torch,packet,sizeof(packet),&torch_size));
+  assert(DioramaObjectSnapshot_Decode(packet,torch_size,&owned));
+  assert(owned.view.voxel_sprites.sprites[0].shape==kActRaiserSpriteProp_CastleWallPlatform);
+  assert(owned.view.voxel_sprites.sprites[0].retraction==3);
+  /* Versions 2 and 3 carry the same prop layout, without a retraction word. */
+  memcpy(packet,original,128);
+  for(unsigned i=0;i<2;++i) {
+    memcpy(packet+128+i*368,original+128+i*372,112);
+    memcpy(packet+128+i*368+112,original+128+i*372+116,256);
+  }
+  memcpy(packet+128+2*368,original+128+2*372,size-128-2*372);
+  for(unsigned version=2;version<=3;++version) {
+    Put(4,version);Put(8,size-8);Rehash(size-8);
+    assert(DioramaObjectSnapshot_Decode(packet,size-8,&owned));
+    assert(!owned.view.voxel_sprites.sprites[0].retraction);
+  }
   /* Version 1's fixed 316-byte prop contract remains readable: its first
    * 60 bytes are followed directly by 32 silhouette rows. No authored facts
    * or joins existed there. Keep original actor/plane payloads byte-exact. */
   memcpy(packet,original,128);
   for(unsigned i=0;i<2;++i) {
-    memcpy(packet+128+i*316,original+128+i*368,60);
-    memcpy(packet+128+i*316+60,original+128+i*368+112,256);
+    memcpy(packet+128+i*316,original+128+i*372,60);
+    memcpy(packet+128+i*316+60,original+128+i*372+116,256);
   }
-  memcpy(packet+128+2*316,original+128+2*368,size-128-2*368);
-  const size_t legacy_size=size-104;
+  memcpy(packet+128+2*316,original+128+2*372,size-128-2*372);
+  const size_t legacy_size=size-112;
   Put(4,1);Put(8,legacy_size);Rehash(legacy_size);
   assert(DioramaObjectSnapshot_Decode(packet,legacy_size,&owned));
   assert(!owned.view.voxel_sprites.sprites[0].source && owned.view.voxel_sprites.sprites[0].width_scale==1);

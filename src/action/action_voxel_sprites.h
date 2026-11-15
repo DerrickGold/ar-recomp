@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include "actraiser/actraiser_sprite_ownership.h"
 #include "diorama/diorama_voxel_edit.h"
 
 /* Small, bounded native compositions. Pixels travel in a separate owned
@@ -19,6 +20,7 @@ typedef struct ActionVoxelSprite {
   uint16_t owner;
   uint8_t shape, priority, width, height;
   uint8_t owner_tag; /* Capture-only OAM ownership, not stable component identity. */
+  uint8_t retraction; /* Native wall platform pose, 0 (extended) to 3 (flush). */
   int16_t component_x, component_y; /* Relative to the emitted composition origin. */
   uint8_t solid_y, solid_height; /* Other rows use crossed spike profiles. */
   uint32_t join_left, join_right; /* Opaque neighbours across a section boundary. */
@@ -52,15 +54,28 @@ static inline bool ActionVoxelSprite_KeepsNativeFace(const ActionVoxelSprite *p)
       !(p->presentation_fields&(kDioramaVoxelObject_Offset|kDioramaVoxelObject_Width));
 }
 
-static inline float ActionVoxelSprite_DepthOffset(const ActionVoxelSprite *p, float play_recess) {
-  if (p->presentation_fields & kDioramaVoxelObject_Offset) return p->depth_offset;
-  /* Start at the native OBJ2 face and extend away from the camera. */
-  return p->shape==kActionVoxelSpriteIceShape ? play_recess-.01f : 0;
-}
-
-static inline float ActionVoxelSprite_Thickness(const ActionVoxelSprite *p, float deck_depth) {
-  if (p->presentation_fields & kDioramaVoxelObject_Thickness) return p->thickness;
-  return p->shape==kActionVoxelSpriteIceShape ? .36f*deck_depth : deck_depth;
+static inline void ActionVoxelSprite_Depth(const ActionVoxelSprite *p, float play_recess,
+    float deck_depth, float *offset, float *thickness) {
+  *offset=0;
+  *thickness=deck_depth;
+  if(p->shape==kActRaiserSpriteProp_IcePlatform) {
+    /* Start at the native OBJ2 face and extend away from the camera. */
+    *offset=play_recess-.01f;
+    *thickness=.36f*deck_depth;
+  } else if(p->shape==kActRaiserSpriteProp_CastleChainPlatform) {
+    /* The BG1 chains start at the front of the shaft, with the rider
+     * farther in. The deck reaches through both planes. */
+    *thickness=.66f*deck_depth;
+  } else if(p->shape==kActRaiserSpriteProp_CastleWallPlatform) {
+    const float contact=play_recess> .01f ? play_recess-.01f : 0;
+    /* Leave the retracted face just ahead of the native rear wall. */
+    const float reach=.96f*deck_depth>contact ? .96f*deck_depth-contact : 0;
+    const float retracted=p->retraction/3.f;
+    *offset=contact+reach*retracted;
+    *thickness=reach*(1-retracted);
+  }
+  if(p->presentation_fields&kDioramaVoxelObject_Offset)*offset=p->depth_offset;
+  if(p->presentation_fields&kDioramaVoxelObject_Thickness)*thickness=p->thickness;
 }
 /* Re-resolve against the current project, not the rules active when a
  * diagnostic pose was captured. Unauthored generic compositions stay native. */
@@ -106,6 +121,7 @@ static inline void ActionVoxelSprite_RemoveNative(const ActionVoxelSprite *p,
 static inline bool ActionVoxelSprite_SameComponent(const ActionVoxelSprite *a,
     const ActionVoxelSprite *b) {
   return a->owner==b->owner && a->shape==b->shape && a->priority==b->priority &&
+      a->retraction==b->retraction &&
       a->generation==b->generation &&
       (a->shape!=kActionVoxelSpriteGenericShape || a->generation!=0) &&
       a->component_x==b->component_x && a->component_y==b->component_y &&

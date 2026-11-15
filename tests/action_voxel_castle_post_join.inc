@@ -102,6 +102,46 @@ static void CastlePostEditor(const ActionRoomScene *s,const ActionVoxelGeometry 
     CastlePostDepth(edited,-2,-3,0,.0288f,kVoxelForeground,false);
   }
 }
+static void CastleWaterDecks(const ActionVoxelGeometry *geometry) {
+  static const int decks[][2]={{60,59},{64,58},{76,58},{88,58}};
+  const float depth=ActionVoxel_Depth(geometry);
+  unsigned edge_count;
+  const VoxelEdge *edges=ActionVoxel_Edges(geometry,&edge_count);
+  for(unsigned i=0;i<sizeof(decks)/sizeof(*decks);++i) {
+    const int x=decks[i][0]*16,y=decks[i][1]*16;
+    int covered=0;
+    for(unsigned e=0;e<edge_count;++e) {
+      const VoxelEdge *edge=&edges[e];
+      if(edge->side || edge->y!=y || edge->x<x || edge->x>=x+32)continue;
+      VoxelEdgeSpan span;
+      assert(edge->colliding && !edge->high_priority && edge->top_owned_art);
+      assert(edge->surface_texture && edge->top_sample_size==16);
+      assert(ActionVoxel_ResolveEdgeSpan(geometry,edge,kVoxelEdgeNative,0,depth,&span));
+      assert(span.near_depth==0 && span.far_depth==depth);
+      covered+=edge->length;
+    }
+    assert(covered==32);
+  }
+  /* Identical stone at the spike bases stays thin. Both purple wall
+   * variants and the low pillar foot retain their ink on the rear plane. */
+  VoxelCellGeometry cell;
+  assert(ActionVoxel_CellGeometry(geometry,19,34,&cell));
+  for(unsigned q=0;q<4;++q)
+    assert(cell.front[q]==0 && fabsf(cell.back[q]-.0288f)<.000001f);
+  for(int x=60;x<=63;++x) {
+    assert(ActionVoxel_CellGeometry(geometry,x,60,&cell));
+    for(unsigned q=0;q<4;++q)assert(cell.front[q]==depth && cell.back[q]==depth);
+    unsigned ink=0;
+    for(int y=60*16;y<61*16;++y)for(int px=x*16;px<(x+1)*16;++px) {
+      const unsigned pixel=geometry->front[(size_t)(y-geometry->origin_y)*geometry->width+
+                                          px-geometry->origin_x];
+      if(!pixel)continue;
+      assert(pixel==kVoxelRearOnly);
+      ++ink;
+    }
+    assert(ink);
+  }
+}
 static void CastlePostJoinFixtures(const char *directory) {
   if(!directory)return;
   static ActionSceneSnapshot snapshot;
@@ -116,6 +156,7 @@ static void CastlePostJoinFixtures(const char *directory) {
     const ActionVoxelSettings settings=ActionVoxel_SettingsForRoom(2,5);
     ActionVoxelGeometry *base=ActionVoxel_Create(),*edited=ActionVoxel_Create();assert(base&&edited);
     assert(ActionVoxel_Build(base,s,NULL,settings));
+    CastleWaterDecks(base);
     assert(fabsf(ActionVoxel_Depth(base)-.24f)<.000001f);
     /* Exact independent established trim: the new rods must meet these
      * CC/CD rows at the same resolved depth, rather than just share an enum. */
@@ -151,6 +192,7 @@ static void CastlePostJoinFixtures(const char *directory) {
     CastlePostDepth(base,107,4,0,.24f,kVoxelSolid,true);
     remapped=*s;Renumber(&remapped);
     assert(ActionVoxel_Build(edited,&remapped,NULL,settings));SameGeometry(base,edited);
+    CastleWaterDecks(edited);
     assert(!memcmp(base->front,edited->front,(size_t)base->width*base->height));
     CastlePostEditor(s,base,edited,settings);
     remapped=*s;remapped.map=4;

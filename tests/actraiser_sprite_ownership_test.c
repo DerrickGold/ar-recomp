@@ -389,7 +389,39 @@ static void TestApronWallTorches(void) {
   CHECK(o.wall_torch_part_count==kActRaiserWallTorchPartLimit);
   CHECK(!ActRaiserSpriteOwnership_PropTag(&o,0x8e0+kActRaiserWallTorchPartLimit*64));
 }
+static void TestCastlePlatforms(void) {
+  static const struct {
+    unsigned room,source,composition,shape,retraction;
+  } cases[]={
+    {3,0xb977,0x45dc,kActRaiserSpriteProp_CastleChainPlatform,0},
+    {3,0xb9a3,0x45dc,kActRaiserSpriteProp_CastleChainPlatform,0},
+    {5,0xb977,0x45dc,kActRaiserSpriteProp_CastleChainPlatform,0},
+    {5,0xb9a3,0x45dc,kActRaiserSpriteProp_CastleChainPlatform,0},
+    {5,0xb9d2,0x4951,kActRaiserSpriteProp_CastleChainPlatform,0},
+    {3,0xb9d2,0x4951,0,0},
+    {5,0xba12,0x4b86,0,0},
+    {7,0xba34,0x4b20,kActRaiserSpriteProp_CastleWallPlatform,0},
+    {7,0xba48,0x4b33,kActRaiserSpriteProp_CastleWallPlatform,1},
+    {7,0xba5c,0x4b46,kActRaiserSpriteProp_CastleWallPlatform,2},
+    {7,0xba70,0x4b59,kActRaiserSpriteProp_CastleWallPlatform,3},
+    {7,0xba70,0x4b6c,0,0},
+  };
+  for(unsigned i=0;i<sizeof(cases)/sizeof(*cases);++i) {
+    uint8_t shadow[544]={0};
+    ActRaiserSpriteOwnership_Begin(2,cases[i].room,0);
+    ActRaiserSpriteOwnership_RecordActionObject(cases[i].source,0x8e0,0,0,0,8);
+    ActRaiserSpriteOwnership_RecordActionVisual(cases[i].source,0x8e0,0x4000,0x7e,
+        cases[i].composition,0,0,0,8);
+    ActRaiserSpriteOwnership_Complete(shadow);
+    ActRaiserSpriteOwnership_Upload(2,cases[i].room,shadow);
+    const ActRaiserSpriteOwnership o=ActRaiserSpriteOwnership_Presented(2,cases[i].room);
+    CHECK(o.prop_shape[0]==cases[i].shape && o.prop_shape[1]==cases[i].shape);
+    CHECK(o.prop_retraction[0]==cases[i].retraction && o.prop_retraction[1]==cases[i].retraction);
+    CHECK(o.visual_owner[0]==0x8e0 && o.slots[0]==kActRaiserSprite_Enemy);
+  }
+}
 int main(void) {
+  TestCastlePlatforms();
   TestApronWallTorches();
   TestVoxelProps();
   TestActionReceivers();

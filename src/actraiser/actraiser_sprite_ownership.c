@@ -32,6 +32,7 @@ void ActRaiserSpriteOwnership_Record(ActRaiserSpriteRole role,
     s_build.slots[slot] = (uint8_t)role;
     s_build.prop_owner[slot] = 0;
     s_build.prop_shape[slot] = 0;
+    s_build.prop_retraction[slot] = 0;
     s_build.visual_owner[slot]=s_build.visual_source[slot]=s_build.visual_animation[slot]=0;
     s_build.prop_origin_x[slot] = s_build.prop_origin_y[slot] = 0;
   }
@@ -116,6 +117,29 @@ void ActRaiserSpriteOwnership_RecordActionVisual(uint16_t source,uint16_t record
       source==0xd601 && bank==0x7e && animation==0x4000 && composition==0x4750;
   unsigned shape=rock?kActRaiserSpriteProp_RockPlatform:
       bridge_log?kActRaiserSpriteProp_Log:0;
+  unsigned retraction=0;
+  if (s_build.group==kActRaiserMapGroup_Bloodpool && bank==0x7e && animation==0x4000) {
+    /* The chain lifts keep the same picture in both directions. The drop
+     * deck keeps its picture through the delay and subsequent free fall. */
+    if (((s_build.map==3 || s_build.map==5) &&
+         (source==0xb977 || source==0xb9a3) && composition==0x45dc) ||
+        (s_build.map==5 && source==0xb9d2 && composition==0x4951))
+      shape=kActRaiserSpriteProp_CastleChainPlatform;
+    if (s_build.map==7 &&
+        (source==0xba34 || source==0xba48 || source==0xba5c || source==0xba70)) {
+      /* The four native platform pictures are ordered from out to in.
+       * Each object's own timer already selects the right picture. */
+      switch(composition) {
+        case 0x4b20: retraction=0; break;
+        case 0x4b33: retraction=1; break;
+        case 0x4b46: retraction=2; break;
+        case 0x4b59: retraction=3; break;
+        default: retraction=4; break;
+      }
+      if(retraction<4)shape=kActRaiserSpriteProp_CastleWallPlatform;
+      else retraction=0;
+    }
+  }
   if (s_build.group==kActRaiserMapGroup_Northwall && bank==0x7e && animation==0x4000) {
     /* Match the native ice bridge's solid pose and the two rideable ice
      * families. The linked $A686 collision records emit no artwork. */
@@ -159,6 +183,7 @@ void ActRaiserSpriteOwnership_RecordActionVisual(uint16_t source,uint16_t record
     s_build.visual_animation[slot]=animation;
     s_build.prop_owner[slot] = shape ? record : 0;
     s_build.prop_shape[slot] = shape;
+    s_build.prop_retraction[slot] = retraction;
     s_build.prop_origin_x[slot] = origin_x;
     s_build.prop_origin_y[slot] = origin_y;
   }

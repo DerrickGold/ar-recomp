@@ -24,6 +24,8 @@ static bool VoxelSpriteLayout(unsigned shape, const SrPpuObjResolveResult *b,
       return b->x1>b->x0 && b->y1>b->y0 && b->x1-b->x0<=256 && b->y1-b->y0<=256;
     case kActRaiserSpriteProp_TempleBridge: width=192; height=sh=32; break;
     case kActRaiserSpriteProp_TemplePlatform: break;
+    case kActRaiserSpriteProp_CastleChainPlatform:
+    case kActRaiserSpriteProp_CastleWallPlatform: break;
     case kActRaiserSpriteProp_TempleCrusher: height=48; sy=16; break;
     case kActRaiserSpriteProp_TempleSpikes: sh=0; break;
     case kActRaiserSpriteProp_TempleSpikeRail: sh=3; break;
@@ -171,6 +173,7 @@ static void CaptureVoxelSprites(FrameSlot *f, const SnesRunnerApi *api,
         ActionVoxelSprite prop={.owner=owner,.shape=shape,.priority=priority,
             .owner_tag=pass?ActRaiserSpriteOwnership_VisualTag(&ownership,owner):
                 ActRaiserSpriteOwnership_PropTag(&ownership,owner),
+            .retraction=pass?0:ownership.prop_retraction[first],
             .width=width,.height=height,.x=x,.y=y,.ambient=ambient,
             .component_x=x0-origin_x,.component_y=y0-origin_y,
             .solid_y=body1>body0?body0-y0:0,.solid_height=body1>body0?body1-body0:0};

@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 enum {
-  kDioramaObjectSnapshotVersion = 3,
+  kDioramaObjectSnapshotVersion = 4,
   kDioramaObjectSnapshotWidth = 640,
   kDioramaObjectSnapshotHeight = 352,
   kDioramaObjectSnapshotHeaderBytes = 128,

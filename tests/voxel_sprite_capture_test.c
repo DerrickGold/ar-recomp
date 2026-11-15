@@ -309,5 +309,26 @@ int main(void) {
   ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(2,1,shadow);
   CaptureVoxelSprites(&f,&api,NULL,42);
   assert(f.voxel_sprites.count==16 && p->shape==kActRaiserSpriteProp_Log);
+  diagnostic_candidates=false;
+  room=f.diorama_map_number=7;source=0xba34;
+  width=32;
+  static const unsigned wall_poses[]={0x4b20,0x4b33,0x4b46,0x4b59};
+  float last=-1;
+  for(unsigned pose=0;pose<4;++pose) {
+    composition=wall_poses[pose];Owners(1);CaptureVoxelSprites(&f,&api,NULL,42);
+    assert(f.voxel_sprites.count==1 && p->shape==kActRaiserSpriteProp_CastleWallPlatform);
+    assert(p->retraction==pose && p->priority==2 && p->width==32 && p->solid_height==16);
+    float start,thickness;
+    ActionVoxelSprite_Depth(p,.08f,.24f,&start,&thickness);
+    assert(start>last && fabsf(start+thickness-.96f*.24f)<.000001f);
+    assert((thickness==0)==(pose==3));
+    last=start;
+  }
+  room=f.diorama_map_number=5;source=0xb9d2;composition=0x4951;
+  Owners(1);CaptureVoxelSprites(&f,&api,NULL,42);
+  assert(f.voxel_sprites.count==1 && p->shape==kActRaiserSpriteProp_CastleChainPlatform);
+  float start,thickness;
+  ActionVoxelSprite_Depth(p,.08f,.24f,&start,&thickness);
+  assert(start==0 && thickness>.08f && thickness<.24f);
   puts("Voxel sprite capture: native ownership, opt-in candidates, authored families, joins, bounded fallback and lighting passed");
 }

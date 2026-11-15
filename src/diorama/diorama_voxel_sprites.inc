@@ -92,8 +92,10 @@ static bool DrawVoxelSprites(ArRenderDevice *device,const DioramaCapture *captur
         p->presentation_mode!=kDioramaVoxelObject_Extruded;
     const bool wall_torch=attached_torch &&
         (!(p->presentation_fields&kDioramaVoxelObject_Thickness) || p->thickness==0);
-    const float start=ActionVoxelSprite_DepthOffset(p,recess)+(attached_torch?default_depth:0);
-    const float full=start+ActionVoxelSprite_Thickness(p,default_depth);
+    float start,thickness;
+    ActionVoxelSprite_Depth(p,recess,default_depth,&start,&thickness);
+    if(attached_torch)start+=default_depth;
+    const float full=start+thickness;
     /* Native flame artwork shares the sconce/glow's BG1 plane. Keep the same
      * native priority slot and exact-owner handoff, but emit only one flat
      * rear face; a front cap would recreate the floating duplicate. */

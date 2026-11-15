@@ -883,10 +883,26 @@ static unsigned NativeContourCollision(const ActionRoomScene *s,
   return cx>=0 && cy>=0 && ActionRoomScene_LookupTile(s,1,cx*2,cy*2,&word,&id)
       ? native[id].collision : 0;
 }
+static bool CastleChainAbove(const ActionRoomScene *s,const DioramaStampLayerOverride *stamps,
+    const CastleMaterial native[256],int cx,int cy,const uint16_t *tiles,size_t tile_pitch) {
+  CastleMaterial above;
+  uint8_t id;
+  if(!LookupMaterialSource(s,stamps,native,cx,cy-1,&above,&id,tiles,tile_pitch) ||
+      above.collision)return false;
+  /* The chain is a thin vertical strip on one side of the native cell.
+   * The spike bases reuse the same stone face without this hanger. */
+  return above.kind[0]==above.kind[2] && above.kind[1]==above.kind[3] &&
+      ((above.kind[0]==kVoxelThin && above.kind[1]==0) ||
+       (above.kind[1]==kVoxelThin && above.kind[0]==0));
+}
 static bool LookupMaterial(const ActionRoomScene *s,const DioramaStampLayerOverride *stamps,
     const CastleMaterial native[256],int cx,int cy,CastleMaterial *out,
     uint8_t *metatile,const uint16_t *tiles,size_t tile_pitch) {
   if(!LookupMaterialSource(s,stamps,native,cx,cy,out,metatile,tiles,tile_pitch))return false;
+  if(s->group==2 && s->map==5 && out->collision==3 && out->kind[0]==kVoxelThin &&
+      out->top_surface==kVoxelTopSurface_Own16 &&
+      CastleChainAbove(s,stamps,native,cx,cy,tiles,tile_pitch))
+    for(unsigned q=0;q<4;++q)out->kind[q]=kVoxelSolid;
   if(!out->native_slope || (out->collision!=6 && out->collision!=9))return true;
   const unsigned left=NativeContourCollision(s,stamps,native,cx-1,cy);
   const unsigned right=NativeContourCollision(s,stamps,native,cx+1,cy);

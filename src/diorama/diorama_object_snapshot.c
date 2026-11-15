@@ -73,7 +73,8 @@ static bool Header(Codec *c,DioramaObjectSnapshotView *v) {
 }
 
 static bool Prop(Codec *c,ActionVoxelSprite *p,unsigned width,unsigned height) {
-  const unsigned max_shape=c->version>=3?kActionVoxelSpriteIceShape:
+  const unsigned max_shape=c->version>=4?kActRaiserSpriteProp_CastleWallPlatform:
+      c->version>=3?kActionVoxelSpriteIceShape:
       c->version>=2?kActionVoxelSpriteGenericShape:8;
   U(p->owner,1,65535);U(p->shape,1,max_shape);U(p->priority,0,3);
   U(p->width,1,kVoxelSpriteWidth);U(p->height,1,kVoxelSpriteHeight);U(p->owner_tag,1,128);
@@ -96,6 +97,9 @@ static bool Prop(Codec *c,ActionVoxelSprite *p,unsigned width,unsigned height) {
     if(c->decode){p->join_top=(uint64_t)thi<<32|tlo;p->join_bottom=(uint64_t)bhi<<32|blo;}
     U(p->generation,0,UINT32_MAX);
   } else if(c->decode)p->width_scale=1;
+  if(c->version>=4) {
+    U(p->retraction,0,p->shape==kActRaiserSpriteProp_CastleWallPlatform?3:0);
+  }
   uint64_t occupied=0;
   const uint64_t columns=p->width==64?UINT64_MAX:(UINT64_C(1)<<p->width)-1;
   for(unsigned y=0;y<kVoxelSpriteHeight;++y) {

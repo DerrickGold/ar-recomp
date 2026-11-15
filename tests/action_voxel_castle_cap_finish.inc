@@ -59,6 +59,41 @@ static void CastleFinishEdits(const ActionRoomScene *s,int x,int y) {
   assert((g->front[(y*16-g->origin_y)*g->width+x*16-g->origin_x]&kVoxelKindMask)==0);
   ActionVoxel_Release(g);
 }
+static void CastleFinalShaftCheck(const ActionVoxelGeometry *g) {
+  /* The upper walkway, all five gold landings, and the floor under the
+   * skull pillar at the window arcade. Check coverage as well as texture. */
+  static const struct { int left,right,y; } tops[]={
+    {80,240,800},{80,112,848},{112,144,880},{144,176,912},
+    {176,208,880},{208,240,848},{272,320,208},
+  };
+  unsigned count;
+  const VoxelEdge *edges=ActionVoxel_Edges(g,&count);
+  for(unsigned i=0;i<sizeof(tops)/sizeof(*tops);++i) {
+    int covered=0;
+    for(unsigned j=0;j<count;++j) {
+      const VoxelEdge *edge=&edges[j];
+      if(edge->side || edge->y!=tops[i].y)continue;
+      const int left=edge->x>tops[i].left?edge->x:tops[i].left;
+      const int end=edge->x+edge->length;
+      const int right=end<tops[i].right?end:tops[i].right;
+      if(left>=right)continue;
+      VoxelEdgeSpan span;
+      assert(edge->colliding && !edge->high_priority && edge->surface_texture);
+      assert(edge->top_owned_art && edge->top_sample_size==16);
+      assert(ActionVoxel_ResolveEdgeSpan(g,edge,kVoxelEdgeNative,0,ActionVoxel_Depth(g),&span));
+      assert(span.near_depth==0 && span.far_depth==ActionVoxel_Depth(g));
+      covered+=right-left;
+    }
+    assert(covered==tops[i].right-tops[i].left);
+  }
+
+  static const int skull_ink[][2]={{88,824},{296,88},{312,200}};
+  for(unsigned i=0;i<sizeof(skull_ink)/sizeof(*skull_ink);++i) {
+    const int x=skull_ink[i][0]-g->origin_x,y=skull_ink[i][1]-g->origin_y;
+    const unsigned ink=g->front[(size_t)y*g->width+x];
+    assert(ink==kVoxelRearOnly);
+  }
+}
 static void CastleCapFinishFixtures(const char *directory) {
   if(!directory)return;bool complete=true;
   static uint8_t bytes[kActionSceneSnapshotMaxBytes];static ActionSceneSnapshot snapshot;
@@ -80,6 +115,10 @@ static void CastleCapFinishFixtures(const char *directory) {
     assert(CastleFinishCheck(&remapped,NULL,r,renamed_totals,none)==missing&&!memcmp(totals,renamed_totals,sizeof(totals)));
     TombCapTerrain(group,room,region,&terrain);assert(ActionVoxel_Build(g,s,&terrain,settings));none[0]=INT_MIN;
     const unsigned shipped_missing=CastleFinishCheck(s,&terrain,g,totals,none);complete&=!shipped_missing;
+    if(group==2 && room==7) {
+      CastleFinalShaftCheck(g);
+      CastleFinalShaftCheck(r);
+    }
     printf("castle cap finish%02u/%02u terrain%u: shipped ochre%u gray%u missing16%u\n",group,room,region,totals[0],totals[1],shipped_missing);
     if(!missing&&!shipped_missing&&selected[0]!=INT_MIN)CastleFinishEdits(s,selected[0],selected[1]);
     assert(!memcmp(s,&original,sizeof(original)));ActionVoxel_Release(g);ActionVoxel_Release(r);
