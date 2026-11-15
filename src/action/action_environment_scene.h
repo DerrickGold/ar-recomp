@@ -59,6 +59,7 @@ typedef struct ActionEnvironmentScene {
   bool suppress_default_moon_field;
   bool suppress_default_water_field;
   bool suppress_default_atmosphere_field;
+  bool voxel;
 } ActionEnvironmentScene;
 
 static inline const ActionRoomSceneFrameState *ActionEnvironmentScene_BackgroundFrame(

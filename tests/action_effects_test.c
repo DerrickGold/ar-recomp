@@ -2497,13 +2497,16 @@ static void TestBossEffectsCarryIntoDeathHeim(void) {
     CHECK(frame.effects[5].obj_priority == expected_priority);
   }
 
-  /* Ice Dragon balls retain their exact eight-frame artwork in the rematch. */
+  /* Ice Dragon balls retain exact visual/artwork pairing in both layouts. */
   static const struct {
     uint8_t group, map;
     uint16_t source;
   } kIceRooms[] = {
       {kActRaiserMapGroup_Northwall, 8, 0xF161},
       {kActRaiserMapGroup_DeathHeim, 7, 0xF760},
+  };
+  static const uint16_t kSummitIceArt[] = {
+      0x5E2F, 0x5E3B, 0x5E47, 0x5E53, 0x5E5F, 0x5E6B, 0x5E77, 0x5E83,
   };
   for (size_t i = 0; i < sizeof(kIceRooms) / sizeof(kIceRooms[0]); i++) {
     memset(wram, 0, sizeof(wram));
@@ -2516,6 +2519,25 @@ static void TestBossEffectsCarryIntoDeathHeim(void) {
     ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
     CHECK(frame.effect_count == 1);
     CHECK(frame.effects[0].kind == kActionEffect_IceDragonIceBall);
+    for (unsigned j = 0; j < sizeof(kSummitIceArt) / sizeof(kSummitIceArt[0]); ++j) {
+      ActionEffectObserver_Reset(&observer);
+      SeedBossFamilyObject(wram, 11, kIceRooms[i].source, kSummitIceArt[j], 0x12 + j,
+                           j < 4 ? 0x19 : 0x1A, 0xF2CA, 0x0020, (uint16_t)BossEffectSlot(54));
+      ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+      CHECK(frame.effect_count == 0);
+
+      ActionSceneEffects_CaptureFrameFiltered(&observer, &frame, wram, sizeof(wram), 1,
+                                               true, true, NULL);
+      CHECK(frame.effect_count == 1);
+      CHECK(frame.effects[0].kind == kActionEffect_IceDragonIceBall);
+
+      ActionEffectObserver_Reset(&observer);
+      Write16(wram, BossEffectSlot(11) + kActRaiserActionObject_Composition,
+              kSummitIceArt[(j + 1) % 8]);
+      ActionSceneEffects_CaptureFrameFiltered(&observer, &frame, wram, sizeof(wram), 1,
+                                               true, true, NULL);
+      CHECK(frame.effect_count == 0);
+    }
   }
 
   /* Tanzara is Death Heim-only and uses several exact projectile families. */

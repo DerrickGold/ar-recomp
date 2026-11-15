@@ -25,7 +25,7 @@ uint16_t ActionEffectCapture_VisualClock(void) { return 37; }
 void ActionEffectCapture_PeekScene(ActionSceneEffectFrame *frame) {
   *frame=observed; ++peeks;
   ActionEffectManifest_Apply(ram[kActRaiserWram_MapGroup],ram[kActRaiserWram_CurrentMap],
-      37,ram,sizeof(ram),frame);
+      37,ram,sizeof(ram),false,frame);
 }
 bool ActionEnvironmentScene_FromWram(ActionEnvironmentScene *scene,const uint8_t *data,size_t size,uint16_t clock) {
   assert(data==ram && size==sizeof(ram));

@@ -177,9 +177,11 @@ static void PreparePendingFrame(void) {
                              kActRaiserWramSize, action_effect_ticks);
   const ActionSurfaceField *surfaces[kActionSurfaceFieldKinds];
   ActionEffectManifest_SurfaceFields(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],surfaces);
+  const bool voxel = g_diorama_frame_active && g_settings.diorama_mode == kAction3D_Voxel;
   ActionSceneEffects_CaptureFrameFiltered(&s_pending.observer,
-                                  &s_pending.scene, g_ram,
-                                  kActRaiserWramSize, action_effect_ticks,!ActionEffectManifest_ReplacesGlowField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),surfaces);
+      &s_pending.scene, g_ram, kActRaiserWramSize, action_effect_ticks, voxel,
+      !ActionEffectManifest_ReplacesGlowField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+      surfaces);
   if (g_settings.action_environmental_effects)
     ActionEnvironmentalEffects_CaptureFrameFiltered(
         &s_pending.observer, &s_pending.scene,
@@ -205,7 +207,7 @@ static void PreparePendingFrame(void) {
     s_pending.scene.decoration_visible_count = 0;
   } else if (s_pending.observer.scene_map_valid) {
     ActionEffectManifest_Apply(g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
-        s_pending.observer.scene_clock, g_ram, kActRaiserWramSize, &s_pending.scene);
+        s_pending.observer.scene_clock, g_ram, kActRaiserWramSize, voxel, &s_pending.scene);
   }
   if (!g_settings.action_effect_lighting)
     for (unsigned i = 0; i < s_pending.scene.effect_count; ++i)

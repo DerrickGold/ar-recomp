@@ -76,12 +76,14 @@ bool ActionEffectManifest_Load(void) {
   else fprintf(stderr,"[action-effects] loaded %u source overrides from %s\n",s_recipes.count,path);
   return ok;
 }
-void ActionEffectManifest_Apply(unsigned group, unsigned room, uint16_t clock, const uint8_t *ram, size_t size, ActionSceneEffectFrame *frame) {
+void ActionEffectManifest_Apply(unsigned group, unsigned room, uint16_t clock,
+    const uint8_t *ram, size_t size, bool voxel, ActionSceneEffectFrame *frame) {
   ActionEnvironmentScene scene;
   const bool valid=ActionEnvironmentScene_FromWram(&scene,ram,size,clock);
   if (valid) {
     (void)ActRaiserActionBg_BindEnvironmentScenery(&scene);
     scene.scenery_cache = &s_scenery_cache;
+    scene.voxel = voxel;
   }
   ActionEffectRecipes_Apply(&s_recipes,group,room,ActRaiserActionBg_TerrainProfile(),clock,valid?&scene:NULL,frame);
 }

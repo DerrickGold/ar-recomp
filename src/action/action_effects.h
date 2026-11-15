@@ -759,7 +759,10 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
  * allowlist, global player sword beam, and exact two-child Aitos boss sword
  * volley. Unknown objects are ignored;
  * presentation never guesses from pixels or palette colours. */
-void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *,ActionSceneEffectFrame *,const uint8_t *,size_t,unsigned,bool,const ActionSurfaceField *const *);
+void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
+    ActionSceneEffectFrame *dst, const uint8_t *wram, size_t wram_size,
+    unsigned elapsed_ticks, bool voxel, bool native_glow,
+    const ActionSurfaceField *const *surfaces);
 void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
                                      ActionSceneEffectFrame *dst,
                                      const uint8_t *wram, size_t wram_size,

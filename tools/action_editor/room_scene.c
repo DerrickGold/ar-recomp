@@ -1336,6 +1336,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       r->effects.actors[r->effects.actor_count++]=r->receiver_actors[i];
   }
   r->environment.scenery_cache = &r->scenery_cache;
+  r->environment.voxel = r->scene.voxel_mode;
   ActionEffectRecipes_Apply(&r->recipes, s->group, s->map, r->assets.terrain_profile,
                             r->environment.clock, &r->environment, &r->effects);
   ActionWoodland_Capture(&r->woodland_observer,&r->effects,s->group,s->map,

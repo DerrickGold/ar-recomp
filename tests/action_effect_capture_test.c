@@ -73,7 +73,8 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer, ActionScene
   *dst = scene;
 }
 void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
-    ActionSceneEffectFrame *dst,const uint8_t *wram,size_t size,unsigned ticks,bool native_glow,const ActionSurfaceField *const *surfaces) {
+    ActionSceneEffectFrame *dst,const uint8_t *wram,size_t size,unsigned ticks,bool voxel,bool native_glow,const ActionSurfaceField *const *surfaces) {
+  (void)voxel;
   (void)surfaces;
   assert(native_glow);ActionSceneEffects_CaptureFrame(observer,dst,wram,size,ticks);
 }
@@ -109,8 +110,10 @@ void Diorama_PublishLiveLayerSection(uint8_t group, uint8_t map, uint8_t section
   publications++;
 }
 
-void ActionEffectManifest_Apply(unsigned group, unsigned room, uint16_t clock, const uint8_t *ram, size_t size, ActionSceneEffectFrame *value) {
+void ActionEffectManifest_Apply(unsigned group, unsigned room, uint16_t clock,
+    const uint8_t *ram, size_t size, bool voxel, ActionSceneEffectFrame *value) {
   assert(ram == g_ram && size == kActRaiserWramSize);
+  assert(voxel == (g_diorama_frame_active && g_settings.diorama_mode == kAction3D_Voxel));
   assert(clock == expected_scene_clock);
   manifest_calls++;
   assert(group == g_ram[kActRaiserWram_MapGroup] && room == g_ram[kActRaiserWram_CurrentMap]);

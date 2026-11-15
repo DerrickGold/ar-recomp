@@ -20,6 +20,7 @@ typedef struct ActionEffectRecipe {
   ActionEffectActorSelector actor;
   ActionNativeMember shape;
   float x, y, width, height, mist_height;
+  ActionEffectLocalRect voxel_bg1_bounds;
   uint16_t particles, lifetime;
   uint32_t source;
   ActionEffectTuning tuning;

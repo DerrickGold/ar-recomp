@@ -11,6 +11,36 @@
 #include <time.h>
 static ActionEffectRecipes table, before;
 static bool Parse(const char *text) { unsigned line; return ActionEffectRecipes_Parse(&table,text,strlen(text),&line); }
+static void TestVoxelCloudBounds(void) {
+  const char *base = "[effects]\nversion=1\n[emitter:04:01:0:cloud-bank:1]\n"
+      "x=1024\ny=186\nanchor=bg2-point\nplacement=background\ntextured=1\nrolling=.8\n";
+  char text[512];
+  snprintf(text, sizeof(text), "%svoxel-bg1-bounds=0,910,4096,1038\n", base);
+  assert(Parse(text));
+
+  ActionEnvironmentScene scene = {0};
+  ActionSceneEffectFrame frame = {0};
+  ActionEffectRecipes_Apply(&table, 4, 1, 0, 37, &scene, &frame);
+  assert(frame.authored_count == 1);
+  const ActionEffectInstance *effect = &frame.authored[0];
+  assert(effect->world_x == 1024 && effect->world_y == 186);
+  assert(effect->projection_plane == kActionEffectProjectionPlane_Bg2);
+  assert(effect->render_layer == kActionEffectRenderLayer_Bg2Alpha);
+  assert(effect->flags & kActionEffectFlag_StaticAnchor);
+
+  scene.voxel = true;
+  ActionEffectRecipes_Apply(&table, 4, 1, 0, 37, &scene, &frame);
+  assert(frame.authored_count == 1);
+  assert(effect->world_x == 2048 && effect->world_y == 974);
+  assert(effect->projection_plane == kActionEffectProjectionPlane_Bg1High);
+  assert(effect->render_layer == kActionEffectRenderLayer_Bg1Mist);
+  assert(!(effect->flags & kActionEffectFlag_StaticAnchor));
+  assert(effect->geometry.data.rect.x1 == 2048 && effect->geometry.data.rect.y0 == -64);
+
+  before = table;
+  snprintf(text, sizeof(text), "%svoxel-bg1-bounds=0,910,4096,910\n", base);
+  assert(!Parse(text) && !memcmp(&table, &before, sizeof(table)));
+}
 static void TestBackgroundTorchRouting(void) {
   const char *header="[effects]\nversion=1\n[emitter:04:07:0:torch:1]\n"
       "x=168\ny=54\nlight-scenery=1\n";
@@ -657,6 +687,7 @@ static void TestPerPassBudgets(void) {
 }
 
 int main(int argc,char **argv) {
+  TestVoxelCloudBounds();
   TestBackgroundTorchRouting();
   TestCaveLifeParameters();
   TestDocumentCapacity();

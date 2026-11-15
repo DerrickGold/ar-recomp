@@ -307,6 +307,19 @@ static bool Number(const char *s, float low, float high, float *out) {
   if (end == s || *end || !isfinite(value) || value < low || value > high) return false;
   *out = value; return true;
 }
+static bool VoxelCloudBounds(const char *value, ActionEffectLocalRect *bounds) {
+  float x0, y0, x1, y1;
+  int end = 0;
+  if (sscanf(value, "%f,%f,%f,%f%n", &x0, &y0, &x1, &y1, &end) != 4 ||
+      !end || value[end] || !isfinite(x0) || !isfinite(y0) ||
+      !isfinite(x1) || !isfinite(y1) || x0 < -2048 || y0 < -2048 ||
+      x1 > 16384 || y1 > 16384 || x1 - x0 < 4 || y1 - y0 < 4 ||
+      x1 - x0 > 16384 || y1 - y0 > 16384 ||
+      x0 != floorf(x0) || y0 != floorf(y0) || x1 != floorf(x1) || y1 != floorf(y1))
+    return false;
+  *bounds = (ActionEffectLocalRect){x0, y0, x1, y1};
+  return true;
+}
 static bool UnsignedNumber(const char *s, uint32_t *out) {
   if (!*s) return false;
   uint32_t value=0;
@@ -759,6 +772,8 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
         bit=UINT64_C(1)<<61;ok=!strcmp(value,"0")||!strcmp(value,"1");current->field_style.crown=!strcmp(value,"1");
       } else if (!strcmp(key,"rolling") && current->kind==kActionEffect_AuthoredCloud) {
         bit=UINT64_C(1)<<55;ok=Number(value,0,1,&current->field_style.rolling);
+      } else if (!strcmp(key,"voxel-bg1-bounds") && current->kind==kActionEffect_AuthoredCloud) {
+        bit=UINT64_C(1)<<59;ok=VoxelCloudBounds(value,&current->voxel_bg1_bounds);
       } else if (!strcmp(key,"volume") && current->kind==kActionEffect_AuthoredCloud) {
         bit=UINT64_C(1)<<63;ok=Number(value,0,1,&current->field_style.volume);
       } else if (!strcmp(key,"plume") && current->kind==kActionEffect_AuthoredCloud) {
@@ -891,6 +906,9 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
     if(r->kind==kActionEffect_AuthoredCloud && r->field_style.textured && r->field_style.point_count) {ok=false;break;}
     if(r->kind==kActionEffect_AuthoredCloud) {
       const ActionEffectFieldStyle *s=&r->field_style;
+      if (r->voxel_bg1_bounds.x1 > r->voxel_bg1_bounds.x0 &&
+          (r->anchor != kActionEffectAnchor_Bg2Point || s->placement != 0 ||
+           s->point_count || r->actor.target)) {ok=false;break;}
       if(s->ground_depth>0&&(!s->point_count||s->placement!=2)){ok=false;break;}
       if(s->ground_width>0&&s->ground_depth<=0){ok=false;break;}
       if(s->plume&&(!s->textured||s->point_count||s->rolling||s->volume||s->rainbow||s->sparkle||s->wake||s->canopy_response||r->actor.target)) {ok=false;break;}
@@ -1237,6 +1255,20 @@ void ActionEffectRecipes_Apply(const ActionEffectRecipes *table, unsigned group,
       .geometry = {.kind = kActionEffectGeometry_Rect,
         .data.rect = {-r->width/2,-r->height/2,r->width/2,r->height/2}}};
     RecipePlacement(r,e);
+    const ActionEffectLocalRect *voxel_bounds = &r->voxel_bg1_bounds;
+    if (scene && scene->voxel && voxel_bounds->x1 > voxel_bounds->x0) {
+      /* Augment the front terrain face underneath the native high clouds
+       * and their actor priorities. Keep the native cutout as the silhouette. */
+      e->projection_plane = kActionEffectProjectionPlane_Bg1High;
+      e->render_layer = kActionEffectRenderLayer_Bg1Mist;
+      e->flags &= (uint8_t)~kActionEffectFlag_StaticAnchor;
+      e->world_x = (int16_t)((voxel_bounds->x0 + voxel_bounds->x1) * .5f);
+      e->world_y = (int16_t)((voxel_bounds->y0 + voxel_bounds->y1) * .5f);
+      e->geometry.data.rect = (ActionEffectLocalRect){
+        voxel_bounds->x0 - e->world_x, voxel_bounds->y0 - e->world_y,
+        voxel_bounds->x1 - e->world_x, voxel_bounds->y1 - e->world_y,
+      };
+    }
     if (e->kind == kActionEffect_AuthoredStorm && e->field_style.storm.ground_colors) {
       ActionStormFlash flash;
       if (ActionStorm_Flash(e, &flash)) {

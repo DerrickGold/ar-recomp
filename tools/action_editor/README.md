@@ -3040,6 +3040,12 @@ New cloud styles should extend these material/shape profiles instead of adding
 another private baker. Scene-specific floor support, actor emission and
 projection stay in their adapters.
 
+Free background cloud banks can set `voxel-bg1-bounds=x0,y0,x1,y1` in
+`action-effects.ini`. These BG1 world-pixel bounds put the bank on the
+foreground terrain plane in Voxel mode. The native high-priority artwork
+still defines the cloud silhouette. The original anchor and bounds apply
+in ordinary Diorama and flat mode.
+
 ### Native final-battle nebula
 
 Room `07:08`'s environmental effects grade and bloom the original projected

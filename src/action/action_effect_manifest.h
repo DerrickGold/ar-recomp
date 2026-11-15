@@ -18,5 +18,6 @@ bool ActionEffectManifest_ReplacesAtmosphereField(unsigned group,unsigned room);
 bool ActionEffectManifest_NeedsBg1Mask(unsigned group,unsigned room);
 const ActionReceiverLighting *ActionEffectManifest_PrepareReceivers(unsigned group,unsigned room,
     const uint8_t *ram,size_t size,bool projected);
-void ActionEffectManifest_Apply(unsigned group, unsigned room, uint16_t clock, const uint8_t *ram, size_t size, ActionSceneEffectFrame *frame);
+void ActionEffectManifest_Apply(unsigned group, unsigned room, uint16_t clock,
+    const uint8_t *ram, size_t size, bool voxel, ActionSceneEffectFrame *frame);
 #endif

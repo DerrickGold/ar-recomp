@@ -1682,10 +1682,14 @@ static bool FlamingWheelProjectileParentIsValid(
       IsFlamingWheel(&parent);
 }
 
+static const uint16_t kIceDragonLegacyCompositions[] = {
+  0x5D9C, 0x5DA8, 0x5DB4, 0x5DC0, 0x5DCC, 0x5DD8, 0x5DE4, 0x5DF0,
+};
+
 static bool IsIceDragonIceBall(const ActionObjectSnapshot *object) {
-  static const uint16_t kCompositions[] = {
-    0x5D9C, 0x5DA8, 0x5DB4, 0x5DC0,
-    0x5DCC, 0x5DD8, 0x5DE4, 0x5DF0,
+  /* Exact visual/composition pairs from the summit's live $7E:5000 page. */
+  static const uint16_t kSummitCompositions[] = {
+    0x5E2F, 0x5E3B, 0x5E47, 0x5E53, 0x5E5F, 0x5E6B, 0x5E77, 0x5E83,
   };
   if (!object ||
       !SourceIs(object->source_descriptor, kIceDragonSourceDescriptor,
@@ -1699,8 +1703,9 @@ static bool IsIceDragonIceBall(const ActionObjectSnapshot *object) {
   if (object->visual < 0x0012 || object->visual > 0x0019)
     return false;
   const unsigned frame = object->visual - 0x0012;
-  return object->composition == kCompositions[frame] &&
-      object->animation_state == (frame < 4u ? 0x0019 : 0x001A);
+  return object->animation_state == (frame < 4u ? 0x0019 : 0x001A) &&
+      (object->composition == kIceDragonLegacyCompositions[frame] ||
+       object->composition == kSummitCompositions[frame]);
 }
 
 typedef struct TanzaraProjectileFrame {
@@ -2004,7 +2009,8 @@ static bool SceneTrackContinues(const ActionEffectObserverTrack *track,
 
 static uint8_t AdmitSceneObject(ActionEffectObserverTrack *track,
                                 ActionObjectSnapshot *object, uint8_t group, uint8_t map,
-                                const uint8_t *ram, size_t size, unsigned ticks, uint8_t *phase) {
+                                const uint8_t *ram, size_t size, unsigned ticks,
+                                bool voxel, uint8_t *phase) {
   for (uint8_t family = 1; family < kActionSceneFamily_Count; ++family) {
     const SceneEffectRule *rule = &kSceneRules[family];
     if (!SceneRuleRoomMatches(rule->room, group, map, object->source_descriptor)) continue;
@@ -2021,6 +2027,11 @@ static uint8_t AdmitSceneObject(ActionEffectObserverTrack *track,
     }
     const uint8_t matched = rule->match(&candidate);
     if (!matched || (rule->phase_filter && matched != rule->phase_filter)) continue;
+    /* Keep the existing effect coverage in 2D and regular Diorama. The extra
+     * ice-ball artwork is enabled as part of the Voxel effects pass. */
+    if (!voxel && family == kActionSceneFamily_IceDragonBall &&
+        candidate.composition != kIceDragonLegacyCompositions[candidate.visual - 0x12])
+      continue;
     if (rule->ownership == kSceneOwnership_Attached ||
         (rule->ownership == kSceneOwnership_Spawn && !continuing)) {
       if (!rule->dependency || !rule->dependency(ram, size, &candidate)) continue;
@@ -2110,7 +2121,8 @@ static void AitosWaterfallLog(const ActionSceneEffectFrame *dst,
 void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
                                      ActionSceneEffectFrame *dst,
                                      const uint8_t *wram, size_t wram_size,
-                                     unsigned elapsed_ticks, bool native_glow,const ActionSurfaceField *const *surfaces) {
+                                     unsigned elapsed_ticks, bool voxel, bool native_glow,
+                                     const ActionSurfaceField *const *surfaces) {
   if (!dst) return;
   memset(dst, 0, sizeof(*dst));
   if (!observer) return;
@@ -2176,7 +2188,7 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
 
     uint8_t phase = kActionEffectPhase_None;
     const uint8_t family = AdmitSceneObject(&observer->scene_tracks[slot], &object,
-        map_group, map_number, wram, wram_size, elapsed_ticks, &phase);
+        map_group, map_number, wram, wram_size, elapsed_ticks, voxel, &phase);
     if (!family) continue;
     const SceneEffectRule *rule = &kSceneRules[family];
     const uint8_t kind = rule->kind;
@@ -2312,5 +2324,5 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
                                      ActionSceneEffectFrame *dst,
                                      const uint8_t *wram, size_t wram_size,
                                      unsigned elapsed_ticks) {
-  ActionSceneEffects_CaptureFrameFiltered(observer,dst,wram,wram_size,elapsed_ticks,true,NULL);
+  ActionSceneEffects_CaptureFrameFiltered(observer,dst,wram,wram_size,elapsed_ticks,false,true,NULL);
 }
