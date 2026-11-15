@@ -17,12 +17,18 @@ func TestShellResourcesPackageWithIntactPayload(t *testing.T) {
 	if testing.Short() {
 		t.Skip("cross-compiles Windows fixtures")
 	}
-	for _, arch := range []string{"amd64", "arm64"} {
-		t.Run(arch, func(t *testing.T) {
+	for _, fixture := range []struct {
+		arch, release string
+		numbers       [4]uint16
+	}{
+		{"amd64", "v0801-3-g0123abc", [4]uint16{0, 8, 0, 1}},
+		{"arm64", "v1.0-3-g0123abc-dirty", [4]uint16{1, 0, 0, 0}},
+	} {
+		t.Run(fixture.arch, func(t *testing.T) {
 			root := t.TempDir()
 			source, described, output := filepath.Join(root, "shell.exe"), filepath.Join(root, "described.exe"), filepath.Join(root, "Builder.exe")
 			cmd := exec.Command("go", "build", "-trimpath", "-ldflags=-H windowsgui", "-o", source, "../../../internal/appicons/testdata/main.go")
-			cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=windows", "GOARCH="+arch)
+			cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=windows", "GOARCH="+fixture.arch)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("cross-build: %v: %s", err, out)
 			}
@@ -33,14 +39,14 @@ func TestShellResourcesPackageWithIntactPayload(t *testing.T) {
 			if err := writeShellResources(source, described, ""); err == nil {
 				t.Fatal("accepted an unversioned shell")
 			}
-			if err := writeShellResources(source, described, "v0801-3-g0123abc"); err != nil {
+			if err := writeShellResources(source, described, fixture.release); err != nil {
 				t.Fatal(err)
 			}
 			after, err := os.ReadFile(source)
 			if err != nil || !bytes.Equal(original, after) {
 				t.Fatal("input shell changed", err)
 			}
-			checkShellResources(t, described, "v0801-3-g0123abc", [4]uint16{0, 8, 0, 1})
+			checkShellResources(t, described, fixture.release, fixture.numbers)
 			put := func(name string, data []byte) {
 				t.Helper()
 				path := filepath.Join(root, filepath.FromSlash(name))
@@ -57,11 +63,11 @@ func TestShellResourcesPackageWithIntactPayload(t *testing.T) {
 			for _, name := range []string{"payload/utils/snesbuild.ini", "payload/utils/defaults/config.ini", "payload/utils/tools/sdl3/include/SDL3/SDL.h"} {
 				put(name, []byte("fixture"))
 			}
-			if err := winbundle.Create(winbundle.Options{Shell: described, Payload: filepath.Join(root, "payload"), Output: output, Arch: arch}); err != nil {
+			if err := winbundle.Create(winbundle.Options{Shell: described, Payload: filepath.Join(root, "payload"), Output: output, Arch: fixture.arch}); err != nil {
 				t.Fatal(err)
 			}
 			// The appended archive must not hide the shell's resources from Windows.
-			checkShellResources(t, output, "v0801-3-g0123abc", [4]uint16{0, 8, 0, 1})
+			checkShellResources(t, output, fixture.release, fixture.numbers)
 			bundle, err := winbundle.Open(output)
 			if err != nil {
 				t.Fatal(err)
@@ -160,19 +166,44 @@ func TestShellManifestIsMinimalAndWellFormed(t *testing.T) {
 
 func TestReleaseNumbers(t *testing.T) {
 	for release, want := range map[string][4]uint16{
-		"v049":              {0, 4, 9, 0},
-		"v0491":             {0, 4, 9, 1},
-		"v0800":             {0, 8, 0, 0},
-		"v0800-9-g03b54133": {0, 8, 0, 0},
-		"v0801-dirty":       {0, 8, 0, 1},
-		"03b54133":          {},
-		"0.0.0-dev":         {},
-		"v1":                {},
-		"v12345":            {},
-		"version":           {},
+		"v049":                     {0, 4, 9, 0},
+		"v0491":                    {0, 4, 9, 1},
+		"v0800":                    {0, 8, 0, 0},
+		"v0800-9-g03b54133":        {0, 8, 0, 0},
+		"v0801-dirty":              {0, 8, 0, 1},
+		"v0900":                    {0, 9, 0, 0},
+		"v1000":                    {1, 0, 0, 0},
+		"v1.0":                     {1, 0, 0, 0},
+		"v1.0.1":                   {1, 0, 1, 0},
+		"v12.34.56.78":             {12, 34, 56, 78},
+		"v1.0-9-g03b54133-dirty":   {1, 0, 0, 0},
+		"v1.2.3-rc.1+build.4":      {1, 2, 3, 0},
+		"v1.2+build.4":             {1, 2, 0, 0},
+		"v65535.65535.65535.65535": {65535, 65535, 65535, 65535},
+		"v65536.0":                 {},
+		"v1.65536":                 {},
+		"v1..2":                    {},
+		"v1.2.":                    {},
+		"v.1":                      {},
+		"v1.2.3.4.5":               {},
+		"v1.0invalid":              {},
+		"03b54133":                 {},
+		"0.0.0-dev":                {},
+		"v1":                       {},
+		"v12345":                   {},
+		"version":                  {},
 	} {
 		if got := releaseNumbers(release); got != want {
 			t.Errorf("releaseNumbers(%q) = %v, want %v", release, got, want)
+		}
+		info, err := shellVersionInfo(release)
+		if err != nil {
+			t.Fatal(err)
+		}
+		values := info.Table().GetMainTranslation()
+		if info.FileVersion != want || info.ProductVersion != want ||
+			values[version.FileVersion] != release || values[version.ProductVersion] != release {
+			t.Errorf("version information lost the release stamp %q", release)
 		}
 	}
 }

@@ -16,6 +16,9 @@ set(_release "${_repo}/release")
 if(NOT EXISTS "${_build}/CMakeCache.txt")
     message(FATAL_ERROR "First configure/build installer preset ${BUILDER_PLATFORM}")
 endif()
+if(IS_SYMLINK "${_release}" OR (EXISTS "${_release}" AND NOT IS_DIRECTORY "${_release}"))
+    message(FATAL_ERROR "Release directory must be a real directory: ${_release}")
+endif()
 if(BUILDER_PLATFORM MATCHES "^macos-")
     set(_kind macos)
     set(_ext .app)
@@ -30,7 +33,23 @@ else()
     set(_ext .exe)
     set(_published_ext .exe)
 endif()
-set(_filename "ActRaiserRecompBuilder-${BUILDER_PLATFORM}${_published_ext}")
+string(RANDOM LENGTH 12 ALPHABET abcdef0123456789 _suffix)
+set(_stage "${_build}/desktop-release-${_suffix}")
+file(MAKE_DIRECTORY "${_stage}" "${_release}")
+set(_app "${_stage}/ActRaiserRecompBuilder${_ext}")
+execute_process(COMMAND "${CMAKE_COMMAND}" "-DBUILDER_DIST_BUILD=${_build}"
+    "-DBUILDER_OUTPUT=${_app}" "-DBUILDER_LINUX_CROSS=ON"
+    -P "${CMAKE_CURRENT_LIST_DIR}/package-${_kind}.cmake" COMMAND_ERROR_IS_FATAL ANY)
+# Read the completed payload's stamp: its build may have regenerated CMake
+# and changed an automatically discovered version since initial configuration.
+file(STRINGS "${_build}/CMakeCache.txt" _version REGEX "^SNESBUILD_VERSION_STAMP:INTERNAL=.")
+if(NOT _version)
+    message(FATAL_ERROR "Reconfigure the installer preset; its build records no release version")
+endif()
+string(REGEX REPLACE "^SNESBUILD_VERSION_STAMP:INTERNAL=" "" SNESBUILD_VERSION "${_version}")
+builder_resolve_release_version(SNESBUILD_VERSION)
+builder_release_basename("${BUILDER_PLATFORM}" _basename)
+set(_filename "${_basename}${_published_ext}")
 builder_portable_release_name("${BUILDER_PLATFORM}" _portable_filename)
 foreach(_path "${_release}"
         "${_release}/${_filename}" "${_release}/${_filename}.sha256"
@@ -45,13 +64,6 @@ foreach(_leaf "${_filename}" "${_filename}.sha256"
         message(FATAL_ERROR "Release output collides with a directory: ${_leaf}")
     endif()
 endforeach()
-string(RANDOM LENGTH 12 ALPHABET abcdef0123456789 _suffix)
-set(_stage "${_build}/desktop-release-${_suffix}")
-file(MAKE_DIRECTORY "${_stage}" "${_release}")
-set(_app "${_stage}/ActRaiserRecompBuilder${_ext}")
-execute_process(COMMAND "${CMAKE_COMMAND}" "-DBUILDER_DIST_BUILD=${_build}"
-    "-DBUILDER_OUTPUT=${_app}" "-DBUILDER_LINUX_CROSS=ON"
-    -P "${CMAKE_CURRENT_LIST_DIR}/package-${_kind}.cmake" COMMAND_ERROR_IS_FATAL ANY)
 set(_artifact "${_app}")
 if(_kind STREQUAL "macos")
     set(_artifact "${_stage}/${_filename}")

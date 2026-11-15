@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 include("${CMAKE_CURRENT_LIST_DIR}/release_policy.cmake")
+builder_resolve_release_version(SNESBUILD_VERSION)
 if(NOT DEFINED BUILDER_PLATFORMS)
     set(BUILDER_PLATFORMS "${BUILDER_ALL_PLATFORMS}")
 endif()

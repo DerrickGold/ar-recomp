@@ -97,12 +97,12 @@ To force a complete integrity check, close the Builder and start it with
 `--verify-bundle`:
 
 ```powershell
-.\ActRaiserRecompBuilder-windows-arm64.exe --verify-bundle
+.\ActRaiserRecompBuilder-v0900-windows-arm64.exe --verify-bundle
 ```
 
 ```sh
 ./ActRaiserRecompBuilder.app/Contents/MacOS/ActRaiserRecompBuilder --verify-bundle
-./ActRaiserRecompBuilder-steam-deck.AppImage --verify-bundle
+./ActRaiserRecompBuilder-v0900-steam-deck.AppImage --verify-bundle
 ```
 
 Use your download's actual filename. Successful checks refresh the cache;
@@ -220,6 +220,26 @@ companions. For one platform, use a target such as `make release-windows-arm64`.
 These commands run packaging directly; they do not require Python lint modules,
 Node.js lint tools, or the game test dependencies.
 
+Download names include the exact release tag, for example
+`ActRaiserRecompBuilder-v0900-windows-x64-portable.zip` and
+`ActRaiserRecompBuilder-v0900-linux-arm64.tar.xz`. The compact tag `v0900`
+represents version 0.9; `v1000` would represent 1.0. Starting at 1.0, use dotted
+tags such as `v1.0`. Both tag styles are preserved as written in filenames.
+Windows download names use `x64`; its build target remains `windows-x86_64`.
+
+By default, packaging uses `git describe --tags --always --dirty`. A clean
+checkout at a tag uses that tag exactly; development builds retain the commit
+distance/hash and `-dirty` suffix when present. To set the release version
+explicitly, pass `RELEASE_VERSION` to either local or remote packaging:
+
+```sh
+make release RELEASE_VERSION=v0900
+make release-remote build-host RELEASE_VERSION=v1.0
+```
+
+The selected version is used for filenames, checksums, and the bundled tools'
+version stamp. The executable inside a portable archive keeps its stable name.
+
 For validation followed by packaging, set up the
 [local quality-check dependencies](../CONTRIBUTING.md#developer-checks) and use
 `make release-checked` or `make release-checked-windows-arm64`. These run
@@ -284,8 +304,9 @@ non-ignored new files. Deleted files, `.git`, ignored ROMs, local settings,
 build output, and internal archives are omitted. No commit or push is needed.
 One source snapshot is uploaded once per active host. A worker session stays
 open to build and return each newly assigned target, reusing that source copy
-and the host's caches. The local Git version is shared by every build host,
-so all artifacts retain the same source and version stamp. `REMOTE_DRY_RUN=1`
+and the host's caches. The local Git version, or explicit `RELEASE_VERSION`, is
+shared by every build host, so all artifacts retain the same source and version
+stamp. `REMOTE_DRY_RUN=1`
 reports the selection without connecting or building. Like `make release`, this target packages directly;
 run the developer checks locally when needed.
 

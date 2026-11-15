@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/host"
@@ -35,14 +36,30 @@ const shellManifest = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </assembly>
 `
 
-// releaseNumbers maps this project's tags (v049 = 0.4.9, v0801 = 0.8.0.1) onto
-// the four numeric version fields. Other strings, such as an untagged
+// releaseNumbers maps compact tags (v0900 = 0.9.0.0) and dotted tags (v1.0)
+// onto the four numeric version fields. Other strings, such as an untagged
 // development build, keep 0.0.0.0; the version strings still carry the
 // complete git describe text.
 func releaseNumbers(release string) [4]uint16 {
 	var numbers [4]uint16
 	digits, ok := strings.CutPrefix(release, "v")
 	if !ok {
+		return numbers
+	}
+	core, _, _ := strings.Cut(digits, "-")
+	core, _, _ = strings.Cut(core, "+")
+	if strings.Contains(core, ".") {
+		parts := strings.Split(core, ".")
+		if len(parts) > len(numbers) {
+			return numbers
+		}
+		for i, part := range parts {
+			number, err := strconv.ParseUint(part, 10, 16)
+			if err != nil {
+				return [4]uint16{}
+			}
+			numbers[i] = uint16(number)
+		}
 		return numbers
 	}
 	if end := strings.IndexFunc(digits, func(r rune) bool { return r < '0' || r > '9' }); end >= 0 {

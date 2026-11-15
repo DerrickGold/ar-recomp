@@ -23,7 +23,8 @@ function(builder_create_portable_release kind platform artifact stage out_artifa
     endif()
 
     builder_portable_release_name("${platform}" _filename)
-    set(_root_leaf "ActRaiserRecompBuilder-${platform}-portable")
+    builder_release_basename("${platform}" _basename)
+    set(_root_leaf "${_basename}-portable")
     set(_root "${stage}/${_root_leaf}")
     set(_archive "${stage}/${_filename}")
     foreach(_path "${_root}" "${_archive}")

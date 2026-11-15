@@ -122,6 +122,7 @@ release-remote:
 	$(PYTHON) tools/release_remote.py $(foreach host,$(RELEASE_REMOTE_HOSTS),--host $(call shell_quote,$(host))) \
 	  --platforms $(call shell_quote,$(PLATFORMS)) --desktop $(if $(filter 0,$(DESKTOP)),0,1) \
 	  --remote-dir $(call shell_quote,$(REMOTE_DIR)) \
+	  $(if $(RELEASE_VERSION),$(call shell_quote,--version=$(RELEASE_VERSION))) \
 	  $(if $(KEEP_BUILD),--keep-build) $(if $(filter 1,$(REMOTE_DRY_RUN)),--dry-run)
 $(RELEASE_REMOTE_HOSTS):
 	@:

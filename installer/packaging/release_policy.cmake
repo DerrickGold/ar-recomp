@@ -1,14 +1,31 @@
 # One release matrix shared by Make and the CMake orchestrator.
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/release_version.cmake")
 set(BUILDER_ALL_PLATFORMS macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck)
+
+# Internal preset names stay stable; only the Windows download label uses x64.
+function(builder_release_suffix platform out_name)
+    if(NOT platform IN_LIST BUILDER_ALL_PLATFORMS)
+        message(FATAL_ERROR "Unknown release target: ${platform}")
+    endif()
+    set(_platform "${platform}")
+    if(platform STREQUAL "windows-x86_64")
+        set(_platform windows-x64)
+    endif()
+    builder_resolve_release_version(_version)
+    set(${out_name} "${_version}-${_platform}" PARENT_SCOPE)
+endfunction()
+
+function(builder_release_basename platform out_name)
+    builder_release_suffix("${platform}" _suffix)
+    set(${out_name} "ActRaiserRecompBuilder-${_suffix}" PARENT_SCOPE)
+endfunction()
 
 # Portable desktop downloads are packaging-only companions to the normal
 # artifact. Their contents use the stable, unsuffixed application name so its
 # adjacent .portable marker keeps working independently of the release filename.
 function(builder_portable_release_name platform out_name)
-    if(NOT platform IN_LIST BUILDER_ALL_PLATFORMS)
-        message(FATAL_ERROR "Unknown release target: ${platform}")
-    endif()
+    builder_release_basename("${platform}" _base)
     if(platform MATCHES "^macos-" OR platform MATCHES "^windows-")
         set(_suffix .zip)
     else()
@@ -16,23 +33,24 @@ function(builder_portable_release_name platform out_name)
         # extraction. This also supports direct low-level linux-* publishers.
         set(_suffix .tar.xz)
     endif()
-    set(${out_name} "ActRaiserRecompBuilder-${platform}-portable${_suffix}" PARENT_SCOPE)
+    set(${out_name} "${_base}-portable${_suffix}" PARENT_SCOPE)
 endfunction()
 
 function(builder_release_layout platform legacy out_kind out_name out_retired)
-    if(NOT platform IN_LIST BUILDER_ALL_PLATFORMS)
-        message(FATAL_ERROR "Unknown release target: ${platform}")
-    endif()
-    set(_archive "actraiser-recomp-${platform}.tar.xz")
+    builder_release_suffix("${platform}" _suffix)
+    set(_base "ActRaiserRecompBuilder-${_suffix}")
+    set(_archive "actraiser-recomp-${_suffix}.tar.xz")
     if(platform MATCHES "^windows-")
-        set(_archive "actraiser-recomp-${platform}.zip")
-        set(_desktop "ActRaiserRecompBuilder-${platform}.exe")
+        set(_archive "actraiser-recomp-${_suffix}.zip")
+        set(_desktop "${_base}.exe")
     elseif(platform MATCHES "^macos-")
-        set(_desktop "ActRaiserRecompBuilder-${platform}.app.zip")
+        set(_desktop "${_base}.app.zip")
     else()
-        set(_desktop "ActRaiserRecompBuilder-${platform}.AppImage")
+        set(_desktop "${_base}.AppImage")
         if(platform STREQUAL "steam-deck")
-            set(_archive "actraiser-recomp-steam-deck-x86_64.tar.xz")
+            set(_archive "actraiser-recomp-${_suffix}-x86_64.tar.xz")
+        else()
+            set(_archive "${_base}.tar.xz")
         endif()
     endif()
     set(_kind desktop)
@@ -52,7 +70,7 @@ function(builder_release_layout platform legacy out_kind out_name out_retired)
     set(${out_retired} "${_retired}" PARENT_SCOPE)
 endfunction()
 
-# Only remove exact superseded deliverables after their replacement exists.
+# Only remove exact same-version superseded deliverables after their replacement exists.
 # Unknown files, player data, symlinks and directories are never removed here.
 function(builder_prune_replaced_release platform directory)
     builder_release_layout("${platform}" FALSE _kind _replacement _retired)

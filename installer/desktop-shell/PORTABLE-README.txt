@@ -36,7 +36,7 @@ Helpers may also be checked. Damaged-app or malware warnings need separate
 investigation.
 
 Steam Deck: open the AppImage in Desktop Mode. If FUSE is unavailable, run:
-APPIMAGE_EXTRACT_AND_RUN=1 ./ActRaiserRecompBuilder-steam-deck.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./ActRaiserRecompBuilder.AppImage
 
 Full troubleshooting instructions and official Windows/macOS guidance:
 https://github.com/DerrickGold/ar-recomp/blob/main/docs/desktop-packaging.md

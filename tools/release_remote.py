@@ -93,6 +93,7 @@ def release_plan(args, work):
     output = subprocess.check_output([
         "cmake", "-DBUILDER_PRINT_PLAN=ON", "-DBUILDER_PLATFORMS=" + args.platforms,
         "-DBUILDER_LEGACY_ARCHIVES=" + ("ON" if args.desktop == "0" else "OFF"),
+        "-DSNESBUILD_VERSION=" + args.version,
         "-P", "installer/packaging/release.cmake"], cwd=work, text=True)
     platforms, names = [], []
     for line in output.splitlines():
@@ -113,7 +114,7 @@ def release_plan(args, work):
 
 def validate_names(names):
     for name in names:
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]+", name):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", name):
             raise ValueError(f"Unexpected release filename: {name}")
 
 
@@ -658,10 +659,12 @@ def local_action(args):
     assignments, queued = assign_targets(args.host, args.platforms)
     root = args.root.resolve()
     files = source_files(root)
-    args.version = subprocess.check_output(
-        ["git", "describe", "--tags", "--always", "--dirty"], cwd=root, text=True).strip()
-    if not args.version or any(c in args.version for c in ";\r\n"):
-        raise ValueError("Cannot use this Git version as a release stamp")
+    if not args.version:
+        args.version = subprocess.check_output(
+            ["git", "describe", "--tags", "--always", "--dirty"], cwd=root, text=True).strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", args.version):
+        raise ValueError("Release version must contain only letters, digits, '.', '_', '+', or '-' "
+                         "and start with a letter or digit")
     size = sum((root / name).stat().st_size for name in files)
     print(f"Release {args.version}: {len(files)} source files, {size / (1024 * 1024):.1f} MiB",
           flush=True)
@@ -724,7 +727,8 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--queue-worker", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--version", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--version", default="",
+                        help="release tag or build version; defaults to git describe --tags --always --dirty")
     args = parser.parse_args()
     def interrupted(_number, _frame):
         raise KeyboardInterrupt

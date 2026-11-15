@@ -75,14 +75,15 @@ build runs offline on your computer. You supply the ROM separately.
 ### 1. Download and open the Builder
 
 Get the archive for your machine from [GitHub Releases](https://github.com/DerrickGold/ar-recomp/releases)
-and extract it to a folder you can write to.
+and extract it to a folder you can write to. Download names include the release
+tag; these examples use `v0900`.
 
 | Platform | Download | Open |
 |---|---|---|
-| macOS (Apple Silicon or Intel) | `ActRaiserRecompBuilder-macos-arm64-portable.zip` or `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder.app` |
-| Windows (x64 or ARM64) | `ActRaiserRecompBuilder-windows-x86_64-portable.zip` or `-windows-arm64-portable.zip` | `ActRaiserRecompBuilder.exe` |
-| Linux (x64 or ARM64) | `actraiser-recomp-linux-x86_64.tar.xz` or `-linux-arm64.tar.xz` | `./run-build.sh` to open the Builder in a browser |
-| Steam Deck | `ActRaiserRecompBuilder-steam-deck-portable.tar.xz` | The Builder `.AppImage` in Desktop Mode |
+| macOS (Apple Silicon or Intel) | `ActRaiserRecompBuilder-v0900-macos-arm64-portable.zip` or `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder.app` |
+| Windows (x64 or ARM64) | `ActRaiserRecompBuilder-v0900-windows-x64-portable.zip` or `-windows-arm64-portable.zip` | `ActRaiserRecompBuilder.exe` |
+| Linux (x64 or ARM64) | `ActRaiserRecompBuilder-v0900-linux-x86_64.tar.xz` or `-linux-arm64.tar.xz` | `./run-build.sh` to open the Builder in a browser |
+| Steam Deck | `ActRaiserRecompBuilder-v0900-steam-deck-portable.tar.xz` | The Builder `.AppImage` in Desktop Mode |
 
 Keep the portable Builder beside its `.portable` file. On first launch, the
 Builder may take a few minutes to check and prepare its tools.

@@ -27,6 +27,7 @@ project(actraiser-recomp-dist NONE)
 
 set(SNESBUILD_GOOS "" CACHE STRING "Target GOOS (darwin, linux, windows); empty = orchestrator")
 set(SNESBUILD_GOARCH "" CACHE STRING "Target GOARCH (arm64, amd64); empty = orchestrator")
+set(SNESBUILD_VERSION "" CACHE STRING "Release tag or development version; empty = git describe")
 set(SNESBUILD_SDL3_VERSION "3" CACHE STRING "SDL3: latest stable major 3, or exact 3.x.y")
 set(SNESBUILD_SDL3_TTF_VERSION "3" CACHE STRING "SDL3_ttf: latest stable major 3, or exact 3.x.y")
 set(SNESBUILD_SDL_LOCKFILE "" CACHE FILEPATH "Reuse a target-specific SDL SDK lock (no metadata lookup)")
@@ -51,6 +52,7 @@ if(NOT SNESBUILD_GOOS AND NOT SNESBUILD_GOARCH)
     add_custom_target(release
         COMMAND "${CMAKE_COMMAND}" "-DBUILDER_PLATFORMS=${SNESBUILD_ALL_PRESETS}"
             "-DBUILDER_LEGACY_ARCHIVES=${_legacy}" "-DBUILDER_KEEP_BUILD=${SNESBUILD_KEEP_BUILD}"
+            "-DSNESBUILD_VERSION=${SNESBUILD_VERSION}"
             "-DSNESBUILD_SDL3_VERSION=${SNESBUILD_SDL3_VERSION}"
             "-DSNESBUILD_SDL3_TTF_VERSION=${SNESBUILD_SDL3_TTF_VERSION}"
             -DSNESBUILD_SDL_LOCKFILE=
@@ -74,21 +76,7 @@ find_program(GO_EXECUTABLE go REQUIRED
     DOC "Go toolchain used to cross-compile the distribution binaries")
 
 # Version stamp: explicit -DSNESBUILD_VERSION wins; otherwise `git describe`.
-set(SNESBUILD_VERSION "" CACHE STRING "Version stamped into the binary")
-if(NOT SNESBUILD_VERSION)
-    find_package(Git QUIET)
-    if(GIT_FOUND)
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-            OUTPUT_VARIABLE _git_describe OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    endif()
-    if(_git_describe)
-        set(SNESBUILD_VERSION "${_git_describe}")
-    else()
-        set(SNESBUILD_VERSION "0.0.0-dev")
-    endif()
-endif()
+builder_resolve_release_version(SNESBUILD_VERSION)
 # Desktop packagers run as separate cmake -P scripts and read this back.
 set(SNESBUILD_VERSION_STAMP "${SNESBUILD_VERSION}" CACHE INTERNAL "Version stamped into the binaries")
 
@@ -654,8 +642,13 @@ install(SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/write_build_identity.cmake")
 # ── Archive naming + output location ─────────────────────────────────────────
 set(CPACK_PACKAGE_NAME "actraiser-recomp")
 set(CPACK_PACKAGE_VERSION "${SNESBUILD_VERSION}")
-set(CPACK_PACKAGE_FILE_NAME
-    "actraiser-recomp-${_archive_platform_name}-${_arch_name}")
+# Use the same archive names as the release plan and remote publisher.
+set(_release_platform "${_archive_platform_name}-${_arch_name}")
+if(SNESBUILD_STEAM_DECK)
+    set(_release_platform "steam-deck")
+endif()
+builder_release_layout("${_release_platform}" TRUE _release_kind _release_filename _release_retired)
+string(REGEX REPLACE "\\.(tar\\.xz|zip)$" "" CPACK_PACKAGE_FILE_NAME "${_release_filename}")
 set(CPACK_PACKAGE_DIRECTORY "${GAME_ROOT}/release")
 set(CPACK_PACKAGE_CHECKSUM "SHA256")
 set(CPACK_THREADS 0)  # multithreaded compression (0 = all cores)

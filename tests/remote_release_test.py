@@ -88,7 +88,8 @@ if (os.environ.get("FAIL_REMOTE_BUILD") or host == os.environ.get("FAIL_BUILD_HO
     print("fixture compiler failure on " + host, file=sys.stderr, flush=True)
     sys.exit(3)
 legacy = next(a for a in args if a.startswith("-DBUILDER_LEGACY_ARCHIVES="))
-plan = subprocess.check_output([{cmake!r}, "-DBUILDER_PRINT_PLAN=ON", platforms, legacy,
+version = next(a for a in args if a.startswith("-DSNESBUILD_VERSION="))
+plan = subprocess.check_output([{cmake!r}, "-DBUILDER_PRINT_PLAN=ON", platforms, legacy, version,
     "-P", "installer/packaging/release.cmake"], text=True)
 release = root / "release"
 release.mkdir(exist_ok=True)
@@ -131,7 +132,7 @@ class RemoteReleaseTest(unittest.TestCase):
         if not cmake:
             self.skipTest("CMake required for the real release-plan contract")
         for name in ("Makefile", "tools/release_remote.py", "installer/packaging/release.cmake",
-                     "installer/packaging/release_policy.cmake"):
+                     "installer/packaging/release_policy.cmake", "installer/packaging/release_version.cmake"):
             destination = self.root / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, destination)
@@ -148,6 +149,8 @@ class RemoteReleaseTest(unittest.TestCase):
         (self.root / "private.sfc").write_text("private ROM")
         (self.root / "development").mkdir()
         (self.root / "development/internal.md").write_text("private progress")
+        self.version = subprocess.check_output(
+            ["git", "describe", "--tags", "--always", "--dirty"], cwd=self.root, text=True).strip()
         for name, text in (("ssh", SSH), ("cmake", CMAKE)):
             script = self.bin / name
             script.write_text(text.format(python=sys.executable, cmake=cmake))
@@ -179,8 +182,8 @@ class RemoteReleaseTest(unittest.TestCase):
         release = self.root / "release"
         names = {p.name for p in release.iterdir()}
         self.assertEqual(len(names), 6)
-        self.assertIn("ActRaiserRecompBuilder-macos-arm64-portable.zip", names)
-        self.assertIn("actraiser-recomp-linux-arm64.tar.xz", names)
+        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-macos-arm64-portable.zip", names)
+        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-arm64.tar.xz", names)
         for path in release.iterdir():
             if not path.name.endswith(".sha256"):
                 self.assertEqual(path.read_text(), "dirty source")
@@ -191,7 +194,7 @@ class RemoteReleaseTest(unittest.TestCase):
         (self.root / "edited.txt").write_text("next source")
         result = self.run_release()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual((release / "actraiser-recomp-linux-arm64.tar.xz").read_text(), "next source")
+        self.assertEqual((release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.tar.xz").read_text(), "next source")
         self.assertEqual((release / "unrelated.txt").read_text(), "keep me")
 
     def test_legacy_keep_build_version_and_alias_matching_a_local_target(self):
@@ -207,10 +210,54 @@ class RemoteReleaseTest(unittest.TestCase):
         self.assertTrue((self.root / "edited.txt").exists())
         self.assertEqual(len(list((self.root / "release").iterdir())), 4)
 
+    def test_explicit_versions_reach_git_free_workers_and_versioned_downloads(self):
+        # Workers receive a source snapshot without Git metadata; their release
+        # plan and the build must both use the coordinator's exact version.
+        release = self.root / "release"
+        previous_names = set()
+        for version in ("v0900", "v1.0", "v1.0.1+build.2"):
+            with self.subTest(version=version):
+                result = self.run_release("RELEASE_VERSION=" + version,
+                                          "PLATFORMS=windows-x86_64 linux-arm64", host="localhost")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("Release " + version + ":", result.stdout)
+                artifacts = [f"ActRaiserRecompBuilder-{version}-windows-x64.exe",
+                             f"ActRaiserRecompBuilder-{version}-windows-x64-portable.zip",
+                             f"ActRaiserRecompBuilder-{version}-linux-arm64.tar.xz"]
+                names = artifacts + [name + ".sha256" for name in artifacts]
+                release_remote.verify_artifacts(release, names)
+                previous_names.update(names)
+                self.assertEqual({path.name for path in release.iterdir()}, previous_names)
+                command = json.loads((self.remote / "downloads/release-command.json").read_text())
+                self.assertIn("-DSNESBUILD_VERSION=" + version, command)
+                self.assertFalse(list(self.remote.glob("work-*")))
+
+    def test_clean_tagged_source_uses_exact_release_tag(self):
+        for command in (["git", "add", "-A"],
+                        ["git", "-c", "user.name=Release fixture", "-c",
+                         "user.email=release@example.invalid", "commit", "-qm", "release"],
+                        ["git", "tag", "v0900"]):
+            subprocess.run(command, cwd=self.root, check=True, capture_output=True)
+        result = self.run_release(host="localhost")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        names = {path.name for path in (self.root / "release").iterdir()}
+        self.assertIn("ActRaiserRecompBuilder-v0900-linux-arm64.tar.xz", names)
+        self.assertIn("ActRaiserRecompBuilder-v0900-macos-arm64-portable.zip", names)
+        self.assertTrue(all("-v0900-" in name and "dirty" not in name for name in names))
+
+    def test_unsafe_release_version_is_rejected_before_transfer(self):
+        for version in ("../v1.0", "v1.0 preview", "v1.0;other", "-v1.0"):
+            with self.subTest(version=version):
+                result = self.run_release("RELEASE_VERSION=" + version)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Release version must", result.stderr)
+                self.assertFalse(self.remote.exists())
+                self.assertFalse((self.root / "release").exists())
+
     def test_failed_build_and_bad_checksums_preserve_local_outputs(self):
         release = self.root / "release"
         release.mkdir()
-        old = release / "actraiser-recomp-linux-arm64.tar.xz"
+        old = release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.tar.xz"
         old.write_text("previous release")
         for failure in ("FAIL_REMOTE_BUILD", "CORRUPT_REMOTE_CHECKSUM", "FAIL_HANDOFF"):
             result = self.run_release(**{failure: "1"})
@@ -407,9 +454,9 @@ class RemoteReleaseTest(unittest.TestCase):
     def test_unsafe_local_destination_prevents_partial_publication(self):
         release = self.root / "release"
         release.mkdir()
-        old = release / "ActRaiserRecompBuilder-macos-arm64.app.zip"
+        old = release / f"ActRaiserRecompBuilder-{self.version}-macos-arm64.app.zip"
         old.write_text("previous release")
-        unsafe = release / "actraiser-recomp-linux-arm64.tar.xz"
+        unsafe = release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.tar.xz"
         unsafe.symlink_to(self.root / "private.sfc")
         result = self.run_release()
         self.assertNotEqual(result.returncode, 0)
@@ -491,7 +538,7 @@ class RemoteReleaseTest(unittest.TestCase):
         self.assertTrue(versions[0].endswith("-dirty"))
         names = {p.name for p in (self.root / "release").iterdir()}
         self.assertEqual(len(names), 24)
-        self.assertIn("ActRaiserRecompBuilder-steam-deck-portable.tar.xz", names)
+        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-steam-deck-portable.tar.xz", names)
         self.assertTrue((self.root / "edited.txt").exists())
 
     def test_failed_host_stops_peers_preserves_outputs_and_keeps_host_diagnostics(self):
