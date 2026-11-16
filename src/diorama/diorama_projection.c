@@ -204,8 +204,10 @@ DioramaVerticalBounds DioramaVerticalBounds_Resolve(
   bounds.plane = plane;
   /* Scanline 1 samples camera_y + 1. The first world row is captured in
    * the upper margin, including when the native camera is already at 0. */
-  bounds.top_reached = authentic_y0 == camera_y + 1;
-  bounds.bottom_reached = bottom_rows == available_bottom;
+  bounds.rows_above = camera_y + 1 - authentic_y0;
+  bounds.rows_below = available_bottom - bottom_rows;
+  bounds.top_reached = bounds.rows_above == 0;
+  bounds.bottom_reached = bounds.rows_below == 0;
   return bounds;
 }
 
@@ -390,14 +392,14 @@ bool Diorama_FitCameraToCapture(
   return true;
 }
 
-bool Diorama_ClampCameraVertically(
+static bool ClampCameraVertically(
     float matrix[16], float aspect_x, float height_scale,
     float z_world, float rake, float bow,
-    bool clamp_top, bool clamp_bottom, float *world_y_offset) {
+    float world_above, float world_below, float *world_y_offset) {
   if (world_y_offset) *world_y_offset = 0.0f;
   if (!CameraProjectionValid(matrix, aspect_x, height_scale, z_world, rake, bow))
     return false;
-  if (!clamp_top && !clamp_bottom) return true;
+  if (isinf(world_above) && isinf(world_below)) return true;
   float lower = -INFINITY, upper = INFINITY;
   for (int edge = 0; edge < 2; edge++) {
     const float t = (float)edge;
@@ -421,19 +423,40 @@ bool Diorama_ClampCameraVertically(
    * At a tight automatic fit there may be less guard space than the easing
    * distance. Keep this hard limit separate from the finite-world stop. */
   const float capture_lower = lower, capture_upper = upper;
-  if (!clamp_top) lower = -INFINITY;
-  if (!clamp_bottom) upper = INFINITY;
+  /* A world edge outside a flat capture differs only by a world-Y
+   * translation. Apply that distance before easing into the room stop. */
+  lower -= world_above;
+  upper += world_below;
   /* A small room or deliberate zoom-out cannot satisfy both world edges by
    * moving the camera alone. Keep its existing fit rather than stretching. */
   if (lower > upper) return true;
-  float shift = clamp_top ? CameraEdgeCorrection(lower) : 0.0f;
-  if (clamp_bottom) shift -= CameraEdgeCorrection(-upper);
+  float shift = CameraEdgeCorrection(lower) - CameraEdgeCorrection(-upper);
   shift = fmaxf(lower, fminf(shift, upper));
   if (capture_lower <= capture_upper)
     shift = fmaxf(capture_lower, fminf(shift, capture_upper));
   Diorama_TranslateCameraWorldY(matrix, shift);
   if (world_y_offset) *world_y_offset = shift;
   return true;
+}
+
+bool Diorama_ClampCameraVertically(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    bool clamp_top, bool clamp_bottom, float *world_y_offset) {
+  return ClampCameraVertically(matrix, aspect_x, height_scale, z_world, rake, bow,
+      clamp_top ? 0.0f : INFINITY, clamp_bottom ? 0.0f : INFINITY, world_y_offset);
+}
+
+bool Diorama_ClampCameraToVerticalWorld(
+    float matrix[16], float aspect_x, float height_scale, float z_world,
+    const DioramaVerticalBounds *bounds, float *world_y_offset) {
+  if (!bounds || !bounds->valid || bounds->rows_above < 0 || bounds->rows_below < 0) {
+    if (world_y_offset) *world_y_offset = 0.0f;
+    return false;
+  }
+  return ClampCameraVertically(matrix, aspect_x, height_scale, z_world, 0.0f, 0.0f,
+      (float)bounds->rows_above / kActRaiserAuthenticHeight,
+      (float)bounds->rows_below / kActRaiserAuthenticHeight, world_y_offset);
 }
 
 void Diorama_TranslateCameraWorldY(float matrix[16], float shift) {

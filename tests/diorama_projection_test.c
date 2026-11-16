@@ -428,6 +428,46 @@ static void TestCameraEasesIntoWorldEdge(void) {
     }
 }
 
+static void TestVoxelCameraStopFollowsWorldInsteadOfCapture(void) {
+  /* Northwall 06/06 has a tall room and a tilted Dynamic Cam. At the last
+   * frame with symmetric guards the old floor stop jumped by roughly 48 rows. */
+  const Scene3DCamera camera = {.20f, -.46f, 3.25f, .4f};
+  const float focal_z = -.24f;
+  const int world_height = 2048;
+  for (int budget = 32; budget <= 64; budget += 32) {
+    const int native_stop = world_height - 225;
+    float previous_shift = 0;
+    ArRenderPointF previous_point = {0};
+    for (int y = native_stop - 160; y <= native_stop; y++) {
+      const int bottom = y < native_stop - budget ? budget : native_stop - y;
+      const int top = 2 * budget - bottom;
+      const int height = 224 + top + bottom;
+      const DioramaVerticalBounds bounds = DioramaVerticalBounds_Resolve(
+          SR_PPU_OVERLAY_BG1, y, world_height, top, height);
+      CHECK(bounds.valid);
+      CHECK(bounds.rows_below == native_stop - y - bottom);
+      DioramaProjection projection = CaptureProjection(&camera, height, top);
+      CHECK(Diorama_CenterCameraVertically(projection.matrix, projection.aspect_x,
+          projection.height_scale, focal_z, 0, 0, top / (float)height,
+          (top + 224) / (float)height));
+      float shift;
+      CHECK(Diorama_ClampCameraToVerticalWorld(projection.matrix,
+          projection.aspect_x, projection.height_scale, focal_z, &bounds, &shift));
+      ArRenderPointF point;
+      CHECK(Diorama_ProjectCapturedBg1Point(
+          &projection, 248, 1663 - y + top, &point, NULL, NULL));
+      if (y > native_stop - 160) {
+        CHECK(fabsf(shift - previous_shift) <= 1.001f / 224);
+        CHECK(point.y <= previous_point.y + .001f);
+      }
+      if (y == native_stop - budget - 1)
+        CHECK(!bounds.bottom_reached && shift * 224 < -40);
+      previous_shift = shift;
+      previous_point = point;
+    }
+  }
+}
+
 static void TestCaptureAlignmentRejectsInvalidInputs(void) {
   DioramaProjection projection = Projection();
   const DioramaProjection before = projection;
@@ -1229,6 +1269,7 @@ int main(void) {
   TestCaptureOriginKeepsEveryDepthRegistered();
   TestScrollContinuesAcrossRedistributedMargins();
   TestCameraEasesIntoWorldEdge();
+  TestVoxelCameraStopFollowsWorldInsteadOfCapture();
   TestCaptureAlignmentRejectsInvalidInputs();
   TestCameraFramingRejectsUnprojectableMesh();
   TestCapturedWorldVerticalBounds();

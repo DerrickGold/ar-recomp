@@ -71,6 +71,10 @@ typedef struct DioramaVerticalBounds {
   int plane;
   bool top_reached;
   bool bottom_reached;
+  /* Finite world rows beyond the capture. Voxel framing uses these to
+   * approach the world stop before the capture touches it. */
+  int rows_above;
+  int rows_below;
 } DioramaVerticalBounds;
 
 typedef struct DioramaHorizontalBounds {
@@ -103,9 +107,9 @@ bool Diorama_FitCameraToCapture(
     const DioramaHorizontalBounds *world,
     float capture_left, float capture_right);
 
-/* Only captured finite world edges can constrain the presentation camera.
- * Scanline 1 samples camera + 1: world row 0 belongs to the upper margin,
- * and the native bottom camera bound includes its one-row scroll guard. */
+/* Locate the world edges relative to the capture. Scanline 1 samples
+ * camera + 1: world row 0 belongs to the upper margin, and the native
+ * bottom camera bound includes its one-row scroll guard. */
 DioramaVerticalBounds DioramaVerticalBounds_Resolve(
     int plane, int camera_y, int world_height,
     int authentic_y0, int capture_height);
@@ -119,6 +123,12 @@ bool Diorama_ClampCameraVertically(
     float matrix[16], float aspect_x, float height_scale,
     float z_world, float rake, float bow,
     bool clamp_top, bool clamp_bottom, float *world_y_offset);
+
+/* Voxel playfields are flat at the walking plane. Frame against their actual
+ * world edges even when the current capture covers only part of the room. */
+bool Diorama_ClampCameraToVerticalWorld(
+    float matrix[16], float aspect_x, float height_scale, float z_world,
+    const DioramaVerticalBounds *bounds, float *world_y_offset);
 
 /* Manual gameplay orbit keeps the chosen scale. On each axis, keep edges
  * outside the view where possible and balance the margins otherwise. */

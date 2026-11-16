@@ -44,6 +44,14 @@ const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void) {
   return DioramaLayerOrder_Find(&s_layers, g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap]);
 }
 int Settings_VisibleWidth(void) { return 256 + 2 * g_ws_display_extra; }
+int Settings_ExtendedAspectY(void) {
+  switch (g_settings.extended_aspect) {
+    case kScreenAspect_169:
+    case kScreenAspect_Stretch: return 9;
+    case kScreenAspect_1610: return 10;
+    default: return 0;
+  }
+}
 bool Settings_IgnoreAspectRatio(void) { return false; }
 bool ActRaiser_DioramaNeedsBgApron(const DioramaRoomOverride *room,
     unsigned bg, bool edits, bool world) {
@@ -110,6 +118,9 @@ static void AutoProfiles(void) {
 }
 static void SavedPolicy(void) {
   Reset();
+  g_settings.diorama_mode = kAction3D_Diorama;
+  Step(3840, 1, 0);
+  const uint16_t default_right_stop = Read(kActRaiserWram_Bg1CameraX);
   DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&s_layers, 1, 1); assert(room);
   room->bg_policy[0] = (DioramaBgPolicyOverride){.set_horizontal = true,
     .horizontal = {.mode = kActionBgExtent_Fixed, .left = 24, .right = 48}};
@@ -119,7 +130,7 @@ static void SavedPolicy(void) {
     Step(0, -1, 0); assert(Read(kActRaiserWram_Bg1CameraX) == (diorama ? 24 : 120));
   }
   room->bg_policy[0].horizontal.mode = kActionBgExtent_Inherit; /* invalid at layer scope */
-  Step(3840, 1, 0); assert(Read(kActRaiserWram_Bg1CameraX) == 3720);
+  Step(3840, 1, 0); assert(Read(kActRaiserWram_Bg1CameraX) == default_right_stop);
   room->bg_policy[0].horizontal.mode = kActionBgExtent_Fixed;
   room->bg_policy[0].horizontal.left = room->bg_policy[0].horizontal.right = 0;
   Step(0, 0, 0); assert(Read(kActRaiserWram_Bg1CameraX) == 0);
@@ -163,9 +174,9 @@ static void CapturePolicy(void) {
 }
 
 static void NearlyScreenSizedRoom(void) {
-  /* Marahna 05:03: a 512-pixel room with one painted column on the left.
-   * At the user's 3.25 baseline it just fills 16:9; a slight zoom-in leaves
-   * two pixels of travel. Neither should scroll, while 16:10 must still do so. */
+  /* Marahna 05:03 has one painted column on the left. The 16:9 view at
+   * distance 3.25 leaves at most two pixels of travel, which should lock.
+   * Closer 16:9 views and 16:10 still have room to scroll. */
   const int outputs[][2] = {{960, 540}, {1920, 1080}, {3420, 2140}};
   const int distances[] = {320, 324, 325};
   for (unsigned output = 0; output < sizeof(outputs) / sizeof(*outputs); ++output) {
@@ -191,7 +202,7 @@ static void NearlyScreenSizedRoom(void) {
         g_settings.diorama_dyncam_baseline_distance_x100 = distance;
         uint16_t lo, hi;
         Step(120, 0, 0); assert(ActRaiser_ActionCameraTravel(&lo, &hi));
-        if (aspect == 9 && distance >= 324) {
+        if (aspect == 9 && distance == 325) {
           assert(lo == 120 && hi == 120);
           for (int x = 0; x <= 256; x += 64) {
             Step(x, 1, 0); assert(Read(kActRaiserWram_Bg1CameraX) == 120 && s_dx == 0);

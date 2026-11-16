@@ -705,6 +705,32 @@ static void TestSceneResolution(void) {
   assert(ArRenderSceneScale_Resolve(&device, &scene, kArRenderFilter_Linear));
   assert(backend.last_draw_state.scene_resolve == kArRenderSceneResolve_Smaa);
   assert(backend.target_state.target.value == parent.value);
+
+  const int draws = backend.draw_texture_count;
+  const int creates = backend.create_count;
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_Native,
+                                false, kSceneAntiAliasing_Off) ==
+         kArRenderTargetBegin_Omitted);
+  assert(!ArRenderSceneScale_Viewport(&device, &scene));
+  assert(ArRenderSceneScale_Resolve(&device, &scene, kArRenderFilter_Linear));
+  assert(backend.draw_texture_count == draws && backend.create_count == creates);
+  assert(backend.target_state.target.value == parent.value);
+
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_2160p,
+                                false, kSceneAntiAliasing_Off) ==
+         kArRenderTargetBegin_Omitted);
+  assert(!ArRenderSceneScale_Viewport(&device, &scene));
+  assert(ArRenderSceneScale_Resolve(&device, &scene, kArRenderFilter_Linear));
+  assert(backend.draw_texture_count == draws && backend.create_count == creates);
+  assert(backend.target_state.target.value == parent.value);
+
+  assert(ArRenderSceneScale_Begin(&device, image, kRenderResolution_720p,
+                                false, kSceneAntiAliasing_Off) ==
+         kArRenderTargetBegin_Ready);
+  assert(ArRenderSceneScale_Viewport(&device, &scene));
+  assert(ArRenderSceneScale_Resolve(&device, &scene, kArRenderFilter_Linear));
+  assert(!(backend.last_draw_state.flags & kArRenderDrawState_SceneResolve));
+
   const int clears = backend.clear_count;
   const ArRenderRectI full = {0, 0, 3440, 1440};
   assert(ArRenderSceneScale_Begin(&device, full, kRenderResolution_Native,

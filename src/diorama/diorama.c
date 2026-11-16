@@ -2817,9 +2817,10 @@ static void PrepareDioramaView(const DioramaCapture *capture,
    * Keep that saved offset for ordinary Diorama, and keep horizontal framing
    * and user orbit/zoom in both modes. Resolve here so drawing and capture
    * footprint/camera queries use exactly the same policy. */
-  const ActionVoxelProfile framing_profile =
-      ActionVoxel_Active(scene->voxel_geometry, scene->map_group, scene->map_number)
-          ? ActionVoxel_Profile(scene->voxel_geometry) : kActionVoxelProfile_None;
+  const bool voxel_terrain =
+      ActionVoxel_Active(scene->voxel_geometry, scene->map_group, scene->map_number);
+  const ActionVoxelProfile framing_profile = voxel_terrain
+      ? ActionVoxel_Profile(scene->voxel_geometry) : kActionVoxelProfile_None;
   const int framing_y = ActionVoxel_VerticalFraming(framing_profile, capture->framing_y);
   float framing_weight = Clampf(view->camera_framing_weight, 0.0f, 1.0f);
   if (framing_weight == 0.0f) {
@@ -2847,8 +2848,9 @@ static void PrepareDioramaView(const DioramaCapture *capture,
   {
     float focal_z = DioramaBg1ReferenceZ() - 0.5f;
     float focal_rake = 0.0f, focal_bow = 0.0f;
+    const int focal_plane = voxel_terrain ? kDioramaPlane_Bg1Far : SR_PPU_OVERLAY_BG1;
     for (int i = 0; i < resolved_count; i++) {
-      if (resolved[i].plane != (ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number)?kDioramaPlane_Bg1Far:SR_PPU_OVERLAY_BG1)) continue;
+      if (resolved[i].plane != focal_plane) continue;
       focal_z = resolved[i].z - 0.5f;
       focal_rake = resolved[i].rake;
       focal_bow = resolved[i].bow;
@@ -2860,13 +2862,19 @@ static void PrepareDioramaView(const DioramaCapture *capture,
         (float)(capture->authentic_y0 + kActRaiserAuthenticHeight) / tex_h);
   }
 
-  /* Dynamic framing follows the level, but must stop at captured world edges.
-   * Free-camera orbit/zoom remains an explicit view chosen by the player. */
+  /* Approach modeled BG1 world edges even before the capture reaches them.
+   * The curved enclosure has its own assets and no tile extrusion model. */
   if (capture->vertical_bounds.valid) {
     const int primary = capture->vertical_bounds.plane;
     const DioramaResolvedLayer *focal =
         CameraFocalLayer(primary, scene, resolved, resolved_count);
-    if (focal)
+    const bool voxel_playfield = primary == SR_PPU_OVERLAY_BG1 &&
+        (voxel_terrain || HollowPlaySpace(scene));
+    if (focal && voxel_playfield)
+      Diorama_ClampCameraToVerticalWorld(
+          geometry->matrix, geometry->aspect_x, geometry->height_scale,
+          focal->z - 0.5f, &capture->vertical_bounds, &geometry->world_y_offset);
+    else if (focal)
       Diorama_ClampCameraVertically(
           geometry->matrix, geometry->aspect_x, geometry->height_scale,
           focal->z - 0.5f, focal->rake, focal->bow,
