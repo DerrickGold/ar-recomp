@@ -59,6 +59,19 @@ Settings, saves and custom asset entries retain their existing preservation rule
 Use the Workshop's explicit import workflow to bring in another project's
 content while retaining the original.
 
+## RecompLauncher on Windows
+
+The Windows portable ZIP includes a RecompLauncher profile. Play opens the
+Builder, where you can build from your ROM, rebuild after an update, or run
+the existing game. The Builder waits while the game runs and returns its exit
+status when it closes. RecompLauncher uses the generated `ActRaiserRecomp`
+folder for saves and game logs.
+
+To bring over an existing installation in a different folder, use the Builder's
+[installation import](../README.md#4-update-or-import-an-existing-installation).
+RecompLauncher updates the Builder download. The Builder checks whether the
+locally generated game needs to be rebuilt the next time you open it.
+
 ## Inspecting paths and troubleshooting
 
 The macOS launcher is `ActRaiserRecomp.app/Contents/MacOS/actraiser-builder`.

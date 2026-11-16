@@ -130,13 +130,13 @@ func (app *application) serveInstallImport(w http.ResponseWriter, r *http.Reques
 		}
 		defer app.dataGate.Unlock()
 		app.mu.Lock()
-		busy := app.state == "building" || app.slimming
+		busy := app.state == "building" || app.slimming || app.playing
 		app.mu.Unlock()
 		app.previewMu.Lock()
 		busy = busy || app.preview.State == "generating"
 		app.previewMu.Unlock()
 		if busy {
-			writeJSONError(w, 409, "finish the build, cleanup, or audio generation before importing")
+			writeJSONError(w, 409, "close the game and finish any build, cleanup, or audio generation before importing")
 			return
 		}
 		if endpoint == "skip" {

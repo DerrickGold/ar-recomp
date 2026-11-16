@@ -50,6 +50,9 @@ function(builder_create_portable_release kind platform artifact stage out_artifa
     endif()
     file(WRITE "${_copy}.portable" "BuilderData\n")
     file(COPY_FILE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PORTABLE-README.txt" "${_root}/README.txt")
+    if(kind STREQUAL "windows")
+        file(COPY_FILE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/recomplauncher.json" "${_root}/recomplauncher.json")
+    endif()
 
     if(kind STREQUAL "macos")
         # Preserve resource forks and Finder metadata just like the direct app

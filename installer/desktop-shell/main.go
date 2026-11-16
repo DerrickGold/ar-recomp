@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -24,6 +25,10 @@ import (
 
 func main() {
 	if err := runDesktop(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, errAlreadyRunning) {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() > 0 {
+			os.Exit(exit.ExitCode())
+		}
 		if !errors.Is(err, errWebview2Missing) {
 			showStartupError(err)
 		}
@@ -38,6 +43,7 @@ func runDesktop() error {
 	webview := flag.String("webview-runtime", "", "Windows development: Fixed Version WebView2 runtime directory instead of the system runtime")
 	jobs := flag.Int("jobs", 0, "build workers (0 uses builder default; use 1 on low-memory machines)")
 	verifyBundle := flag.Bool("verify-bundle", false, "fully verify bundled files instead of reusing unchanged-file checks")
+	playSession := flag.Bool("play-session", false, "return to the calling launcher when the game exits")
 	flag.Parse()
 	developmentPayload := *payload != ""
 	if *jobs < 0 {
@@ -163,7 +169,9 @@ func runDesktop() error {
 				var b *host.Backend
 				for {
 					bridge.Progress("Starting the local Workshop… Game output: " + output)
-					b, err = host.StartBundledBackend(ctx, work, *payload, inputID, output, *jobs, filepath.Dir(artifact))
+					b, err = host.StartBundledBackend(ctx, work, *payload, inputID, output, *jobs, host.BackendOptions{
+						ArtifactDirectory: filepath.Dir(artifact), PlaySession: *playSession,
+					})
 					if err == nil {
 						break
 					}
@@ -238,5 +246,15 @@ func runDesktop() error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return wails.Run(appOptions)
+	if err := wails.Run(appOptions); err != nil {
+		return err
+	}
+	if *playSession {
+		mu.Lock()
+		defer mu.Unlock()
+		if backend != nil {
+			return backend.Result()
+		}
+	}
+	return nil
 }

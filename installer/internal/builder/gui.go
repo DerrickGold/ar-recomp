@@ -67,6 +67,9 @@ type Options struct {
 	Ready  func(string) error
 	Build  func(context.Context, string, io.Writer) (Result, error)
 	Launch func(Result) error
+	// LaunchSession starts a game owned by this Builder session. Its result
+	// is delivered after the game exits and ends the Builder session.
+	LaunchSession func(Result) (<-chan error, error)
 	// Detect reports what this copy of the bundle can currently do: launch an
 	// already-built game, run a rebuild, or reclaim space by removing the
 	// build-only files. Called at session start and again on every status poll,
@@ -185,6 +188,7 @@ func Run(ctx context.Context, options Options) error {
 	case <-ctx.Done():
 		runError = ctx.Err()
 	case <-app.closed:
+		runError = app.playResult
 	case err := <-serveError:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			runError = err
@@ -221,6 +225,7 @@ func openBrowser(url string) error {
 }
 
 type status struct {
+	Playing     bool     `json:"playing,omitempty"`
 	State       string   `json:"state"`
 	Log         string   `json:"log"`
 	Error       string   `json:"error,omitempty"`
@@ -282,6 +287,8 @@ type application struct {
 	install      InstallState
 	slimDone     bool
 	slimming     bool
+	playing      bool
+	playResult   error
 	// slimBytes caches MeasureSlim's walk. Refreshed only when the size can
 	// have changed -- session start, after a build, after a cleanup -- because
 	// Detect runs at the poll interval and must not walk the tree.
@@ -525,7 +532,8 @@ func (app *application) writeStatus(response http.ResponseWriter) {
 
 	app.mu.Lock()
 	current := status{
-		State: app.state, Log: app.log.String(), Error: app.errorMessage,
+		Playing: app.playing,
+		State:   app.state, Log: app.log.String(), Error: app.errorMessage,
 		ErrorCode: app.errorCode, RecoveryKey: app.recoveryKey,
 		Message: app.result.Message, OutputPath: app.result.OutputPath,
 		Install: app.install, SlimDone: app.slimDone,
@@ -569,6 +577,11 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 	}
 
 	app.mu.Lock()
+	if app.playing {
+		app.mu.Unlock()
+		writeJSONError(response, http.StatusConflict, "close the game first")
+		return
+	}
 	if app.state == "building" {
 		app.mu.Unlock()
 		writeJSONError(response, http.StatusConflict, "a build is already running")
@@ -758,8 +771,20 @@ func (writer *lockedLogWriter) ReportBuildProgress(update BuildProgress) {
 
 func (app *application) launch(response http.ResponseWriter) {
 	app.mu.Lock()
+	if app.playing || app.slimming {
+		app.mu.Unlock()
+		writeJSONError(response, http.StatusConflict, "the game or cleanup is already running")
+		return
+	}
+	select {
+	case <-app.closed:
+		app.mu.Unlock()
+		writeJSONError(response, http.StatusConflict, "the Builder is closing")
+		return
+	default:
+	}
 	result, state, install := app.result, app.state, app.install
-	app.mu.Unlock()
+	session := app.options.LaunchSession
 	// NEVER mid-build. Broadening the guard below to accept a DETECTED build made
 	// Play work during a rebuild, which launches the very binary the build is in
 	// the middle of overwriting -- at best a crash, at worst a half-written
@@ -767,6 +792,7 @@ func (app *application) launch(response http.ResponseWriter) {
 	// install state legitimately still says "launchable" while a rebuild runs
 	// (status deliberately skips re-probing mid-build, since the tree is churning).
 	if state == "building" {
+		app.mu.Unlock()
 		writeJSONError(response, http.StatusConflict,
 			"a build is running -- wait for it to finish before playing")
 		return
@@ -775,6 +801,7 @@ func (app *application) launch(response http.ResponseWriter) {
 	// did and the artifacts are still on disk. The second case is the whole
 	// point of detection -- it is what turns the builder into a launcher.
 	if state != "succeeded" && !install.CanLaunch {
+		app.mu.Unlock()
 		writeJSONError(response, http.StatusConflict, "finish a successful build first")
 		return
 	}
@@ -783,8 +810,29 @@ func (app *application) launch(response http.ResponseWriter) {
 	// refuse a launch the host could perform, since the script is optional now
 	// and a user may well have deleted it.
 	if result.BinaryPath == "" && result.OutputPath == "" {
+		app.mu.Unlock()
 		writeJSONError(response, http.StatusConflict,
 			"no built game was found to launch")
+		return
+	}
+	if session != nil {
+		app.playing = true
+	}
+	app.mu.Unlock()
+	if session != nil {
+		done, err := session(result)
+		if err != nil {
+			app.mu.Lock()
+			app.playing = false
+			app.mu.Unlock()
+			writeJSONError(response, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]string{"state": "launched"})
+		go func() {
+			app.playResult = <-done
+			app.closeOnce.Do(func() { close(app.closed) })
+		}()
 		return
 	}
 	if app.options.Launch == nil {
@@ -808,6 +856,11 @@ func (app *application) slim(response http.ResponseWriter) {
 		return
 	}
 	app.mu.Lock()
+	if app.playing {
+		app.mu.Unlock()
+		writeJSONError(response, http.StatusConflict, "close the game first")
+		return
+	}
 	if app.state == "building" {
 		app.mu.Unlock()
 		writeJSONError(response, http.StatusConflict,
@@ -851,13 +904,18 @@ func (app *application) slim(response http.ResponseWriter) {
 
 func (app *application) close(response http.ResponseWriter) {
 	app.mu.Lock()
-	building := app.state == "building"
-	app.mu.Unlock()
-	if building {
+	switch {
+	case app.playing:
+		app.mu.Unlock()
+		writeJSONError(response, http.StatusConflict, "quit the game to return to the launcher")
+		return
+	case app.state == "building":
+		app.mu.Unlock()
 		writeJSONError(response, http.StatusConflict, "wait for the current build to finish")
 		return
 	}
 	app.closeOnce.Do(func() { close(app.closed) })
+	app.mu.Unlock()
 	writeJSON(response, http.StatusOK, map[string]string{"state": "closed"})
 }
 

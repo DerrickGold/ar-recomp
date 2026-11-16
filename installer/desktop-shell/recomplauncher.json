@@ -1,0 +1,18 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "ActRaiser Recomp",
+  "start": {
+    "program": ["ActRaiserRecompBuilder.exe"],
+    "args": ["--play-session", "--output-dir={install}/ActRaiserRecomp"]
+  },
+  "saves": ["{install}/ActRaiserRecomp/saves"],
+  "folders": {
+    "saves": "{install}/ActRaiserRecomp/saves",
+    "logs": "{install}/ActRaiserRecomp/logs"
+  },
+  "looks": {
+    "allowed": false,
+    "reason": "This entry starts the Builder. Set visual effects in ActRaiser Recomp."
+  }
+}

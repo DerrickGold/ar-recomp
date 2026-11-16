@@ -32,6 +32,7 @@ type guiFlags struct {
 func runGUI(args []string) error {
 	flags := flag.NewFlagSet("gui", flag.ContinueOnError)
 	values := guiFlags{}
+	playSession := flags.Bool("play-session", false, "close the Builder when the game exits and return its status")
 	desktopGate := flags.Bool("desktop-start-gate", false, "wait for desktop process supervision before initializing")
 	flags.StringVar(&values.buildWorkspace, "build-workspace", "", "private scratch directory; enables read-only bundled source")
 	flags.StringVar(&values.inputID, "input-id", "", "verified bundled payload identity")
@@ -105,6 +106,10 @@ func runGUI(args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "Build inputs: %s\nBuild workspace: %s\nGame output: %s\n", root, values.buildWorkspace, outputDir)
 	buildChecker := &gameBuildChecker{outputDir: outputDir, inputID: bundledBuildID(root, values.inputID), version: version}
+	var launchSession func(builder.Result) (<-chan error, error)
+	if *playSession {
+		launchSession = startGameSession
+	}
 	return builder.Run(context.Background(), builder.Options{
 		Title:           "ActRaiser Recomp Builder",
 		Version:         version,
@@ -121,7 +126,8 @@ func runGUI(args []string) error {
 		Build: func(ctx context.Context, romPath string, output io.Writer) (builder.Result, error) {
 			return buildFromGUI(ctx, values, root, outputDir, romPath, output)
 		},
-		Launch: launchBuiltGame,
+		Launch:        launchBuiltGame,
+		LaunchSession: launchSession,
 		// Lets the GUI open as a launcher beside an existing build, and refuse a
 		// rebuild whose inputs have been cleaned away. See install_state.go for
 		// the two file sets and why they differ.
@@ -190,6 +196,33 @@ func writeGUIReadyFile(path, address string) error {
 // The argument list mirrors project.launcher(): the ROM path, then
 // `--config config.ini` resolved against the working directory.
 func launchBuiltGame(result builder.Result) error {
+	command, err := builtGameCommand(result)
+	if err != nil {
+		return err
+	}
+	if command == nil {
+		return launchViaScript(result)
+	}
+	// Closing the standalone Workshop must let the game keep running.
+	detachFromBuilder(command)
+	return startLoggedGame(command, result.WorkingDir)
+}
+
+func startGameSession(result builder.Result) (<-chan error, error) {
+	command, err := builtGameCommand(result)
+	if err != nil {
+		return nil, err
+	}
+	if command == nil {
+		return nil, fmt.Errorf("rebuild the game to use a tracked play session")
+	}
+	// Keep the game's writable data at the directory the launcher backs up.
+	command.Env = append(command.Environ(), "AR_USER_DATA_DIR="+result.WorkingDir)
+	done, _, err := startGameProcess(command, result.WorkingDir)
+	return done, err
+}
+
+func builtGameCommand(result builder.Result) (*exec.Cmd, error) {
 	if strings.HasSuffix(result.OutputPath, ".app") || strings.HasSuffix(result.OutputPath, ".AppImage") || strings.HasSuffix(result.OutputPath, ".AppDir") {
 		path := result.OutputPath
 		var arguments []string
@@ -201,20 +234,19 @@ func launchBuiltGame(result builder.Result) error {
 		}
 		command := exec.Command(path, arguments...)
 		command.Dir = result.WorkingDir
-		detachFromBuilder(command)
-		return startLoggedGame(command, result.WorkingDir)
+		return command, nil
 	}
 	if result.BinaryPath == "" {
 		// Older Result (or a host that only knows the script): fall back to the
 		// previous behaviour rather than refusing to launch.
-		return launchViaScript(result)
+		return nil, nil
 	}
 	info, err := os.Stat(result.BinaryPath)
 	if err != nil {
-		return fmt.Errorf("the built game is missing: %w", err)
+		return nil, fmt.Errorf("the built game is missing: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a runnable file", result.BinaryPath)
+		return nil, fmt.Errorf("%s is not a runnable file", result.BinaryPath)
 	}
 	arguments := []string{}
 	if rom := findInstalledROM(result.WorkingDir); rom != "" {
@@ -224,11 +256,7 @@ func launchBuiltGame(result builder.Result) error {
 
 	command := exec.Command(result.BinaryPath, arguments...)
 	command.Dir = result.WorkingDir
-	// Its own process group, so closing the builder window (or Ctrl-C in it, or
-	// pressing "Close builder") does not signal the game to death. The previous
-	// `open`/`start` path got this for free; running the binary directly does not.
-	detachFromBuilder(command)
-	return startLoggedGame(command, result.WorkingDir)
+	return command, nil
 }
 
 // launchViaScript is the pre-existing indirect path, kept as a fallback.

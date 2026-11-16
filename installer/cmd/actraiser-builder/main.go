@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -26,6 +27,10 @@ func main() {
 			return
 		}
 		fmt.Fprintf(os.Stderr, "actraiser-builder: %v\n", err)
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() > 0 {
+			os.Exit(exit.ExitCode())
+		}
 		os.Exit(1)
 	}
 }

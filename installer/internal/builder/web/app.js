@@ -891,7 +891,7 @@ function applyMode(data){
   /* Play is hidden while a build runs: the binary it would launch is being
      overwritten. The server refuses it too (launch() checks state first) -- this
      is only so the button does not sit there inviting the click. */
-  const building=(data.state==="building");
+  const building=(data.state==="building"), playing=!!data.playing;
   savedROM=typeof data.rebuildROM==="string"?data.rebuildROM:"";
   romInput.required=!savedROM;
   romInput.disabled=closed||building;
@@ -900,9 +900,9 @@ function applyMode(data){
   ui.set(build,install.canLaunch?"builder.build.rebuild_game":"builder.nav.build_game");
   applyBuildFreshness(install,building);
   playBox.hidden=!install.canLaunch||building;
-  playButton.disabled=building||launching;
+  playButton.disabled=building||playing||launching;
   dockLaunch.hidden=!install.canLaunch||building;
-  dockLaunch.disabled=building||launching||!install.canLaunch;
+  dockLaunch.disabled=building||playing||launching||!install.canLaunch;
   track.hidden=!["building","succeeded","failed"].includes(data.state);
   buildBox.hidden=!install.canRebuild;
   noBuild.hidden=(mode!=="launcher");
@@ -924,7 +924,7 @@ function applyMode(data){
   if(mode==="unusable" && lastMode!==mode)
     showKey("failed","builder.home.unusable");
   canLaunch=!!install.canLaunch&&!building;
-  homePrimary.disabled=closed||building||launching||(!canLaunch&&!install.canRebuild);
+  homePrimary.disabled=closed||building||playing||launching||(!canLaunch&&!install.canRebuild);
   ui.set(homePrimary,building?"builder.home.building":canLaunch?"builder.home.play":"builder.home.build");
   ui.set(document.querySelector("#home-game-note"),building?"builder.home.while_building":canLaunch?(install.build?.state==="current"?"builder.version.current":"builder.home.ready"):install.canRebuild?"builder.home.rom":"builder.home.unusable");
   ui.set(document.querySelector("#build-nav-label"),canLaunch?"builder.nav.build":"builder.nav.build_game");
@@ -1169,7 +1169,7 @@ async function doLaunch(){
     // Recheck on the click: the game or Builder may have changed since the
     // initial page load. All Play buttons share this path, including the dock.
     const data=await responseJSON(await fetchResponse("status",{cache:"no-store"}));
-    if(closed)return;
+    if(closed||data.playing)return;
     launchStatus=data;
     applyMode(data);
     const info=data.install||{}, state=info.build?.state||"unknown";
@@ -1195,7 +1195,7 @@ async function doLaunch(){
     pendingStalePlay=null;
     launching=false;
     if(!closed){
-      if(launchStatus){const current=latestModeData||launchStatus;applyMode(current);launch.disabled=!current.install?.canLaunch||current.state==="building";}
+      if(launchStatus){const current=latestModeData||launchStatus;applyMode(current);launch.disabled=!current.install?.canLaunch||current.state==="building"||!!current.playing;}
       else buttons.forEach((button,i)=>button.disabled=previous[i]);
     }
   }

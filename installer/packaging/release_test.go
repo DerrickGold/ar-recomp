@@ -266,7 +266,7 @@ func TestDesktopReleaseUsesFinalPayloadVersion(t *testing.T) {
 	for _, relative := range []string{
 		"packaging/release_policy.cmake", "packaging/release_version.cmake",
 		"desktop-shell/release.cmake", "desktop-shell/portable-release.cmake",
-		"desktop-shell/PORTABLE-README.txt",
+		"desktop-shell/PORTABLE-README.txt", "desktop-shell/recomplauncher.json",
 	} {
 		data, err := os.ReadFile(filepath.Join("..", relative))
 		if err != nil {
@@ -332,6 +332,7 @@ func TestPortableReleaseBundlesWrapExistingArtifacts(t *testing.T) {
 		kind, platform, artifact, archive string
 	}{
 		{"windows", "windows-x86_64", "ActRaiserRecompBuilder.exe", "ActRaiserRecompBuilder-v0900-windows-x64-portable.zip"},
+		{"windows", "windows-arm64", "ActRaiserRecompBuilder.exe", "ActRaiserRecompBuilder-v0900-windows-arm64-portable.zip"},
 		{"linux", "steam-deck", "ActRaiserRecompBuilder.AppImage", "ActRaiserRecompBuilder-v0900-steam-deck-portable.tar.xz"},
 	}
 	if _, err := exec.LookPath("ditto"); err == nil {
@@ -340,7 +341,7 @@ func TestPortableReleaseBundlesWrapExistingArtifacts(t *testing.T) {
 		}{"macos", "macos-arm64", "ActRaiserRecompBuilder.app", "ActRaiserRecompBuilder-v0900-macos-arm64-portable.zip"})
 	}
 	for _, test := range tests {
-		t.Run(test.kind, func(t *testing.T) {
+		t.Run(test.platform, func(t *testing.T) {
 			root := t.TempDir()
 			stage := filepath.Join(root, "stage")
 			if err := os.Mkdir(stage, 0700); err != nil {
@@ -389,6 +390,13 @@ func TestPortableReleaseBundlesWrapExistingArtifacts(t *testing.T) {
 				t.Fatalf("portable download lacks startup security guidance: %v", err)
 			}
 			bundledArtifact := filepath.Join(bundle, test.artifact)
+			if test.kind == "windows" {
+				profile, err := os.ReadFile(filepath.Join(bundle, "recomplauncher.json"))
+				source, sourceErr := os.ReadFile(filepath.Join("..", "desktop-shell", "recomplauncher.json"))
+				if err != nil || sourceErr != nil || string(profile) != string(source) {
+					t.Fatalf("Windows portable download lacks its RecompLauncher profile: %v, %v", err, sourceErr)
+				}
+			}
 			bundledPayload := bundledArtifact
 			if test.kind == "macos" {
 				bundledPayload = filepath.Join(bundledArtifact, "Contents", "MacOS", "ActRaiserRecompBuilder")

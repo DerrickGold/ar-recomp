@@ -24,6 +24,11 @@ import (
 
 var tokenPath = regexp.MustCompile(`^/[0-9a-f]{36}/$`)
 
+type BackendOptions struct {
+	ArtifactDirectory string
+	PlaySession       bool
+}
+
 type Backend struct {
 	URL        *url.URL
 	Done       chan struct{}
@@ -37,7 +42,7 @@ type Backend struct {
 
 // StartBundledBackend runs tools directly from the verified payload, with a
 // separate writable workspace for logs and derived build products.
-func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outputDir string, jobs int, artifactDirectory ...string) (*Backend, error) {
+func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outputDir string, jobs int, options ...BackendOptions) (*Backend, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -70,8 +75,13 @@ func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outpu
 	if inputID != "" {
 		b.command.Args = append(b.command.Args, "--build-workspace", workspace, "--input-id", inputID)
 	}
-	if len(artifactDirectory) != 0 {
-		b.command.Args = append(b.command.Args, "--import-search-dir", artifactDirectory[0])
+	if len(options) != 0 {
+		if options[0].ArtifactDirectory != "" {
+			b.command.Args = append(b.command.Args, "--import-search-dir", options[0].ArtifactDirectory)
+		}
+		if options[0].PlaySession {
+			b.command.Args = append(b.command.Args, "--play-session")
+		}
 	}
 	if jobs > 0 {
 		b.command.Args = append(b.command.Args, "--jobs", strconv.Itoa(jobs))
@@ -173,6 +183,13 @@ func ValidateAddress(schema int, address string) (*url.URL, error) {
 		return nil, errors.New("invalid local Builder session descriptor")
 	}
 	return u, nil
+}
+
+// Result is available after Done is closed.
+func (b *Backend) Result() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.err
 }
 
 func (b *Backend) RequestClose() error {
