@@ -33,6 +33,13 @@ func runGUI(args []string) error {
 	flags := flag.NewFlagSet("gui", flag.ContinueOnError)
 	values := guiFlags{}
 	playSession := flags.Bool("play-session", false, "close the Builder when the game exits and return its status")
+	bigScreen := flags.Bool("big-screen", false, "show the controller interface")
+	var roms []string
+	flags.Func("rom", "preselect a ROM (repeat for additional supported ROMs)", func(path string) error {
+		roms = append(roms, path)
+		return nil
+	})
+	firstBuild := flags.Bool("build-on-first-run", false, "build automatically when a ROM is supplied for a new installation")
 	desktopGate := flags.Bool("desktop-start-gate", false, "wait for desktop process supervision before initializing")
 	flags.StringVar(&values.buildWorkspace, "build-workspace", "", "private scratch directory; enables read-only bundled source")
 	flags.StringVar(&values.inputID, "input-id", "", "verified bundled payload identity")
@@ -113,6 +120,10 @@ func runGUI(args []string) error {
 	return builder.Run(context.Background(), builder.Options{
 		Title:           "ActRaiser Recomp Builder",
 		Version:         version,
+		BigScreen:       *bigScreen,
+		LaunchROMs:      roms,
+		BuildOnFirstRun: *firstBuild,
+		ControllerHint:  os.Getenv("RECOMPLAUNCHER_PAD"),
 		ProjectRoot:     dataRoot,
 		ImportSearchDir: values.importSearchDir,
 		OpenBrowser:     !values.noOpen,

@@ -596,6 +596,7 @@ input[type=checkbox] {
   margin:20px 0;
   max-width:850px
 }
+#build-rom-checklist { max-width:850px; }
 .play-head {
   display:flex;
   align-items:center;

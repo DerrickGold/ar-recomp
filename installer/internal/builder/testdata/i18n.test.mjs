@@ -132,6 +132,14 @@ function setupAssetApp(tracks=[["song-09","Track 09"],["song-01","Sky Palace"]])
   node("asset-track-options").hidden=true;
   const tabs=[node("tab-home"),node("tab-build")];
   tabs.forEach(tab=>tab.setAttribute("aria-controls",tab.id.replace("tab-","panel-")));
+  for(const id of ["home-rom-checklist","build-rom-checklist"]){
+    const host=node(id);
+    host.append=child=>{
+      if(child.parentNode)child.parentNode.children=child.parentNode.children.filter(item=>item!==child);
+      host.children.push(child);child.parentNode=host;
+    };
+  }
+  node("home-rom-checklist").append(node("rom-checklist"));
   const originalQuery=s.doc.querySelectorAll.bind(s.doc);
   s.doc.querySelectorAll=selector=>{
     if(selector===".asset-row")return rows;
@@ -149,6 +157,21 @@ function setupAssetApp(tracks=[["song-09","Track 09"],["song-01","Sky Palace"]])
   s.context.window.addEventListener=()=>{};
   s.context.window.scrollTo=()=>{};
   s.context.window.history={pushState:(_,__,hash)=>{s.context.location.hash=hash;}};
+  const staleActions=new Node("div");
+  node("stale-build-dialog").querySelector=selector=>{
+    assert.equal(selector,".dialog-actions");
+    return staleActions;
+  };
+  // These tests exercise the desktop UI with its existing asset controls.
+  // Big Screen input and requests are exercised separately.
+  s.context.window.workshopBigScreenCustomize=()=>({});
+  s.context.window.workshopBigScreenNavigation=()=>{};
+  s.context.window.workshopROMBrowser=()=>{};
+  let reportROMUpload;
+  s.context.window.workshopROMChecklist=(_request,_browse,_imported,report)=>{
+    reportROMUpload=report;
+    return {load(){},availability(){},inspect(){}};
+  };
   const requests=[], urls=[];
   Object.assign(s.context,{location:{hash:"#unknown"},matchMedia:()=>({matches:false,addEventListener(){}}),
     URL:{createObjectURL(file){urls.push(file);return "blob:pending-track";},revokeObjectURL(){throw Error("unexpected file release");}},
@@ -163,7 +186,7 @@ function setupAssetApp(tracks=[["song-09","Track 09"],["song-01","Sky Palace"]])
   const source=readFileSync(new URL("../web/app.js",import.meta.url),"utf8");
   assert.match(source,/\}\)\(\);\s*$/);
   runInNewContext(source.replace(/\}\)\(\);\s*$/,"window.testApplyMode=applyMode;\nwindow.testRefresh=refresh;\n})();"),s.context);
-  return {...s,node,rows,list,pickerHost,requests,urls,applyMode:s.context.window.testApplyMode,refresh:s.context.window.testRefresh};
+  return {...s,node,rows,list,pickerHost,requests,urls,reportROMUpload,applyMode:s.context.window.testApplyMode,refresh:s.context.window.testRefresh};
 }
 
 test("blocked build shows localized policy recovery while preserving the raw report",async()=>{
@@ -184,7 +207,7 @@ test("blocked build shows localized policy recovery while preserving the raw rep
   s.context.navigator={userAgent:"Test webview"};
   runInNewContext(readFileSync(new URL("../../workshopui/feedback.js",import.meta.url),"utf8"),s.context);
   const detail="start snesbuild regen: fork/exec C:\\Users\\Alice\\Builder\\snesbuild.exe: An Application Control policy has blocked this file.";
-  let data={state:"failed",mode:"builder",install:{canRebuild:true},error:detail,
+  let data={state:"failed",mode:"builder",install:{canRebuild:true},rebuildROM:"user-rom.sfc",error:detail,
     errorCode:"builder.errors.windows_app_control",recoveryKey:"builder.recovery.windows_app_control",log:"=== Build failed ===\n"+detail};
   s.context.fetch=async(path,options)=>({ok:true,json:async()=>path==="interface/preferences"?JSON.parse(options.body):data});
   await s.refresh();
@@ -366,6 +389,40 @@ test("saved ROM path translates literally and removes file-picker requirement",a
   assert.equal(s.node("rom").required,true);
   assert.equal(s.node("saved-rom-note").hidden,true);
   assert.equal(s.node("game-version-rebuild").textContent,s.ui.text("builder.version.review"));
+});
+
+test("desktop Build & play shares the checklist and accepts preselected ROMs",async()=>{
+  const s=setupAssetApp();
+  const checklist=s.node("rom-checklist");
+  s.applyMode({state:"idle",install:{canRebuild:true},selectedROM:"ActRaiser (USA).sfc",hasSelectedROMs:true});
+  assert.equal(s.node("rom").required,false);
+  assert.equal(s.node("rom-label").textContent,s.ui.text("builder.build.extra_rom_label"));
+  assert.equal(s.node("home-game-note").textContent,s.ui.text("builder.home.rom_ready"));
+  await s.node("home-primary").fire("click");
+  assert.equal(checklist.parentNode,s.node("build-rom-checklist"));
+  assert.equal(s.node("saved-rom-note").textContent,s.ui.text("builder.build.browser_rom",{path:"ActRaiser (USA).sfc"}));
+  await s.node("tab-home").fire("click");
+  assert.equal(checklist.parentNode,s.node("home-rom-checklist"));
+  assert.equal(s.node("build-rom-checklist").children.length,0);
+});
+
+test("desktop build requires a core ROM and waits for file validation",()=>{
+  const s=setupAssetApp();
+  s.applyMode({state:"idle",install:{canRebuild:true}});
+  assert.equal(s.node("build").disabled,true);
+  s.node("rom").files=[{name:"ActRaiser 2 (USA).sfc"}];
+  s.reportROMUpload({checking:true});
+  assert.equal(s.node("rom-build-hint").textContent,s.ui.text("builder.roms.checking_files"));
+  assert.equal(s.node("build").disabled,true);
+  s.reportROMUpload({});
+  assert.equal(s.node("rom-build-hint").textContent,s.ui.text("builder.home.rom"));
+  assert.equal(s.node("build").disabled,true);
+  s.reportROMUpload({core:"ActRaiser (USA).sfc",invalid:true});
+  assert.equal(s.node("rom-build-hint").textContent,s.ui.text("builder.roms.fix_files"));
+  assert.equal(s.node("build").disabled,true);
+  s.reportROMUpload({core:"ActRaiser (USA).sfc"});
+  assert.equal(s.node("rom-build-hint").hidden,true);
+  assert.equal(s.node("build").disabled,false);
 });
 
 test("Rebuild now and the build form reuse the saved ROM with one request",async()=>{

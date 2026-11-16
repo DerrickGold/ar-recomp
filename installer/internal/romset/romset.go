@@ -27,6 +27,20 @@ type Plan struct {
 	sources       []*localization.AuthorProject
 }
 
+const SequelID = "ar2-us"
+
+// Identify checks the supported clean ROM identities without extracting content.
+func Identify(data []byte) (string, []byte, error) {
+	if normalized, err := ar2rom.Normalize(data); err == nil {
+		return SequelID, normalized, nil
+	}
+	if len(data) == gamerom.Size+512 {
+		data = data[512:]
+	}
+	release, err := gamerom.Identify(data)
+	return release.ID, data, err
+}
+
 func Prepare(inputs []Input) (*Plan, error) {
 	if len(inputs) == 0 || len(inputs) > 6 {
 		return nil, fmt.Errorf("select between one and six supported game ROMs")
@@ -34,36 +48,28 @@ func Prepare(inputs []Input) (*Plan, error) {
 	plan := &Plan{}
 	seen := map[string]bool{}
 	for _, input := range inputs {
-		data := input.Data
-		if normalized, err := ar2rom.Normalize(data); err == nil {
-			if seen["ar2-us"] {
-				continue
-			}
-			seen["ar2-us"] = true
-			plan.Releases = append(plan.Releases, "ActRaiser 2 (USA): optional content")
-			plan.master, err = ar2master.Extract(normalized)
-			if err != nil {
-				return nil, err
-			}
-			plan.world, err = ar2game.Extract(normalized)
-			if err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if len(data) == gamerom.Size+512 {
-			data = data[512:]
-		}
-		release, err := gamerom.Identify(data)
+		id, data, err := Identify(input.Data)
 		if err != nil {
 			return nil, fmt.Errorf("%s: unsupported ROM; select a clean supported ActRaiser ROM", input.Name)
 		}
-		if seen[release.ID] {
+		if seen[id] {
 			continue
 		}
-		seen[release.ID] = true
-		plan.Releases = append(plan.Releases, "ActRaiser ("+release.ID+"): regional graphics, music and text source")
-		if release.ID == "us" {
+		seen[id] = true
+		if id == SequelID {
+			plan.Releases = append(plan.Releases, "ActRaiser 2 (USA): optional content")
+			plan.master, err = ar2master.Extract(data)
+			if err != nil {
+				return nil, err
+			}
+			plan.world, err = ar2game.Extract(data)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		plan.Releases = append(plan.Releases, "ActRaiser ("+id+"): regional graphics, music and text source")
+		if id == "us" {
 			plan.Baseline = data
 		}
 		extraction, err := regionalmedia.Extract(data)
@@ -75,7 +81,7 @@ func Prepare(inputs []Input) (*Plan, error) {
 			return nil, err
 		}
 		plan.media = append(plan.media, media)
-		if release.ID == "us" {
+		if id == "us" {
 			continue
 		} // Build prepares the runtime baseline.
 		decoder, err := localization.NewDecoder(data)

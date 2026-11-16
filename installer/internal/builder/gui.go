@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -53,11 +54,16 @@ type Result struct {
 
 // Options configures one local GUI session.
 type Options struct {
-	Title       string
-	Version     string
-	ProjectRoot string
-	OpenBrowser bool
-	Stdout      io.Writer
+	Title           string
+	Version         string
+	BigScreen       bool
+	LaunchROMs      []string
+	BuildOnFirstRun bool
+	// ControllerHint is the controller family reported by the launcher.
+	ControllerHint string
+	ProjectRoot    string
+	OpenBrowser    bool
+	Stdout         io.Writer
 	// ImportSearchDir is the folder containing the outer desktop artifact, never
 	// Finder's CWD. Empty disables installation import for legacy CLI callers.
 	ImportSearchDir string
@@ -251,6 +257,11 @@ type status struct {
 	// RebuildROM names the existing local copy; no browser-supplied filesystem
 	// path is trusted and the original file-picker location is not needed.
 	RebuildROM string `json:"rebuildROM,omitempty"`
+	// SelectedROM names the selected core only when it takes priority over a
+	// saved copy. The checklist always shows the full selection.
+	SelectedROM     string `json:"selectedROM,omitempty"`
+	HasSelectedROMs bool   `json:"hasSelectedROMs,omitempty"`
+	BuildOnFirstRun bool   `json:"buildOnFirstRun,omitempty"`
 }
 
 type application struct {
@@ -275,20 +286,23 @@ type application struct {
 	previewPaths      map[string]string
 	scenery           scenerySession
 
-	mu           sync.Mutex
-	state        string
-	log          bytes.Buffer
-	errorMessage string
-	errorCode    string
-	recoveryKey  string
-	result       Result
-	progress     progress
-	closeOnce    sync.Once
-	install      InstallState
-	slimDone     bool
-	slimming     bool
-	playing      bool
-	playResult   error
+	mu                  sync.Mutex
+	state               string
+	log                 bytes.Buffer
+	errorMessage        string
+	errorCode           string
+	recoveryKey         string
+	result              Result
+	progress            progress
+	closeOnce           sync.Once
+	install             InstallState
+	slimDone            bool
+	slimming            bool
+	playing             bool
+	firstBuildAttempted bool
+	romChoices          map[string]romChoice
+	romIssues           []string
+	playResult          error
 	// slimBytes caches MeasureSlim's walk. Refreshed only when the size can
 	// have changed -- session start, after a build, after a cleanup -- because
 	// Detect runs at the poll interval and must not walk the tree.
@@ -303,6 +317,7 @@ func newApplication(ctx context.Context, options Options, token string) *applica
 		preview:      audioPreviewStatus{State: "idle", Total: len(assetTracks)},
 		previewPaths: make(map[string]string),
 	}
+	app.initializeROMChoices()
 	// Adopt an existing build as this session's result, which is what makes
 	// Launch work without rebuilding first: the launch handler needs an
 	// OutputPath, and a freshly opened process has no other source for one.
@@ -399,6 +414,10 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		app.serveInstallImport(response, request, strings.TrimPrefix(endpoint, "installation-import/"))
 		return
 	}
+	if endpoint == "rom-import-selected" && request.Method == http.MethodPost {
+		app.importSelectedROMs(response)
+		return
+	}
 	// Import changes many runtime files together. Refuse concurrent editor
 	// requests, rather than allowing an old in-memory manifest to overwrite it.
 	if !app.dataGate.TryRLock() {
@@ -459,6 +478,9 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		page := strings.NewReplacer(
 			"{{TITLE}}", html.EscapeString(app.options.Title),
 			"{{BUILDER_VERSION}}", html.EscapeString(app.options.Version),
+			"{{BIG_SCREEN}}", strconv.FormatBool(app.options.BigScreen),
+			"{{PLAY_SESSION}}", strconv.FormatBool(app.options.LaunchSession != nil),
+			"{{CONTROLLER_HINT}}", html.EscapeString(app.options.ControllerHint),
 			"{{STEPS}}", renderStepList(),
 			"{{ASSET_TRACKS}}", renderAssetTrackRows(),
 			"{{ASSET_ROW_PROTOTYPE}}", renderAssetRowPrototype(),
@@ -499,8 +521,18 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 			strings.TrimPrefix(endpoint, "audio-preview/"))
 	case endpoint == "status" && request.Method == http.MethodGet:
 		app.writeStatus(response)
+	case endpoint == "rom-browser" && request.Method == http.MethodGet:
+		app.browseROMs(response, request)
+	case endpoint == "rom-checklist" && request.Method == http.MethodGet:
+		app.serveROMChecklist(response)
+	case endpoint == "rom-inspect" && request.Method == http.MethodPost:
+		inspectUploadedROMs(response, request)
+	case endpoint == "rom-selection" && request.Method == http.MethodPost:
+		app.selectChecklistROM(response, request)
 	case endpoint == "build" && request.Method == http.MethodPost:
 		app.startBuild(response, request)
+	case endpoint == "build-report" && request.Method == http.MethodPost:
+		app.saveBuildReport(response, request)
 	case endpoint == "launch" && request.Method == http.MethodPost:
 		app.launch(response)
 	case endpoint == "slim" && request.Method == http.MethodPost:
@@ -538,6 +570,9 @@ func (app *application) writeStatus(response http.ResponseWriter) {
 		Message: app.result.Message, OutputPath: app.result.OutputPath,
 		Install: app.install, SlimDone: app.slimDone,
 	}
+	firstBuildAttempted := app.firstBuildAttempted
+	selectedCore := app.romChoices["us"]
+	current.HasSelectedROMs = len(app.romChoices) != 0
 	current.Progress = app.progress
 	if app.state == "succeeded" {
 		current.Progress = completedProgress()
@@ -546,6 +581,12 @@ func (app *application) writeStatus(response http.ResponseWriter) {
 	current.Mode = app.pageMode(current.Install)
 	current.LocalizationReady, current.LocalizationError = app.localizationAvailability()
 	current.RebuildROM, _ = reusableBuildROM(app.options.ProjectRoot)
+	if !selectedCore.preferSavedCore(current.RebuildROM) {
+		current.SelectedROM = selectedCore.name
+	}
+	if selectedCore.launchPath != "" {
+		current.BuildOnFirstRun = app.options.BuildOnFirstRun && !firstBuildAttempted && !current.Install.CanLaunch && current.RebuildROM == ""
+	}
 	// Only offered while a cleanup is actually possible: no Slim hook means no
 	// offer, and an already-lean install has nothing left to remove.
 	if app.options.Slim != nil && current.Install.CanSlim {
@@ -603,34 +644,14 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 
 	request.Body = http.MaxBytesReader(response, request.Body, maxROMBytes+(1<<20))
 	if err := request.ParseMultipartForm(maxROMBytes + (1 << 20)); err != nil {
-		app.rejectBuild(response, "could not read the selected ROM")
+		app.rejectBuild(response, "could not read the selected ROM", "")
 		return
 	}
 	defer request.MultipartForm.RemoveAll()
-	var romPath string
-	var err error
-	files := request.MultipartForm.File["rom"]
-	if len(files) == 0 && request.FormValue("reuseROM") == "true" {
-		romPath, err = reusableBuildROM(app.options.ProjectRoot)
-		if err != nil {
-			app.mu.Lock()
-			app.state = "idle"
-			app.mu.Unlock()
-			writeJSON(response, http.StatusBadRequest, map[string]string{
-				"error": err.Error(), "errorCode": "builder.build.saved_rom_missing",
-			})
-			return
-		}
-	} else {
-		if len(request.MultipartForm.File) != 1 {
-			app.rejectBuild(response, "select supported ROM files in the main selector")
-			return
-		}
-		romPath, err = app.prepareBuildROMs(files)
-		if err != nil {
-			app.rejectBuild(response, err.Error())
-			return
-		}
+	romPath, errorCode, err := app.resolveBuildROM(request.MultipartForm)
+	if err != nil {
+		app.rejectBuild(response, err.Error(), errorCode)
+		return
 	}
 
 	writeJSON(response, http.StatusAccepted, map[string]string{"state": "building"})
@@ -676,10 +697,14 @@ func firstLine(text string) string {
 	return trimmed
 }
 
-func (app *application) rejectBuild(response http.ResponseWriter, message string) {
+func (app *application) rejectBuild(response http.ResponseWriter, message, code string) {
 	app.mu.Lock()
 	app.state = "idle"
 	app.mu.Unlock()
+	if code != "" {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": message, "errorCode": code})
+		return
+	}
 	writeJSONError(response, http.StatusBadRequest, message)
 }
 

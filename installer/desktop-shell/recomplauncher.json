@@ -2,9 +2,24 @@
   "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
   "format": 1,
   "name": "ActRaiser Recomp",
+  "inputs": [
+    {
+      "id": "rom",
+      "label": "Your ActRaiser (USA) ROM",
+      "optional": true,
+      "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]
+    },
+    {"id": "rom-jp", "label": "ActRaiser (Japan) ROM — regional text, art and music", "optional": true, "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]},
+    {"id": "rom-eu-en", "label": "ActRaiser (Europe, English) ROM — regional text, art and music", "optional": true, "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]},
+    {"id": "rom-de", "label": "ActRaiser (Germany) ROM — regional text, art and music", "optional": true, "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]},
+    {"id": "rom-fr", "label": "ActRaiser (France) ROM — regional text, art and music", "optional": true, "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]},
+    {"id": "rom-ar2-us", "label": "ActRaiser 2 (USA) ROM — bonus character and development content", "optional": true, "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]}
+  ],
   "start": {
     "program": ["ActRaiserRecompBuilder.exe"],
-    "args": ["--play-session", "--output-dir={install}/ActRaiserRecomp"]
+    "args": ["--play-session", "--output-dir={install}/ActRaiserRecomp", "--build-on-first-run",
+      "--rom={input:rom}", "--rom={input:rom-jp}", "--rom={input:rom-eu-en}",
+      "--rom={input:rom-de}", "--rom={input:rom-fr}", "--rom={input:rom-ar2-us}"]
   },
   "saves": ["{install}/ActRaiserRecomp/saves"],
   "folders": {

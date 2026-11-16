@@ -67,10 +67,65 @@ the existing game. The Builder waits while the game runs and returns its exit
 status when it closes. RecompLauncher uses the generated `ActRaiserRecomp`
 folder for saves and game logs.
 
+Easy Setup accepts up to six local `.sfc` or `.smc` files. Select ActRaiser (USA)
+for the core game. The Japanese, European English, German, and French ROMs add
+regional text references, artwork, and music. ActRaiser 2 (USA) adds Winged
+Master and ActRaiser 2 development content.
+
+On first Play with a valid ActRaiser (USA) ROM selected, the Builder starts the
+local build and imports any supplied extras. In Big Screen, Play is focused
+when the build finishes. All Easy Setup fields can be skipped so an existing
+installation can use its saved ROM or build. You can also select files in the
+Builder.
+
 To bring over an existing installation in a different folder, use the Builder's
 [installation import](../README.md#4-update-or-import-an-existing-installation).
 RecompLauncher updates the Builder download. The Builder checks whether the
 locally generated game needs to be rebuilt the next time you open it.
+
+## Builder Big Screen
+
+Play from RecompLauncher’s Big Picture or SteamOS Gaming Mode opens the
+Builder in fullscreen Big Screen mode. SteamOS Desktop Mode opens the
+Workshop. Pass `--big-screen` to request Big Screen or `--big-screen=false`
+to request the Workshop. In Steam’s Launch Options, use
+`%command% --big-screen` to select Big Screen manually.
+
+Use the D-pad or left stick to move, the bottom face button to select, and
+the right face button to go back. Arrow keys, Enter and Escape also work.
+Press F8 or the controller’s Menu / Options button to switch between Big
+Screen and the desktop Workshop during the same session.
+Big Screen shows the button glyphs for the current controller. When present,
+RecompLauncher’s controller hint supplies the glyphs at startup.
+
+In Customize, you can switch title artwork, enable or disable installed
+language packs, and listen to installed music replacements and ROM previews.
+Use the desktop Workshop to add music files or import and edit languages.
+On first launch, use **Use suggested folder** to approve the Builder's
+suggested destination. **Browse ROMs** in Big Screen can select a file from
+your game folder, Downloads, home folder or mounted media. You can also
+use the system file picker with a keyboard or mouse.
+
+On a fresh install, **Choose US ROM** opens the ActRaiser (USA) entry and offers
+a discovered copy when available. Choose optional ROMs from the checklist.
+Both views check file-picker selections and show what needs attention before
+enabling Build.
+
+The **ROM checklist** is available on Home in both views and in **Build & play**
+in the desktop Workshop. It shows each ROM's purpose, files supplied by the
+launcher, files found beside the Builder or in the game folder, and imported
+content. Select a row to use a found file, browse for another one, or clear its
+selection. The desktop file picker can add or replace ROMs for the next build.
+**Clear chosen files** clears the file picker and keeps the checklist choices.
+If the game is already playable, use **Import selected extras** to add content
+without rebuilding.
+
+The build view shows progress and a live log side by side. Use LB / L1 and
+RB / R1 or Page Up and Page Down to scroll the log. Save build report writes
+a snapshot of the current phase, error and recent log to the game's `logs/`
+folder.
+The same buttons page through ROMs, music and language packs. Launch errors
+have a separate report action in the same view.
 
 ## Inspecting paths and troubleshooting
 

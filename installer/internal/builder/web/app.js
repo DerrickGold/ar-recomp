@@ -27,12 +27,33 @@ let assetRows=[...document.querySelectorAll(".asset-row")];
 const generatePreviews=document.querySelector("#generate-previews"), previewState=document.querySelector("#preview-state");
 const regeneratePreviews=document.querySelector("#regenerate-previews");
 let polling=false;
+let statusRequestID=0, statusTimer;
 let assetsLoaded=false;
 let previewPolling=false, previewTimer=0;
 const homePrimary=document.querySelector("#home-primary"), workspaceStatus=document.querySelector("#workspace-status");
 let canLaunch=false, closed=false, launching=false;
 let savedROM="", buildSubmitting=false, latestModeData=null;
+let selectedROM="", hasSelectedROMs=false, firstBuildAttempted=false;
+let uploadCheck={};
 const romInput=document.querySelector("#rom"), savedROMNote=document.querySelector("#saved-rom-note");
+const romLabel=document.querySelector("#rom-label"), clearROMUpload=document.querySelector("#clear-rom-upload");
+const romBuildHint=document.querySelector("#rom-build-hint"), bigROMHelp=document.querySelector("#big-rom-help");
+const romChecklistSection=document.querySelector("#rom-checklist");
+const homeROMChecklist=document.querySelector("#home-rom-checklist"), buildROMChecklist=document.querySelector("#build-rom-checklist");
+const startBigScreen=document.body.dataset.bigScreen==="true";
+let bigScreen=false;
+const playSession=document.body.dataset.playSession==="true";
+const bigActions=document.querySelector("#big-screen-actions"), bigRebuild=document.querySelector("#big-screen-rebuild");
+const bigROM=document.querySelector("#big-screen-rom"), bigExit=document.querySelector("#big-screen-exit");
+const bigProgress=document.querySelector("#big-screen-progress");
+const bigCustomizeOpen=document.querySelector("#big-screen-customize-open");
+const bigMenu=document.querySelector("#big-screen-menu");
+const bigBuild=document.querySelector("#big-screen-build"), bigBuildPhase=document.querySelector("#big-build-phase");
+const bigBuildBack=document.querySelector("#big-build-back"), bigReport=document.querySelector("#big-build-report");
+const bigReportStatus=document.querySelector("#big-build-report-status");
+const bigLaunchDetails=document.querySelector("#big-launch-details");
+let bigROMOpen=false, closing=false;
+let bigBuildError="", bigBuildDismissed=false, savingReport=false;
 let lastPaint=null;
 let activeTab=document.querySelector("#tab-home");
 const scrollPositions=new Map();
@@ -43,8 +64,10 @@ const scrollPositions=new Map();
  * manual is installed, so a user who never opens the manual never pays for it,
  * and one with no manual never requests a 404. */
 function selectTab(tab,{history=true,focus=true,activate=true}={}){
-  if(!tab||tab.disabled||closed) return false;
+  if(bigScreen||!tab||tab.disabled||closed) return false;
   if(activeTab!==tab) scrollPositions.set(activeTab.id,window.scrollY);
+  const checklistHost=tab===buildTab?buildROMChecklist:homeROMChecklist;
+  if(romChecklistSection.parentNode!==checklistHost) checklistHost.append(romChecklistSection);
   if(activate&&tab.id==="tab-localization") window.localizationActivate?.();
   for(const t of tabs){
     const on=t===tab;
@@ -80,6 +103,7 @@ window.workshopOpenLanguages = () => selectTab(languageTab,{activate:false});
 document.querySelectorAll("[data-nav]").forEach(button=>button.addEventListener("click",()=>selectTab(document.getElementById("tab-"+button.dataset.nav))));
 let routed=false;
 function route(){
+  if(bigScreen) return;
   const tab=tabs.find(t=>"#"+t.id.slice(4)===location.hash);
   // Ignore anchors such as the skip link; never treat the URL as a selector.
   if(tab || !location.hash){
@@ -116,15 +140,28 @@ function show(kind,text){
   workspaceStatus.dataset.kind=kind; workspaceStatus.textContent=text; workspaceStatus.title=text;
 }
 function showKey(kind,key,args={},error,operation="Check Builder status") {
-  show(kind,ui.text(key,args));
-  ui.set(state,key,args); ui.set(workspaceStatus,key,args);
+  const message=ui.text(key,args);
+  if(state.dataset.kind!==kind||state.dataset.i18n!==key||state.textContent!==message){
+    show(kind,message);
+    ui.set(state,key,args); ui.set(workspaceStatus,key,args);
+  }
   const feedback=window.workshopFeedback;
+  const buildFailure=operation==="Build game"||operation==="Start game build";
+  const launchFailure=operation==="Launch game";
   if(kind==="failed"){
-    const buildFailure=key==="builder.build.failed"||operation==="Build game";
-    feedback?.show(state,error||new Error(args.detail||ui.text(key,args)),{operation:buildFailure?"Build game":operation,log:buildFailure?log.textContent:"",retry:refresh});
+    if(bigScreen&&(buildFailure||launchFailure)) feedback?.clear(state);
+    else feedback?.show(state,error||new Error(args.detail||ui.text(key,args)),{operation:buildFailure?"Build game":operation,log:buildFailure?log.textContent:"",retry:refresh});
     if(feedback) ui.set(workspaceStatus,"builder.feedback.failed");
   }else feedback?.clear(state);
   const details=document.getElementById("dock-error");if(details)details.hidden=kind!=="failed";
+  if(kind==="failed"&&(buildFailure||launchFailure)){
+    bigBuildError=launchFailure?"launch":"build";
+    if(launchFailure){
+      bigLaunchDetails.textContent=error?.detail||args.detail||message;
+      bigLaunchDetails.scrollTop=0;
+    }
+    updateBigScreen();
+  }
 }
 document.getElementById("dock-error")?.addEventListener("click",()=>{selectTab(buildTab);state.scrollIntoView({block:"center"});state.focus();});
 document.addEventListener("workshop:language",()=>{
@@ -864,6 +901,89 @@ const slimDismiss=document.querySelector("#slim-dismiss");
 let slimDismissed=false, lastMode="", lastSceneBuildState="";
 
 const versionNotice=document.querySelector("#game-version-notice"), versionReview=document.querySelector("#game-version-rebuild");
+function coreROM(){ return uploadCheck.core||selectedROM||savedROM; }
+function romSetupKey(){
+  if(uploadCheck.checking) return "builder.roms.checking_files";
+  if(uploadCheck.invalid) return "builder.roms.fix_files";
+  return coreROM()?"builder.home.rom_ready":"builder.home.rom";
+}
+
+function updateBigScreen(){
+  if(!bigScreen) return;
+  const data=latestModeData, install=data?.install||{};
+  const building=buildSubmitting||data?.state==="building", playing=!!data?.playing;
+  const busy=closed||closing||building||playing||launching;
+  const review=uploadCheck.checking||uploadCheck.invalid;
+  const rebuild=install.build?.state==="rebuild"||install.build?.state==="unknown";
+  const buildPanel=!customize.isOpen()&&(building||bigBuildError&&!bigBuildDismissed);
+  const launchError=buildPanel&&bigBuildError==="launch";
+  bigBuild.hidden=!buildPanel;
+  document.body.dataset.bigBuild=String(buildPanel);
+  bigMenu.hidden=buildPanel||customize.isOpen();
+  bigBuildBack.disabled=building||closed;
+  ui.set(document.querySelector("#big-build-title"),launchError?"builder.big_screen.launch_failed":"builder.nav.build");
+  ui.set(document.querySelector("#big-build-log-title"),launchError?"builder.big_screen.launch_details":"builder.build.log");
+  ui.set(bigReport,launchError?"builder.big_screen.save_launch_report":"builder.big_screen.save_report");
+  log.hidden=!!launchError;
+  bigLaunchDetails.hidden=!launchError;
+  if(buildPanel){
+    const summary=document.querySelector("#big-build-summary");
+    if(state.parentNode!==summary) summary.append(state,bigProgress);
+  }else{
+    const status=document.querySelector("#big-screen-status");
+    if(state.parentNode!==status) status.prepend(state,bigProgress);
+  }
+  bigROM.hidden=!bigROMOpen||!install.canRebuild||building||playing;
+  homePrimary.hidden=!bigROM.hidden||data?.mode==="unusable";
+  homePrimary.disabled=busy||(!canLaunch&&!install.canRebuild);
+  ui.set(homePrimary,building?"builder.home.building":canLaunch?"builder.home.play":
+    review?"builder.roms.review":coreROM()?"builder.home.build":install.canRebuild?"builder.big_screen.choose_rom":"builder.home.checking");
+  bigROMHelp.hidden=!!review;
+  bigRebuild.hidden=!bigROM.hidden||!install.canRebuild||!install.canLaunch||!rebuild||building;
+  bigRebuild.disabled=busy;
+  bigExit.disabled=busy;
+  bigCustomizeOpen.hidden=!bigROM.hidden;
+  bigCustomizeOpen.disabled=busy;
+  ui.set(bigExit,!bigROM.hidden?"common.back":playSession?"builder.big_screen.library":"builder.close");
+  bigProgress.hidden=!building;
+  if(launchError) bigBuildPhase.hidden=true;
+  if(customize.isOpen()||document.querySelector("dialog[open]")) return;
+  const focused=document.activeElement;
+  if(!data&&state.dataset.kind!=="failed") return;
+  if(focused===document.body||focused.disabled||!focused.getClientRects().length){
+    const next=(buildPanel?[bigReport,bigBuildBack,state]:[bigROM.hidden?null:document.querySelector("#big-rom-browse"),homePrimary,bigCustomizeOpen,bigExit,state])
+      .find(node=>node&&!node.disabled&&node.getClientRects().length);
+    next?.focus({preventScroll:true});
+  }else if(focused===state&&!busy&&!homePrimary.disabled){
+    homePrimary.focus({preventScroll:true});
+  }
+}
+
+function openBigROM(){
+  bigROMOpen=true;
+  updateBigScreen();
+  document.querySelector("#big-rom-browse").focus();
+  romChecklist.chooseCore();
+}
+
+function syncROMSelection(){
+  const selected=coreROM();
+  const state=latestModeData;
+  const busy=closed||closing||launching||buildSubmitting||state?.playing||state?.state==="building";
+  romChecklist.availability(!!state?.install?.canLaunch,!!busy);
+  romInput.required=!(selectedROM||savedROM);
+  clearROMUpload.disabled=romInput.disabled=!!busy;
+  clearROMUpload.hidden=!romInput.files.length;
+  build.disabled=!!busy||!!uploadCheck.checking||!!uploadCheck.invalid||!selected;
+  ui.set(romLabel,selected?"builder.build.extra_rom_label":"builder.build.rom_label");
+  savedROMNote.hidden=!selected;
+  ui.set(savedROMNote,uploadCheck.core||selectedROM?"builder.build.browser_rom":"builder.build.saved_rom",{path:selected});
+  const hint=uploadCheck.checking?"builder.roms.checking_files":uploadCheck.invalid?"builder.roms.fix_files":
+    !selected&&!bigScreen?"builder.home.rom":"";
+  romBuildHint.hidden=!hint;
+  if(hint) ui.set(romBuildHint,hint);
+}
+
 function applyBuildFreshness(install,building){
   const info=install.build||{}, state=info.state||"unknown";
   const recommended=state==="rebuild"||state==="unknown";
@@ -893,10 +1013,9 @@ function applyMode(data){
      is only so the button does not sit there inviting the click. */
   const building=(data.state==="building"), playing=!!data.playing;
   savedROM=typeof data.rebuildROM==="string"?data.rebuildROM:"";
-  romInput.required=!savedROM;
-  romInput.disabled=closed||building;
-  savedROMNote.hidden=!savedROM;
-  ui.set(savedROMNote,"builder.build.saved_rom",{path:savedROM});
+  selectedROM=typeof data.selectedROM==="string"?data.selectedROM:"";
+  hasSelectedROMs=!!data.hasSelectedROMs;
+  syncROMSelection();
   ui.set(build,install.canLaunch?"builder.build.rebuild_game":"builder.nav.build_game");
   applyBuildFreshness(install,building);
   playBox.hidden=!install.canLaunch||building;
@@ -926,9 +1045,15 @@ function applyMode(data){
   canLaunch=!!install.canLaunch&&!building;
   homePrimary.disabled=closed||building||playing||launching||(!canLaunch&&!install.canRebuild);
   ui.set(homePrimary,building?"builder.home.building":canLaunch?"builder.home.play":"builder.home.build");
-  ui.set(document.querySelector("#home-game-note"),building?"builder.home.while_building":canLaunch?(install.build?.state==="current"?"builder.version.current":"builder.home.ready"):install.canRebuild?"builder.home.rom":"builder.home.unusable");
+  ui.set(document.querySelector("#home-game-note"),building?"builder.home.while_building":
+    canLaunch?(install.build?.state==="current"?"builder.version.current":"builder.home.ready"):
+    install.canRebuild?romSetupKey():"builder.home.unusable");
+  if(bigScreen&&data.state==="idle"&&!canLaunch&&install.canRebuild&&state.dataset.kind==="idle"){
+    showKey("idle",romSetupKey());
+  }
   ui.set(document.querySelector("#build-nav-label"),canLaunch?"builder.nav.build":"builder.nav.build_game");
   lastMode=mode;
+  updateBigScreen();
 }
 
 /* The phase list and percentage come from the server (builder/progress.go), so
@@ -948,6 +1073,11 @@ function paint(progress,kind){
   dock.title=[ui.text("builder.phase."+progress.phaseId,{},progress.phaseLabel),progress.unitsTotal?ui.text("builder.build.units",{done:ui.number(progress.units),total:ui.number(progress.unitsTotal)}):""].filter(Boolean).join(" · ");
   dockPct.textContent=ui.number(percent)+"%";
   track.setAttribute("aria-valuenow",percent);
+  if(bigScreen) bigProgress.value=percent;
+  if(bigScreen){
+    bigBuildPhase.hidden=false;
+    ui.set(bigBuildPhase,"builder.big_screen.build_phase",{phase:dock.title,percent});
+  }
 }
 
 /* A finished build must be unmissable without hijacking the reader's tab: the
@@ -1069,10 +1199,17 @@ async function responseJSON(response){
 
 async function refresh(){
   if(closed) return;
+  const requestID=++statusRequestID;
+  clearTimeout(statusTimer);
   try {
     const data=await responseJSON(await fetchResponse("status",{cache:"no-store"}));
-    if(closed) return;
-    if(data.log){ ui.unbind(log); log.textContent=data.log; log.scrollTop=log.scrollHeight; }
+    if(closed||requestID!==statusRequestID) return;
+    if(data.log&&log.textContent!==data.log){
+      const follow=!bigScreen||log.scrollHeight-log.scrollTop-log.clientHeight<24;
+      ui.unbind(log);
+      log.textContent=data.log;
+      if(follow) log.scrollTop=log.scrollHeight;
+    }
     applyMode(data);
     applyLocalizationAvailability(data);
     paint(data.progress,data.state);
@@ -1083,15 +1220,22 @@ async function refresh(){
       dock.dataset.kind="building"; dock.dataset.open="true";
     }
     if(data.state==="succeeded"){
+      bigBuildError="";
+      if(polling) romChecklist.load();
+      if(bigROMOpen){
+        bigROMOpen=false;
+      }
+      updateBigScreen();
       showKey("succeeded","builder.build.complete");
-      build.disabled=false; launch.disabled=false; polling=false;
+      launch.disabled=false; polling=false;
       dockPct.textContent="100%";
       announce("succeeded");
     }
     if(data.state==="failed"){
+      if(polling) romChecklist.load();
       const error=data.errorCode&&window.workshopFeedback?.responseError(data);
       showKey("failed",error?.uiKey||"builder.build.failed",error?.uiArgs||{detail:data.error||""},error,"Build game");
-      build.disabled=false; launch.disabled=true; polling=false;
+      launch.disabled=true; polling=false;
       logBox.open=true;  /* a failure is the one time the log matters unprompted */
       announce("failed");
     }
@@ -1101,23 +1245,49 @@ async function refresh(){
        * need. */
       const install=data.install||{};
       if(data.mode==="launcher") showKey("idle","builder.build.ready");
-      else if(install.canLaunch){ showKey("idle","builder.build.ready_or_rebuild"); launch.disabled=false; }
-      else if(install.canRebuild) showKey("idle","builder.build.ready_to_build");
+      else if(install.canLaunch){
+        const ready=bigScreen
+          ? (bigRebuild.hidden?"builder.build.ready":"builder.version.recommended")
+          : "builder.build.ready_or_rebuild";
+        showKey("idle",ready);
+        launch.disabled=false;
+      }
+      else if(install.canRebuild) showKey("idle",bigScreen||coreROM()?romSetupKey():"builder.build.ready_to_build");
+      if(!firstBuildAttempted&&data.buildOnFirstRun&&selectedROM&&!savedROM&&
+          !romInput.files.length&&install.canRebuild&&!install.canLaunch&&!data.playing){
+        firstBuildAttempted=true;
+        void startGameBuild(false,true);
+      }
     }
-  } catch(error) { showKey("failed","builder.request_failed",{detail:error.message},error); polling=false; announce("failed"); }
-  if(polling) setTimeout(refresh,500);
+  } catch(error) {
+    if(closed||requestID!==statusRequestID) return;
+    showKey("failed","builder.request_failed",{detail:error.message},error);
+    polling=false; announce("failed"); updateBigScreen();
+  }
+  if(polling&&requestID===statusRequestID) statusTimer=setTimeout(refresh,500);
 }
 
-async function startGameBuild(reuseSaved=false){
-  if(closed||buildSubmitting||lastSceneBuildState==="building")return false;
-  if(!savedROM&&(reuseSaved||!romInput.files.length)){
-    selectTab(buildTab);romInput.focus();return false;
+async function startGameBuild(reuseSaved=false, firstRun=false){
+  if(closed||closing||launching||latestModeData?.playing||buildSubmitting||lastSceneBuildState==="building")return false;
+  const useFile=!reuseSaved&&!firstRun&&romInput.files.length;
+  if(useFile&&(uploadCheck.checking||uploadCheck.invalid))return false;
+  if(!(savedROM||selectedROM||(useFile&&uploadCheck.core))){
+    if(bigScreen) openBigROM();
+    else { selectTab(buildTab); romInput.focus(); }
+    return false;
   }
   const payload=new FormData(form);
-  if(reuseSaved||!romInput.files.length){payload.delete("rom");payload.set("reuseROM","true");}
+  if(!useFile) payload.delete("rom");
+  if(hasSelectedROMs) payload.set("useSelectedROMs","true");
+  if(reuseSaved||(!hasSelectedROMs&&!useFile)) payload.set("reuseROM","true");
+  if(firstRun) payload.set("firstRun","true");
+  bigBuildError="";
+  bigBuildDismissed=false;
+  bigReportStatus.hidden=true;
   buildSubmitting=true;
+  syncROMSelection();
   selectTab(buildTab);
-  build.disabled=true; launch.disabled=true; ui.unbind(log); log.textContent=ui.text("builder.build.preparing");
+  launch.disabled=true; ui.unbind(log); log.textContent=ui.text("builder.build.preparing");
   showKey("building","builder.build.starting");
   steps.forEach(step=>step.removeAttribute("data-state"));
   stepsBox.hidden=false;   /* only worth showing once there is progress to show */
@@ -1125,6 +1295,11 @@ async function startGameBuild(reuseSaved=false){
   dock.dataset.kind="building"; dock.dataset.open="true";
   ui.set(dockPhase,"builder.build.preparing_rom"); dockPct.textContent="…"; track.hidden=false; dockLaunch.hidden=true;
   track.removeAttribute("aria-valuenow");
+  if(bigScreen){
+    bigProgress.removeAttribute("value");
+    bigBuildPhase.hidden=true;
+    updateBigScreen();
+  }
   try {
     await responseJSON(await fetchResponse("build",{method:"POST",body:payload}));
     applyMode({...latestModeData,state:"building"});
@@ -1132,11 +1307,12 @@ async function startGameBuild(reuseSaved=false){
   }
   catch(error){
     showKey("failed","builder.request_failed",{detail:error.message},error,"Start game build");
-    build.disabled=false;announce("failed");
+    announce("failed");
     if(error.code==="builder.build.saved_rom_missing")applyMode({...latestModeData,rebuildROM:""});
+    if(error.code==="builder.build.launch_rom_invalid") romChecklist.load();
     return false; // Never silently retry a build after a network failure.
   }
-  finally {buildSubmitting=false;}
+  finally {buildSubmitting=false;syncROMSelection();updateBigScreen();}
 }
 form.addEventListener("submit",async event=>{
   event.preventDefault();
@@ -1160,10 +1336,15 @@ document.addEventListener("workshop:closed",()=>{if(pendingStalePlay)finishStale
 
 async function doLaunch(){
   if(closed||launching) return;
+  if(buildSubmitting||lastSceneBuildState==="building") return;
+  bigBuildError="";
+  bigBuildDismissed=false;
+  bigReportStatus.hidden=true;
   launching=true;
   const buttons=[homePrimary,playButton,launch,dockLaunch];
   const previous=buttons.map(button=>button.disabled);
   buttons.forEach(button=>button.disabled=true);
+  updateBigScreen();
   let launchStatus=null;
   try {
     // Recheck on the click: the game or Builder may have changed since the
@@ -1176,11 +1357,17 @@ async function doLaunch(){
     if(info.canLaunch&&state!=="current"&&state!=="unavailable"){
       document.querySelector("#stale-build-review").hidden=!info.canRebuild;
       ui.set(document.querySelector("#stale-build-review"),savedROM?"builder.version.rebuild_now":"builder.version.review");
-      const action=await new Promise(resolve=>{pendingStalePlay=resolve;staleBuildDialog.showModal();});
+      const action=await new Promise(resolve=>{
+        pendingStalePlay=resolve;
+        staleBuildDialog.showModal();
+        if(bigScreen&&info.canRebuild) document.querySelector("#stale-build-review").focus();
+      });
       if(action==="rebuild"){
+        launching=false;
         if(savedROM){
           await startGameBuild(true);
-        }else selectTab(buildTab);
+        }else if(bigScreen) openBigROM();
+        else selectTab(buildTab);
         return;
       }
       if(action!=="play"||closed)return;
@@ -1188,6 +1375,7 @@ async function doLaunch(){
     if(closed)return;
     showKey("idle","builder.build.launching");
     await responseJSON(await fetchResponse("launch",{method:"POST"}));
+    if(bigScreen&&playSession) applyMode({...latestModeData,playing:true});
     showKey("succeeded","builder.build.launched");
   }
   catch(error){ showKey("failed","builder.request_failed",{detail:error.message},error,"Launch game"); }
@@ -1197,13 +1385,25 @@ async function doLaunch(){
     if(!closed){
       if(launchStatus){const current=latestModeData||launchStatus;applyMode(current);launch.disabled=!current.install?.canLaunch||current.state==="building"||!!current.playing;}
       else buttons.forEach((button,i)=>button.disabled=previous[i]);
+      if(bigScreen&&bigROMOpen&&!bigROM.hidden) romInput.focus();
+      updateBigScreen();
     }
   }
 }
 launch.addEventListener("click",doLaunch);
 dockLaunch.addEventListener("click",doLaunch);
 playButton.addEventListener("click",doLaunch);
-homePrimary.addEventListener("click",()=>canLaunch?doLaunch():selectTab(buildTab));
+homePrimary.addEventListener("click",()=>{
+  if(canLaunch) doLaunch();
+  else if(!bigScreen) selectTab(buildTab);
+  else if(uploadCheck.checking||uploadCheck.invalid){
+    bigROMOpen=true;
+    updateBigScreen();
+    romInput.focus();
+  }
+  else if(coreROM()) startGameBuild();
+  else openBigROM();
+});
 
 slimDismiss.addEventListener("click",()=>{ slimDismissed=true; slimBox.hidden=true; });
 slimButton.addEventListener("click",async()=>{
@@ -1223,18 +1423,17 @@ slimButton.addEventListener("click",async()=>{
 /* First paint: ask the server what this copy can do before showing anything, so
  * a returning user never sees the build form flash past on the way to a
  * launcher. */
-refresh();
-route();
-// Also discover a source/build prepared in another window or by the CLI.
-window.addEventListener("focus",()=>{ if(!closed&&!polling) refresh(); });
-closeButton.addEventListener("click",async()=>{
+async function closeWorkshop(){
+  if(closed||closing) return;
   if(window.localizationHasEdits?.()||assetBar.dataset.dirty==="true"){
     if(!window.confirm(ui.text("builder.close_confirm"))) return;
   }
+  closing=true;
+  updateBigScreen();
   try {
     await responseJSON(await fetchResponse("close",{method:"POST"}));
     showKey("idle","builder.closed");
-    closed=true; polling=false; clearTimeout(previewTimer);
+    closed=true; polling=false; clearTimeout(previewTimer); clearTimeout(statusTimer);
     document.dispatchEvent(new Event("workshop:closed"));
     document.querySelectorAll("button,input,select,textarea").forEach(control=>control.disabled=true);
     assetForm.querySelectorAll("audio").forEach(audio=>audio.pause());
@@ -1243,5 +1442,161 @@ closeButton.addEventListener("click",async()=>{
     document.querySelector("#scene-motion").dispatchEvent(new Event("change"));
     dock.dataset.open="false";
   } catch(error){ showKey("failed","builder.request_failed",{detail:error.message},error,"Close Workshop"); }
+  finally { closing=false;updateBigScreen(); }
+}
+closeButton.addEventListener("click",closeWorkshop);
+const bigPanel=document.querySelector("#big-screen-panel"), homePanel=document.querySelector("#panel-home");
+const staleActions=staleBuildDialog.querySelector(".dialog-actions");
+const desktopSlots=[homePrimary,form,state,log].map(node=>[node,node.parentNode,node.nextSibling]);
+const desktopStaleOrder=[...staleActions.children];
+let desktopTab=tabs[0], switchingView=false;
+
+function setView(next, destination){
+  window.workshopFeedback?.clear(state);
+  if(next){
+    desktopTab=activeTab;
+    if(activeTab!==tabs[0]) selectTab(tabs[0],{history:false,focus:false,activate:false});
+    bigScreen=true;
+    document.body.dataset.bigScreen="true";
+    bigActions.prepend(homePrimary);
+    bigROM.append(form);
+    document.querySelector("#big-screen-status").prepend(state,bigProgress);
+    document.querySelector("#big-build-log").append(log);
+    log.dataset.bigScroll="";
+    homePanel.removeAttribute("role");
+    homePanel.setAttribute("aria-labelledby","big-screen-title");
+    staleActions.prepend(document.querySelector("#stale-build-review"));
+    staleActions.append(document.querySelector("#stale-build-cancel"));
+    bigPanel.hidden=false;
+    if(!latestModeData) ui.set(state,"builder.home.checking");
+    if(lastPaint) paint(lastPaint.progress,lastPaint.kind);
+    if(document.activeElement!==document.body) document.activeElement.blur();
+    window.scrollTo(0,0);
+    if(latestModeData) applyMode(latestModeData);
+    else updateBigScreen();
+  }else{
+    customize.close();
+    bigScreen=false;
+    document.body.dataset.bigScreen="false";
+    document.body.dataset.bigBuild="false";
+    bigPanel.hidden=true;
+    bigROMOpen=false;
+    for(const [node,parent,before] of desktopSlots) parent.insertBefore(node,before);
+    delete log.dataset.bigScroll;
+    log.hidden=false;
+    homePrimary.hidden=false;
+    staleActions.append(...desktopStaleOrder);
+    homePanel.setAttribute("role","tabpanel");
+    homePanel.setAttribute("aria-labelledby","tab-home");
+    if(latestModeData) applyMode(latestModeData);
+    const tab=destination==="music"?assetTab:destination==="languages"?languageTab:desktopTab;
+    selectTab(tab.disabled?tabs[0]:tab);
+    if(destination==="music") document.querySelector('[data-asset-category="music"]').click();
+  }
+}
+
+async function switchView(next, destination){
+  if(next===bigScreen||switchingView||closed||closing||launching||latestModeData?.playing||
+      customize.isBusy()||document.querySelector("dialog[open]")) return;
+  switchingView=true;
+  try {
+    const response=await fetchResponse("__shell/window-mode",{
+      method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bigScreen:next}),
+    });
+    // The browser-only Builder can still change layouts without a native window.
+    if(!response.ok&&response.status!==404) throw new Error(ui.text("builder.big_screen.switch_failed"));
+    if(!closed) setView(next,destination);
+  }catch(error){
+    showKey("failed","builder.request_failed",{detail:error.message},error,"Switch Builder view");
+  }finally { switchingView=false; }
+}
+
+const customize=window.workshopBigScreenCustomize(
+  async (...args)=>responseJSON(await fetchResponse(...args)),
+  destination=>switchView(false,destination),
+  ()=>{updateBigScreen();bigCustomizeOpen.focus();},
+);
+const openROMBrowser=window.workshopROMBrowser(
+  async (...args)=>responseJSON(await fetchResponse(...args)),
+  async selection=>responseJSON(await fetchResponse("rom-selection",{
+    method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(selection),
+  })),
+  async id=>{
+    await Promise.all([romChecklist.load(),refresh()]);
+    if(bigROMOpen&&id==="us"&&!build.disabled) build.focus();
+    else if(bigROMOpen) document.querySelector("#big-rom-browse").focus();
+    else document.getElementById("rom-slot-" + id)?.focus();
+  },
+);
+const romChecklist=window.workshopROMChecklist(
+  async (...args)=>responseJSON(await fetchResponse(...args)),
+  openROMBrowser,
+  async()=>{document.dispatchEvent(new Event("workshop:content-imported"));await refresh();},
+  check=>{
+    uploadCheck=check;
+    if(latestModeData) applyMode(latestModeData);
+    else syncROMSelection();
+    if(bigScreen&&!build.disabled&&document.activeElement===romInput) build.focus();
+  },
+);
+document.querySelector("#big-rom-browse").addEventListener("click",()=>romChecklist.chooseCore());
+bigCustomizeOpen.addEventListener("click",customize.open);
+document.querySelector("#open-big-screen").addEventListener("click",()=>switchView(true));
+document.querySelector("#big-screen-desktop").addEventListener("click",()=>switchView(false));
+bigRebuild.addEventListener("click",()=>savedROM?startGameBuild(true):openBigROM());
+romInput.addEventListener("change",()=>{
+  void romChecklist.inspect(romInput.files);
+});
+clearROMUpload.addEventListener("click",()=>{
+  romInput.value="";
+  romInput.dispatchEvent(new Event("change"));
+  romInput.focus();
+});
+function backBigScreen(){
+  if(customize.isOpen()) customize.back();
+  else if(!bigBuild.hidden){
+    if(bigBuildBack.disabled) return;
+    bigBuildDismissed=true;
+    updateBigScreen();
+  }else if(bigROMOpen&&!bigROM.hidden){
+    bigROMOpen=false;
+    updateBigScreen();
+    homePrimary.focus();
+  }else if(!bigExit.disabled) closeWorkshop();
+}
+bigExit.addEventListener("click",backBigScreen);
+bigBuildBack.addEventListener("click",backBigScreen);
+bigReport.addEventListener("click",async()=>{
+  if(savingReport||closed) return;
+  savingReport=true;
+  bigReportStatus.hidden=false;
+  ui.set(bigReportStatus,"builder.big_screen.saving_report");
+  try {
+    const result=await responseJSON(await fetchResponse("build-report",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({operation:bigBuildError==="launch"?"launch":"build",
+        message:(bigBuildError==="launch"?bigLaunchDetails:state).textContent.slice(0,4096)}),
+    }));
+    ui.set(bigReportStatus,"builder.big_screen.report_saved",{path:result.path});
+  }catch(error){
+    ui.set(bigReportStatus,"builder.request_failed",{detail:error.message});
+  }finally { savingReport=false; }
+});
+window.workshopBigScreenNavigation(bigPanel,backBigScreen,{
+  navigationRoot:homePanel,
+  isActive:()=>bigScreen,
+  toggleView:()=>switchView(!bigScreen),
+});
+if(startBigScreen) setView(true);
+syncROMSelection();
+romChecklist.load();
+refresh();
+route();
+// Also discover a source/build prepared in another window or by the CLI.
+window.addEventListener("focus",()=>{
+  if(!closed&&!polling&&!launching) {
+    romChecklist.load();
+    refresh();
+  }
 });
 })();

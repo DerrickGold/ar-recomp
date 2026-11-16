@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/host"
@@ -20,6 +21,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -36,6 +38,21 @@ func main() {
 	}
 }
 
+func defaultBigScreen(platform string, getenv func(string) string) bool {
+	if getenv("RECOMPLAUNCHER_MODE") == "bigpicture" {
+		return true
+	}
+	if platform != "linux" {
+		return false
+	}
+	// A nested Gamescope can set XDG_CURRENT_DESKTOP even in Desktop Mode.
+	// Prefer the login session when it is available.
+	if session := strings.ToLower(getenv("XDG_SESSION_DESKTOP")); session != "" {
+		return session == "gamescope" || strings.HasPrefix(session, "gamescope-")
+	}
+	return strings.EqualFold(getenv("XDG_CURRENT_DESKTOP"), "gamescope")
+}
+
 func runDesktop() error {
 	payload := flag.String("payload", "", "development-only: clean manifested installer tree")
 	workspace := flag.String("workspace", "", "dedicated writable workspace; default: sidecar or per-user app data")
@@ -44,6 +61,20 @@ func runDesktop() error {
 	jobs := flag.Int("jobs", 0, "build workers (0 uses builder default; use 1 on low-memory machines)")
 	verifyBundle := flag.Bool("verify-bundle", false, "fully verify bundled files instead of reusing unchanged-file checks")
 	playSession := flag.Bool("play-session", false, "return to the calling launcher when the game exits")
+	bigScreen := flag.Bool("big-screen", defaultBigScreen(runtime.GOOS, os.Getenv), "open the fullscreen controller interface")
+	var roms []string
+	flag.Func("rom", "preselect a ROM (repeat for additional supported ROMs)", func(rom string) error {
+		extension := strings.ToLower(filepath.Ext(rom))
+		if extension != ".sfc" && extension != ".smc" {
+			return nil
+		}
+		path, err := filepath.Abs(rom)
+		if err == nil {
+			roms = append(roms, path)
+		}
+		return err
+	})
+	firstBuild := flag.Bool("build-on-first-run", false, "build automatically when a ROM is supplied for a new installation")
 	flag.Parse()
 	developmentPayload := *payload != ""
 	if *jobs < 0 {
@@ -91,6 +122,8 @@ func runDesktop() error {
 		// It must not create the global build workspace before PrepareSession owns it.
 		Linux:   &linux.Options{ProgramName: host.Name + "WebView", WebviewGpuPolicy: linux.WebviewGpuPolicyOnDemand, Icon: appicons.Builder.PNG(256)},
 		Windows: winOptions,
+		Mac: &mac.Options{DisableEscapeExitsFullscreen: true,
+			Preferences: &mac.Preferences{EnableAutoplayWithoutUserAction: mac.Enabled}},
 		OnDomReady: func(appctx context.Context) {
 			splash.Handoff()
 			if ctx.Err() != nil {
@@ -99,6 +132,13 @@ func runDesktop() error {
 		},
 		// No frontend Go bindings, remote content, telemetry, or updater.
 		OnStartup: func(appctx context.Context) {
+			bridge.SetFullscreenHandler(func(fullscreen bool) {
+				if fullscreen {
+					wruntime.WindowFullscreen(appctx)
+				} else {
+					wruntime.WindowUnfullscreen(appctx)
+				}
+			})
 			go func() {
 				defer startup.Done()
 				if ctx.Err() != nil {
@@ -156,6 +196,7 @@ func runDesktop() error {
 				unlock = release
 				mu.Unlock()
 				selection := host.NewOutputSelection(artifact, work, *payload, container)
+				selection.SetBigScreen(*bigScreen)
 				selection.SetChooser(func() (string, error) {
 					return wruntime.OpenDirectoryDialog(appctx, wruntime.OpenDialogOptions{
 						Title: "Choose the exact ActRaiserRecomp game output folder", CanCreateDirectories: true})
@@ -170,7 +211,8 @@ func runDesktop() error {
 				for {
 					bridge.Progress("Starting the local Workshop… Game output: " + output)
 					b, err = host.StartBundledBackend(ctx, work, *payload, inputID, output, *jobs, host.BackendOptions{
-						ArtifactDirectory: filepath.Dir(artifact), PlaySession: *playSession,
+						ArtifactDirectory: filepath.Dir(artifact), PlaySession: *playSession, BigScreen: *bigScreen,
+						ROMs: roms, BuildOnFirstRun: *firstBuild,
 					})
 					if err == nil {
 						break
@@ -234,6 +276,9 @@ func runDesktop() error {
 				release()
 			}
 		},
+	}
+	if *bigScreen {
+		appOptions.WindowStartState = options.Fullscreen
 	}
 	enableSmokeTest(appOptions)
 	rendererURL, stopRenderer, err := host.StartRenderer(appOptions.AssetServer.Handler)

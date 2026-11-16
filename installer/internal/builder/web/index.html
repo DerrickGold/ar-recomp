@@ -6,6 +6,7 @@
 <meta name="workshop-version" content="{{BUILDER_VERSION}}">
 <title>{{TITLE}}</title>
 <link rel="stylesheet" href="builder/theme.css">
+<link rel="stylesheet" href="builder/big-screen.css">
 <link rel="stylesheet" href="builder/feedback.css">
 <script type="application/json" id="interface-catalog">{{UI_CATALOG}}</script>
 <script src="builder/i18n.js" defer></script>
@@ -13,7 +14,7 @@
 <script src="builder/file-input.js" defer></script>
 <script src="builder/project-links.js" defer></script>
 </head>
-<body>
+<body data-big-screen="{{BIG_SCREEN}}" data-play-session="{{PLAY_SESSION}}" data-controller-hint="{{CONTROLLER_HINT}}">
 <div id="workshop-atmosphere" aria-hidden="true"><canvas id="ambient-scene" width="640" height="420"></canvas></div>
 <a class="skip-link" href="#workspace" data-i18n="builder.nav.skip">Skip to workspace</a>
 <aside class="sidebar">
@@ -32,6 +33,7 @@
     <p id="project-link-status" role="status" hidden></p>
   </div>
   <div class="sidebar-bottom">
+    <button id="open-big-screen" class="quiet" type="button" aria-keyshortcuts="F8" data-i18n="builder.big_screen.open">Big Screen · F8</button>
     <div class="sidebar-tools"><button class="quiet" type="button" id="game-folder-open" hidden data-i18n="builder.output.change">Change game folder…</button>
     <button class="quiet" type="button" id="import-install-open" hidden data-i18n="builder.import.open">Import previous installation…</button></div>
     <label for="interface-language" data-i18n="interface.language">Interface language</label>
@@ -53,8 +55,90 @@
   </section>
   <section class="panel" id="panel-home" role="tabpanel" aria-labelledby="tab-home">
     <div class="home-hero">
-      <div class="hero-copy"><h1 data-i18n="builder.home.title">Shape the land.&#10;Make it yours.</h1><p class="lede" data-i18n="builder.home.intro">Build ActRaiser, give its people a new voice, and tune the adventure to your liking.</p><div class="actions"><button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button></div><p id="home-game-note" class="muted" data-i18n="builder.home.rom">Choose your US ActRaiser ROM to build the game.</p></div>
-      <div class="scene-stage"><canvas id="palace-scene" width="640" height="420" aria-label="A small illustrated palace floating above the clouds" data-i18n-aria="builder.scene.placeholder_aria"></canvas><span class="scene-caption" id="scene-caption" data-i18n="builder.scene.placeholder">A quiet moment above the clouds</span></div>
+      <div class="hero-copy">
+        <div id="workshop-home-copy"><h1 data-i18n="builder.home.title">Shape the land.&#10;Make it yours.</h1><p class="lede" data-i18n="builder.home.intro">Build ActRaiser, give its people a new voice, and tune the adventure to your liking.</p><div class="actions"><button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button></div><p id="home-game-note" class="muted" data-i18n="builder.home.rom">Choose your US ActRaiser ROM to build the game.</p></div>
+        <div id="big-screen-panel" hidden>
+          <p class="big-screen-brand"><span class="brand-sigil" aria-hidden="true">✦</span><span data-i18n="builder.brand.workshop">THE WORKSHOP</span></p>
+          <h1 id="big-screen-title">ActRaiser</h1>
+          <div id="big-screen-menu">
+          <div id="big-screen-actions">
+            <button id="big-screen-rebuild" class="secondary" type="button" hidden data-i18n="builder.build.rebuild_game">Rebuild game</button>
+            <div id="big-screen-rom" hidden>
+              <p id="big-rom-help" data-i18n="builder.big_screen.rom_picker">Choose your ActRaiser (USA) ROM. You can also use the system picker with a keyboard or mouse.</p>
+              <button class="secondary" id="big-rom-browse" type="button" data-i18n="builder.big_screen.browse_roms">Browse ROMs</button>
+            </div>
+            <button id="big-screen-customize-open" class="secondary" type="button" data-i18n="builder.big_screen.customize">Customize</button>
+            <button id="big-screen-desktop" class="quiet" type="button" aria-keyshortcuts="F8" data-i18n="builder.big_screen.desktop">Desktop Workshop</button>
+            <button id="big-screen-exit" class="quiet" type="button" data-i18n="builder.close">Close workshop</button>
+          </div>
+          <div id="big-screen-status">
+            <progress id="big-screen-progress" max="100" aria-label="Build progress" data-i18n-aria="builder.progress" hidden></progress>
+          </div>
+          </div>
+          <section id="big-screen-customize" aria-labelledby="big-customize-title" hidden>
+            <h2 id="big-customize-title" data-i18n="builder.big_screen.customize">Customize</h2>
+            <div class="big-screen-list" id="big-customize-menu">
+              <button class="secondary" type="button" data-big-page="title" data-i18n="builder.assets.title_art">Title artwork</button>
+              <button class="secondary" type="button" data-big-page="languages" data-i18n="builder.nav.languages">Languages</button>
+              <button class="secondary" type="button" data-big-page="music" data-i18n="builder.assets.music">Music</button>
+            </div>
+            <div id="big-customize-title-options" hidden>
+              <div class="big-screen-list" role="group" aria-label="Title artwork" data-i18n-aria="builder.assets.title_art">
+                <button class="secondary" type="button" data-big-title="original" aria-pressed="false" data-i18n="builder.big_screen.original_title">Original title</button>
+                <button class="secondary" type="button" data-big-title="en" aria-pressed="false" data-i18n="builder.big_screen.hd_title_en">HD title · English</button>
+                <button class="secondary" type="button" data-big-title="ja" aria-pressed="false" data-i18n="builder.big_screen.hd_title_ja">HD title · Japanese</button>
+              </div>
+              <img id="big-title-preview" width="2212" height="760" hidden
+                   alt="Preview of the included high-resolution ActRaiser title treatment" data-i18n-alt="builder.assets.title_preview">
+            </div>
+            <div id="big-customize-rows" class="big-screen-list big-screen-scroll" data-big-page-list hidden></div>
+            <p class="big-screen-feedback big-screen-prompt" id="big-customize-paging" hidden><span class="controller-glyph" role="img" data-pad-button="left" aria-label="Page Up">PgUp</span><span class="controller-glyph" role="img" data-pad-button="right" aria-label="Page Down">PgDn</span><span data-i18n="builder.big_screen.page_list">Page through the list</span></p>
+            <button class="secondary" id="big-music-extract" type="button" hidden data-i18n="builder.assets.extract_previews">Extract original-audio previews</button>
+            <audio id="big-music-player" preload="none"></audio>
+            <p class="big-screen-feedback" id="big-customize-status" role="status" tabindex="-1" hidden></p>
+            <p class="big-screen-feedback" id="big-customize-desktop-hint" hidden></p>
+            <div class="big-screen-footer">
+              <button class="quiet" id="big-customize-desktop" type="button" hidden data-i18n="builder.big_screen.desktop">Desktop Workshop</button>
+              <button class="quiet" id="big-customize-back" type="button" data-i18n="common.back">Back</button>
+            </div>
+          </section>
+          <section id="big-screen-build" aria-labelledby="big-build-title" hidden>
+            <div class="big-build-main">
+              <h2 id="big-build-title" data-i18n="builder.nav.build">Build &amp; play</h2>
+              <div id="big-build-summary"></div>
+              <p id="big-build-phase" class="muted" hidden></p>
+              <div class="big-screen-list">
+                <button id="big-build-report" class="secondary" type="button" data-i18n="builder.big_screen.save_report">Save build report</button>
+                <button id="big-build-back" class="quiet" type="button" data-i18n="common.back">Back</button>
+              </div>
+              <p id="big-build-report-status" role="status" hidden></p>
+            </div>
+            <div class="big-build-console">
+              <h3 id="big-build-log-title" data-i18n="builder.build.log">Build log</h3>
+              <div id="big-build-log"><pre id="big-launch-details" data-big-scroll hidden></pre></div>
+              <p class="big-build-log-hint big-screen-prompt"><span class="controller-glyph" role="img" data-pad-button="left" aria-label="Page Up">PgUp</span><span class="controller-glyph" role="img" data-pad-button="right" aria-label="Page Down">PgDn</span><span data-i18n="builder.big_screen.log_scroll">Scroll log</span></p>
+            </div>
+          </section>
+          <div class="big-screen-controls">
+            <span id="big-screen-move" data-i18n="builder.big_screen.move_keyboard">Arrow keys to move</span>
+            <span class="big-screen-prompt"><span class="controller-glyph" role="img" data-pad-button="confirm" aria-label="Enter">Enter</span><span data-i18n="builder.big_screen.select_action">Select</span></span>
+            <span class="big-screen-prompt"><span class="controller-glyph" role="img" data-pad-button="back" aria-label="Esc">Esc</span><span data-i18n="common.back">Back</span></span>
+          </div>
+          <p class="big-screen-mode-hint big-screen-prompt"><span class="controller-glyph" role="img" data-pad-button="menu" aria-label="Menu" hidden>☰</span><kbd class="controller-glyph">F8</kbd><span data-i18n="builder.big_screen.mode_shortcut">Switch views</span></p>
+        </div>
+      </div>
+      <div class="home-companion">
+        <div id="home-rom-checklist">
+          <section id="rom-checklist" aria-labelledby="rom-checklist-title">
+            <h2 id="rom-checklist-title" data-i18n="builder.roms.title">ROM checklist</h2>
+            <div id="rom-checklist-rows" data-big-page-list></div>
+            <button id="rom-import-selected" class="secondary" type="button" hidden data-i18n="builder.roms.import_selected">Import selected extras</button>
+            <p id="rom-checklist-unavailable" role="status" hidden></p>
+            <p id="rom-checklist-feedback" role="status" hidden></p>
+          </section>
+        </div>
+        <div class="scene-stage"><canvas id="palace-scene" width="640" height="420" aria-label="A small illustrated palace floating above the clouds" data-i18n-aria="builder.scene.placeholder_aria"></canvas><span class="scene-caption" id="scene-caption" data-i18n="builder.scene.placeholder">A quiet moment above the clouds</span></div>
+      </div>
     </div>
     <div class="section-heading"><h2 data-i18n="builder.home.customize">Choose your path</h2></div>
     <div class="home-actions">
@@ -67,11 +151,9 @@
   </section>
 
   <section class="panel" id="panel-build" role="tabpanel" aria-labelledby="tab-build" hidden>
-    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.build.eyebrow">FROM YOUR ROM TO THE REALM</p><h1 data-i18n="builder.nav.build">Build &amp; play</h1><p data-i18n="builder.build.intro">Select ActRaiser (USA). You can also select other ActRaiser regional ROMs to include their text, graphics and music.</p></div></div>
+    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.build.eyebrow">FROM YOUR ROM TO THE REALM</p><h1 data-i18n="builder.nav.build">Build &amp; play</h1><p data-i18n="builder.build.intro">ActRaiser (USA) supplies the core game. Review your ROMs before building.</p></div></div>
     <p class="notice" data-language-status data-i18n="builder.language.source_checking" role="status">Checking the native US language source…</p>
-    <!-- PLAY BLOCK. Shown whenever a built game is on disk, whether this
-         session built it or a previous one did. In launcher mode it is the only
-         thing here. -->
+    <!-- Show Play whenever a built game is on disk. -->
     <div id="play-box" hidden>
       <div class="play-head">
         <div>
@@ -101,16 +183,16 @@
       Build tools removed &mdash; this install is now just the game.
     </div>
 
-    <!-- BUILD BLOCK. Hidden entirely in launcher mode: with the inputs gone
-         there is nothing a ROM picker could accomplish, and a disabled control
-         invites the question "why?" without answering it. -->
+    <div id="build-rom-checklist"></div>
     <div id="build-box">
       <form id="build-form">
         <label for="rom" id="rom-label" data-i18n="builder.build.rom_label">Game ROMs (.sfc or .smc)</label>
         <input id="rom" name="rom" type="file" multiple accept=".sfc,.smc" required>
         <p id="saved-rom-note" class="muted" role="status" hidden></p>
+        <p id="rom-build-hint" class="muted" role="status" hidden></p>
         <div class="actions">
           <button id="build" type="submit" data-i18n="builder.nav.build_game">Build game</button>
+          <button id="clear-rom-upload" class="quiet" type="button" hidden data-i18n="builder.build.clear_files">Clear chosen files</button>
           <button id="launch" class="secondary" type="button" disabled data-i18n="builder.build.launch">Launch game</button>
         </div>
       </form>
@@ -257,6 +339,13 @@
   </section>
 </main>
 
+<dialog id="big-rom-dialog" aria-labelledby="big-rom-title">
+  <h2 id="big-rom-title" data-i18n="builder.big_screen.browse_roms">Browse ROMs</h2>
+  <p id="big-rom-location" tabindex="-1" role="status"></p>
+  <div id="big-rom-entries" class="big-screen-list big-screen-scroll" data-big-page-list></div>
+  <div class="dialog-actions"><button id="big-rom-back" class="quiet" type="button" data-i18n="common.back">Back</button></div>
+</dialog>
+
 <script src="builder/scene.js" type="module"></script>
 <dialog id="stale-build-dialog" aria-labelledby="stale-build-title" aria-describedby="stale-build-help">
   <h2 id="stale-build-title" data-i18n="builder.version.play_title">Play without rebuilding?</h2>
@@ -282,6 +371,10 @@
   <label class="import-confirm"><input type="checkbox" id="import-install-confirm"><span data-i18n="builder.import.confirm">Both games are closed, and I have saved my Workshop edits. Other open Workshop tabs must be reloaded after import.</span></label>
   <div class="dialog-actions"><button class="quiet" type="button" id="import-install-skip" data-i18n="builder.import.skip">Cancel</button><button type="button" id="import-install-apply" disabled data-i18n="builder.import.apply">Import into game output</button><button type="button" id="import-install-reload" hidden data-i18n="builder.import.reload">Reload Workshop</button></div>
 </dialog>
+<script src="builder/big-screen.js" defer></script>
+<script src="builder/big-screen-customize.js" defer></script>
+<script src="builder/rom-browser.js" defer></script>
+<script src="builder/rom-checklist.js" defer></script>
 <script src="builder/app.js" defer></script>
 <script src="builder/regional-media.js" defer></script>
 <script src="builder/game-imports.js" defer></script>

@@ -113,7 +113,9 @@ func TestInterfacePreferenceRejectsInvalidRequestsWithoutMutation(t *testing.T) 
 }
 
 func TestInterfaceBootstrapAndBindings(t *testing.T) {
-	app := newApplication(context.Background(), Options{ProjectRoot: t.TempDir(), Title: `{{UI_CATALOG}} <script>bad</script>`}, "tok")
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(), Title: `{{UI_CATALOG}} <script>bad</script>`, ControllerHint: "playstation",
+	}, "tok")
 	w := httptest.NewRecorder()
 	app.ServeHTTP(w, httptest.NewRequest("GET", "/tok/", nil))
 	if w.Code != 200 {
@@ -161,6 +163,9 @@ func TestInterfaceBootstrapAndBindings(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "&lt;script&gt;bad&lt;/script&gt;") {
 		t.Fatal("title is not escaped")
+	}
+	if !strings.Contains(w.Body.String(), `data-controller-hint="playstation"`) {
+		t.Fatal("missing launcher controller hint")
 	}
 	if strings.Index(w.Body.String(), `src="builder/i18n.js"`) > strings.Index(w.Body.String(), `src="localization/editor.js"`) {
 		t.Fatal("interface bootstrap must precede editor execution")
@@ -241,7 +246,7 @@ func TestBrowserInterfaceBindings(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, node, "--test", "testdata/i18n.test.mjs", "testdata/localization_ui.test.mjs", "testdata/localization_playback.test.mjs", "testdata/localization_styling.test.mjs").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, node, "--test", "testdata/i18n.test.mjs", "testdata/localization_ui.test.mjs", "testdata/localization_playback.test.mjs", "testdata/localization_styling.test.mjs", "testdata/big_screen.test.mjs").CombinedOutput(); err != nil {
 		t.Fatalf("interface JS: %v\n%s", err, out)
 	}
 }

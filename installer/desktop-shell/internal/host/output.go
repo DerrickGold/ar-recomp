@@ -50,6 +50,8 @@ type OutputSelection struct {
 	artifact, workspace               string
 	protected                         []string
 	candidate, current, next, warning string
+	suggested                         string
+	bigScreen                         bool
 	selected                          chan string
 	chooser                           func() (string, error)
 	choosing                          bool
@@ -62,6 +64,7 @@ func NewOutputSelection(artifact, workspace string, protected ...string) *Output
 }
 
 func (s *OutputSelection) SetChooser(choose func() (string, error)) { s.chooser = choose }
+func (s *OutputSelection) SetBigScreen(bigScreen bool)              { s.bigScreen = bigScreen }
 
 // Initial honors an explicit CLI destination for scripted builds. Interactive
 // launches only resume a remembered, recognized game folder; missing/invalid
@@ -83,7 +86,8 @@ func (s *OutputSelection) Initial(ctx context.Context, override string) (string,
 		s.mu.Unlock()
 		return review.Directory, nil
 	}
-	s.candidate, _ = DefaultOutputDirectory(s.artifact, "")
+	s.suggested, _ = DefaultOutputDirectory(s.artifact, "")
+	s.candidate = s.suggested
 	if saved, create, err := s.readPreference(); err == nil {
 		s.candidate = saved
 		if review, err := s.review(saved); err == nil && (review.Game || create && !review.Existing) {
@@ -326,7 +330,7 @@ func outputJSON(w http.ResponseWriter, code int, value any) {
 func (s *OutputSelection) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if r.Method == "GET" && (r.URL.Path == "/__shell/output/feedback.js" || r.URL.Path == "/__shell/output/feedback.css") {
+	if r.Method == "GET" && (r.URL.Path == "/__shell/output/feedback.js" || r.URL.Path == "/__shell/output/feedback.css" || r.URL.Path == "/__shell/output/big-screen.js") {
 		name := strings.TrimPrefix(r.URL.Path, "/__shell/output/")
 		data, _ := workshopui.Assets.ReadFile(name)
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -349,7 +353,8 @@ func (s *OutputSelection) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" && r.URL.Path == "/__shell/output/state" {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		outputJSON(w, 200, map[string]any{"candidate": s.candidate, "current": s.current, "next": s.next, "warning": s.warning})
+		outputJSON(w, 200, map[string]any{"candidate": s.candidate, "current": s.current, "next": s.next, "warning": s.warning,
+			"suggested": s.suggested, "bigScreen": s.bigScreen})
 		return
 	}
 	if r.Method != "POST" {

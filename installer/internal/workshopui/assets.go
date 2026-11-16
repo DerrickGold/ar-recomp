@@ -4,5 +4,5 @@ package workshopui
 
 import "embed"
 
-//go:embed feedback.js feedback.css
+//go:embed feedback.js feedback.css big-screen.js
 var Assets embed.FS

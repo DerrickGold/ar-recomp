@@ -27,6 +27,9 @@ var tokenPath = regexp.MustCompile(`^/[0-9a-f]{36}/$`)
 type BackendOptions struct {
 	ArtifactDirectory string
 	PlaySession       bool
+	BigScreen         bool
+	ROMs              []string
+	BuildOnFirstRun   bool
 }
 
 type Backend struct {
@@ -81,6 +84,15 @@ func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outpu
 		}
 		if options[0].PlaySession {
 			b.command.Args = append(b.command.Args, "--play-session")
+		}
+		if options[0].BigScreen {
+			b.command.Args = append(b.command.Args, "--big-screen")
+		}
+		for _, path := range options[0].ROMs {
+			b.command.Args = append(b.command.Args, "--rom", path)
+		}
+		if len(options[0].ROMs) != 0 && options[0].BuildOnFirstRun {
+			b.command.Args = append(b.command.Args, "--build-on-first-run")
 		}
 	}
 	if jobs > 0 {
@@ -269,6 +281,7 @@ type Bridge struct {
 	failed      bool
 	rendererURL string
 	output      *OutputSelection
+	fullscreen  func(bool)
 }
 
 func (h *Bridge) SetOutputSelection(selection *OutputSelection) {
@@ -278,6 +291,12 @@ func (h *Bridge) SetOutputSelection(selection *OutputSelection) {
 }
 
 func (h *Bridge) SetRendererURL(address string) { h.mu.Lock(); h.rendererURL = address; h.mu.Unlock() }
+
+func (h *Bridge) SetFullscreenHandler(fullscreen func(bool)) {
+	h.mu.Lock()
+	h.fullscreen = fullscreen
+	h.mu.Unlock()
+}
 
 func (h *Bridge) Progress(message string) {
 	fmt.Fprintln(os.Stderr, "Builder startup:", message)
@@ -314,8 +333,33 @@ func (h *Bridge) Bootstrap(w http.ResponseWriter, r *http.Request) {
 
 func (h *Bridge) serveHTTP(w http.ResponseWriter, r *http.Request, allowProxy bool) {
 	h.mu.RLock()
-	proxy, message, failed, rendererURL, output := h.proxy, h.message, h.failed, h.rendererURL, h.output
+	proxy, message, failed, rendererURL, output, fullscreen := h.proxy, h.message, h.failed, h.rendererURL, h.output, h.fullscreen
 	h.mu.RUnlock()
+	if r.URL.Path == "/__shell/window-mode" {
+		if !allowProxy || proxy == nil || fullscreen == nil {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			w.WriteHeader(http.StatusUnsupportedMediaType)
+			return
+		}
+		var request struct {
+			BigScreen *bool `json:"bigScreen"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256)).Decode(&request); err != nil || request.BigScreen == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		fullscreen(*request.BigScreen)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if r.Method == "GET" && (r.URL.Path == "/__shell/feedback.js" || r.URL.Path == "/__shell/feedback.css") {
 		name := strings.TrimPrefix(r.URL.Path, "/__shell/")
 		data, _ := workshopui.Assets.ReadFile(name)

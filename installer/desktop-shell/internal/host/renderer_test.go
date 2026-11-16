@@ -10,6 +10,38 @@ import (
 	"time"
 )
 
+func TestWindowModeUsesPrivateRenderer(t *testing.T) {
+	bridge := &Bridge{}
+	backend, err := url.Parse("http://127.0.0.1:1/local-session/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge.Connect(backend)
+	var modes []bool
+	bridge.SetFullscreenHandler(func(fullscreen bool) { modes = append(modes, fullscreen) })
+	for _, test := range []struct {
+		handler http.HandlerFunc
+		body    string
+		code    int
+	}{
+		{bridge.Bootstrap, `{"bigScreen":true}`, http.StatusNotFound},
+		{bridge.ServeHTTP, `{}`, http.StatusBadRequest},
+		{bridge.ServeHTTP, `{"bigScreen":true}`, http.StatusNoContent},
+		{bridge.ServeHTTP, `{"bigScreen":false}`, http.StatusNoContent},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/__shell/window-mode", strings.NewReader(test.body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		test.handler(response, request)
+		if response.Code != test.code {
+			t.Fatalf("%s status = %d, want %d", test.body, response.Code, test.code)
+		}
+	}
+	if len(modes) != 2 || !modes[0] || modes[1] {
+		t.Fatalf("fullscreen requests = %v", modes)
+	}
+}
+
 func TestRendererRequiresPrivatePrefixAndPreservesHTTPBodies(t *testing.T) {
 	address, stop, err := StartRenderer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/upload" || r.Method != "POST" || r.URL.Query().Get("id") != "sample" {

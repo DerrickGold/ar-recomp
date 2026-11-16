@@ -3,7 +3,7 @@
   const fetchResponse = (...args) => window.workshopFeedback?.request ?
     window.workshopFeedback.request(...args) : fetch(...args);
   const $=id=>document.getElementById(id);
-  let plan=null, busy=false, saved=false, current="";
+  let plan=null, busy=false, saved=false, current="", suggested="", bigScreen=false, focusAfter;
   async function request(endpoint, body) {
     const response=await fetchResponse(endpoint,body===undefined?{cache:"no-store"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     if(window.workshopFeedback)return window.workshopFeedback.readJSON(response);
@@ -17,7 +17,7 @@
   async function run(action){
     if(busy||saved)return;busy=true;window.workshopFeedback?.clear($("status"));controls();$("status").textContent="Working…";
     try{await action();}catch(error){invalidate();$("status").textContent=error.message;window.workshopFeedback?.show($("status"),error,{operation:"Choose game folder"});}
-    finally{busy=false;controls();}
+    finally{busy=false;controls();if(focusAfter&&!saved)focusAfter.focus();focusAfter=null;}
   }
   $("directory").addEventListener("input",invalidate);
   $("confirm").addEventListener("change",controls);
@@ -25,8 +25,8 @@
     invalidate();const result=await request("choose",{});if(result.directory)$("directory").value=result.directory;
     $("status").textContent="Review the exact destination before continuing.";
   }));
-  $("folder-form").addEventListener("submit",event=>{event.preventDefault();return run(async()=>{
-    invalidate();plan=await request("review",{directory:$("directory").value});$("directory").value=plan.directory;
+  async function review(directory){
+    invalidate();plan=await request("review",{directory});$("directory").value=plan.directory;
     $("review-path").textContent=plan.directory;
     $("review-title").textContent=plan.game?"Existing game folder":plan.existing?"Non-empty destination":"New game folder";
     $("review-description").textContent=plan.game?"An existing ActRaiserRecomp installation was detected. The Workshop will use its settings, assets, ROM and saves directly; no import is needed. You can play or rebuild the game from there.":plan.existing?"This folder contains files but is not a recognized game installation. A dedicated game subfolder is recommended. Existing unrelated files will be left alone.":"This destination is empty or does not exist yet. The Builder will start a new portable game installation here. You can optionally import data from another folder later in the Workshop.";
@@ -34,16 +34,39 @@
     $("confirm-label").hidden=!plan.existing;$("review").hidden=false;
     $("apply").textContent=current?"Save for next launch":plan.game?"Open existing installation":"Use this game folder";
     $("status").textContent=current?"This session will keep using its current game folder. The new choice takes effect after you close and reopen the Builder.":"Ready to continue. No game files have been changed.";
-  });});
-  $("apply").addEventListener("click",()=>run(async()=>{
+    if(bigScreen)focusAfter=plan.existing?$("confirm"):$("apply");
+  }
+  async function apply(){
     const result=await request("apply",{revision:plan.revision,confirm:$("confirm").checked});saved=true;
     $("status").textContent=result.restartRequired?"Saved. Close this dialog, finish or save your work, then close and reopen the Builder to use: "+result.directory:"Starting the Workshop…";
     if(!result.restartRequired)location.replace("../../");
+  }
+  $("folder-form").addEventListener("submit",event=>{
+    event.preventDefault();return run(()=>review($("directory").value));
+  });
+  $("apply").addEventListener("click",()=>run(apply));
+  $("use-suggested").addEventListener("click",()=>run(async()=>{
+    focusAfter=$("use-suggested");
+    await review(suggested);
+    if(!plan.existing){focusAfter=$("use-suggested");await apply();}
   }));
   run(async()=>{
     const state=await request("state");current=state.current;$("directory").value=state.next||state.candidate||"";
     $("current").hidden=!current;$("current").textContent="Current game folder: "+current;
     if(current)$("intro").textContent="Choose a game folder for the next launch. Your current build, editor and files will keep using the folder shown below until you close and reopen the Builder. Changing folders does not copy data; use Import previous installation if needed.";
     $("status").textContent=state.warning||"";
+    bigScreen=!!state.bigScreen&&!current;
+    if(bigScreen){
+      document.body.dataset.bigScreen="true";
+      suggested=state.suggested;
+      $("suggested-folder").hidden=!suggested;
+      $("suggested-path").textContent=suggested;
+      focusAfter=suggested?$("use-suggested"):$("preview");
+      window.workshopBigScreenNavigation(document.body,()=>{
+        if(!plan||busy||saved)return;
+        invalidate();
+        (suggested?$("use-suggested"):$("preview")).focus();
+      });
+    }
   });
 })();

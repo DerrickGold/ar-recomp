@@ -9,12 +9,13 @@ class Node {
   addEventListener(name,fn){this.listeners[name]=fn;}
   async fire(name){await this.listeners[name]?.({preventDefault(){}});}
   replaceChildren(...nodes){this.children=nodes;}
+  focus(){this.focused=true;}
 }
-async function setup(current=""){
+async function setup(current="",bigScreen=false){
   const nodes=Object.fromEntries([...html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)].map(([,tag,id])=>[id,new Node(tag)]));
-  const requests=[],navigation=[];let response=(endpoint)=>({candidate:"/portable/Game",current});
-  const document={getElementById:id=>nodes[id],createElement:tag=>new Node(tag),querySelectorAll:()=>Object.values(nodes).filter(n=>["button","input"].includes(n.tag))};
-  runInNewContext(script,{window:{},document,location:{replace:path=>navigation.push(path)},fetch:async(endpoint,options)=>{
+  const requests=[],navigation=[];let response=(endpoint)=>({candidate:"/portable/Game",suggested:"/portable/Game",current,bigScreen});
+  const document={body:{dataset:{}},getElementById:id=>nodes[id],createElement:tag=>new Node(tag),querySelectorAll:()=>Object.values(nodes).filter(n=>["button","input"].includes(n.tag))};
+  runInNewContext(script,{window:{workshopBigScreenNavigation(){}},document,location:{replace:path=>navigation.push(path)},fetch:async(endpoint,options)=>{
     const body=options?.body?JSON.parse(options.body):undefined;requests.push({endpoint,body});
     const value=await response(endpoint,body);return {ok:!value.error,status:value.error?400:200,json:async()=>value};
   }});
@@ -31,6 +32,22 @@ test("first launch reviews a destination without accepting it or losing literal 
   assert.deepEqual(s.requests.map(r=>r.endpoint),["state","review"]);
   s.respond((endpoint,body)=>{assert.equal(endpoint,"apply");assert.equal(body.revision,"first");return {restartRequired:false};});
   await n.apply.fire("click");assert.deepEqual(s.navigation,["../../"]);
+});
+test("Big Screen offers and focuses the suggested folder while preserving existing-folder consent",async()=>{
+  const s=await setup("",true),n=s.nodes;
+  assert.equal(n["use-suggested"].focused,true);
+  s.respond(()=>({directory:"/portable/Game",revision:"existing",existing:true,game:true,entries:["saves"]}));
+  await n["use-suggested"].fire("click");
+  assert.deepEqual(s.requests.map(r=>r.endpoint),["state","review"]);
+  assert.equal(n.confirm.focused,true);
+  assert.equal(n.apply.disabled,true);
+
+  const empty=await setup("",true);
+  empty.respond(endpoint=>endpoint==="review"?{directory:"/portable/Game",revision:"empty",existing:false,entries:[]}:{restartRequired:false});
+  await empty.nodes["use-suggested"].fire("click");
+  assert.deepEqual(empty.requests.map(r=>r.endpoint),["state","review","apply"]);
+  assert.equal(empty.requests[2].body.revision,"empty");
+  assert.deepEqual(empty.navigation,["../../"]);
 });
 test("non-empty destinations require confirmation, invalidated by edits",async()=>{
   const s=await setup(),n=s.nodes;

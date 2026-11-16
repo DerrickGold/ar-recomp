@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/ar2game"
 	"github.com/DerrickGold/ar-recomp/installer/internal/ar2master"
+	"github.com/DerrickGold/ar-recomp/installer/internal/romset"
 )
 
 func TestLocalMultiROMBuildRequest(t *testing.T) {
@@ -35,9 +37,13 @@ func TestLocalMultiROMBuildRequest(t *testing.T) {
 			built <- err == nil && bytes.Equal(got, baseline) && ar2game.Status(root) == "installed" && ar2master.Status(root) == "installed"
 			return Result{}, nil
 		}}, "tok")
+	// The previous checklist source has gone away. The upload supplies the
+	// same release, so the build can continue using the new file.
+	app.romChoices[romset.SequelID] = romChoice{name: "removed.sfc", location: "game", path: "removed.sfc"}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	_ = writer.WriteField("reuseROM", "true") // Explicit selection still wins.
+	_ = writer.WriteField("useSelectedROMs", "true")
 	for _, name := range []string{"ar2.sfc", "ar.sfc"} {
 		data, err := os.ReadFile(filepath.Join(directory, name))
 		if err != nil {
@@ -61,6 +67,34 @@ func TestLocalMultiROMBuildRequest(t *testing.T) {
 	case valid := <-built:
 		if !valid {
 			t.Fatal("build started with wrong baseline or missing content")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("build did not start")
+	}
+}
+
+func TestExplicitRebuildUsesSavedROMDespiteChecklistSelection(t *testing.T) {
+	root := t.TempDir()
+	saved := filepath.Join(root, "user-rom.sfc")
+	if err := os.WriteFile(saved, []byte("saved build ROM"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	built := make(chan string, 1)
+	app := newApplication(context.Background(), Options{ProjectRoot: root,
+		Build: func(_ context.Context, path string, _ io.Writer) (Result, error) {
+			built <- path
+			return Result{}, nil
+		}}, "tok")
+	app.romChoices["us"] = romChoice{name: "removed.sfc", location: "game", path: "removed.sfc"}
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, buildROMRequest(t, map[string]string{"reuseROM": "true", "useSelectedROMs": "true"}))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, response = %s", w.Code, w.Body.String())
+	}
+	select {
+	case path := <-built:
+		if path != saved {
+			t.Fatalf("build path = %q, want %q", path, saved)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("build did not start")
