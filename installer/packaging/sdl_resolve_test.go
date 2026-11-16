@@ -1,6 +1,7 @@
 package packaging_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,60 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestDefaultLinuxSDLUsesPinnedPackages(t *testing.T) {
+	cmake := releaseCMake(t)
+	goexe, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("Go required")
+	}
+	packaging, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	module, err := filepath.Abs("../../snesrecomp-go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for _, arch := range []string{"amd64", "arm64"} {
+		t.Run(arch, func(t *testing.T) {
+			script := filepath.Join(dir, "check.cmake")
+			body := fmt.Sprintf(`cmake_minimum_required(VERSION 3.25)
+set(CMAKE_BINARY_DIR [[%s]])
+set(SNESBUILD_GOOS linux)
+set(SNESBUILD_GOARCH %s)
+set(SNESBUILD_SDL3_VERSION 3)
+set(SNESBUILD_SDL3_TTF_VERSION 3)
+set(GO_EXECUTABLE [[%s]])
+set(SNESBUILD_MODULE_DIR [[%s]])
+set(_go_cache [[%s]])
+include([[%s]])
+if(NOT _sdl_version STREQUAL "3.4.18" OR NOT _ttf_version STREQUAL "3.2.2")
+    message(FATAL_ERROR "unexpected Linux SDL versions")
+endif()
+`, filepath.ToSlash(dir), arch, filepath.ToSlash(goexe), filepath.ToSlash(module),
+				filepath.ToSlash(filepath.Join(dir, "go-cache")),
+				filepath.ToSlash(filepath.Join(packaging, "sdl-resolve.cmake")))
+			if err := os.WriteFile(script, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(cmake, "-P", script)
+			cmd.Env = append(os.Environ(), "HTTPS_PROXY=http://127.0.0.1:1", "NO_PROXY=")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			want, err := os.ReadFile("sdl-sdk-linux-" + arch + ".json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "sdl-sdk.lock.json"))
+			if err != nil || !bytes.Equal(got, want) {
+				t.Fatalf("generated SDK lock differs from the checked-in lock: %v", err)
+			}
+		})
+	}
+}
 
 // Exercise the actual CMake integration with offline lock input, without
 // downloading or extracting any SDK. This catches stale-cache regressions.

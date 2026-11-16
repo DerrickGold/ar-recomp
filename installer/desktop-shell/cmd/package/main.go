@@ -28,6 +28,7 @@ func run() error {
 	out := flag.String("output", "", "new .app, .AppDir, or .AppImage output path")
 	sdk := flag.String("linux-sdk", "", "Linux SDK root for host-independent AppImage packaging")
 	glibcMax := flag.String("glibc-max", "", "maximum glibc for the complete Linux artifact, including offline build tools/SDL")
+	profile := flag.String("recomplauncher-profile", "", "shared RecompLauncher profile to adapt and embed in the Linux artifact")
 	flag.Parse()
 	if *source == "" || *shell == "" || *out == "" {
 		return fmt.Errorf("--source, --shell and --output are required")
@@ -45,7 +46,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		return packageLinux(sourcePath, shellPath, outputPath, *sdk, *glibcMax)
+		return packageLinux(sourcePath, shellPath, outputPath, *sdk, *glibcMax, *profile)
 	}
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("use cmd/windows-package for Windows, or --linux-sdk for cross-host Linux packaging")

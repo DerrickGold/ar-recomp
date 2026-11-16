@@ -181,9 +181,10 @@ class RemoteReleaseTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         release = self.root / "release"
         names = {p.name for p in release.iterdir()}
-        self.assertEqual(len(names), 6)
+        self.assertEqual(len(names), 8)
         self.assertIn(f"ActRaiserRecompBuilder-{self.version}-macos-arm64-portable.zip", names)
-        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-arm64.tar.xz", names)
+        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-arm64.AppImage", names)
+        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-arm64-portable.tar.xz", names)
         for path in release.iterdir():
             if not path.name.endswith(".sha256"):
                 self.assertEqual(path.read_text(), "dirty source")
@@ -194,7 +195,7 @@ class RemoteReleaseTest(unittest.TestCase):
         (self.root / "edited.txt").write_text("next source")
         result = self.run_release()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual((release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.tar.xz").read_text(), "next source")
+        self.assertEqual((release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.AppImage").read_text(), "next source")
         self.assertEqual((release / "unrelated.txt").read_text(), "keep me")
 
     def test_legacy_keep_build_version_and_alias_matching_a_local_target(self):
@@ -208,7 +209,9 @@ class RemoteReleaseTest(unittest.TestCase):
         self.assertTrue(any(arg.startswith("-DSNESBUILD_VERSION=") and arg.endswith("-dirty")
                             for arg in command))
         self.assertTrue((self.root / "edited.txt").exists())
-        self.assertEqual(len(list((self.root / "release").iterdir())), 4)
+        release = self.root / "release"
+        self.assertEqual(len(list(release.iterdir())), 4)
+        self.assertTrue((release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.tar.xz").is_file())
 
     def test_explicit_versions_reach_git_free_workers_and_versioned_downloads(self):
         # Workers receive a source snapshot without Git metadata; their release
@@ -223,7 +226,8 @@ class RemoteReleaseTest(unittest.TestCase):
                 self.assertIn("Release " + version + ":", result.stdout)
                 artifacts = [f"ActRaiserRecompBuilder-{version}-windows-x64.exe",
                              f"ActRaiserRecompBuilder-{version}-windows-x64-portable.zip",
-                             f"ActRaiserRecompBuilder-{version}-linux-arm64.tar.xz"]
+                             f"ActRaiserRecompBuilder-{version}-linux-arm64.AppImage",
+                             f"ActRaiserRecompBuilder-{version}-linux-arm64-portable.tar.xz"]
                 names = artifacts + [name + ".sha256" for name in artifacts]
                 release_remote.verify_artifacts(release, names)
                 previous_names.update(names)
@@ -241,7 +245,7 @@ class RemoteReleaseTest(unittest.TestCase):
         result = self.run_release(host="localhost")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         names = {path.name for path in (self.root / "release").iterdir()}
-        self.assertIn("ActRaiserRecompBuilder-v0900-linux-arm64.tar.xz", names)
+        self.assertIn("ActRaiserRecompBuilder-v0900-linux-arm64.AppImage", names)
         self.assertIn("ActRaiserRecompBuilder-v0900-macos-arm64-portable.zip", names)
         self.assertTrue(all("-v0900-" in name and "dirty" not in name for name in names))
 
@@ -257,7 +261,7 @@ class RemoteReleaseTest(unittest.TestCase):
     def test_failed_build_and_bad_checksums_preserve_local_outputs(self):
         release = self.root / "release"
         release.mkdir()
-        old = release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.tar.xz"
+        old = release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.AppImage"
         old.write_text("previous release")
         for failure in ("FAIL_REMOTE_BUILD", "CORRUPT_REMOTE_CHECKSUM", "FAIL_HANDOFF"):
             result = self.run_release(**{failure: "1"})
@@ -456,7 +460,7 @@ class RemoteReleaseTest(unittest.TestCase):
         release.mkdir()
         old = release / f"ActRaiserRecompBuilder-{self.version}-macos-arm64.app.zip"
         old.write_text("previous release")
-        unsafe = release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.tar.xz"
+        unsafe = release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.AppImage"
         unsafe.symlink_to(self.root / "private.sfc")
         result = self.run_release()
         self.assertNotEqual(result.returncode, 0)
@@ -496,7 +500,7 @@ class RemoteReleaseTest(unittest.TestCase):
         (self.bin / "ssh").write_text("#!/bin/sh\nexit 87\n")
         result = self.run_release(host="localhost")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(len(list((self.root / "release").iterdir())), 6)
+        self.assertEqual(len(list((self.root / "release").iterdir())), 8)
         self.assertFalse(list(self.remote.glob("work-*")))
         self.assertTrue((self.remote / "downloads/retained.txt").exists())
         self.assertTrue((self.root / "fresh.txt").exists())
@@ -505,7 +509,7 @@ class RemoteReleaseTest(unittest.TestCase):
     def test_three_hosts_build_the_matrix_concurrently_without_duplicate_targets(self):
         barrier = Path(self.temporary.name) / "barrier"
         barrier.mkdir()
-        platforms = "macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck"
+        platforms = "macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64"
         hosts = ["first-box", "clean", "localhost"]
         result = self.run_release("PLATFORMS=" + platforms, hosts=hosts, MULTI_HOST="1",
                                   BUILD_BARRIER=str(barrier), BUILD_COUNT="3")
@@ -538,8 +542,19 @@ class RemoteReleaseTest(unittest.TestCase):
         self.assertTrue(versions[0].endswith("-dirty"))
         names = {p.name for p in (self.root / "release").iterdir()}
         self.assertEqual(len(names), 24)
-        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-steam-deck-portable.tar.xz", names)
+        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-x64.AppImage", names)
+        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-x64-portable.tar.xz", names)
         self.assertTrue((self.root / "edited.txt").exists())
+
+    def test_steam_deck_alias_returns_linux_x64_downloads(self):
+        result = self.run_release("PLATFORMS=steam-deck")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        release = self.root / "release"
+        base = f"ActRaiserRecompBuilder-{self.version}-linux-x64"
+        artifacts = [base + ".AppImage", base + "-portable.tar.xz"]
+        names = artifacts + [name + ".sha256" for name in artifacts]
+        self.assertCountEqual([path.name for path in release.iterdir()], names)
+        release_remote.verify_artifacts(release, names)
 
     def test_failed_host_stops_peers_preserves_outputs_and_keeps_host_diagnostics(self):
         barrier = Path(self.temporary.name) / "barrier"
@@ -575,6 +590,7 @@ class RemoteReleaseTest(unittest.TestCase):
         self.assertIn("[idle-box] Initial target: (idle; no targets assigned)", result.stdout)
         self.assertFalse(self.remote.exists())
         for options, hosts in ((["PLATFORMS=linux-arm64 linux-arm64"], ["first-box", "localhost"]),
+                               (["PLATFORMS=linux-x86_64 steam-deck"], ["first-box", "localhost"]),
                                ([], ["localhost", "localhost"]), ([], ["bad@alias"])):
             result = self.run_release(*options, hosts=hosts)
             self.assertNotEqual(result.returncode, 0)
@@ -588,7 +604,7 @@ class RemoteReleaseTest(unittest.TestCase):
     def test_idle_host_steals_all_queued_targets_while_slow_host_is_still_building(self):
         barrier = Path(self.temporary.name) / "barrier"
         barrier.mkdir()
-        platforms = "linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck"
+        platforms = "linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-arm64"
         result = self.run_release("PLATFORMS=" + platforms, "DESKTOP=0",
                                   hosts=["slow-box", "localhost"], MULTI_HOST="1",
                                   BUILD_BARRIER=str(barrier), BUILD_COUNT="2",

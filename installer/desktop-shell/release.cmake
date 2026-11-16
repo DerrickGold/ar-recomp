@@ -3,12 +3,8 @@
 # explicitly named direct and portable deliverables after one successful build.
 cmake_minimum_required(VERSION 3.25)
 include("${CMAKE_CURRENT_LIST_DIR}/portable-release.cmake")
-set(_platforms macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck)
-if(NOT BUILDER_PLATFORM IN_LIST _platforms)
+if(NOT BUILDER_PLATFORM IN_LIST BUILDER_SUPPORTED_PLATFORMS)
     message(FATAL_ERROR "Unknown BUILDER_PLATFORM: ${BUILDER_PLATFORM}")
-endif()
-if(BUILDER_PLATFORM STREQUAL "steam-deck")
-    message(STATUS "Steam Deck: building the glibc-2.35-audited desktop candidate; real-device acceptance is still required")
 endif()
 get_filename_component(_repo "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(_build "${_repo}/installer/packaging/build/${BUILDER_PLATFORM}")
@@ -36,7 +32,12 @@ endif()
 string(RANDOM LENGTH 12 ALPHABET abcdef0123456789 _suffix)
 set(_stage "${_build}/desktop-release-${_suffix}")
 file(MAKE_DIRECTORY "${_stage}" "${_release}")
-set(_app "${_stage}/ActRaiserRecompBuilder${_ext}")
+set(_app_directory "${_stage}")
+if(_kind STREQUAL "macos")
+    set(_app_directory "${_stage}/macos")
+    file(MAKE_DIRECTORY "${_app_directory}")
+endif()
+set(_app "${_app_directory}/ActRaiserRecompBuilder${_ext}")
 execute_process(COMMAND "${CMAKE_COMMAND}" "-DBUILDER_DIST_BUILD=${_build}"
     "-DBUILDER_OUTPUT=${_app}" "-DBUILDER_LINUX_CROSS=ON"
     -P "${CMAKE_CURRENT_LIST_DIR}/package-${_kind}.cmake" COMMAND_ERROR_IS_FATAL ANY)
@@ -66,8 +67,9 @@ foreach(_leaf "${_filename}" "${_filename}.sha256"
 endforeach()
 set(_artifact "${_app}")
 if(_kind STREQUAL "macos")
+    builder_stage_macos_launcher_profile("${_app}")
     set(_artifact "${_stage}/${_filename}")
-    execute_process(COMMAND "${_ditto}" -c -k --keepParent --sequesterRsrc "${_app}" "${_artifact}"
+    execute_process(COMMAND "${_ditto}" -c -k --sequesterRsrc "${_app_directory}" "${_artifact}"
         COMMAND_ERROR_IS_FATAL ANY)
 endif()
 builder_create_portable_release("${_kind}" "${BUILDER_PLATFORM}" "${_app}"

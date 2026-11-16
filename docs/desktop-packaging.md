@@ -59,13 +59,15 @@ Settings, saves and custom asset entries retain their existing preservation rule
 Use the Workshop's explicit import workflow to bring in another project's
 content while retaining the original.
 
-## RecompLauncher on Windows
+## RecompLauncher
 
-The Windows portable ZIP includes a RecompLauncher profile. Play opens the
-Builder, where you can build from your ROM, rebuild after an update, or run
-the existing game. The Builder waits while the game runs and returns its exit
-status when it closes. RecompLauncher uses the generated `ActRaiserRecomp`
-folder for saves and game logs.
+Use the Windows portable ZIP, Linux AppImage (including Steam Deck), or either
+macOS Builder ZIP on Apple Silicon. The Windows and macOS ZIPs ship
+`recomplauncher.json` beside the Builder, and Linux AppImages embed it. Play
+opens the Builder, where you can build from your ROM, rebuild after an update,
+or run the existing game. The Builder waits while the game runs and returns
+its exit status when it closes. RecompLauncher uses the generated
+`ActRaiserRecomp` folder for saves and game logs.
 
 Easy Setup accepts up to six local `.sfc` or `.smc` files. Select ActRaiser (USA)
 for the core game. The Japanese, European English, German, and French ROMs add
@@ -82,6 +84,13 @@ To bring over an existing installation in a different folder, use the Builder's
 [installation import](../README.md#4-update-or-import-an-existing-installation).
 RecompLauncher updates the Builder download. The Builder checks whether the
 locally generated game needs to be rebuilt the next time you open it.
+
+When started from RecompLauncher Big Picture, the game starts in borderless
+fullscreen. You can change **Window mode** in the game for that session. To
+always start windowed from RecompLauncher, save `--game-window-mode=windowed`
+in the game's **Launch options**. Use `--game-window-mode=saved` to use your
+saved game setting even in Big Picture. These launch options apply to the game
+window. The Builder still follows the launcher's Big Picture mode.
 
 ## Builder Big Screen
 
@@ -170,7 +179,7 @@ To force a complete integrity check, close the Builder and start it with
 
 ```sh
 ./ActRaiserRecompBuilder.app/Contents/MacOS/ActRaiserRecompBuilder --verify-bundle
-./ActRaiserRecompBuilder-v0900-steam-deck.AppImage --verify-bundle
+./ActRaiserRecompBuilder-v0900-linux-x64.AppImage --verify-bundle
 ```
 
 Use your download's actual filename. Successful checks refresh the cache;
@@ -290,10 +299,12 @@ Node.js lint tools, or the game test dependencies.
 
 Download names include the exact release tag, for example
 `ActRaiserRecompBuilder-v0900-windows-x64-portable.zip` and
-`ActRaiserRecompBuilder-v0900-linux-arm64.tar.xz`. The compact tag `v0900`
+`ActRaiserRecompBuilder-v0900-linux-arm64.AppImage`. The compact tag `v0900`
 represents version 0.9; `v1000` would represent 1.0. Starting at 1.0, use dotted
 tags such as `v1.0`. Both tag styles are preserved as written in filenames.
-Windows download names use `x64`; its build target remains `windows-x86_64`.
+Linux and Windows download names use `x64`. Build targets retain `linux-x86_64`
+and `windows-x86_64`. The old `release-steam-deck` target also produces the
+Linux x64 AppImage, which supports Steam Deck and desktop Linux.
 
 By default, packaging uses `git describe --tags --always --dirty`. A clean
 checkout at a tag uses that tag exactly; development builds retain the commit
@@ -308,14 +319,33 @@ make release-remote build-host RELEASE_VERSION=v1.0
 The selected version is used for filenames, checksums, and the bundled tools'
 version stamp. The executable inside a portable archive keeps its stable name.
 
+When the RecompLauncher catalog lists the versioned release, use these asset
+patterns so the launcher can select the player's architecture and follow later
+tags without a filename change in the catalog.
+
+| Catalog platform | Asset pattern |
+|---|---|
+| `windows` | `ActRaiserRecompBuilder*-windows-*-portable.zip` |
+| `linux` | `ActRaiserRecompBuilder-*-linux-*.AppImage` |
+| `macos` | `ActRaiserRecompBuilder*-macos-arm64-portable.zip` |
+
 For validation followed by packaging, set up the
 [local quality-check dependencies](../CONTRIBUTING.md#developer-checks) and use
 `make release-checked` or `make release-checked-windows-arm64`. These run
 `make check-release` (the ordinary checks plus optimized tests) first and stop
 if a check fails. `make check-release` also works independently.
 
-`make release DESKTOP=0` selects archive-only packaging. See the
+`make release DESKTOP=0` selects archive-only packaging. For the Linux
+browser-based Builder, use `make release-linux-x86_64 DESKTOP=0` or
+`make release-linux-arm64 DESKTOP=0`. These archives can coexist with the
+AppImages. The x64 AppImage is audited against glibc 2.35 and ARM64 against
+glibc 2.38. See the
 [Builder README](https://github.com/DerrickGold/ar-recomp/tree/main/installer) for building and running the CLI locally.
+
+Both Linux architectures pin SDL 3.4.18 and SDL_ttf 3.2.2. The release build
+reads the checked-in package URLs and checksums, so an upstream update cannot
+silently change the runtime. For an SDL upgrade, verify the x64 AppImage
+against the glibc 2.35 limit and test it on Steam Deck before updating the pins.
 
 Each download bundles the pinned Zig compiler with only the parts of its
 library that the platform's game builds read: the compiler's support code and

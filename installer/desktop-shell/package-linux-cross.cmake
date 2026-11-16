@@ -12,16 +12,11 @@ if(EXISTS "${BUILDER_OUTPUT}" OR IS_SYMLINK "${BUILDER_OUTPUT}")
 endif()
 file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _os REGEX "^SNESBUILD_GOOS:STRING=")
 file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _arch REGEX "^SNESBUILD_GOARCH:STRING=")
-file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _deck REGEX "^SNESBUILD_STEAM_DECK:BOOL=")
 if(NOT _os STREQUAL "SNESBUILD_GOOS:STRING=linux" OR
    NOT _arch MATCHES "^SNESBUILD_GOARCH:STRING=(amd64|arm64)$")
     message(FATAL_ERROR "Expected a configured linux/amd64 or linux/arm64 payload")
 endif()
 set(_arch "${CMAKE_MATCH_1}")
-set(_abi_options)
-if(_deck STREQUAL "SNESBUILD_STEAM_DECK:BOOL=ON")
-    set(_abi_options --glibc-max 2.35)
-endif()
 foreach(_tool go pkg-config xz zstd mksquashfs glib-compile-schemas update-mime-database)
     find_program(_program_${_tool} NAMES "${_tool}" REQUIRED)
 endforeach()
@@ -79,5 +74,6 @@ execute_process(COMMAND "${_go}" -C "${CMAKE_CURRENT_LIST_DIR}" run ./cmd/linux-
     COMMAND_ERROR_IS_FATAL ANY)
 execute_process(COMMAND "${_go}" -C "${CMAKE_CURRENT_LIST_DIR}" run ./cmd/package
     --source "${_stage}/payload" --shell "${_stage}/shell" --linux-sdk "${_sdk}"
-    --output "${BUILDER_OUTPUT}" ${_abi_options} COMMAND_ERROR_IS_FATAL ANY)
+    --output "${BUILDER_OUTPUT}" --recomplauncher-profile "${CMAKE_CURRENT_LIST_DIR}/recomplauncher.json"
+    COMMAND_ERROR_IS_FATAL ANY)
 message(STATUS "Cross-built Linux Builder artifact: ${BUILDER_OUTPUT}")

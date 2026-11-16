@@ -1,8 +1,14 @@
-# Resolve only while making installer archives. Players use the included SDK.
+# Freeze the Linux SDKs at the packages audited together for the AppImage releases.
+# An explicit lock or version selector still permits testing other SDKs.
+set(_sdl_input_lock "${SNESBUILD_SDL_LOCKFILE}")
+if(NOT _sdl_input_lock AND SNESBUILD_GOOS STREQUAL "linux" AND
+   SNESBUILD_SDL3_VERSION STREQUAL "3" AND SNESBUILD_SDL3_TTF_VERSION STREQUAL "3")
+    set(_sdl_input_lock "${CMAKE_CURRENT_LIST_DIR}/sdl-sdk-linux-${SNESBUILD_GOARCH}.json")
+endif()
 set(_sdl_args --goos ${SNESBUILD_GOOS} --goarch ${SNESBUILD_GOARCH}
     --sdl-version ${SNESBUILD_SDL3_VERSION} --ttf-version ${SNESBUILD_SDL3_TTF_VERSION})
-if(SNESBUILD_SDL_LOCKFILE)
-    list(APPEND _sdl_args --lock "${SNESBUILD_SDL_LOCKFILE}")
+if(_sdl_input_lock)
+    list(APPEND _sdl_args --lock "${_sdl_input_lock}")
 endif()
 execute_process(COMMAND ${CMAKE_COMMAND} -E env GOCACHE=${_go_cache}
     ${GO_EXECUTABLE} -C ${SNESBUILD_MODULE_DIR} run ./cmd/snesbuild sdl resolve ${_sdl_args}

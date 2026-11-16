@@ -28,13 +28,9 @@ project(actraiser-recomp-dist NONE)
 set(SNESBUILD_GOOS "" CACHE STRING "Target GOOS (darwin, linux, windows); empty = orchestrator")
 set(SNESBUILD_GOARCH "" CACHE STRING "Target GOARCH (arm64, amd64); empty = orchestrator")
 set(SNESBUILD_VERSION "" CACHE STRING "Release tag or development version; empty = git describe")
-set(SNESBUILD_SDL3_VERSION "3" CACHE STRING "SDL3: latest stable major 3, or exact 3.x.y")
-set(SNESBUILD_SDL3_TTF_VERSION "3" CACHE STRING "SDL3_ttf: latest stable major 3, or exact 3.x.y")
+set(SNESBUILD_SDL3_VERSION "3" CACHE STRING "SDL3: platform default (3), or exact 3.x.y")
+set(SNESBUILD_SDL3_TTF_VERSION "3" CACHE STRING "SDL3_ttf: platform default (3), or exact 3.x.y")
 set(SNESBUILD_SDL_LOCKFILE "" CACHE FILEPATH "Reuse a target-specific SDL SDK lock (no metadata lookup)")
-option(SNESBUILD_STEAM_DECK
-    "Build the standalone x86_64 Steam Deck bundle with Valve's SDL3 runtime"
-    OFF)
-
 include("${CMAKE_CURRENT_SOURCE_DIR}/release_policy.cmake")
 set(SNESBUILD_ALL_PRESETS "${BUILDER_ALL_PLATFORMS}")
 
@@ -57,20 +53,13 @@ if(NOT SNESBUILD_GOOS AND NOT SNESBUILD_GOARCH)
             "-DSNESBUILD_SDL3_TTF_VERSION=${SNESBUILD_SDL3_TTF_VERSION}"
             -DSNESBUILD_SDL_LOCKFILE=
             -P "${CMAKE_CURRENT_SOURCE_DIR}/release.cmake"
-        COMMENT "Building desktop Builders, portable companions, and generic Linux archives into release/"
+        COMMENT "Building Builder releases into release/"
         VERBATIM)
     return()
 elseif(NOT SNESBUILD_GOOS OR NOT SNESBUILD_GOARCH)
     message(FATAL_ERROR "Set both SNESBUILD_GOOS and SNESBUILD_GOARCH, or neither "
         "(neither = orchestrator; see the package-* presets).")
 endif()
-if(SNESBUILD_STEAM_DECK AND
-   (NOT SNESBUILD_GOOS STREQUAL "linux" OR
-    NOT SNESBUILD_GOARCH STREQUAL "amd64"))
-    message(FATAL_ERROR
-        "The Steam Deck package is always linux/amd64 (x86_64)")
-endif()
-
 # ── Single-platform bundle ───────────────────────────────────────────────────
 find_program(GO_EXECUTABLE go REQUIRED
     DOC "Go toolchain used to cross-compile the distribution binaries")
@@ -87,11 +76,6 @@ endif()
 set(_arch_name "${SNESBUILD_GOARCH}")
 if(_arch_name STREQUAL "amd64")
     set(_arch_name "x86_64")
-endif()
-set(_archive_platform_name "${_os_name}")
-if(SNESBUILD_STEAM_DECK)
-    set(_os_name "Steam Deck")
-    set(_archive_platform_name "steam-deck")
 endif()
 set(_exe_suffix "")
 if(SNESBUILD_GOOS STREQUAL "windows")
@@ -291,7 +275,6 @@ if(SNESBUILD_GOOS STREQUAL "darwin")
     set(SNESBUILD_SDL3_BUNDLED TRUE)
 elseif(SNESBUILD_GOOS STREQUAL "linux")
     include(${CMAKE_CURRENT_SOURCE_DIR}/sdl-linux.cmake)
-    # Generic x86_64 and Steam Deck share Valve's Sniper SDK.
     file(REMOVE_RECURSE "${_sdl_stage}")
     stage_linux_sdl(SDL3)
     stage_linux_sdl(SDL3_ttf)
@@ -368,9 +351,7 @@ set(SNESBUILD_OS_NAME "${_os_name}")
 set(SNESBUILD_ARCH_NAME "${_arch_name}")
 set(SNESBUILD_RUN_SCRIPT "${_run_script_name}")
 set(SNESBUILD_SDL_NOTE "- SDL3 ${_sdl_version} and SDL3_ttf ${_ttf_version} headers and libraries are included.")
-if(SNESBUILD_STEAM_DECK)
-    string(APPEND SNESBUILD_SDL_NOTE " The Steam Deck build uses SteamOS runtime dependencies.")
-elseif(SNESBUILD_GOOS STREQUAL "linux")
+if(SNESBUILD_GOOS STREQUAL "linux")
     string(JSON _sdl_dependencies GET "${_sdl_lock}" sdl dependencies)
     string(JSON _ttf_dependencies GET "${_sdl_lock}" ttf dependencies)
     string(APPEND SNESBUILD_SDL_NOTE
@@ -616,7 +597,7 @@ if(SNESBUILD_SDL3_BUNDLED)
         set(SNESBUILD_REQUIRED_SDL_RUNTIME utils/tools/sdl3/lib/SDL3.dll)
     elseif(SNESBUILD_GOOS STREQUAL "darwin")
         set(SNESBUILD_REQUIRED_SDL_RUNTIME utils/tools/sdl3/lib/libSDL3.dylib)
-    elseif(SNESBUILD_STEAM_DECK)
+    elseif(SNESBUILD_GOOS STREQUAL "linux")
         set(SNESBUILD_REQUIRED_SDL_RUNTIME utils/tools/sdl3/lib/libSDL3.so)
     endif()
 endif()
@@ -643,10 +624,7 @@ install(SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/write_build_identity.cmake")
 set(CPACK_PACKAGE_NAME "actraiser-recomp")
 set(CPACK_PACKAGE_VERSION "${SNESBUILD_VERSION}")
 # Use the same archive names as the release plan and remote publisher.
-set(_release_platform "${_archive_platform_name}-${_arch_name}")
-if(SNESBUILD_STEAM_DECK)
-    set(_release_platform "steam-deck")
-endif()
+set(_release_platform "${_os_name}-${_arch_name}")
 builder_release_layout("${_release_platform}" TRUE _release_kind _release_filename _release_retired)
 string(REGEX REPLACE "\\.(tar\\.xz|zip)$" "" CPACK_PACKAGE_FILE_NAME "${_release_filename}")
 set(CPACK_PACKAGE_DIRECTORY "${GAME_ROOT}/release")

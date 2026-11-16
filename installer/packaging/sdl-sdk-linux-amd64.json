@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "goos": "linux",
+  "goarch": "amd64",
+  "sdl": {
+    "version": "3.4.18",
+    "kind": "deb",
+    "archives": [
+      {
+        "url": "https://repo.steampowered.com/steamrt-sniper/pool/main/libs/libsdl3/libsdl3-dev_3.4.18+ds-1+steamrt3.1+bsrt3.1_amd64.deb",
+        "sha256": "0036d658efb9690a4c7f24687ccf4ee7b7ae8da57591d9135973588110eaaf5b",
+        "archive": "libsdl3-dev_3.4.18+ds-1+steamrt3.1+bsrt3.1_amd64.deb"
+      },
+      {
+        "url": "https://repo.steampowered.com/steamrt-sniper/pool/main/libs/libsdl3/libsdl3-0_3.4.18+ds-1+steamrt3.1+bsrt3.1_amd64.deb",
+        "sha256": "0f6a16b1f8f658f705a626fdf07742b169e22004390afcbaa29973c5175edcaf",
+        "archive": "libsdl3-0_3.4.18+ds-1+steamrt3.1+bsrt3.1_amd64.deb"
+      }
+    ],
+    "dependencies": "libasound2 (\u003e= 1.0.27), libc6 (\u003e= 2.29), libdecor-0-0 (\u003e= 0.2.0), libfribidi0 (\u003e= 0.19.2), libpulse0 (\u003e= 5.0), libwayland-client0 (\u003e= 1.17.93), libwayland-cursor0 (\u003e= 1.0.2), libwayland-egl1 (\u003e= 1.15.0), libx11-6 (\u003e= 2:1.2.99.901), libxcursor1 (\u003e\u003e 1.1.2), libxext6, libxfixes3 (\u003e= 1:5.0), libxi6 (\u003e= 2:1.6.99.1), libxkbcommon0 (\u003e= 1.0.0), libxrandr2 (\u003e= 2:1.2.99.3), libxss1, libxtst6"
+  },
+  "ttf": {
+    "version": "3.2.2",
+    "kind": "deb",
+    "archives": [
+      {
+        "url": "https://repo.steampowered.com/steamrt-sniper/pool/main/libs/libsdl3-ttf/libsdl3-ttf-dev_3.2.2+ds-1~steamrt3.1+bsrt3.1_amd64.deb",
+        "sha256": "2378625fc83e185cdb8101e81817ac8429dee162f08a9d261c4ac0aa4d44af0b",
+        "archive": "libsdl3-ttf-dev_3.2.2+ds-1~steamrt3.1+bsrt3.1_amd64.deb"
+      },
+      {
+        "url": "https://repo.steampowered.com/steamrt-sniper/pool/main/libs/libsdl3-ttf/libsdl3-ttf0_3.2.2+ds-1~steamrt3.1+bsrt3.1_amd64.deb",
+        "sha256": "32a0e683d254d3d4706cb80aa10bbf64ff29dbb347ce34fc41b42bd083fff4d9",
+        "archive": "libsdl3-ttf0_3.2.2+ds-1~steamrt3.1+bsrt3.1_amd64.deb"
+      }
+    ],
+    "dependencies": "libc6 (\u003e= 2.14), libfreetype6 (\u003e= 2.2.1), libharfbuzz0b (\u003e= 2.3.1), libsdl3-0 (\u003e= 3.2.6)"
+  }
+}

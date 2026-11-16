@@ -91,6 +91,7 @@ static int s_boot_display_rank;
 static int s_boot_widescreen_rank;
 static int s_boot_display_mode;
 static bool s_boot_display_from_environment;
+static int s_saved_window_mode = kWindowMode_Count;
 
 /* The framebuffer width is derived from the canonical ActRaiser display
  * geometry, so this module does not need host_display's g_snes_width. */
@@ -3813,6 +3814,7 @@ void Settings_InitWithFile(const char *path) {
   s_boot_widescreen_rank = 0;
   s_boot_display_mode = kDisplayMode_WideFull;
   s_boot_display_from_environment = false;
+  s_saved_window_mode = kWindowMode_Count;
 
   for (int i = 0; i < g_setting_desc_count; i++)
     SetSettingDefault(&g_setting_descs[i]);
@@ -3832,6 +3834,7 @@ void Settings_InitWithFile(const char *path) {
   }
 
   Settings_LoadInternal(path, true, 2, true);
+  const int saved_window_mode = g_settings.window_mode;
 
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
@@ -3839,6 +3842,15 @@ void Settings_InitWithFile(const char *path) {
     if (text)
       ApplyBootLayerValue(desc, text, 3,
                           Settings_UsesLegacyEnvironmentSyntax(desc));
+  }
+
+  const char *session_window_mode = getenv("AR_SESSION_WINDOW_MODE");
+  int window_mode;
+  if (session_window_mode && *session_window_mode &&
+      ParseEnumLayerValue(Settings_Find("window_mode"), session_window_mode,
+                          &window_mode)) {
+    s_saved_window_mode = saved_window_mode;
+    g_settings.window_mode = window_mode;
   }
 
   if (g_settings.localization_content != 0)
@@ -3966,7 +3978,10 @@ static bool SaveSettings(const char *path, bool deferred) {
     if (desc->field == &g_settings.display_mode &&
         g_settings.display_mode == kDisplayMode_Custom) continue;
     const struct HardwareSetting *hardware = HardwareSettingFor(desc);
-    if (hardware && hardware->suppressed)
+    /* A launcher override and any subsequent window-mode changes apply to this session. */
+    if (desc->field == &g_settings.window_mode && s_saved_window_mode != kWindowMode_Count)
+      snprintf(value, sizeof(value), "%s", kWindowModeLabels[s_saved_window_mode]);
+    else if (hardware && hardware->suppressed)
       snprintf(value, sizeof(value), "%s", hardware->requested ? "On" : "Off");
     else if (desc->serialize) desc->serialize(value, sizeof(value), desc->field);
     else Settings_FormatValue(desc, value, sizeof(value));

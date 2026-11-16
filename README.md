@@ -82,11 +82,12 @@ tag; these examples use `v0900`.
 |---|---|---|
 | macOS (Apple Silicon or Intel) | `ActRaiserRecompBuilder-v0900-macos-arm64-portable.zip` or `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder.app` |
 | Windows (x64 or ARM64) | `ActRaiserRecompBuilder-v0900-windows-x64-portable.zip` or `-windows-arm64-portable.zip` | `ActRaiserRecompBuilder.exe` |
-| Linux (x64 or ARM64) | `ActRaiserRecompBuilder-v0900-linux-x86_64.tar.xz` or `-linux-arm64.tar.xz` | `./run-build.sh` to open the Builder in a browser |
-| Steam Deck | `ActRaiserRecompBuilder-v0900-steam-deck-portable.tar.xz` | The Builder `.AppImage` in Desktop Mode |
+| Linux x64, including Steam Deck | `ActRaiserRecompBuilder-v0900-linux-x64.AppImage` | Open the AppImage. On Steam Deck, use Desktop Mode for a manual install. |
+| Linux ARM64 | `ActRaiserRecompBuilder-v0900-linux-arm64.AppImage` | Open the AppImage on a system with glibc 2.38 or newer. |
 
-Keep the portable Builder beside its `.portable` file. On first launch, the
-Builder may take a few minutes to check and prepare its tools.
+Older releases label the Linux x64 AppImage `steam-deck`. Keep the portable
+Builder beside its `.portable` file. On first launch, the Builder may take a
+few minutes to check and prepare its tools.
 
 <details>
 <summary>Troubleshoot Builder startup</summary>

@@ -62,6 +62,7 @@ func runDesktop() error {
 	verifyBundle := flag.Bool("verify-bundle", false, "fully verify bundled files instead of reusing unchanged-file checks")
 	playSession := flag.Bool("play-session", false, "return to the calling launcher when the game exits")
 	bigScreen := flag.Bool("big-screen", defaultBigScreen(runtime.GOOS, os.Getenv), "open the fullscreen controller interface")
+	gameWindowMode := flag.String("game-window-mode", "", "window mode for --play-session: saved, windowed, or borderless (default: follow RecompLauncher Big Picture)")
 	var roms []string
 	flag.Func("rom", "preselect a ROM (repeat for additional supported ROMs)", func(rom string) error {
 		extension := strings.ToLower(filepath.Ext(rom))
@@ -212,7 +213,7 @@ func runDesktop() error {
 					bridge.Progress("Starting the local Workshop… Game output: " + output)
 					b, err = host.StartBundledBackend(ctx, work, *payload, inputID, output, *jobs, host.BackendOptions{
 						ArtifactDirectory: filepath.Dir(artifact), PlaySession: *playSession, BigScreen: *bigScreen,
-						ROMs: roms, BuildOnFirstRun: *firstBuild,
+						GameWindowMode: *gameWindowMode, ROMs: roms, BuildOnFirstRun: *firstBuild,
 					})
 					if err == nil {
 						break

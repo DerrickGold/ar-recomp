@@ -381,7 +381,8 @@ def assign_targets(hosts, platforms):
     targets = [target for target in re.split(r"[;\s]+", platforms.strip()) if target]
     if not targets or any(not re.fullmatch(r"[a-z0-9_-]+", target) for target in targets):
         raise ValueError("Select at least one valid release target")
-    if len(set(targets)) != len(targets):
+    canonical = {"linux-x86_64" if target == "steam-deck" else target for target in targets}
+    if len(canonical) != len(targets):
         raise ValueError("Duplicate release target; each target must be built exactly once")
     return ([(host, targets[index:index + 1]) for index, host in enumerate(hosts)],
             targets[len(hosts):])

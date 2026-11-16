@@ -68,6 +68,7 @@ static void InputActionObserved(InputAction action) {
 
 static void ClearSettingsEnv(void) {
   Test_UnsetEnv("AR_LOCALIZATION_PACK");
+  Test_UnsetEnv("AR_SESSION_WINDOW_MODE");
   Settings_ClearConfigLayer();
   for (int i = 0; i < g_setting_desc_count; i++) {
     if (g_setting_descs[i].env) Test_UnsetEnv(g_setting_descs[i].env);
@@ -840,6 +841,36 @@ static void TestFogDefaultsAndPersistence(void) {
   Settings_InitWithFile(path);
   CHECK(g_settings.sim3d_cull_corner_px == 96);
   CHECK(g_settings.sim3d_cull_dim_pct == 35);
+  remove(path);
+}
+
+static void TestSessionWindowMode(void) {
+  const char *path = "actraiser-settings-session-window-test.ini";
+  ClearSettingsEnv();
+  CHECK(WriteTextFile(path, "window_mode = Fullscreen\n"));
+
+  Test_SetEnv("AR_SESSION_WINDOW_MODE", "Borderless", 1);
+  Settings_InitWithFile(path);
+  CHECK(g_settings.window_mode == kWindowMode_Borderless);
+  CHECK(Settings_SetLong(Settings_Find("audio_master_volume"), 40) == kSettingChange_Applied);
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "window_mode = Fullscreen"));
+  CHECK(FileContains(path, "audio_master_volume = 40%"));
+
+  CHECK(Settings_SetLong(Settings_Find("window_mode"), kWindowMode_Windowed) == kSettingChange_Applied);
+  CHECK(g_settings.window_mode == kWindowMode_Windowed);
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "window_mode = Fullscreen"));
+
+  Test_SetEnv("AR_SESSION_WINDOW_MODE", "Windowed", 1);
+  Settings_InitWithFile(path);
+  CHECK(g_settings.window_mode == kWindowMode_Windowed);
+  ClearSettingsEnv();
+  Settings_InitWithFile(path);
+  CHECK(g_settings.window_mode == kWindowMode_Exclusive);
+  CHECK(Settings_SetLong(Settings_Find("window_mode"), kWindowMode_Windowed) == kSettingChange_Applied);
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "window_mode = Windowed"));
   remove(path);
 }
 
@@ -2970,6 +3001,7 @@ int main(int argc, char **argv) {
   TestFogDefaultsAndPersistence();
   TestDeferredSettingsSnapshot();
   TestSettingsWriterRecovery();
+  TestSessionWindowMode();
   TestConfigSettingsEnvironmentPrecedence();
   TestLegacySeedEncodings();
   TestMutationApi();

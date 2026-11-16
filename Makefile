@@ -1,19 +1,19 @@
-# Root convenience targets for producing desktop and generic Linux Builders.
+# Root convenience targets for producing Builder releases.
 #
 # `make release` cross-builds every platform's self-contained bundle
 # (plus SHA-256 sidecars) into ./release/:
-# macOS .app.zip, Windows .exe, Steam Deck .AppImage, and generic Linux .tar.xz.
+# macOS .app.zip, Windows .exe, and Linux AppImages (including Steam Deck).
 # Requires Go and CMake; the C
 # toolchain and supported SDL3 redistributables are downloaded and bundled by
 # the packaging project. Desktop releases also need native host packaging tools;
 # macOS can cross-build all release targets without a VM.
 # See docs/desktop-packaging.md for Builder distribution prerequisites.
 # DESKTOP=0 explicitly requests legacy archives instead of the default matrix.
-# Steam Deck enforces glibc 2.35; full device/game qualification is separate.
+# Linux x64 enforces glibc 2.35, and Linux ARM64 enforces glibc 2.38.
 #
 # The lower-level packaging-only CMake command (run from the packaging directory) is:
 #   cd installer/packaging && cmake --workflow --preset release
-# Individual platforms: `make release-macos-arm64`, `make release-steam-deck`,
+# Individual platforms: `make release-macos-arm64`, `make release-linux-x86_64`,
 # etc. Packaging does not run repository lint or tests. Use `make release-checked`
 # or `make release-checked-<platform>` to run `check-release` before packaging.
 # `make release-remote <host> [<host> ...]` splits targets across SSH aliases and
@@ -91,7 +91,8 @@
 #   make clean-release  remove only the packaged bundles + packaging build.
 
 PACKAGING := installer/packaging
-PLATFORMS := macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck
+PLATFORMS := macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64
+RELEASE_TARGETS := $(sort $(PLATFORMS) steam-deck)
 DESKTOP ?= 1
 ROM ?= ar.sfc
 PYTHON ?= python3
@@ -128,7 +129,7 @@ $(RELEASE_REMOTE_HOSTS):
 	@:
 else
 
-.PHONY: dev android release $(addprefix release-,$(PLATFORMS)) release-checked $(addprefix release-checked-,$(PLATFORMS)) check check-release check-c check-c-release check-c-asan check-go check-shaders check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
+.PHONY: dev android release $(addprefix release-,$(RELEASE_TARGETS)) release-checked $(addprefix release-checked-,$(RELEASE_TARGETS)) check check-release check-c check-c-release check-c-asan check-go check-shaders check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
 
 # ROM-free presets use separate trees and never disturb the play/dev presets.
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
@@ -237,7 +238,7 @@ RELEASE_OPTIONS += $(if $(filter 0,$(TRIM_ZIG)),-DSNESBUILD_TRIM_ZIG=OFF)
 release:
 	cmake "-DBUILDER_PLATFORMS=$(PLATFORMS)" $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
 
-$(addprefix release-,$(PLATFORMS)): release-%:
+$(addprefix release-,$(RELEASE_TARGETS)): release-%:
 	cmake -DBUILDER_PLATFORMS=$* $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
 
 # Recursive make starts packaging only after the shared validation succeeds,
@@ -246,7 +247,7 @@ $(addprefix release-,$(PLATFORMS)): release-%:
 release-checked: check-release
 	$(MAKE) release
 
-$(addprefix release-checked-,$(PLATFORMS)): release-checked-%: check-release
+$(addprefix release-checked-,$(RELEASE_TARGETS)): release-checked-%: check-release
 	$(MAKE) release-$*
 
 # Cross-target link check. `zig cc` carries libc headers and a linker for every

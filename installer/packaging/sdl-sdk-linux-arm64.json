@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "goos": "linux",
+  "goarch": "arm64",
+  "sdl": {
+    "version": "3.4.18",
+    "kind": "deb",
+    "archives": [
+      {
+        "url": "https://repo.steampowered.com/steamrt4/apt/pool/main/libs/libsdl3/libsdl3-dev_3.4.18+ds-1+steamrt4.1+bsrt4.1_arm64.deb",
+        "sha256": "65c5ffbee4cb8968e6ee9eaa77493dbe2714e05e75659fec33b3c848e67eadfb",
+        "archive": "libsdl3-dev_3.4.18+ds-1+steamrt4.1+bsrt4.1_arm64.deb"
+      },
+      {
+        "url": "https://repo.steampowered.com/steamrt4/apt/pool/main/libs/libsdl3/libsdl3-0_3.4.18+ds-1+steamrt4.1+bsrt4.1_arm64.deb",
+        "sha256": "8d8e73557086c7201bec5756be3a2fd20cd26e033f5cd0612410abeed723d25b",
+        "archive": "libsdl3-0_3.4.18+ds-1+steamrt4.1+bsrt4.1_arm64.deb"
+      }
+    ],
+    "dependencies": "libasound2t64 (\u003e= 1.0.27), libc6 (\u003e= 2.38), libdecor-0-0 (\u003e= 0.2.0), libfribidi0 (\u003e= 0.19.2), libpulse0 (\u003e= 5.0), libwayland-client0 (\u003e= 1.23.0), libwayland-cursor0 (\u003e= 1.0.2), libwayland-egl1 (\u003e= 1.15.0), libx11-6 (\u003e= 2:1.2.99.901), libxcursor1 (\u003e\u003e 1.1.2), libxext6, libxfixes3 (\u003e= 1:5.0), libxi6 (\u003e= 2:1.6.99.1), libxkbcommon0 (\u003e= 1.0.0), libxrandr2 (\u003e= 2:1.2.99.3), libxss1, libxtst6 (\u003e= 2:1.2.5)"
+  },
+  "ttf": {
+    "version": "3.2.2",
+    "kind": "deb",
+    "archives": [
+      {
+        "url": "https://deb.debian.org/debian/pool/main/libs/libsdl3-ttf/libsdl3-ttf-dev_3.2.2+ds-1_arm64.deb",
+        "sha256": "eeb821c4ef03efb514900203749b10d42a5775c22b15441ac1a8c23a95462c05",
+        "archive": "libsdl3-ttf-dev_3.2.2+ds-1_arm64.deb"
+      },
+      {
+        "url": "https://deb.debian.org/debian/pool/main/libs/libsdl3-ttf/libsdl3-ttf0_3.2.2+ds-1_arm64.deb",
+        "sha256": "0fe784d3c2d1db749d9dd10dbb4df5a33a1ee9be7224ddbf141ce3deb47b56c6",
+        "archive": "libsdl3-ttf0_3.2.2+ds-1_arm64.deb"
+      }
+    ],
+    "dependencies": "libc6 (\u003e= 2.17), libfreetype6 (\u003e= 2.2.1), libharfbuzz0b (\u003e= 2.3.1), libsdl3-0 (\u003e= 3.2.6)"
+  }
+}

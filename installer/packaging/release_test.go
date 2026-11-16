@@ -2,10 +2,12 @@ package packaging_test
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -30,13 +32,18 @@ func TestDefaultReleaseMatrixAndExplicitLegacyEscapeHatch(t *testing.T) {
 					t.Fatal(err, string(output))
 				}
 				text := string(output)
-				if strings.Count(text, "Release plan:") != 7 {
+				if strings.Count(text, "Release plan:") != 6 || strings.Contains(text, "steam-deck") {
 					t.Fatal(text)
 				}
 				for _, arch := range []string{"arm64", "x86_64"} {
-					want := "linux-" + arch + " | archive | ActRaiserRecompBuilder-" + version + "-linux-" + arch + ".tar.xz"
+					platform := "linux-" + arch
+					base := "ActRaiserRecompBuilder-" + version + "-" + strings.ReplaceAll(platform, "x86_64", "x64")
+					want := platform + " | archive | " + base + ".tar.xz"
+					if !legacy {
+						want = platform + " | desktop | " + base + ".AppImage | portable | " + base + "-portable.tar.xz"
+					}
 					if !strings.Contains(text, want) {
-						t.Fatal("missing generic Linux archive", text)
+						t.Fatal("missing Linux release", text)
 					}
 					for _, pair := range [][4]string{
 						{"macos-" + arch, ".app.zip", ".zip", ".tar.xz"},
@@ -61,26 +68,22 @@ func TestDefaultReleaseMatrixAndExplicitLegacyEscapeHatch(t *testing.T) {
 					if strings.Contains(text, " | portable | ") {
 						t.Fatal("legacy archive unexpectedly gained desktop portable companion", text)
 					}
-					if !strings.Contains(text, "steam-deck | archive | actraiser-recomp-"+version+"-steam-deck-x86_64.tar.xz") {
-						t.Fatal("wrong legacy Steam Deck archive", text)
-					}
 				} else {
-					base := "ActRaiserRecompBuilder-" + version + "-steam-deck"
-					want := "steam-deck | desktop | " + base + ".AppImage | portable | " + base + "-portable.tar.xz"
-					if !strings.Contains(text, want) {
-						t.Fatal("missing Steam Deck release pair", text)
-					}
-					if strings.Count(text, " | portable | ") != 5 {
+					if strings.Count(text, " | portable | ") != 6 {
 						t.Fatal("wrong portable desktop bundle count", text)
 					}
-					if strings.Count(text, " | archive | ") != 2 {
+					if strings.Contains(text, " | archive | ") {
 						t.Fatal("redundant archives in default release", text)
 					}
 				}
 			})
 		}
 	}
-	for _, platforms := range []string{"", "unknown", "../steam-deck", "steam-deck;steam-deck"} {
+	output, err := exec.Command(cmake, "-DBUILDER_PRINT_PLAN=ON", "-DSNESBUILD_VERSION=v0900", "-DBUILDER_PLATFORMS=steam-deck", "-P", "release.cmake").CombinedOutput()
+	if err != nil || !strings.Contains(string(output), "steam-deck | desktop | ActRaiserRecompBuilder-v0900-linux-x64.AppImage") {
+		t.Fatal("Steam Deck alias must produce the Linux x64 AppImage", err, string(output))
+	}
+	for _, platforms := range []string{"", "unknown", "../steam-deck", "steam-deck;steam-deck", "steam-deck;linux-x86_64"} {
 		if output, err := exec.Command(cmake, "-DBUILDER_PRINT_PLAN=ON", "-DSNESBUILD_VERSION=v0900", "-DBUILDER_PLATFORMS="+platforms, "-P", "release.cmake").CombinedOutput(); err == nil {
 			t.Fatal("invalid selection accepted", platforms, string(output))
 		}
@@ -199,11 +202,11 @@ func TestReleasePruningOnlyRemovesSupersededFilesAfterPublication(t *testing.T) 
 	for _, mode := range []string{"normal", "missing-replacement", "missing-portable", "retired-directory", "retired-symlink", "replacement-symlink", "portable-symlink"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
-			keep := filepath.Join(root, "ActRaiserRecompBuilder-v0900-steam-deck.AppImage")
-			portable := filepath.Join(root, "ActRaiserRecompBuilder-v0900-steam-deck-portable.tar.xz")
-			old := filepath.Join(root, "actraiser-recomp-v0900-steam-deck-x86_64.tar.xz")
+			keep := filepath.Join(root, "ActRaiserRecompBuilder-v0900-windows-x64.exe")
+			portable := filepath.Join(root, "ActRaiserRecompBuilder-v0900-windows-x64-portable.zip")
+			old := filepath.Join(root, "actraiser-recomp-v0900-windows-x64.zip")
 			unrelated := filepath.Join(root, "player-save.srm")
-			previous := filepath.Join(root, "actraiser-recomp-v0805-steam-deck-x86_64.tar.xz")
+			previous := filepath.Join(root, "actraiser-recomp-v0805-windows-x64.zip")
 			for _, p := range []string{keep, keep + ".sha256", portable, portable + ".sha256", old, old + ".sha256", unrelated, previous, previous + ".sha256"} {
 				if err := os.WriteFile(p, []byte("fixture"), 0600); err != nil {
 					t.Fatal(err)
@@ -232,7 +235,7 @@ func TestReleasePruningOnlyRemovesSupersededFilesAfterPublication(t *testing.T) 
 				}
 			}
 			script := filepath.Join(t.TempDir(), "prune.cmake")
-			body := fmt.Sprintf("cmake_minimum_required(VERSION 3.25)\nset(SNESBUILD_VERSION v0900)\ninclude([[%s]])\nbuilder_prune_replaced_release(steam-deck [[%s]])\n", filepath.ToSlash(policy), filepath.ToSlash(root))
+			body := fmt.Sprintf("cmake_minimum_required(VERSION 3.25)\nset(SNESBUILD_VERSION v0900)\ninclude([[%s]])\nbuilder_prune_replaced_release(windows-x86_64 [[%s]])\n", filepath.ToSlash(policy), filepath.ToSlash(root))
 			if err := os.WriteFile(script, []byte(body), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -260,7 +263,52 @@ func TestReleasePruningOnlyRemovesSupersededFilesAfterPublication(t *testing.T) 
 	}
 }
 
+func TestLinuxAppImageDoesNotRemoveExplicitArchive(t *testing.T) {
+	cmake := releaseCMake(t)
+	policy, err := filepath.Abs("release_policy.cmake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	base := filepath.Join(dir, "ActRaiserRecompBuilder-v0900-linux-x64")
+	for _, suffix := range []string{".AppImage", "-portable.tar.xz", ".tar.xz"} {
+		for _, path := range []string{base + suffix, base + suffix + ".sha256"} {
+			if err := os.WriteFile(path, []byte("fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	script := filepath.Join(t.TempDir(), "keep.cmake")
+	body := fmt.Sprintf("cmake_minimum_required(VERSION 3.25)\nset(SNESBUILD_VERSION v0900)\ninclude([[%s]])\nbuilder_prune_replaced_release(linux-x86_64 [[%s]])\n", filepath.ToSlash(policy), filepath.ToSlash(dir))
+	if err := os.WriteFile(script, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(cmake, "-P", script).CombinedOutput(); err != nil {
+		t.Fatal(err, string(output))
+	}
+	for _, suffix := range []string{".tar.xz", ".tar.xz.sha256"} {
+		if _, err := os.Stat(base + suffix); err != nil {
+			t.Fatal("explicit archive or checksum removed", err)
+		}
+	}
+}
+
 func TestDesktopReleaseUsesFinalPayloadVersion(t *testing.T) {
+	t.Run("windows-x86_64", func(t *testing.T) {
+		testDesktopReleaseUsesFinalPayloadVersion(t, "windows-x86_64", "windows", "windows-x64.exe", "windows-x64-portable.zip")
+	})
+	t.Run("macos-arm64", func(t *testing.T) {
+		if _, err := exec.LookPath("ditto"); err != nil {
+			t.Skip("ditto required for macOS releases")
+		}
+		testDesktopReleaseUsesFinalPayloadVersion(t, "macos-arm64", "macos", "macos-arm64.app.zip", "macos-arm64-portable.zip")
+	})
+}
+
+const macOSBuilderProgram = "ActRaiserRecompBuilder.app/Contents/MacOS/ActRaiserRecompBuilder"
+
+func testDesktopReleaseUsesFinalPayloadVersion(t *testing.T, platform, kind, direct, portable string) {
+	t.Helper()
 	cmake := releaseCMake(t)
 	root := t.TempDir()
 	for _, relative := range []string{
@@ -280,7 +328,7 @@ func TestDesktopReleaseUsesFinalPayloadVersion(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	build := filepath.Join(root, "installer", "packaging", "build", "windows-x86_64")
+	build := filepath.Join(root, "installer", "packaging", "build", platform)
 	if err := os.MkdirAll(build, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -289,15 +337,19 @@ func TestDesktopReleaseUsesFinalPayloadVersion(t *testing.T) {
 	}
 	// A build may regenerate CMake's cache after the source tag has changed.
 	// The publisher must use the payload's final stamp, not its initial cache.
-	packager := `cmake_minimum_required(VERSION 3.25)
+	target := "${BUILDER_OUTPUT}"
+	if kind == "macos" {
+		target += "/Contents/MacOS/ActRaiserRecompBuilder"
+	}
+	packager := fmt.Sprintf(`cmake_minimum_required(VERSION 3.25)
 file(WRITE "${BUILDER_DIST_BUILD}/CMakeCache.txt" "SNESBUILD_VERSION_STAMP:INTERNAL=v1.0\n")
-file(WRITE "${BUILDER_OUTPUT}" "built payload for v1.0\n")
-`
+file(WRITE "%s" "built payload for v1.0\n")
+`, target)
 	shell := filepath.Join(root, "installer", "desktop-shell")
-	if err := os.WriteFile(filepath.Join(shell, "package-windows.cmake"), []byte(packager), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(shell, "package-"+kind+".cmake"), []byte(packager), 0600); err != nil {
 		t.Fatal(err)
 	}
-	output, err := exec.Command(cmake, "-DBUILDER_PLATFORM=windows-x86_64", "-P", filepath.Join(shell, "release.cmake")).CombinedOutput()
+	output, err := exec.Command(cmake, "-DBUILDER_PLATFORM="+platform, "-P", filepath.Join(shell, "release.cmake")).CombinedOutput()
 	if err != nil {
 		t.Fatal(err, string(output))
 	}
@@ -306,10 +358,9 @@ file(WRITE "${BUILDER_OUTPUT}" "built payload for v1.0\n")
 	if err != nil || len(entries) != 4 {
 		t.Fatalf("expected only the final direct/portable files and checksums: %v, %v", entries, err)
 	}
-	for _, name := range []string{
-		"ActRaiserRecompBuilder-v1.0-windows-x64.exe",
-		"ActRaiserRecompBuilder-v1.0-windows-x64-portable.zip",
-	} {
+	const prefix = "ActRaiserRecompBuilder-v1.0-"
+	for _, suffix := range []string{direct, portable} {
+		name := prefix + suffix
 		data, err := os.ReadFile(filepath.Join(release, name))
 		if err != nil {
 			t.Fatal("missing final-version artifact", err)
@@ -319,6 +370,40 @@ file(WRITE "${BUILDER_OUTPUT}" "built payload for v1.0\n")
 		if err != nil || string(checksum) != want {
 			t.Fatalf("checksum must identify the final version: %q, %v", checksum, err)
 		}
+	}
+	if kind == "macos" {
+		extracted := t.TempDir()
+		cmd := exec.Command(cmake, "-E", "tar", "xf", filepath.Join(release, prefix+direct))
+		cmd.Dir = extracted
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatal(err, string(output))
+		}
+		checkReleaseLauncherProfile(t, extracted, macOSBuilderProgram)
+	}
+}
+
+func checkReleaseLauncherProfile(t *testing.T, directory, program string) {
+	t.Helper()
+	readProfile := func(path string) map[string]any {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var profile map[string]any
+		if err := json.Unmarshal(data, &profile); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		return profile
+	}
+	want := readProfile(filepath.Join("..", "desktop-shell", "recomplauncher.json"))
+	want["start"].(map[string]any)["program"] = []any{program}
+	got := readProfile(filepath.Join(directory, "recomplauncher.json"))
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected the shared launcher profile with start.program %q, got %v", program, got)
+	}
+	if info, err := os.Stat(filepath.Join(directory, filepath.FromSlash(program))); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("launcher program %s is missing from the archive: %v", program, err)
 	}
 }
 
@@ -333,15 +418,18 @@ func TestPortableReleaseBundlesWrapExistingArtifacts(t *testing.T) {
 	}{
 		{"windows", "windows-x86_64", "ActRaiserRecompBuilder.exe", "ActRaiserRecompBuilder-v0900-windows-x64-portable.zip"},
 		{"windows", "windows-arm64", "ActRaiserRecompBuilder.exe", "ActRaiserRecompBuilder-v0900-windows-arm64-portable.zip"},
-		{"linux", "steam-deck", "ActRaiserRecompBuilder.AppImage", "ActRaiserRecompBuilder-v0900-steam-deck-portable.tar.xz"},
-	}
-	if _, err := exec.LookPath("ditto"); err == nil {
-		tests = append(tests, struct {
-			kind, platform, artifact, archive string
-		}{"macos", "macos-arm64", "ActRaiserRecompBuilder.app", "ActRaiserRecompBuilder-v0900-macos-arm64-portable.zip"})
+		{"linux", "linux-x86_64", "ActRaiserRecompBuilder.AppImage", "ActRaiserRecompBuilder-v0900-linux-x64-portable.tar.xz"},
+		{"linux", "linux-arm64", "ActRaiserRecompBuilder.AppImage", "ActRaiserRecompBuilder-v0900-linux-arm64-portable.tar.xz"},
+		{"macos", "macos-arm64", "ActRaiserRecompBuilder.app", "ActRaiserRecompBuilder-v0900-macos-arm64-portable.zip"},
+		{"macos", "macos-x86_64", "ActRaiserRecompBuilder.app", "ActRaiserRecompBuilder-v0900-macos-x86_64-portable.zip"},
 	}
 	for _, test := range tests {
 		t.Run(test.platform, func(t *testing.T) {
+			if test.kind == "macos" {
+				if _, err := exec.LookPath("ditto"); err != nil {
+					t.Skip("ditto required for macOS releases")
+				}
+			}
 			root := t.TempDir()
 			stage := filepath.Join(root, "stage")
 			if err := os.Mkdir(stage, 0700); err != nil {
@@ -350,7 +438,7 @@ func TestPortableReleaseBundlesWrapExistingArtifacts(t *testing.T) {
 			artifact := filepath.Join(root, test.artifact)
 			payload := artifact
 			if test.kind == "macos" {
-				payload = filepath.Join(artifact, "Contents", "MacOS", "ActRaiserRecompBuilder")
+				payload = filepath.Join(root, filepath.FromSlash(macOSBuilderProgram))
 				if err := os.MkdirAll(filepath.Dir(payload), 0700); err != nil {
 					t.Fatal(err)
 				}
@@ -390,16 +478,12 @@ func TestPortableReleaseBundlesWrapExistingArtifacts(t *testing.T) {
 				t.Fatalf("portable download lacks startup security guidance: %v", err)
 			}
 			bundledArtifact := filepath.Join(bundle, test.artifact)
-			if test.kind == "windows" {
-				profile, err := os.ReadFile(filepath.Join(bundle, "recomplauncher.json"))
-				source, sourceErr := os.ReadFile(filepath.Join("..", "desktop-shell", "recomplauncher.json"))
-				if err != nil || sourceErr != nil || string(profile) != string(source) {
-					t.Fatalf("Windows portable download lacks its RecompLauncher profile: %v, %v", err, sourceErr)
-				}
-			}
 			bundledPayload := bundledArtifact
-			if test.kind == "macos" {
-				bundledPayload = filepath.Join(bundledArtifact, "Contents", "MacOS", "ActRaiserRecompBuilder")
+			if test.kind == "windows" {
+				checkReleaseLauncherProfile(t, bundle, test.artifact)
+			} else if test.kind == "macos" {
+				checkReleaseLauncherProfile(t, bundle, macOSBuilderProgram)
+				bundledPayload = filepath.Join(bundle, filepath.FromSlash(macOSBuilderProgram))
 			}
 			data, err := os.ReadFile(bundledPayload)
 			if err != nil || string(data) != "already built\n" {

@@ -14,11 +14,6 @@ get_filename_component(BUILDER_OUTPUT "${BUILDER_OUTPUT}" ABSOLUTE)
 find_program(_go go REQUIRED)
 file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _target_os REGEX "^SNESBUILD_GOOS:STRING=")
 file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _target_arch REGEX "^SNESBUILD_GOARCH:STRING=")
-file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _target_deck REGEX "^SNESBUILD_STEAM_DECK:BOOL=")
-set(_abi_options)
-if(_target_deck STREQUAL "SNESBUILD_STEAM_DECK:BOOL=ON")
-    set(_abi_options --glibc-max 2.35)
-endif()
 execute_process(COMMAND "${_go}" env GOHOSTARCH OUTPUT_VARIABLE _host_arch
     OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
 if(NOT _target_os STREQUAL "SNESBUILD_GOOS:STRING=linux" OR
@@ -43,6 +38,6 @@ execute_process(COMMAND "${_go}" -C "${CMAKE_CURRENT_LIST_DIR}" build -tags "${_
     -ldflags "-s -w" -o "${_stage}/shell" . COMMAND_ERROR_IS_FATAL ANY)
 execute_process(COMMAND "${_go}" -C "${CMAKE_CURRENT_LIST_DIR}" run ./cmd/package
     --source "${_stage}/payload" --shell "${_stage}/shell" --output "${BUILDER_OUTPUT}"
-    ${_abi_options}
+    --recomplauncher-profile "${CMAKE_CURRENT_LIST_DIR}/recomplauncher.json"
     COMMAND_ERROR_IS_FATAL ANY)
 message(STATUS "Builder artifact: ${BUILDER_OUTPUT}")

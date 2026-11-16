@@ -35,7 +35,8 @@ try opening it, then use System Settings > Privacy & Security > Open Anyway.
 Helpers may also be checked. Damaged-app or malware warnings need separate
 investigation.
 
-Steam Deck: open the AppImage in Desktop Mode. If FUSE is unavailable, run:
+Linux: open the AppImage from your desktop. On Steam Deck, use Desktop Mode
+for a manual install. If FUSE is unavailable, run:
 APPIMAGE_EXTRACT_AND_RUN=1 ./ActRaiserRecompBuilder.AppImage
 
 Full troubleshooting instructions and official Windows/macOS guidance:

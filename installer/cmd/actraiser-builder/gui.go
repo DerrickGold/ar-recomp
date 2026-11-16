@@ -34,6 +34,7 @@ func runGUI(args []string) error {
 	values := guiFlags{}
 	playSession := flags.Bool("play-session", false, "close the Builder when the game exits and return its status")
 	bigScreen := flags.Bool("big-screen", false, "show the controller interface")
+	gameWindowMode := flags.String("game-window-mode", "", "window mode for --play-session: saved, windowed, or borderless (default: follow RecompLauncher Big Picture)")
 	var roms []string
 	flags.Func("rom", "preselect a ROM (repeat for additional supported ROMs)", func(path string) error {
 		roms = append(roms, path)
@@ -58,6 +59,10 @@ func runGUI(args []string) error {
 	flags.BoolVar(&values.noOpen, "no-open", false, "print the local URL without opening a browser")
 	flags.StringVar(&values.readyFile, "ready-file", "", "create a private JSON session descriptor for a desktop host")
 	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	sessionWindowMode, err := playSessionWindowMode(*gameWindowMode, os.Getenv("RECOMPLAUNCHER_MODE"))
+	if err != nil {
 		return err
 	}
 	if *desktopGate {
@@ -115,7 +120,9 @@ func runGUI(args []string) error {
 	buildChecker := &gameBuildChecker{outputDir: outputDir, inputID: bundledBuildID(root, values.inputID), version: version}
 	var launchSession func(builder.Result) (<-chan error, error)
 	if *playSession {
-		launchSession = startGameSession
+		launchSession = func(result builder.Result) (<-chan error, error) {
+			return startGameSession(result, sessionWindowMode)
+		}
 	}
 	return builder.Run(context.Background(), builder.Options{
 		Title:           "ActRaiser Recomp Builder",
@@ -219,7 +226,23 @@ func launchBuiltGame(result builder.Result) error {
 	return startLoggedGame(command, result.WorkingDir)
 }
 
-func startGameSession(result builder.Result) (<-chan error, error) {
+func playSessionWindowMode(requestedMode, launcherMode string) (string, error) {
+	if requestedMode == "" && launcherMode == "bigpicture" {
+		requestedMode = "borderless"
+	}
+	switch requestedMode {
+	case "", "saved":
+		return "", nil
+	case "windowed":
+		return "Windowed", nil
+	case "borderless":
+		return "Borderless", nil
+	default:
+		return "", fmt.Errorf("invalid --game-window-mode %q; use saved, windowed, or borderless", requestedMode)
+	}
+}
+
+func startGameSession(result builder.Result, windowMode string) (<-chan error, error) {
 	command, err := builtGameCommand(result)
 	if err != nil {
 		return nil, err
@@ -228,7 +251,8 @@ func startGameSession(result builder.Result) (<-chan error, error) {
 		return nil, fmt.Errorf("rebuild the game to use a tracked play session")
 	}
 	// Keep the game's writable data at the directory the launcher backs up.
-	command.Env = append(command.Environ(), "AR_USER_DATA_DIR="+result.WorkingDir)
+	command.Env = append(command.Environ(), "AR_USER_DATA_DIR="+result.WorkingDir,
+		"AR_SESSION_WINDOW_MODE="+windowMode)
 	done, _, err := startGameProcess(command, result.WorkingDir)
 	return done, err
 }

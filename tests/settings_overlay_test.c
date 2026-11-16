@@ -215,6 +215,43 @@ static void RowToKey(const char *key) {
   CHECK(!"row not reachable");
 }
 
+static int s_window_mode_changes;
+
+static void ObserveWindowMode(const SettingDesc *desc, SettingChangeResult result) {
+  if (desc->field != &g_settings.window_mode) return;
+  ++s_window_mode_changes;
+  CHECK(result == kSettingChange_Applied);
+  CHECK(g_settings.window_mode == kWindowMode_Windowed);
+}
+
+static void TestSessionWindowModeMenu(const char *settings_path) {
+  Test_SetEnv("AR_SESSION_WINDOW_MODE", "Borderless", 1);
+  Settings_InitWithFile(settings_path);
+  Settings_SetChangeObserver(ObserveWindowMode);
+  s_window_mode_changes = 0;
+
+  SettingsOverlay_Open();
+  NavToSection(kSection_Video);
+  NavToTab(0);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("window_mode");
+  const SettingDesc *mode = Settings_Find("window_mode");
+  char label[64];
+  SettingsOverlay_LocalizedValue(kArUiLocale_English, mode, label, sizeof(label));
+  CHECK(!strcmp(label, "Borderless"));
+
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+  CHECK(s_window_mode_changes == 1);
+  SettingsOverlay_LocalizedValue(kArUiLocale_English, mode, label, sizeof(label));
+  CHECK(!strcmp(label, "Windowed"));
+
+  SettingsOverlay_Close();
+  Settings_SetChangeObserver(NULL);
+  Test_UnsetEnv("AR_SESSION_WINDOW_MODE");
+  remove(settings_path);
+  Settings_Init();
+}
+
 static void TestCompletionToggle(const char *settings_path) {
   const char *protected_keys[] = {
     "diorama_mode", "diorama_skybox", "diorama_shoebox",
@@ -2940,6 +2977,9 @@ int main(int argc, char **argv) {
   CHECK(SettingsOverlay_Init(&render_device, NULL, rom_data, rom_size));
   const uint64_t region_badges = CheckRegionBadges(&render_device, renderer, surface, false);
   SettingsOverlay_SetManualHooks(&kFakeManualHooks);
+  TestSessionWindowModeMenu(settings_path);
+  g_settings.show_debug_settings = true;
+  SettingsOverlay_Refresh();
   /* Device-reset recovery: rebuild every atlas in place. All rendering below
    * runs against the REBUILT textures, so a broken reload shows up in the
    * preview captures too. */

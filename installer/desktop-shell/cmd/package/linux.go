@@ -15,7 +15,7 @@ import (
 	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
-func packageLinux(source, shell, output, sdkRoot, glibcMax string) error {
+func packageLinux(source, shell, output, sdkRoot, glibcMax, profile string) error {
 	if runtime.GOOS != "linux" && sdkRoot == "" {
 		return fmt.Errorf("Linux packaging requires a native Linux maintainer host")
 	}
@@ -28,6 +28,13 @@ func packageLinux(source, shell, output, sdkRoot, glibcMax string) error {
 			return err
 		}
 		arch = sdk.Lock.Arch
+	}
+	if glibcMax == "" {
+		glibcMax = linuxsdk.GLIBCBaseline
+		if arch == "arm64" {
+			// The current ARM64 SDL runtime requires glibc 2.38.
+			glibcMax = "2.38"
+		}
 	}
 	if filepath.Ext(output) != ".AppImage" && filepath.Ext(output) != ".AppDir" {
 		return fmt.Errorf("Linux output must end in .AppImage or .AppDir")
@@ -88,6 +95,11 @@ func packageLinux(source, shell, output, sdkRoot, glibcMax string) error {
 	if err = os.WriteFile(filepath.Join(app, "usr/share/doc", host.Name, "linux-abi.json"), append(raw, '\n'), 0644); err != nil {
 		return err
 	}
+	if profile != "" {
+		if err = stageLinuxProfile(app, profile); err != nil {
+			return err
+		}
+	}
 	fmt.Printf("Linux ABI audit: %d ELF programs/libraries; maximum required GLIBC_%s\n", len(audit.Files), audit.MaximumGLIBC)
 	result := app
 	if err := appicons.Builder.ValidateAppDir(app); err != nil {
@@ -127,4 +139,28 @@ func packageLinux(source, shell, output, sdkRoot, glibcMax string) error {
 	}
 	fmt.Println(output)
 	return nil
+}
+
+func stageLinuxProfile(app, source string) error {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	var profile, start map[string]json.RawMessage
+	if err := json.Unmarshal(data, &profile); err != nil {
+		return fmt.Errorf("read RecompLauncher profile: %w", err)
+	}
+	if err := json.Unmarshal(profile["start"], &start); err != nil || start == nil {
+		return fmt.Errorf("RecompLauncher profile needs a start object")
+	}
+	start["program"] = json.RawMessage(`["ActRaiserRecompBuilder.AppImage"]`)
+	profile["start"], err = json.Marshal(start)
+	if err != nil {
+		return err
+	}
+	data, err = json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(app, "recomplauncher.json"), append(data, '\n'), 0644)
 }

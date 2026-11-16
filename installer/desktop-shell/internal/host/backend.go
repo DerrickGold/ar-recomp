@@ -28,6 +28,7 @@ type BackendOptions struct {
 	ArtifactDirectory string
 	PlaySession       bool
 	BigScreen         bool
+	GameWindowMode    string
 	ROMs              []string
 	BuildOnFirstRun   bool
 }
@@ -84,6 +85,9 @@ func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outpu
 		}
 		if options[0].PlaySession {
 			b.command.Args = append(b.command.Args, "--play-session")
+			if options[0].GameWindowMode != "" {
+				b.command.Args = append(b.command.Args, "--game-window-mode", options[0].GameWindowMode)
+			}
 		}
 		if options[0].BigScreen {
 			b.command.Args = append(b.command.Args, "--big-screen")

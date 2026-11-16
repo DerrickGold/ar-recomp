@@ -1,6 +1,21 @@
 include_guard(GLOBAL)
 include("${CMAKE_CURRENT_LIST_DIR}/../packaging/release_policy.cmake")
 
+# RecompLauncher resolves start.program to a file. Keep the profile beside
+# the app so it can use the bundle executable without altering the signature.
+function(builder_stage_macos_launcher_profile app)
+    get_filename_component(_directory "${app}" DIRECTORY)
+    get_filename_component(_bundle "${app}" NAME)
+    get_filename_component(_executable "${app}" NAME_WE)
+    set(_program "${_bundle}/Contents/MacOS/${_executable}")
+    if(NOT EXISTS "${_directory}/${_program}" OR IS_DIRECTORY "${_directory}/${_program}")
+        message(FATAL_ERROR "Missing macOS Builder executable: ${_directory}/${_program}")
+    endif()
+    file(READ "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/recomplauncher.json" _profile)
+    string(JSON _profile SET "${_profile}" start program "[\"${_program}\"]")
+    file(WRITE "${_directory}/recomplauncher.json" "${_profile}\n")
+endfunction()
+
 # Wrap one already-built desktop artifact and its BuilderData marker in a
 # portable release archive. This function only copies and compresses; callers
 # remain responsible for building and validating the source artifact once.
@@ -52,6 +67,8 @@ function(builder_create_portable_release kind platform artifact stage out_artifa
     file(COPY_FILE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PORTABLE-README.txt" "${_root}/README.txt")
     if(kind STREQUAL "windows")
         file(COPY_FILE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/recomplauncher.json" "${_root}/recomplauncher.json")
+    elseif(kind STREQUAL "macos")
+        builder_stage_macos_launcher_profile("${_copy}")
     endif()
 
     if(kind STREQUAL "macos")

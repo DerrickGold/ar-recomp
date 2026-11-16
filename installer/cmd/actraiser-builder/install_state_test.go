@@ -451,6 +451,43 @@ func TestRegenerableInputsDoNotGateRebuild(t *testing.T) {
 	}
 }
 
+func TestPlaySessionPassesWindowModeToGame(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub game is a shell script")
+	}
+	root := t.TempDir()
+	binary := filepath.Join(root, "ActRaiserRecomp")
+	stub := "#!/bin/sh\nprintf '%s' \"$AR_SESSION_WINDOW_MODE\" > window-mode.txt\n"
+	if err := os.WriteFile(binary, []byte(stub), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ requested, launcher, want string }{
+		{launcher: "bigpicture", want: "Borderless"},
+		{requested: "windowed", launcher: "bigpicture", want: "Windowed"},
+		{requested: "saved", launcher: "bigpicture"},
+		{requested: "borderless", launcher: "desktop", want: "Borderless"},
+		{launcher: "desktop"},
+		{},
+	} {
+		mode, err := playSessionWindowMode(test.requested, test.launcher)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done, err := startGameSession(builder.Result{BinaryPath: binary, WorkingDir: root}, mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(root, "window-mode.txt"))
+		if err != nil || string(data) != test.want {
+			t.Fatalf("game received window mode %q, want %q with %q in %q: %v",
+				data, test.want, test.requested, test.launcher, err)
+		}
+	}
+}
+
 // launchBuiltGame had NO test, which let two mutation probes through: skipping
 // the binary-existence check, and dropping the working directory. Both matter --
 // the first is the entire reason the GUI stopped shelling out to the script (so a
