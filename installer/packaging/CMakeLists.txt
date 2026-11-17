@@ -465,8 +465,8 @@ install(FILES
     ${GAME_ROOT}/third_party/unicode/utf8proc-LICENSE.md
     DESTINATION utils/third_party/unicode)
 
-# Player/modder documentation only. Internal architecture, investigations,
-# acceptance records and plans are local development material, not payload.
+# Bundle player and content-author guides. Native research references and
+# published release notes are available on GitHub.
 install(FILES ${GAME_ROOT}/LICENSE
     DESTINATION utils/docs RENAME GAME-LICENSE.txt)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/licenses/appicons/
@@ -477,7 +477,6 @@ install(FILES
     ${GAME_ROOT}/docs/builder-workshop.md
     ${GAME_ROOT}/docs/desktop-packaging.md
     ${GAME_ROOT}/docs/android.md
-    ${GAME_ROOT}/docs/release-notes.md
     ${GAME_ROOT}/docs/language-pack-format.md
     ${GAME_ROOT}/docs/language-packs.md
     ${GAME_ROOT}/docs/language-authoring-reference.json
@@ -492,18 +491,7 @@ install(FILES
     ${GAME_ROOT}/docs/actraiser-1/regional-settings.md
     ${GAME_ROOT}/docs/actraiser-1/regional-media.md
     ${GAME_ROOT}/docs/actraiser-1/regional-differences.md
-    ${GAME_ROOT}/docs/actraiser-1/regional-differences-technical.md
-    ${GAME_ROOT}/docs/actraiser-1/unused-content.md
-    ${GAME_ROOT}/docs/actraiser-1/ram-map.md
-    ${GAME_ROOT}/docs/actraiser-1/rom-map.md
-    ${GAME_ROOT}/docs/actraiser-1/research-symbol-map.md
-    ${GAME_ROOT}/docs/actraiser-1/save-format.md
     ${GAME_ROOT}/docs/actraiser-1/randomizer.md
-    ${GAME_ROOT}/docs/actraiser-1/sim-object-catalog.md
-    ${GAME_ROOT}/docs/actraiser-1/sim-menu-reference.md
-    ${GAME_ROOT}/docs/actraiser-1/sim-model-art-index.md
-    ${GAME_ROOT}/docs/actraiser-1/dialogue-system.md
-    ${GAME_ROOT}/docs/actraiser-1/snes-native-audio-channels.md
     DESTINATION utils/docs/actraiser-1)
 # Independently authored syntax/demo artifacts; no retail prose.
 install(DIRECTORY ${GAME_ROOT}/examples/language-pack/ DESTINATION utils/examples/language-pack

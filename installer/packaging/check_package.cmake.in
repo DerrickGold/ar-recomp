@@ -13,14 +13,13 @@ set(_runtime_source_paths "@SNESBUILD_RUNTIME_SOURCE_PATHS@")
 set(_required_sdl_runtime "@SNESBUILD_REQUIRED_SDL_RUNTIME@")
 set(_required_ttf_runtime "@SNESBUILD_REQUIRED_TTF_RUNTIME@")
 set(_required_ttf_link "@SNESBUILD_REQUIRED_TTF_LINK@")
-# Only player/content-author guides and public SDK references are distributed.
-set(_public_game_docs
+# Bundle player and content-author guides and selected SDK references.
+set(_bundled_game_docs
     README.md
     manual.md
     builder-workshop.md
     desktop-packaging.md
     android.md
-    release-notes.md
     language-pack-format.md
     language-packs.md
     language-authoring-reference.json
@@ -33,18 +32,7 @@ set(_public_game_docs
     actraiser-1/regional-settings.md
     actraiser-1/regional-media.md
     actraiser-1/regional-differences.md
-    actraiser-1/regional-differences-technical.md
-    actraiser-1/unused-content.md
-    actraiser-1/ram-map.md
-    actraiser-1/rom-map.md
-    actraiser-1/research-symbol-map.md
-    actraiser-1/save-format.md
     actraiser-1/randomizer.md
-    actraiser-1/sim-object-catalog.md
-    actraiser-1/sim-menu-reference.md
-    actraiser-1/sim-model-art-index.md
-    actraiser-1/dialogue-system.md
-    actraiser-1/snes-native-audio-channels.md
     GAME-LICENSE.txt
 )
 set(_public_runtime_docs
@@ -223,8 +211,8 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
     set(_checked 0)
     foreach(_file IN LISTS _files)
         if(_file MATCHES "^utils/docs/(.+)$")
-            if(NOT CMAKE_MATCH_1 IN_LIST _public_game_docs)
-                message(FATAL_ERROR "documentation distribution check: non-public document ${_file}")
+            if(NOT CMAKE_MATCH_1 IN_LIST _bundled_game_docs)
+                message(FATAL_ERROR "documentation distribution check: unexpected bundled document ${_file}")
             endif()
         elseif(_file MATCHES "^utils/snesrecomp-go/runtime/docs/(.+)$")
             if(NOT CMAKE_MATCH_1 IN_LIST _public_runtime_docs)

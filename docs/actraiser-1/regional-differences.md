@@ -118,16 +118,16 @@ animation can compensate for that difference, but a change in its movement,
 damage or attack choices is a separate matter. Matching durations alone
 does not establish the developers' intent.
 
-Evidence: [European modes and difficulty](regional-differences-technical.md#european-difficulty-and-placement-contracts),
-[Story save and Continue](regional-differences-technical.md#european-story-save-and-continue),
-[PAL timing interpretation](regional-differences-technical.md#pal-timing-interpretation).
+Evidence: [European modes and difficulty](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-difficulty-and-placement-contracts),
+[Story save and Continue](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-story-save-and-continue),
+[PAL timing interpretation](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#pal-timing-interpretation).
 
 The retained debugging tools also differ. US and Japan contain an action-debug
 block for scene stepping, coordinate display and other controls. That block
 and its supporting tables are absent at the corresponding location in all
 three European ROMs, although their Music Mode sound test remains. An
 alternative European activation path has not been established. See
-[debug facilities](unused-content.md#debugging-facilities) for the controls
+[debug facilities](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/unused-content.md#debugging-facilities) for the controls
 and the distinction between controlled tests and original activation paths.
 
 ## Action mode
@@ -229,10 +229,10 @@ and damage-box lists match. Item numbers need to be interpreted with the selecte
 mode's pickup rules, not given their US names automatically. The checked
 pickup and spell-inventory distinctions are described under [European Action Mode items](#european-action-mode-items-and-magic).
 
-See the [action-rule evidence](regional-differences-technical.md#action-rules-in-code)
-and [terrain and hazard rules](regional-differences-technical.md#terrain-and-damage-box-contracts)
+See the [action-rule evidence](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#action-rules-in-code)
+and [terrain and hazard rules](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#terrain-and-damage-box-contracts)
 for the complete measured tables. European placement and hazard checks are
-in the [difficulty and placement comparison](regional-differences-technical.md#room-tables-and-hazards).
+in the [difficulty and placement comparison](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#room-tables-and-hazards).
 
 ### European difficulty
 
@@ -261,9 +261,9 @@ records' 1. Applicable difficulty adjustments are layered on those values.
 Boss-specific difficulty changes appear with their stages below. The timer
 settings do not mean that every animation runs faster on Expert.
 
-Evidence: [difficulty rules](regional-differences-technical.md#spawn-filtering-hp-and-contact-damage),
-[timer behavior](regional-differences-technical.md#selection-and-timer),
-[five-ROM actor stats](regional-differences-technical.md#five-rom-placed-actor-stat-census).
+Evidence: [difficulty rules](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#spawn-filtering-hp-and-contact-damage),
+[timer behavior](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#selection-and-timer),
+[five-ROM actor stats](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#five-rom-placed-actor-stat-census).
 
 ### European Action Mode items and magic
 
@@ -310,10 +310,10 @@ the effect begins. Story spends its scroll before the effect. A controlled
 room-change test confirms this distinction; it is not a known normal-play
 method of obtaining free spells.
 
-Evidence: [European item and spell inventory contracts](regional-differences-technical.md#european-items-and-spell-inventory),
-[cast ordering and capacity](regional-differences-technical.md#european-spell-capacity-and-interrupted-casts),
-[retry and new runs](regional-differences-technical.md#european-action-retry-and-new-run-inventory),
-[completed acts](regional-differences-technical.md#european-completed-act-inventory).
+Evidence: [European item and spell inventory contracts](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-items-and-spell-inventory),
+[cast ordering and capacity](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-spell-capacity-and-interrupted-casts),
+[retry and new runs](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-action-retry-and-new-run-inventory),
+[completed acts](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-completed-act-inventory).
 
 ## A tour of the action stages
 
@@ -327,7 +327,7 @@ programs or animation data: Fillmore's Centaur, Bloodpool's winged boss,
 Aitos's dragon and Northwall's humanoid boss. Their movement also matched
 when compared from the same attack phase in normal and Special mode.
 European exceptions are described with the relevant stages below.
-See the [first-act boss comparison](regional-differences-technical.md#first-act-boss-program-comparison)
+See the [first-act boss comparison](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#first-act-boss-program-comparison)
 for the tests and their limits.
 
 ### Fillmore
@@ -395,13 +395,13 @@ Act 1 adds a 500-point pickup, upgrades a half apple to a whole apple, and
 replaces a 1,000-point pickup with a 1UP. Act 2 upgrades two half apples and
 replaces a magic scroll with a 1,000-point pickup.
 
-Evidence: [tree attack](regional-differences-technical.md#fillmore-act-1-tree-seed-controller-and-pre-shot-wait),
-[ordinary enemy movement and recovery](regional-differences-technical.md#ordinary-enemy-movement-and-attack-recovery),
-[Minotaur](regional-differences-technical.md#minotaur-timing-and-room-inheritance),
-[wall emitters](regional-differences-technical.md#fillmore-act-2-wall-emitter-cadence),
-[European emitter behavior](regional-differences-technical.md#remaining-ordinary-enemy-timing-and-motion),
-[European Minotaur](regional-differences-technical.md#minotaur-wind-ups),
-[terrain and pickups](regional-differences-technical.md#authored-pickup-differences).
+Evidence: [tree attack](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#fillmore-act-1-tree-seed-controller-and-pre-shot-wait),
+[ordinary enemy movement and recovery](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#ordinary-enemy-movement-and-attack-recovery),
+[Minotaur](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#minotaur-timing-and-room-inheritance),
+[wall emitters](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#fillmore-act-2-wall-emitter-cadence),
+[European emitter behavior](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#remaining-ordinary-enemy-timing-and-motion),
+[European Minotaur](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#minotaur-wind-ups),
+[terrain and pickups](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#authored-pickup-differences).
 The Act 2 theme change is covered under [Music](#music).
 
 ### Bloodpool
@@ -433,10 +433,10 @@ upgrades a half apple in Act 2. In the castle, one Japanese trap strip is
 replaced by solid floor. Several other strips still deal 24 HP in US and
 Japan; the US change is not a blanket removal of lethal traps.
 
-Evidence: [statue volleys](regional-differences-technical.md#bloodpool-act-2-statues-single-versus-double-volley),
-[swordsman recovery](regional-differences-technical.md#remaining-ordinary-enemy-timing-and-motion),
-[Wizard phases](regional-differences-technical.md#wizard-original-fight-and-rematch),
-[terrain and pickups](regional-differences-technical.md#authored-pickup-differences).
+Evidence: [statue volleys](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#bloodpool-act-2-statues-single-versus-double-volley),
+[swordsman recovery](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#remaining-ordinary-enemy-timing-and-motion),
+[Wizard phases](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#wizard-original-fight-and-rematch),
+[terrain and pickups](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#authored-pickup-differences).
 
 ### Kasandora
 
@@ -495,11 +495,11 @@ damaging strip; other nearby floor cells also change.
 The Pharaoh's rematch is covered under
 [Death Heim](#death-heim).
 
-Evidence: [Antlion trigger and firing](regional-differences-technical.md#antlion-trigger-and-post-volley-decision),
-[wall heads, Pharaoh and blue spheres](regional-differences-technical.md#kasandora-act-2-wall-heads-pharaoh-and-blue-spheres),
-[swordsman collision sizes](regional-differences-technical.md#kasandora-swordsman-collision-extents),
-[fire-enemy movement and spawning](regional-differences-technical.md#kasandora-fire-enemy-motion-and-spawn-decisions),
-[terrain and pickups](regional-differences-technical.md#authored-pickup-differences).
+Evidence: [Antlion trigger and firing](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#antlion-trigger-and-post-volley-decision),
+[wall heads, Pharaoh and blue spheres](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#kasandora-act-2-wall-heads-pharaoh-and-blue-spheres),
+[swordsman collision sizes](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#kasandora-swordsman-collision-extents),
+[fire-enemy movement and spawning](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#kasandora-fire-enemy-motion-and-spawn-decisions),
+[terrain and pickups](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#authored-pickup-differences).
 
 ### Aitos
 
@@ -539,7 +539,7 @@ match across all five ROMs. The two animated Act 1 backgrounds advance their
 page every five updates in each release; the separate tile-upload animation
 is disabled in all three Act 1 profiles. A specific scene or object still
 needs to be identified before that report can be treated as a confirmed
-difference. See the [background-animation checks](regional-differences-technical.md#aitos-background-animation-and-video-profiles).
+difference. See the [background-animation checks](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#aitos-background-animation-and-video-profiles).
 
 **Act 1: European dragon.** Beginner omits an additional projectile-producing
 attack; Normal and Expert retain it. The measured movement phases of the
@@ -576,16 +576,16 @@ apple. The other authored item placements match.
 sequences retain the same entries, timing, movement and collision sizes.
 The changed artwork does not add an animation step.
 
-Evidence: [humanoid pose order](regional-differences-technical.md#aitos-humanoid-pose-order),
-[bamboo traps](regional-differences-technical.md#aitos-bamboo-spike-traps),
-[European dragon](regional-differences-technical.md#european-boss-difficulty-branches),
-[projectile lifetime](regional-differences-technical.md#aitos-dragon-projectile-lifetime),
-[platform skulls and volcano fireballs](regional-differences-technical.md#aitos-act-1-platform-skulls-and-volcano-fireballs),
-[molten-rock launches](regional-differences-technical.md#aitos-molten-rock-launches),
-[room exits and the lava report](regional-differences-technical.md#aitos-room-exits-and-the-unassigned-lava-claim),
-[pickups](regional-differences-technical.md#authored-pickup-differences),
-[Flaming Wheel](regional-differences-technical.md#flaming-wheel-original-fight-and-rematch),
-[background distortion](regional-differences-technical.md#regional-action-raster-tables).
+Evidence: [humanoid pose order](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#aitos-humanoid-pose-order),
+[bamboo traps](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#aitos-bamboo-spike-traps),
+[European dragon](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-boss-difficulty-branches),
+[projectile lifetime](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#aitos-dragon-projectile-lifetime),
+[platform skulls and volcano fireballs](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#aitos-act-1-platform-skulls-and-volcano-fireballs),
+[molten-rock launches](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#aitos-molten-rock-launches),
+[room exits and the lava report](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#aitos-room-exits-and-the-unassigned-lava-claim),
+[pickups](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#authored-pickup-differences),
+[Flaming Wheel](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#flaming-wheel-original-fight-and-rematch),
+[background distortion](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#regional-action-raster-tables).
 
 ### Marahna
 
@@ -668,16 +668,16 @@ vertical reach is unchanged, so this is more than a difference in appearance.
 The Western animation omits one intermediate pose; the remaining poses keep
 their original timing.
 
-Evidence: [Act 1 boss phases and protection](regional-differences-technical.md#marahna-act-1-boss-vulnerability-and-placement),
-[spellcaster timing](regional-differences-technical.md#ordinary-enemy-movement-and-attack-recovery),
-[Viper attack selection](regional-differences-technical.md#viper-attack-selection-and-rematch),
-[European plant behavior](regional-differences-technical.md#european-boss-difficulty-branches),
-[plant projectile preparation](regional-differences-technical.md#marahna-head-and-projectile-preparation),
-[European Viper](regional-differences-technical.md#european-viper-lightning-and-floor-attacks),
-[splitting fireballs](regional-differences-technical.md#marahna-splitting-fireballs),
-[trap arrows](regional-differences-technical.md#marahna-trap-arrow-motion-and-artwork),
-[head withdrawal](regional-differences-technical.md#remaining-ordinary-enemy-timing-and-motion),
-[terrain and pickups](regional-differences-technical.md#authored-pickup-differences).
+Evidence: [Act 1 boss phases and protection](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#marahna-act-1-boss-vulnerability-and-placement),
+[spellcaster timing](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#ordinary-enemy-movement-and-attack-recovery),
+[Viper attack selection](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#viper-attack-selection-and-rematch),
+[European plant behavior](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-boss-difficulty-branches),
+[plant projectile preparation](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#marahna-head-and-projectile-preparation),
+[European Viper](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-viper-lightning-and-floor-attacks),
+[splitting fireballs](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#marahna-splitting-fireballs),
+[trap arrows](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#marahna-trap-arrow-motion-and-artwork),
+[head withdrawal](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#remaining-ordinary-enemy-timing-and-motion),
+[terrain and pickups](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#authored-pickup-differences).
 
 ### Northwall
 
@@ -711,10 +711,10 @@ solid ground.
 Two half apples in Act 1 and one in Act 2 become whole apples, while an
 Act 2 magic scroll becomes a 1UP. Some traps remain lethal in US and Japan.
 
-Evidence: [European throwing and impact sequence](regional-differences-technical.md#remaining-european-boss-program-differences),
-[original fight and Death Heim rematch](regional-differences-technical.md#northwall-act-2-boss-original-versus-death-heim),
-[background-wave comparison](regional-differences-technical.md#ice-dragon-raster-workspace-residency),
-[terrain and pickups](regional-differences-technical.md#authored-pickup-differences).
+Evidence: [European throwing and impact sequence](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#remaining-european-boss-program-differences),
+[original fight and Death Heim rematch](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#northwall-act-2-boss-original-versus-death-heim),
+[background-wave comparison](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#ice-dragon-raster-workspace-residency),
+[terrain and pickups](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#authored-pickup-differences).
 
 ### Death Heim
 
@@ -733,7 +733,7 @@ lasts 56 frames in the Western rematch, up from 40 in Kasandora. Japan keeps the
 24-frame sequence in both encounters. These timings and firing patterns apply
 in normal and Special mode.
 
-Evidence: [Pharaoh rematch timing and descendants](regional-differences-technical.md#pharaoh-death-heim-rematch).
+Evidence: [Pharaoh rematch timing and descendants](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#pharaoh-death-heim-rematch).
 
 **Other rematches.** US and Japan accelerate parts of the Wizard and Viper
 fights. The Wizard's initial spread moves twice as fast, while two wind-up
@@ -757,10 +757,10 @@ Its turn uses two poses rather than four,
 taking eight updates instead of 16 before choosing its next direction. These are minion changes,
 not a reduction to the final boss's own health.
 
-Evidence: [European minion](regional-differences-technical.md#remaining-european-boss-program-differences),
-[Wizard rematch](regional-differences-technical.md#wizard-original-fight-and-rematch),
-[Viper rematch](regional-differences-technical.md#viper-attack-selection-and-rematch),
-[final-boss mechanics](regional-differences-technical.md#tanzra-forms-timer-and-projectile-strength).
+Evidence: [European minion](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#remaining-european-boss-program-differences),
+[Wizard rematch](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#wizard-original-fight-and-rematch),
+[Viper rematch](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#viper-attack-selection-and-rematch),
+[final-boss mechanics](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#tanzra-forms-timer-and-projectile-strength).
 
 The arrival of Death Heim on the world map is discussed
 [below](#death-heims-appearance).
@@ -793,7 +793,7 @@ land, sufficient support and a free structure record.
 In the town being shown, houses spend those units; support buildings return
 their cost when they finish. Off-screen building uses the same starting budget
 but does not deduct the reserve. These are separate from construction speed.
-[Construction-budget evidence](regional-differences-technical.md#population-switching-established-boundaries)
+[Construction-budget evidence](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#population-switching-established-boundaries)
 
 Recovery follows these schedules; fractional amounts are rounded down:
 
@@ -813,8 +813,8 @@ Opening the tested town movement menu freezes development, monsters, and
 recovery. During a miracle, development can stop while monsters and recovery
 continue.
 
-Evidence: [development and recovery](regional-differences-technical.md#scheduler-and-sim-enemies),
-[European simulation rules](regional-differences-technical.md#european-simulation-numeric-rules).
+Evidence: [development and recovery](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#scheduler-and-sim-enemies),
+[European simulation rules](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-simulation-numeric-rules).
 
 ### Miracle costs
 
@@ -856,7 +856,7 @@ they contribute to town growth instead. The game distributes each house's
 contribution separately. A player's earthquake can therefore reduce a lair's
 count and then replenish it during the same effect.
 
-Evidence: [earthquake behavior](regional-differences-technical.md#earthquake-class-policy).
+Evidence: [earthquake behavior](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#earthquake-class-policy).
 
 ### Housing and population support
 
@@ -950,12 +950,12 @@ that behavior, but not whether it was intentional or how every naturally
 developed town is reported. The reported wording differences are covered under
 [Menus](#menus).
 
-Evidence: [support and level tables](regional-differences-technical.md#town-census-and-level-requirements),
-[burned-field recovery](regional-differences-technical.md#burned-field-recovery-and-census-refresh),
-[construction and population behavior](regional-differences-technical.md#population-switching-established-boundaries),
-[building geometry and candidate totals](regional-differences-technical.md#building-geometry-and-conditional-fillmore-calculation),
-[city reports](regional-differences-technical.md#census-construction-and-status-are-separate-contracts).
-[Status-refresh evidence](regional-differences-technical.md#regional-growth-status-producer)
+Evidence: [support and level tables](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#town-census-and-level-requirements),
+[burned-field recovery](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#burned-field-recovery-and-census-refresh),
+[construction and population behavior](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#population-switching-established-boundaries),
+[building geometry and candidate totals](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#building-geometry-and-conditional-fillmore-calculation),
+[city reports](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#census-construction-and-status-are-separate-contracts).
+[Status-refresh evidence](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#regional-growth-status-producer)
 documents the separate producer difference.
 
 ### Population prerequisites for story events
@@ -974,7 +974,7 @@ guarantee an immediate scene, set a town's maximum population or change the
 Master's level. The population check itself does not clear an enabled event
 when population falls; individual event callbacks can still change eligibility.
 
-Evidence: [population and road prerequisites](regional-differences-technical.md#population-and-road-story-prerequisites).
+Evidence: [population and road prerequisites](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#population-and-road-story-prerequisites).
 
 ### Monster lairs and sealing
 
@@ -1029,9 +1029,9 @@ score-derived value is directed to growth instead.
 Japan processes the score during the stage-clear sequence; the US game does
 so when leaving the action stage.
 
-Evidence: [lair counts and delays](regional-differences-technical.md#monster-lairs),
-[score and house effects](regional-differences-technical.md#lair-stock-is-not-monotonic),
-[sealing and returning souls](regional-differences-technical.md#guidance-sealing-and-delayed-soul-rewards).
+Evidence: [lair counts and delays](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#monster-lairs),
+[score and house effects](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#lair-stock-is-not-monotonic),
+[sealing and returning souls](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#guidance-sealing-and-delayed-soul-rewards).
 
 ### Simulation enemy combat and behavior
 
@@ -1071,10 +1071,10 @@ The examined Skull Head targeting and earthquake preparation sequence is
 shared, including its timers. Its contact damage and the earthquake's
 destruction rules differ.
 
-Evidence: [combat and behavior](regional-differences-technical.md#sim-enemy-state-differences),
-[targeting and retries](regional-differences-technical.md#monster-target-search-and-retry-gates),
-[strike and destruction ordering](regional-differences-technical.md#dragon-recursion-bat-carrying-and-field-damage),
-[Skull Head behavior](regional-differences-technical.md#skull-head-target-and-earthquake-state-contract).
+Evidence: [combat and behavior](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#sim-enemy-state-differences),
+[targeting and retries](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#monster-target-search-and-retry-gates),
+[strike and destruction ordering](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#dragon-recursion-bat-carrying-and-field-damage),
+[Skull Head behavior](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#skull-head-target-and-earthquake-state-contract).
 
 ### Offerings and the Magic Skull
 
@@ -1089,7 +1089,7 @@ A Source of Magic increases the persistent magic-scroll allowance by one,
 as well as the current working scroll count. The regional difference is
 when the player receives these benefits, not a different reward amount.
 
-Evidence: [collection, activation and inventory handling](regional-differences-technical.md#sources-of-life-and-magic-collection-versus-use).
+Evidence: [collection, activation and inventory handling](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#sources-of-life-and-magic-collection-versus-use).
 
 The four Source of Life discoveries are shared across the releases:
 
@@ -1122,13 +1122,13 @@ restarts it when you return to town. The town keeps its Compass knowledge, so yo
 not need another Compass. This rule is shared: Fillmore's restart was
 tested in all five releases, and Marahna uses the same initialization rule.
 
-Evidence: [discovery gates and fishing rewards](regional-differences-technical.md#source-discoveries-and-compass-fishing).
+Evidence: [discovery gates and fishing rewards](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#source-discoveries-and-compass-fishing).
 
 Northwall's separate lake search uses the same progress counter as Marahna,
 but does not reset it when starting. In all five releases, controlled tests
 carried Marahna's completed value of 128 into Northwall, reducing its search
 from 255 updates to 127 without changing the reward. See
-[the shared-counter oddity](unused-content.md#two-towns-sharing-fishing-progress)
+[the shared-counter oddity](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/unused-content.md#two-towns-sharing-fishing-progress)
 for the behavior and test limits.
 
 **Inventory limits.** All five releases require a free held-item slot before
@@ -1142,7 +1142,7 @@ their discovery complete without storing the new reward. Making room later
 did not recover it. This behavior matches across the releases; whether normal
 town progression can fill all eight slots at these moments remains unverified.
 
-Evidence: [capacity gates and one-time discoveries](regional-differences-technical.md#full-inventories-and-one-time-discoveries).
+Evidence: [capacity gates and one-time discoveries](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#full-inventories-and-one-time-discoveries).
 
 The Magic Skull seals its designated Bloodpool lair through a different path
 from guiding the people. It works at the tested population of two, credits
@@ -1153,7 +1153,7 @@ rules agree in US and Japan.
 The US item sequence adds a 90-frame wait after the effect before consuming
 the skull. Japan proceeds without that wait.
 
-All five ROMs also retain a [separate Fillmore Skull event](unused-content.md#fillmores-extra-magic-skull-event)
+All five ROMs also retain a [separate Fillmore Skull event](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/unused-content.md#fillmores-extra-magic-skull-event)
 with translated dialogue, but no normal way of activating it has been identified.
 
 The crop offering uses the same checked replenishment rule in all five
@@ -1170,8 +1170,8 @@ The Japanese offering is called rice rather than wheat, but its menu icon
 is unchanged: both the selected and greyed-out pictures match across all
 five releases. This comparison does not cover the fields drawn in towns.
 
-Evidence: [crop replenishment](regional-differences-technical.md#crop-offering-replenishment),
-[offering names and artwork](regional-differences-technical.md#crop-offering-menu-artwork).
+Evidence: [crop replenishment](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#crop-offering-replenishment),
+[offering names and artwork](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#crop-offering-menu-artwork).
 
 ### Town story events
 
@@ -1202,9 +1202,9 @@ happen in that order, with the acceptance dialogue before consumption.
 Cancelling in the item picker or trying to give a bridge that Bloodpool
 already knows preserves the item.
 
-Evidence: [maintenance transactions](regional-differences-technical.md#successful-maintenance-transactions),
-[discovery and crop-sharing conditions](regional-differences-technical.md#bridges-and-cross-town-crop-sharing),
-[bridge delivery](regional-differences-technical.md#bridge-offering-delivery).
+Evidence: [maintenance transactions](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#successful-maintenance-transactions),
+[discovery and crop-sharing conditions](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#bridges-and-cross-town-crop-sharing),
+[bridge delivery](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#bridge-offering-delivery).
 
 #### Crop sharing and Teddy
 
@@ -1228,8 +1228,8 @@ consumes the offering. Using it on an already-upgraded field still consumes
 the offering. Neither method repairs burned fields; Rain handles that separately.
 These rules match across all five releases.
 
-Evidence: [crop and Teddy sequence](regional-differences-technical.md#bloodpool-crop-and-teddy-event-joins),
-[automatic teaching and manual delivery](regional-differences-technical.md#bridges-and-cross-town-crop-sharing).
+Evidence: [crop and Teddy sequence](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#bloodpool-crop-and-teddy-event-joins),
+[automatic teaching and manual delivery](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#bridges-and-cross-town-crop-sharing).
 
 #### Bloodpool's disputes, Music and Compass
 
@@ -1246,7 +1246,7 @@ regular town check refreshes population prerequisites and still selects the
 unresolved dispute first. This difference alone has not established earlier
 Compass access in normal Japanese play.
 
-Evidence: [event priority, Music and Compass](regional-differences-technical.md#bloodpool-disputes-music-and-compass).
+Evidence: [event priority, Music and Compass](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#bloodpool-disputes-music-and-compass).
 
 #### Miracles and other story conditions
 
@@ -1273,12 +1273,12 @@ structure-update paths also match the US results. These shared systems do not
 establish complete campaign equivalence: the successful event tests begin
 with controlled prerequisites, rather than following full town-event chains.
 
-Evidence: [miracle story triggers](regional-differences-technical.md#miracle-triggered-story-events),
-[periodic town checks](regional-differences-technical.md#periodic-town-event-maintenance),
-[miracle outcomes](regional-differences-technical.md#successful-miracle-story-transactions),
-[European monster programs](regional-differences-technical.md#european-sim-state-program-comparison),
-[shared effects and redraws](regional-differences-technical.md#european-shared-effects-and-structure-redraws),
-[structure updates](regional-differences-technical.md#european-nonempty-structure-action-matrix).
+Evidence: [miracle story triggers](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#miracle-triggered-story-events),
+[periodic town checks](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#periodic-town-event-maintenance),
+[miracle outcomes](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#successful-miracle-story-transactions),
+[European monster programs](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-sim-state-program-comparison),
+[shared effects and redraws](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-shared-effects-and-structure-redraws),
+[structure updates](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#european-nonempty-structure-action-matrix).
 
 ## Sky Palace, story, graphics, and music
 
@@ -1307,9 +1307,9 @@ The rules choosing a report code differ, however, so a particular developed
 town can receive different classifications. Naturally maximized towns still
 need checking alongside their attainable populations.
 
-Evidence: [Master-status navigation](regional-differences-technical.md#master-status-and-score-page),
-[town-menu returns and speed choices](regional-differences-technical.md#town-menu-return-behavior-and-message-speed-choices),
-[city-report wording and native display](regional-differences-technical.md#city-report-label-selection).
+Evidence: [Master-status navigation](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#master-status-and-score-page),
+[town-menu returns and speed choices](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#town-menu-return-behavior-and-message-speed-choices),
+[city-report wording and native display](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#city-report-label-selection).
 
 ### Death Heim's appearance
 
@@ -1327,7 +1327,7 @@ the Palace does not repeat the announcement in either version.
 During the US reveal, the game keeps the stage-clear music data loaded. It
 loads the usual Sky Palace music when returning there.
 
-Evidence: [arrival and music selection](regional-differences-technical.md#death-heim-transition-and-music).
+Evidence: [arrival and music selection](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#death-heim-transition-and-music).
 
 ### Story and wording
 
@@ -1351,7 +1351,7 @@ suggests more involvement, but does not explicitly state that he rigged the
 draw to select himself. European English also corrects a small typo in this
 conversation, changing “boy name” to “boy named.”
 
-Evidence: [native narrative comparisons](regional-differences-technical.md#native-narrative-comparisons).
+Evidence: [native narrative comparisons](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#native-narrative-comparisons).
 
 ### Music
 
@@ -1374,9 +1374,9 @@ The Western Palace scene also declares the silent resource under a separate
 scene-local selector. A normal route through that extra declaration has not
 been established; the silent resource itself is not unused.
 
-Evidence: [Fillmore Act 2 music](regional-differences-technical.md#fillmore-act-2-music-residency),
-[regional song sequences](regional-differences-technical.md#regional-song-sequences),
-[silent Palace resource](regional-differences-technical.md#extra-palace-music-resource-silent-upload).
+Evidence: [Fillmore Act 2 music](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#fillmore-act-2-music-residency),
+[regional song sequences](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#regional-song-sequences),
+[silent Palace resource](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#extra-palace-music-resource-silent-upload).
 
 ### Artwork
 
@@ -1404,7 +1404,7 @@ evidence that they appear during play.
 Image data, palettes, sprite assembly and collision sizes are separate
 aspects of a redraw. The gameplay sections describe the confirmed collision
 or timing effects; a changed picture alone does not establish either one.
-Evidence: [ordinary action artwork](regional-differences-technical.md#ordinary-action-artwork-survey).
+Evidence: [ordinary action artwork](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#ordinary-action-artwork-survey).
 
 #### Town symbols and fields
 
@@ -1445,7 +1445,7 @@ In Death Heim's boss-selection room, the leftmost statue has horns in Japan
 and lacks them in the Western releases. The background comparison confirms
 the redraw; it does not imply a different boss-selection mechanic.
 
-Evidence: [town, title and Death Heim artwork](regional-differences-technical.md#town-title-and-death-heim-artwork).
+Evidence: [town, title and Death Heim artwork](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#town-title-and-death-heim-artwork).
 
 ## What remains unverified
 
@@ -1457,17 +1457,17 @@ Their independent verification and the following questions remain open:
 | Independent verification of population maxima | Reproduce the published layouts in the pinned ROMs; upper bounds accounting for upgrades, bridges and event changes remain a separate proof task |
 | Complete event chains | Natural prerequisite progression and event order across complete campaigns, beyond the individually tested successful paths |
 | Other action behavior | Untested enemy and boss branches; a precise scene/object for the reported Aitos lava slowdown |
-| Remaining action artwork | Bosses and other shared graphics; native owners for the extra Bloodpool log animation, questionable Japanese Bloodpool references and four unreferenced Fillmore cave pictures. See the [resource-usage checks](regional-differences-technical.md#action-resources-without-a-proven-gameplay-owner) |
+| Remaining action artwork | Bosses and other shared graphics; native owners for the extra Bloodpool log animation, questionable Japanese Bloodpool references and four unreferenced Fillmore cave pictures. See the [resource-usage checks](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#action-resources-without-a-proven-gameplay-owner) |
 | Extra Palace silence declaration | A route carrying scene selector 4 into the Palace loader. The ending already uses the same silent resource directly as music ID 21, independently of this declaration |
 
 Follow-up traces checked the questionable action graphics with their actual
 loaded resources and confirmed that the known Death Heim scene selector is
 cleared before the Palace loads. They found no new gameplay use for these
-entries. The [technical account](regional-differences-technical.md#instruction-level-resource-selection-checks)
+entries. The [technical account](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md#instruction-level-resource-selection-checks)
 records the tested routes and their limits; neither question is treated as
 an established regional gameplay difference.
 
-The [unused content and oddities](unused-content.md) article covers debug
+The [unused content and oddities](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/unused-content.md) article covers debug
 facilities, developer text and possible leftovers separately. It
 distinguishes working features from unexplained resources; none of its
 remaining candidates has confirmed beta or cut-content provenance.
@@ -1479,7 +1479,7 @@ the retail US, Japanese and European ROM data and code, supplemented by controll
 tests running the original routines and game scenes. Some tests deliberately
 set up a particular situation; they are not substitutes for complete playthroughs.
 
-The [technical companion](regional-differences-technical.md) preserves the
+The [technical companion](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/regional-differences-technical.md) preserves the
 exact ROM identities, addresses, measurements, and limitations so readers
 can inspect the evidence. Reported leads were paraphrased from the regional
 differences section of The Cutting Room Floor's *ActRaiser* article, supplied

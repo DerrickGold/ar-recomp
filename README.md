@@ -10,12 +10,12 @@ action stages and towns depth with optional 3D views.
 **[Download the Builder](https://github.com/DerrickGold/ar-recomp/releases)** ·
 [Quick start](#quick-start) · [Features](#features) · [Quality of life](#quality-of-life) ·
 [Project status](#progress-at-a-glance) ·
-[Manual](docs/manual.md) · [Release notes](docs/release-notes.md) ·
+[Manual](docs/manual.md) · [Release notes](https://github.com/DerrickGold/ar-recomp/releases) ·
 [Build from source](#build-from-source) · [AI disclosure](#ai-disclosure)
 
 [![Total GitHub release downloads](https://img.shields.io/github/downloads/DerrickGold/ar-recomp/total)](https://github.com/DerrickGold/ar-recomp/releases)
 ![Downloads for the latest GitHub release](https://img.shields.io/github/downloads-pre/DerrickGold/ar-recomp/latest/total)
-![GitHub commits since the release tag](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0900)
+![GitHub commits since the release tag](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0901)
 
 ## AI disclosure
 
@@ -530,7 +530,8 @@ See the [benchmark definitions](tools/runner-bench.json) for details.
 ## Documentation
 
 - **Play or update:** [Player manual](docs/manual.md),
-  [release notes](docs/release-notes.md), and [desktop packaging](docs/desktop-packaging.md).
+  [release notes](https://github.com/DerrickGold/ar-recomp/releases), and
+  [desktop packaging](docs/desktop-packaging.md).
 - **Make something:** [Workshop](docs/builder-workshop.md),
   [action editor](tools/action_editor/README.md), and [language packs](docs/language-packs.md).
 - **Find a reference:** [Documentation index](docs/README.md),

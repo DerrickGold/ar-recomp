@@ -3,7 +3,7 @@
 Player guides, content-authoring contracts, and maintained game-data references.
 For downloads and build instructions, start with the
 [project README](https://github.com/DerrickGold/ar-recomp#quick-start).
-The [release notes](release-notes.md) describe the next release's changes.
+Read the notes for each version on [GitHub Releases](https://github.com/DerrickGold/ar-recomp/releases).
 
 ## Playing and creating content
 
@@ -30,8 +30,8 @@ memory layouts, scripts, and save formats are grouped by game.
 
 The [ActRaiser 1 index](actraiser-1/README.md) contains regional settings and
 comparisons, action environments, the randomizer, and native modding references.
-Start with its [RAM map](actraiser-1/ram-map.md),
-[ROM map](actraiser-1/rom-map.md), or [save format](actraiser-1/save-format.md)
+Start with its [RAM map](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/ram-map.md),
+[ROM map](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/rom-map.md), or [save format](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/save-format.md)
 when inspecting game data. References describe the USA release unless another
 release is explicitly named; uncertain entries retain their evidence limits.
 
@@ -53,3 +53,6 @@ game research; `docs/shared/` holds host/bundle work and shared rendering resear
 Keep useful controls and authoring instructions in the public guide when moving
 a mixed document's research history. Public links and release packages must not
 depend on those local records.
+
+Keep release-note drafts in `development/docs/shared/releases/<version>/`.
+Publish the finished notes on GitHub Releases.

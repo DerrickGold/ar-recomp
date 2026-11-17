@@ -86,4 +86,4 @@ does not apply the host randomizer or regional enhancements.
 
 The game's import and recovery-copy operations preserve this metadata. A
 plain native-SRAM export is for emulator interchange, not a complete backup
-of enhanced campaign state. For the binary details, see [Save format](save-format.md).
+of enhanced campaign state. For the binary details, see [Save format](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/save-format.md).

@@ -654,7 +654,7 @@ needed. The next town visit redraws its surviving structures.
 
 Switching back requires another redevelopment; it does **not** restore the
 old layout. To restore that layout, use the complete pre-change recovery copy
-as described in [Save formats](save-format.md). A US/Europe switch keeps the
+as described in [Save formats](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/save-format.md). A US/Europe switch keeps the
 same support capacities, so it does not remove buildings. Japanese support
 requires Japanese population goals; those goals cannot be switched separately
 to the higher Western requirements while Japanese support remains selected.
@@ -902,7 +902,7 @@ and restarting displays the extracted Japanese title artwork. A failed settings
 write leaves the previous choice selected and reports an error. Keep the matching
 `.archeckpoint` companion beside your save when copying it to another Recomp
 installation. The `.srm` itself remains compatible with SNES emulators. See
-[save companions](save-format.md#regional-campaign-checkpoints) for backup and
+[save companions](https://github.com/DerrickGold/ar-recomp/blob/main/docs/actraiser-1/save-format.md#regional-campaign-checkpoints) for backup and
 recovery details.
 Population conversion remains an exception: continue the game before requesting
 it, then confirm the Palace review. That transaction saves the rebuilt towns
