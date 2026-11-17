@@ -62,8 +62,10 @@ to retain the visual edit.</p>
 <p><b>Authored edits</b> finds edited regions and shows their record budget.
 Preview <b>Backplanes only</b>/<b>Cutaway + actors</b>, camera presets and <b>Focus selection</b>
 help inspect joins. These inspection choices do not change saved geometry.</p>
-<p><b>Objects → Load native objects…</b> loads a captured game frame for
-sprite inspection. Select a supported object and choose its shape, depth and
+<p><b>Objects → Load native capture…</b> loads recorded sprites and actor
+effects. Select frames from one room and region, then step through them with
+<b>Previous frame</b> and <b>Next frame</b>. The Objects menu lists the effects
+in each frame. Select a supported object and choose its shape, depth and
 thickness; changes apply to its matching family. These are frozen poses.
 Tile and object geometry edits stay in preview until <b>Apply</b>.
 <b>Discard</b> restores the applied state; <b>Save project</b> downloads your

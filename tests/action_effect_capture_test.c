@@ -6,6 +6,7 @@
 
 #include "action/action_effect_clock.h"
 #include "actraiser_game.h"
+#include "dev/action_object_snapshot_capture.h"
 #include "app/settings.h"
 #include "diorama/diorama_layer_order.h"
 #include "diorama/diorama_layer_manifest.h"
@@ -45,6 +46,11 @@ static uint8_t published_group, published_map, published_section;
 static bool pending_peek;
 static uint8_t scenery_section;
 uint8_t ActRaiser_LiveScenerySection(void) { return scenery_section; }
+void ActionObjectSnapshotCapture_StageAccents(const ActionSceneEffectFrame *snapshot,
+    unsigned group, unsigned room, uint16_t clock) {
+  assert(snapshot && group==g_ram[kActRaiserWram_MapGroup] && room==g_ram[kActRaiserWram_CurrentMap]);
+  assert(clock==expected_scene_clock);
+}
 
 void ActionEffects_CaptureFrame(ActionEffectObserver *observer, ActionEffectFrame *dst,
     const uint8_t *wram, size_t size, unsigned ticks) {

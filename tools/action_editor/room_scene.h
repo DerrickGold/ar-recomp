@@ -11,6 +11,7 @@
 #include "action/action_camera_bounds.h"
 
 typedef struct EditorRoomScene EditorRoomScene;
+struct DioramaObjectSnapshotView;
 /* Stable default source inventory, independent of the preview camera or edits. */
 typedef struct EditorRoomEffectSource {
   ActionEffectInstance effect;
@@ -42,6 +43,7 @@ bool EditorRoomScene_BgPolicy(const EditorRoomScene *room, int x, int y,
  * and finite skybox placement also depend on the view when X is unchanged. */
 typedef struct EditorRoomCamera {
   int x, y, maximum_y;
+  int minimum_x, maximum_x;
   ActionCameraAxisBounds travel;
   uint8_t bg_apron_mask;
 } EditorRoomCamera;
@@ -104,7 +106,8 @@ unsigned EditorRoomScene_TerrainProfile(const EditorRoomScene *room);
 bool EditorRoomScene_NativeSection(const EditorRoomScene *,int x,int y,uint32_t frame,unsigned *section);
 /* A native packet replaces synthetic receiver/binding facts, including an
  * intentionally empty native actor frame. Facts retain their world space. */
-bool EditorRoomScene_SetNativeActors(EditorRoomScene *,const ActionEffectActor *,unsigned count,bool enabled);
+/* The frame must remain owned by the caller until cleared or replaced. */
+void EditorRoomScene_SetNativeCapture(EditorRoomScene *,const struct DioramaObjectSnapshotView *);
 const ActionAtmosphereField *EditorRoomScene_AtmosphereField(const EditorRoomScene *room);
 bool EditorRoomScene_PreviewBinding(EditorRoomScene *,bool enabled,uint32_t source,int x,int y,unsigned start);
 void EditorRoomScene_AdvanceReceivers(EditorRoomScene *,unsigned mask,const int x[2],const int feet_y[2],uint32_t frame);

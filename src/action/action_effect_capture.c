@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "action/action_effect_clock.h"
+#include "dev/action_object_snapshot_capture.h"
 #include "action/action_effects.h"
 #include "actraiser_game.h"
 #include "actraiser/actraiser_rtl.h"
@@ -205,7 +206,11 @@ static void PreparePendingFrame(void) {
   if (!g_settings.action_environmental_effects) {
     s_pending.scene.decoration_count = 0;
     s_pending.scene.decoration_visible_count = 0;
-  } else if (s_pending.observer.scene_map_valid) {
+  }
+  ActionObjectSnapshotCapture_StageAccents(&s_pending.scene,
+      g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+      s_pending.observer.scene_clock);
+  if (g_settings.action_environmental_effects && s_pending.observer.scene_map_valid) {
     ActionEffectManifest_Apply(g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
         s_pending.observer.scene_clock, g_ram, kActRaiserWramSize, voxel, &s_pending.scene);
   }

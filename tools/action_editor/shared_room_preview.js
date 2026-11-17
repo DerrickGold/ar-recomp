@@ -37,16 +37,37 @@ const SharedRoomPreview = (() => {
   let backend=null, api=null, key='', configDirty=true, config='', lost=false, skyboxKey=0, effectsConfig=null, collision=null, eventConfig=null;
   let placingPlayer=false;
   let nativeObjects=null;
+  let objectFiles=[],objectFrame=0,objectLoad=0;
   let inspection=0;
-  function objectControls(info=null) {
+  const eventFields=['previewEvent','previewEventX','previewEventY','previewEventVX','previewEventVY','previewEventStart','previewEventDuration','previewEventSeed'];
+  function effectName(kind) {
+    const bytes=new Uint8Array(api.memory.buffer);
+    const start=api.RoomPreview_KindName(kind);
+    return new TextDecoder().decode(bytes.subarray(start,bytes.indexOf(0,start)));
+  }
+  function objectControls(info=null,accents=null) {
     nativeObjects=info;
+    if(!info) {objectFiles=[];objectFrame=0;++objectLoad;}
     $('#sharedResetObjects').disabled=!info;
     $('#sharedClearObjects').disabled=!info;
     $('#sharedPlacePlayer').disabled=!!info;
     $('#sharedPlayerSettings').disabled=!!info;
-    $('#sharedObjectStatus').textContent=info
-      ? `Native frame ${info[3]} · ${info[11]} actors · ${info[10]} modeled pieces · finite capture`
-      : '';
+    $('#previewCapturedAccents').hidden=!accents;
+    for(const id of [...eventFields,'previewEventHere'])$('#'+id).disabled=!!accents;
+    $('#sharedObjectSequence').hidden=objectFiles.length<2;
+    $('#sharedPrevObjectFrame').disabled=objectFrame===0;
+    $('#sharedNextObjectFrame').disabled=objectFrame+1>=objectFiles.length;
+    const status=info?[`Native frame ${info[3]}`,`${info[11]} actors`,`${info[10]} modeled pieces`]:[];
+    if(objectFiles.length>1)status.push(`Frame ${objectFrame+1} of ${objectFiles.length}`);
+    if(accents) {
+      const [count,dust,smoke,...kinds]=accents;
+      status.push(`${count+dust+smoke} accent records`);
+      const names=[...new Set(kinds.map(effectName))];
+      if(dust)names.push('Landing dust');
+      if(smoke)names.push('Fireball smoke');
+      if(names.length)status.push(names.join(', '));
+    } else if(info)status.push('Sprite-only capture');
+    $('#sharedObjectStatus').textContent=status.join(' · ');
   }
   const measures=new Map();
   let configVersion=0,configuredRevision=-1,configuredMode=-1;
@@ -127,6 +148,9 @@ const SharedRoomPreview = (() => {
       if(revision!==configuredRevision){configDirty=true;configuredRevision=revision;}
       const next=sceneKey(room);
       if(key!==next) {
+        // Release the old packet and its decoded planes before the new room
+        // is built. Both room assets can coexist while loading in fixed WASM memory.
+        if(nativeObjects)api.RoomPreview_ClearObjects();
         objectControls();
         send(SharedActionPreview.encode(DATA,BLOBS,room),api.RoomPreview_Load);
         key=next;collision=null;eventConfig=null;config='';configDirty=true;skyboxKey=0;effectsConfig=null;configuredMode=-1;
@@ -163,7 +187,7 @@ const SharedRoomPreview = (() => {
     try {
       ensureRoom();
       if(effectsConfig!==EffectEditor.text())validateEffects(EffectEditor.text());
-      const eventValues=['previewEvent','previewEventX','previewEventY','previewEventVX','previewEventVY','previewEventStart','previewEventDuration','previewEventSeed'].map(id=>Number($('#'+id).value));
+      const eventValues=eventFields.map(id=>Number($('#'+id).value));
       const nextEvent=eventValues.join(':');
       if(eventConfig!==nextEvent) {
         if(!api.RoomPreview_SetEvent(...eventValues))throw Error('Invalid event preview parameters.');
@@ -225,29 +249,40 @@ const SharedRoomPreview = (() => {
   $('#previewRim').checked=!!window.__ACTION_VIEW__?.rimLight;
   $('#sharedPlayerSettings').onclick=()=>EditorLayout.openSettings('receivers');
   $('#sharedLoadObjects').onclick=()=>$('#sharedObjectFile').click();
-  $('#sharedObjectFile').onchange=async event=>{
-    const file=event.target.files[0];event.target.value='';if(!file)return;
-    if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('loading another object capture'))return;
+  async function loadObjectFrame(files,index) {
+    if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('loading another native frame'))return;
+    const file=files[index];
     try {
       ensureRoom();
+      const load=++objectLoad;
       if(file.size>api.DioramaPreview_Capacity())throw Error('Native object capture is too large.');
       const roomAtLoad=sceneKey(room),bytes=new Uint8Array(await file.arrayBuffer());
+      if(load!==objectLoad)return;
       if(sceneKey(room)!==roomAtLoad)throw Error('The room changed while loading. Select the file again.');
-      if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('loading another object capture'))return;
-      api.RoomPreview_SetReceivers(0,0,0,0,0);
+      if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('loading another native frame'))return;
       send(bytes,api.RoomPreview_LoadObjects);
       if(api.RoomPreview_ObjectInfo()!==14)throw Error('Native object capture metadata is unavailable.');
       const info=Array.from(new Int32Array(api.memory.buffer,api.DioramaPreview_Input(),14));
+      const accentSize=api.RoomPreview_ObjectAccents();
+      const accents=accentSize?Array.from(new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),accentSize)):null;
       if(typeof VoxelEditor!=='undefined')VoxelEditor.clearLoaded();
-      objectControls(info);placementMode(false);
+      objectFiles=files;objectFrame=index;
+      objectControls(info,accents);placementMode(false);
       $('#previewReceivers').checked=false;$('#previewEnemyEnabled').checked=false;
       $('#sharedExtra').value=String(info[12]);
       const vertical=Math.max(0,Math.min(64,Math.floor((info[9]-224)/2)));
       $('#sharedVertical').value=String(vertical>=64?64:vertical>=32?32:0);
       setNativeCamera('x',info[4]);setNativeCamera('y',info[5]);setNativeFrame(info[3]);
       setMode('shared');draw();
-    } catch(error) {previewStatus(`Cannot load native objects: ${error.message} Check the selected room and region.`,true);}
+    } catch(error) {previewStatus(`Cannot load ${file.name}. ${error.message} Check the selected room and region.`,true);}
+  }
+  $('#sharedObjectFile').onchange=event=>{
+    const files=Array.from(event.target.files).sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+    event.target.value='';
+    if(files.length)loadObjectFrame(files,0);
   };
+  $('#sharedPrevObjectFrame').onclick=()=>loadObjectFrame(objectFiles,objectFrame-1);
+  $('#sharedNextObjectFrame').onclick=()=>loadObjectFrame(objectFiles,objectFrame+1);
   $('#sharedClearObjects').onclick=()=>{
     if(typeof VoxelEditor!=='undefined'&&!VoxelEditor.guard('clearing native objects'))return;
     if(typeof VoxelEditor!=='undefined')VoxelEditor.clearLoaded();
@@ -420,10 +455,8 @@ const SharedRoomPreview = (() => {
       api=instance.exports;backend.memory=api.memory;api._initialize?.();
       const select=$('#previewEvent');select.replaceChildren();
       const none=document.createElement('option');none.value='0';none.textContent='None';select.append(none);
-      const bytes=new Uint8Array(api.memory.buffer),decoder=new TextDecoder();
       for(let i=0;i<api.RoomPreview_EventCount();i++) {
-        const p=api.RoomPreview_KindName(api.RoomPreview_EventKind(i));let end=p;while(bytes[end])end++;
-        const option=document.createElement('option');option.value=String(i+1);option.textContent=decoder.decode(bytes.subarray(p,end));select.append(option);
+        const option=document.createElement('option');option.value=String(i+1);option.textContent=effectName(api.RoomPreview_EventKind(i));select.append(option);
       }
       if(api.DioramaPreview_Version()!==1||!api.DioramaPreview_Init(backend.gl.getParameter(backend.gl.MAX_TEXTURE_SIZE)))
         throw Error('Unsupported renderer version or device.');

@@ -62,6 +62,11 @@ typedef struct VoxelRearDonorProfile {
   uint64_t key;
   uint16_t rooms;
 } VoxelRearDonorProfile;
+/* Generated rows omit trailing optional flags when their value is zero. */
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
 #include "action_voxel_castle_materials.inc"
 #include "action_voxel_forest_materials.inc"
 #include "action_voxel_cave_materials.inc"
@@ -78,6 +83,9 @@ typedef struct VoxelRearDonorProfile {
 #include "action_voxel_ice_materials.inc"
 #include "action_voxel_ice_water_materials.inc"
 #include "action_voxel_death_heim_materials.inc"
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #include "action_voxel_native_surfaces.inc"
 #include "action_voxel_ice_tip_sources.inc"
 typedef struct VoxelTransparencyRule {

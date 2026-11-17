@@ -63,6 +63,13 @@ static bool Header(Codec *c,DioramaObjectSnapshotView *v) {
   U(v->owner_tags,0,1);U(v->additive_priority_mask,0,15);
   U(v->voxel_sprites.count,0,kVoxelSpriteLimit);U(v->actor_count,0,kActionEffectActorMax);
   U(v->atlas_height,0,kVoxelSpriteAtlasHeight);
+  if(c->version>=5) {
+    DioramaActorAccentSnapshot *a=&v->accents;
+    U(a->captured,0,1);U(a->clock,0,65535);
+    U(a->effect_count,0,kActionSceneEffectMaxInstances);
+    U(a->dust_count,0,kActionLandingDustMaxPuffs);
+    if(!a->captured && (a->clock || a->effect_count || a->dust_count || a->smoke.count))return false;
+  }
   static const uint8_t rooms[]={0,4,8,6,7,8,8,8};
   if(v->map_number>rooms[v->map_group] ||
       v->world_x!=(int64_t)v->camera_x-v->extra_x-v->obj_apron ||
@@ -128,6 +135,67 @@ static bool Actor(Codec *c,ActionEffectActor *a) {
   I(a->feet_y,-32768,32767);U(a->body_radius,0,255);
   F(a->wake.x,-65536,65536);F(a->wake.y,-65536,65536);F(a->wake.dx,-65536,65536);
   F(a->wake.strength,0,1);U(a->wake.age,0,kActionActorWakeTicks);
+  return true;
+}
+
+static bool Accent(Codec *c,ActionEffectInstance *e,bool dust) {
+  U(e->kind,1,kActionEffect_KindCount-1);
+  if(dust) {
+    if(e->kind!=kActionEffect_LandingDust)return false;
+  } else {
+    static const uint8_t native_kinds[]={
+#define SCENE_RULE(name, kind, ...) kActionEffect_##kind,
+#include "action/action_scene_effect_rules.inc"
+#undef SCENE_RULE
+    };
+    if(!memchr(native_kinds,e->kind,sizeof(native_kinds)))return false;
+  }
+  U(e->phase,1,kActionEffectPhase_Count-1);
+  U(e->flags,0,kActionEffectFlag_Visible|kActionEffectFlag_FlipHorizontal|kActionEffectFlag_FlipVertical);
+  U(e->obj_priority,0,3);
+  U(e->generation,0,UINT32_MAX);U(e->pulse_generation,0,UINT32_MAX);
+  U(e->record_address,0,65535);
+  I(e->world_x,-32768,32767);I(e->world_y,-32768,32767);
+  I(e->velocity_x,-32768,32767);I(e->velocity_y,-32768,32767);
+  U(e->left_extent,0,65535);U(e->top_extent,0,65535);
+  U(e->right_extent,0,65535);U(e->bottom_extent,0,65535);
+  U(e->composition,0,65535);U(e->visual,0,65535);
+  U(e->animation_state,0,65535);U(e->animation_index,0,65535);
+  U(e->flip_attributes,0,65535);
+  U(e->age_ticks,0,65535);U(e->phase_ticks,0,65535);U(e->pulse_ticks,0,65535);
+  const unsigned layer=dust?kActionEffectRenderLayer_WorldDust:kActionEffectRenderLayer_WorldOverlay;
+  const unsigned plane=dust?kActionEffectProjectionPlane_Bg1:kActionEffectProjectionPlane_Obj;
+  if(c->decode) {
+    e->role=kActionEffectRole_Body;
+    e->render_layer=layer;
+    e->projection_plane=plane;
+    e->geometry.kind=kActionEffectGeometry_Rect;
+  } else if(e->role!=kActionEffectRole_Body || e->render_layer!=layer ||
+            e->projection_plane!=plane || e->geometry.kind!=kActionEffectGeometry_Rect) {
+    return false;
+  }
+  ActionEffectLocalRect *r=&e->geometry.data.rect;
+  F(r->x0,-65536,65536);F(r->y0,-65536,65536);
+  F(r->x1,-65536,65536);F(r->y1,-65536,65536);
+  return true;
+}
+
+static bool Accents(Codec *c,DioramaActorAccentSnapshot *a) {
+  for(unsigned i=0;i<a->effect_count;++i)
+    if(!Accent(c,&a->effects[i],false))return false;
+  for(unsigned i=0;i<a->dust_count;++i)
+    if(!Accent(c,&a->dust[i],true))return false;
+  ActionFireballSmoke *s=&a->smoke;
+  U(s->count,0,kActionFireballSmokeMaxPuffs);
+  I(s->camera_delta_x,-32768,32767);I(s->camera_delta_y,-32768,32767);
+  if(c->decode)s->clock=a->clock;
+  for(unsigned i=0;i<s->count;++i) {
+    ActionFireballSmokePuff *p=&s->puffs[i];
+    U(p->seed,0,UINT32_MAX);U(p->source_generation,0,UINT32_MAX);
+    U(p->source_address,0,65535);U(p->age,0,kActionFireballSmokeLifetime-1);
+    I(p->x,-32768,32767);I(p->y,-32768,32767);
+    U(p->priority,0,3);U(p->frozen,0,1);
+  }
   return true;
 }
 #undef F
@@ -200,7 +268,7 @@ static bool Values(Codec *c,DioramaObjectSnapshotView *v) {
   for(unsigned i=0;i<v->voxel_sprites.count;++i)
     if(!Prop(c,&v->voxel_sprites.sprites[i],v->width,v->height))return false;
   for(unsigned i=0;i<v->actor_count;++i)if(!Actor(c,&v->actors[i]))return false;
-  return true;
+  return c->version<5 || !v->accents.captured || Accents(c,&v->accents);
 }
 static bool EncodeBody(Codec *c,const DioramaObjectSnapshotView *source) {
   DioramaObjectSnapshotView v=*source;

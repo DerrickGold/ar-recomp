@@ -19,7 +19,8 @@ static bool Render(bool light,bool particles){
 }
 static void AntlionMound(void) {
  FILE *f=fopen("action-effects.ini","rb");assert(f);
- static char text[131073];const size_t length=fread(text,1,sizeof(text)-1,f);assert(!ferror(f)&&feof(f));fclose(f);
+ static char text[kActionEffectRecipeMaxBytes+1];
+ const size_t length=fread(text,1,sizeof(text),f);assert(!ferror(f)&&feof(f));fclose(f);
  unsigned line;assert(ActionEffectRecipes_Parse(&recipes,text,length,&line));
  for(unsigned terrain=0;terrain<3;++terrain) {
    frame=(ActionSceneEffectFrame){0};ActionEffectRecipes_Apply(&recipes,3,2,terrain,100,NULL,&frame);

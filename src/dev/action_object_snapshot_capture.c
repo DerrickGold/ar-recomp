@@ -19,6 +19,8 @@ static struct {
   bool initialized, failed, have_last;
   const char *directory;
   unsigned from, to, every, serial, last_frame, last_room;
+  unsigned accent_frame, accent_room;
+  DioramaActorAccentSnapshot accents;
   uint8_t *packet;
 } s_capture;
 
@@ -67,12 +69,36 @@ static bool Initialize(void) {
 
 bool ActionObjectSnapshotCapture_Enabled(void) { return Initialize(); }
 
+static bool WantsFrame(unsigned frame, unsigned group) {
+  return frame != kActRaiserPowerOnGameFrame && frame >= s_capture.from &&
+      frame <= s_capture.to && (frame - s_capture.from) % s_capture.every == 0 &&
+      ActRaiser_IsActionMapGroup(group);
+}
+
+void ActionObjectSnapshotCapture_StageAccents(const ActionSceneEffectFrame *scene,
+    unsigned group, unsigned room, uint16_t clock) {
+  if (!Initialize()) return;
+  DioramaActorAccentSnapshot *a = &s_capture.accents;
+  a->captured = false;
+  if (!WantsFrame(scene->game_frame, group)) return;
+  s_capture.accent_frame = scene->game_frame;
+  s_capture.accent_room = group * 256u + room;
+  a->captured = true;
+  a->clock = clock;
+  a->effect_count = scene->effect_count;
+  memcpy(a->effects, scene->effects, a->effect_count * sizeof(a->effects[0]));
+  a->smoke = scene->fireball_smoke;
+  a->dust_count = 0;
+  for (unsigned i = 0; i < scene->decoration_count; ++i)
+    if (scene->decorations[i].kind == kActionEffect_LandingDust &&
+        a->dust_count < kActionLandingDustMaxPuffs)
+      a->dust[a->dust_count++] = scene->decorations[i];
+}
+
 void ActionObjectSnapshotCapture_Capture(const FrameSlot *slot) {
   if (!Initialize() || !slot || !slot->diorama_active) return;
   const unsigned frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-  if (frame == kActRaiserPowerOnGameFrame || frame < s_capture.from ||
-      frame > s_capture.to || (frame - s_capture.from) % s_capture.every ||
-      !ActRaiser_IsActionMapGroup(slot->diorama_map_group)) return;
+  if (!WantsFrame(frame, slot->diorama_map_group)) return;
   const unsigned room = (unsigned)slot->diorama_map_group * 256u + slot->diorama_map_number;
   if (s_capture.have_last && s_capture.last_frame == frame && s_capture.last_room == room) return;
 
@@ -96,6 +122,8 @@ void ActionObjectSnapshotCapture_Capture(const FrameSlot *slot) {
     .owner_tags = slot->diorama_obj_owner_tags, .voxel_sprites = slot->voxel_sprites,
     .actor_count = slot->action_scene_effects.actor_count,
   };
+  if (s_capture.accents.captured && s_capture.accent_frame == frame && s_capture.accent_room == room)
+    view.accents = s_capture.accents;
   if (view.actor_count > kActionEffectActorMax) {
     Fail("native actor count exceeds the capture contract");
     return;
@@ -171,10 +199,12 @@ void ActionObjectSnapshotCapture_Capture(const FrameSlot *slot) {
   ok = file && fprintf(file,
       "{\"file\":\"%s\",\"room\":\"%02x%02x\",\"terrain_profile\":%u,"
       "\"layer_section\":%u,\"gf\":%u,\"camera\":[%d,%d],\"world_origin\":[%d,%d],"
-      "\"size\":[%u,%u],\"actors\":%u,\"voxel_components\":%u,\"bytes\":%zu}\n",
+      "\"size\":[%u,%u],\"actors\":%u,\"voxel_components\":%u,"
+      "\"actor_accents\":%u,\"landing_dust\":%u,\"smoke_puffs\":%u,\"bytes\":%zu}\n",
       name, view.map_group, view.map_number, view.terrain_profile, view.layer_section,
       frame, view.camera_x, view.camera_y, view.world_x, view.world_y, view.width,
-      view.height, view.actor_count, view.voxel_sprites.count, size) > 0;
+      view.height, view.actor_count, view.voxel_sprites.count, view.accents.effect_count,
+      view.accents.dust_count, view.accents.smoke.count, size) > 0;
   if (file && fclose(file)) ok = false;
   if (!ok) {
     Fail("native object index could not be written");

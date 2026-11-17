@@ -211,9 +211,14 @@ be replaced safely by isolated tile boxes.
 
 ### Native sprites and moving objects
 
-In **3D preview → Objects**, **Load native objects…** imports an `.arobj` frame for
-the selected room and region. It adds the native sprite artwork and priority,
-modeled props, and actor lighting facts to the existing scenery compositor.
+In **3D preview → Objects**, **Load native capture…** imports `.arobj` frames for
+the selected room and region. It adds native sprite artwork and priority,
+modeled props, and actor lighting to the existing scenery compositor. Version 5
+captures also include native combat accents such as sword beams and enemy
+projectiles, detached fireball smoke, and landing dust. The editor uses the
+capture's positions, priority bands, effect phases, and gameplay clock and
+applies the current project recipes. The Objects menu lists the captured
+effect families. Older captures still provide sprite artwork and actor facts.
 Voxel mode replaces only the captured pixels owned by successfully modeled
 props; ordinary Diorama retains their native sprites. Comparison-player controls
 are disabled while a native capture is loaded. **Clear native objects** restores
@@ -221,6 +226,9 @@ the usual scenery preview.
 
 Each file is a finite captured pose, not an actor simulation. Import restores
 its camera and native frame. **Captured camera** returns to that position.
+Select several files from the same room and region to step through the
+sequence with **Previous frame** and **Next frame**. Use the sample actor
+accent controls when you want to stage an effect without a native capture.
 Orbit to inspect joins and priority; panning beyond
 the captured object coverage is rejected instead of silently dropping sprites.
 Changing rooms clears the capture. Captures are diagnostic inputs and are not
@@ -255,9 +263,9 @@ For acquisition, launch the game with `AR_EDITOR_OBJECT_CAPTURE_DIR` pointing
 to an existing fresh directory. Optional `AR_EDITOR_OBJECT_CAPTURE_FROM`,
 `AR_EDITOR_OBJECT_CAPTURE_TO`, and `AR_EDITOR_OBJECT_CAPTURE_EVERY` select
 native game frames. This opt-in export writes raw sprite winners and ownership,
-the matching independent object atlas, actor facts and camera metadata before
-presentation hands modeled props to the Voxel renderer. Without the environment variable,
-the exporter is inactive.
+the independent object atlas, native actor effects before recipe overrides,
+and camera metadata. Enable environmental effects during acquisition to
+include landing dust. Without the environment variable, the exporter is inactive.
 
 For example, from the checkout, create an empty output directory and capture a
 bounded native-frame interval using the current game build:
@@ -276,8 +284,9 @@ Replace the executable/ROM paths and frame interval with those for your run.
 Enable Action 3D and visit the target level during that native-frame interval;
 these counters are game frames, not elapsed seconds. The directory must not
 already contain `index.jsonl`. Its index records the room, terrain, camera and
-frame for each `.arobj`; select that room/terrain in the editor and use **Load
-native objects…** on the matching file. Stop the capture run when the needed
+frame for each `.arobj`, along with actor accent, landing dust, and smoke counts.
+Select that room and terrain in the editor and use **Load native capture…** on
+the matching files. Stop the capture run when the needed
 poses are recorded, then launch normally without these variables. Keep the
 small set of captures needed for review separately from the saved project ZIP.
 

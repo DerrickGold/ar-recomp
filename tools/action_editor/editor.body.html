@@ -179,7 +179,8 @@
   <div class="ctl"><label for="previewEnemyY">Enemy Y (feet)</label><input id="previewEnemyY" type="number" min="-2048" max="16384" value="192"></div>
   <button id="previewProbesHere">Place player in current view</button>
   <p class="hint">The ROM's idle player uses the game's sprite layer, receiver lighting, dimming, and rim shader. The optional second sprite uses the enemies &amp; objects receiver settings. Shift-click or Shift-drag in Shared renderer to position the player's feet; add Alt for the comparison sprite. Positions are temporary; no game physics or AI runs.</p>
-  <label for="previewEvent">Actor accent</label><select id="previewEvent"><option value="0">None</option></select>
+  <p id="previewCapturedAccents" class="hint" hidden>Showing native actor accents from Objects. Clear the capture to stage a sample.</p>
+  <label for="previewEvent">Sample actor accent</label><select id="previewEvent"><option value="0">None</option></select>
   <div class="ctl"><label for="previewEventX">Event X</label><input id="previewEventX" type="number" min="-2048" max="16384" value="128"></div>
   <div class="ctl"><label for="previewEventY">Event Y</label><input id="previewEventY" type="number" min="-2048" max="16384" value="160"></div>
   <div class="ctl"><label for="previewEventVX">Velocity X / tick</label><input id="previewEventVX" type="number" min="-16" max="16" value="1"></div>
@@ -481,10 +482,14 @@
     <details id="sharedObjectsMenu" class="toolbar-popover">
       <summary>Objects</summary>
       <div class="toolbar-popup">
-        <button id="sharedLoadObjects" type="button">Load native objects…</button>
-        <input id="sharedObjectFile" type="file" accept=".arobj" hidden>
-        <p class="hint">Import a captured game frame to preview enemies and moving props.</p>
+        <button id="sharedLoadObjects" type="button">Load native capture…</button>
+        <input id="sharedObjectFile" type="file" accept=".arobj" multiple hidden>
+        <p class="hint">Load one or more frames from this room to inspect actors, moving props, and their effects.</p>
         <span id="sharedObjectStatus" role="status"></span>
+        <div id="sharedObjectSequence" class="popup-row" hidden>
+          <button id="sharedPrevObjectFrame" type="button">Previous frame</button>
+          <button id="sharedNextObjectFrame" type="button">Next frame</button>
+        </div>
         <div class="popup-row"><button id="sharedResetObjects" type="button" disabled>Captured camera</button><button id="sharedClearObjects" type="button" disabled>Clear native objects</button></div>
         <hr>
         <button id="sharedPlacePlayer" type="button" aria-pressed="false">Place player</button>
@@ -522,7 +527,7 @@
       <span id="sharedOutputSize" title="Preview resolution is capped at 960 pixels on its longest side. Monitor dimensions set the aspect ratio; pixel aspect and extra tile coverage remain separate."></span>
     </div>
 
-        <label><input id="sharedEffects" type="checkbox" checked> Environmental effects</label>
+        <label><input id="sharedEffects" type="checkbox" checked> Scene effects</label>
         <details class="popup-section"><summary>Advanced display &amp; capture</summary>
           <label>Pixel shape <select id="sharedPixels"><option value="0">Square</option><option value="1">CRT 4:3</option></select></label>
           <label>Background <select id="sharedSky"><option value="0">Plane only</option><option value="1" selected>Skybox only</option><option value="2">Both</option></select></label>

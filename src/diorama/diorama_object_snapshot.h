@@ -4,18 +4,30 @@
  * attributes remain paired; modeled props are handed off only by the consumer.
  * This transports presentation facts, never actor simulation or live pointers. */
 #include "action/action_actor_effects.h"
+#include "action/action_effects.h"
 #include "action/action_voxel_sprites.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 enum {
-  kDioramaObjectSnapshotVersion = 4,
+  kDioramaObjectSnapshotVersion = 5,
   kDioramaObjectSnapshotWidth = 640,
   kDioramaObjectSnapshotHeight = 352,
   kDioramaObjectSnapshotHeaderBytes = 128,
   kDioramaObjectSnapshotCapacity = 8 * 1024 * 1024,
 };
+
+/* Native scene accents before project recipes, so the editor can apply its
+ * current recipes to the same pose. An empty capture still has a clock. */
+typedef struct DioramaActorAccentSnapshot {
+  bool captured;
+  uint16_t clock;
+  uint8_t effect_count, dust_count;
+  ActionEffectInstance effects[kActionSceneEffectMaxInstances];
+  ActionEffectInstance dust[kActionLandingDustMaxPuffs];
+  ActionFireballSmoke smoke;
+} DioramaActorAccentSnapshot;
 
 typedef struct DioramaObjectSnapshotView {
   uint8_t map_group, map_number, terrain_profile, layer_section;
@@ -32,6 +44,7 @@ typedef struct DioramaObjectSnapshotView {
   /* Bounded native actor facts feed the existing lighting/attached recipes. */
   unsigned actor_count;
   ActionEffectActor actors[kActionEffectActorMax];
+  DioramaActorAccentSnapshot accents;
   /* Atlas width is264. Input height may be the occupied cell rows or136;
    * decoding always owns a complete264x136 atlas when props are present. */
   const uint32_t *atlas;

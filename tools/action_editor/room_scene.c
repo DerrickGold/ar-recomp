@@ -12,6 +12,7 @@
 #include "actraiser_game.h"
 #include "diorama/diorama_capture_blend.h"
 #include "diorama/diorama_camera_policy.h"
+#include "diorama/diorama_object_snapshot.h"
 #include "deterministic_hash.h"
 #include <math.h>
 #include <stdio.h>
@@ -51,9 +52,7 @@ struct EditorRoomScene {
   uint16_t actor_preview_start;
   bool actor_preview_enabled;
   ActionEffectActor receiver_actors[2];
-  ActionEffectActor native_actors[kActionEffectActorMax];
-  unsigned native_actor_count;
-  bool native_actors_enabled;
+  const DioramaObjectSnapshotView *native_capture;
   uint16_t receiver_clock;
   ActionEffectPreviewEvent event;
   SrSceneSurfaces surfaces;
@@ -884,10 +883,22 @@ bool EditorRoomScene_NativeSection(const EditorRoomScene *r,int x,int y,uint32_t
     }
   free(effects);return true;
 }
-bool EditorRoomScene_SetNativeActors(EditorRoomScene *r,const ActionEffectActor *actors,unsigned count,bool enabled) {
-  if(!r || count>kActionEffectActorMax || (count&&!actors))return false;
-  if(count)memcpy(r->native_actors,actors,count*sizeof(*actors));
-  r->native_actor_count=count;r->native_actors_enabled=enabled;return true;
+void EditorRoomScene_SetNativeCapture(EditorRoomScene *r,const DioramaObjectSnapshotView *capture) {
+  r->native_capture=capture;
+  memset(&r->trunk_observer,0,sizeof(r->trunk_observer));
+  memset(&r->woodland_observer,0,sizeof(r->woodland_observer));
+}
+
+static void ApplyNativeAccents(ActionSceneEffectFrame *effects,const DioramaActorAccentSnapshot *accents) {
+  effects->effect_count=accents->effect_count;
+  memcpy(effects->effects,accents->effects,accents->effect_count*sizeof(*effects->effects));
+  for(unsigned i=0;i<effects->effect_count;++i)
+    if(effects->effects[i].flags&kActionEffectFlag_Visible)++effects->visible_count;
+  effects->fireball_smoke=accents->smoke;
+  for(unsigned i=0;i<accents->dust_count && effects->decoration_count<kActionSceneDecorationMaxInstances;++i) {
+    effects->decorations[effects->decoration_count++]=accents->dust[i];
+    if(accents->dust[i].flags&kActionEffectFlag_Visible)++effects->decoration_visible_count;
+  }
 }
 void EditorRoomScene_AdvanceReceivers(EditorRoomScene *r,unsigned mask,const int x[2],const int feet_y[2],uint32_t clock) {
   if(!r)return;
@@ -925,8 +936,12 @@ bool EditorRoomScene_ResolveCamera(const EditorRoomScene *r, int x, int y,
     DioramaSkyMode skybox, EditorRoomCamera *out) {
   if (!r || !out || x < 0 || y < 0 || x > 65535 || y > 65535 || extra_x < 0 ||
       extra_x > 128 || budget < 0 || budget > 64) return false;
-  const int maximum_y = Max(0, (int)EditorRoomScene_Height(r) - 225);
-  x = Min(x, Max(0, (int)EditorRoomScene_Width(r) - 256));
+  const int native_max_x = Max(0, (int)EditorRoomScene_Width(r) - 256);
+  const int native_max_y = Max(0, (int)EditorRoomScene_Height(r) - 224);
+  int maximum_y = Max(0, native_max_y - 1);
+  if (r->native_capture)
+    maximum_y = Max(maximum_y, Min(r->native_capture->camera_y, native_max_y));
+  x = Min(x, native_max_x);
   y = Min(y, maximum_y);
   ActionBgPlan plan;
   if (!EditorRoomScene_BgPolicy(r, x, y, frame, false, &plan, NULL)) return false;
@@ -957,7 +972,17 @@ bool EditorRoomScene_ResolveCamera(const EditorRoomScene *r, int x, int y,
   }
   if (!ActionCameraAxisBounds_Resolve(EditorRoomScene_Width(r), 256, before, after, &out->travel))
     return false;
-  out->x = ActionCameraAxisBounds_Clamp(&out->travel, x);
+  out->minimum_x = out->travel.minimum;
+  out->maximum_x = out->travel.maximum;
+  if (r->native_capture) {
+    /* The live camera can enter a margin that the editor normally avoids.
+     * Keep the recorded origin reachable, while scenery parallax keeps the
+     * usual travel interval and object coverage still checks the footprint. */
+    const int recorded_x = Max(0, Min(r->native_capture->camera_x, native_max_x));
+    out->minimum_x = Min(out->minimum_x, recorded_x);
+    out->maximum_x = Max(out->maximum_x, recorded_x);
+  }
+  out->x = Max(out->minimum_x, Min(x, out->maximum_x));
   /* Match the native capture-only extension after preserving the existing
    * travel range. Source guards are independent of the chosen orbit pose. */
   for(unsigned bg=0;bg<2;++bg)
@@ -1237,6 +1262,9 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   if (!ActionRoomScene_BuildFrameState(s, &request, f)) return false;
   memset(&r->effects,0,sizeof(r->effects));
   if (!ActionEnvironmentScene_FromRoom(&r->environment,s,f)) return false;
+  const DioramaObjectSnapshotView *native=r->native_capture;
+  const DioramaActorAccentSnapshot *accents=native && native->accents.captured?&native->accents:NULL;
+  if(accents)r->environment.clock=accents->clock;
   if (!LoadFrameGraphics(r) || !PrepareCastlePhase(r)) return false;
   ActionLavaBubbles_Prepare(&r->layers[0].bubbles,s,r->environmental_effects_enabled
       ? ActionEffectRecipes_NativeBubbleField(&r->recipes,s->group,s->map,r->assets.terrain_profile) : NULL,
@@ -1277,7 +1305,9 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       if (r->effects.decorations[i].kind == kActionEffect_AitosWaterfall)
         r->scene.layer_section = kDioramaLayerSection_AitosWaterfall;
   ActionEffectInstance event;
-  if(ActionEffectPreview_Build(&r->event,r->environment.clock,&event)) {
+  if(accents) {
+    ApplyNativeAccents(&r->effects,accents);
+  } else if(ActionEffectPreview_Build(&r->event,r->environment.clock,&event)) {
     if(event.render_layer==kActionEffectRenderLayer_WorldDust && r->effects.decoration_count<kActionSceneDecorationMaxInstances)
       r->effects.decorations[r->effects.decoration_count++]=event;
     else {r->effects.effects[0]=event;r->effects.effect_count=r->effects.visible_count=1;}
@@ -1327,9 +1357,9 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
         r->scene.layer_section, bg, &fill, &b->fill_cgram);
     b->fill_mode = (uint8_t)fill; r->fill_configured[bg] = b->fill_configured;
   }
-  if(r->native_actors_enabled) {
-    r->effects.actor_count=r->native_actor_count;
-    memcpy(r->effects.actors,r->native_actors,r->native_actor_count*sizeof(*r->native_actors));
+  if(native) {
+    r->effects.actor_count=native->actor_count;
+    memcpy(r->effects.actors,native->actors,native->actor_count*sizeof(*r->effects.actors));
   } else {
     CaptureBindingPreview(r);
     for(unsigned i=0;i<2;++i)if(r->receiver_actors[i].visible&&r->effects.actor_count<kActionEffectActorMax)

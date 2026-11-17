@@ -71,7 +71,48 @@ static DioramaObjectSnapshotView Fixture(void) {
   return v;
 }
 
+static void CheckAccents(void) {
+  DioramaObjectSnapshotView source={.map_group=2,.map_number=1,.width=1,.height=1};
+  source.accents=(DioramaActorAccentSnapshot){.captured=true,.clock=127,
+    .effect_count=1,.dust_count=1,.smoke={.count=1,.clock=127,.camera_delta_x=-33,.camera_delta_y=7}};
+  source.accents.effects[0]=(ActionEffectInstance){
+    .kind=kActionEffect_SwordBeam,.phase=kActionEffectPhase_SwordBeamFlight,
+    .flags=kActionEffectFlag_Visible|kActionEffectFlag_FlipHorizontal,.obj_priority=2,
+    .world_x=-11,.world_y=212,.velocity_x=-256,.generation=12345,.pulse_ticks=22,
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-48,-33,-32,-1}},
+  };
+  source.accents.dust[0]=(ActionEffectInstance){
+    .kind=kActionEffect_LandingDust,.phase=kActionEffectPhase_CaveEnvironment,
+    .dust_strength=31,.phase_ticks=5,.render_layer=kActionEffectRenderLayer_WorldDust,
+    .projection_plane=kActionEffectProjectionPlane_Bg1,
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-104,-72,104,2}},
+  };
+  source.accents.smoke.puffs[0]=(ActionFireballSmokePuff){
+    .seed=0xffef1234,.source_address=0x8a0,.source_generation=12345,
+    .x=18,.y=-12,.age=33,.priority=2,.frozen=1,
+  };
+  size_t size=0;
+  DioramaObjectSnapshot owned={0};
+  assert(DioramaObjectSnapshot_Encode(&source,packet,sizeof(packet),&size));
+  assert(DioramaObjectSnapshot_Decode(packet,size,&owned));
+  const DioramaActorAccentSnapshot *a=&owned.view.accents;
+  assert(a->captured && a->clock==127 && a->effect_count==1 && a->dust_count==1);
+  assert(a->effects[0].kind==kActionEffect_SwordBeam && a->effects[0].world_x==-11 &&
+      a->effects[0].generation==12345 && a->effects[0].geometry.data.rect.y0==-33 &&
+      a->effects[0].obj_priority==2 && a->effects[0].pulse_ticks==22);
+  assert(a->dust[0].projection_plane==kActionEffectProjectionPlane_Bg1 && a->dust[0].dust_strength==31);
+  assert(a->smoke.count==1 && a->smoke.clock==127 && a->smoke.camera_delta_x==-33 &&
+      a->smoke.puffs[0].frozen && a->smoke.puffs[0].age==33 && a->smoke.puffs[0].y==-12);
+  memcpy(original,packet,size);
+  BadWord(size,104,kActionSceneEffectMaxInstances+1,&owned);
+  BadWord(size,128,kActionEffect_WallTorch,&owned);
+  source.accents.smoke.puffs[0].age=kActionFireballSmokeLifetime;
+  assert(!DioramaObjectSnapshot_Encode(&source,packet,sizeof(packet),&size) && !size);
+  DioramaObjectSnapshot_Release(&owned);
+}
+
 int main(void) {
+  CheckAccents();
   DioramaObjectSnapshotView source=Fixture();
   size_t size=1;
   assert(DioramaObjectSnapshot_Encode(&source,packet,sizeof(packet),&size));
@@ -123,6 +164,9 @@ int main(void) {
     {128+2*372+2*108+4,0}, /* zero-length run */
   };
   for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);++i)BadWord(size,bad[i].offset,bad[i].value,&owned);
+  memcpy(packet,original,size);
+  Put(4,4);Rehash(size);
+  assert(DioramaObjectSnapshot_Decode(packet,size,&owned) && !owned.view.accents.captured);
   memcpy(packet,original,size);
   assert(DioramaObjectSnapshot_Decode(packet,size,&owned));
   /* The rear-wall flame adds a shape value, without changing the lossless

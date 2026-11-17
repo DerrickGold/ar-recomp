@@ -104,7 +104,7 @@ def build(output, compiler='emcc', scene=None):
                # simultaneous old/new rooms during atomic load.
                '-sSTACK_SIZE=1048576', '-sINITIAL_MEMORY=134217728', '-sALLOW_MEMORY_GROWTH=0',
                *['-Wl,--export=DioramaPreview_' + x for x in exports],
-               *['-Wl,--export=RoomPreview_' + x for x in ('LoadObjects', 'ClearObjects', 'ObjectInfo')],
+               *['-Wl,--export=RoomPreview_' + x for x in ('LoadObjects', 'ClearObjects', 'ObjectInfo', 'ObjectAccents')],
                *['-Wl,--export=RoomPreview_' + x for x in ('VoxelPick', 'VoxelTile', 'VoxelGroup', 'VoxelTransformHandles', 'VoxelBendHandles', 'VoxelObjects', 'SetInspection', 'SceneryError')],
                *['-Wl,--export=RoomPreview_' + x for x in ('GroundCoverAuditEnable', 'GroundCoverAuditCount', 'GroundCoverAuditComplete', 'GroundCoverAuditValue')],
                *['-Wl,--export=RoomPreview_' + x for x in ('VoxelAuditCount', 'VoxelAuditComplete', 'VoxelAuditRead')],

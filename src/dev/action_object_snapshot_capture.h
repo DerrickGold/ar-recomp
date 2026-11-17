@@ -1,8 +1,10 @@
 #ifndef AR_ACTION_OBJECT_SNAPSHOT_CAPTURE_H
 #define AR_ACTION_OBJECT_SNAPSHOT_CAPTURE_H
 #include <stdbool.h>
+#include <stdint.h>
 
 struct FrameSlot;
+struct ActionSceneEffectFrame;
 
 /* Opt-in editor data acquisition on the producer, immediately after the
  * complete FrameSlot capture. No GPU state is read and no borrowed pointer
@@ -13,5 +15,8 @@ void ActionObjectSnapshotCapture_Capture(const struct FrameSlot *slot);
 /* Diagnostic export additionally acquires bounded independent artwork for
  * otherwise-flat native actors. Ordinary gameplay pays no raster cost. */
 bool ActionObjectSnapshotCapture_Enabled(void);
+/* Called on the same producer before live effect recipes modify the scene. */
+void ActionObjectSnapshotCapture_StageAccents(const struct ActionSceneEffectFrame *scene,
+    unsigned group, unsigned room, uint16_t clock);
 
 #endif

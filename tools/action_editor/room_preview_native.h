@@ -19,6 +19,7 @@ void RoomPreview_ClearObjects(void);
 /* int32[14]: group, room, terrain, native GF, camera X/Y, world origin X/Y,
  * capture width/height, prop/actor counts, extra X/top. Returns 0 if absent. */
 unsigned RoomPreview_ObjectInfo(void);
+unsigned RoomPreview_ObjectAccents(void);
 int RoomPreview_SetReceivers(int mask, int player_x, int player_y, int enemy_x, int enemy_y);
 int RoomPreview_ReceiverStyle(unsigned flipped, unsigned rim);
 void RoomPreview_EnableEffects(int enabled);

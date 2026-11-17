@@ -286,7 +286,7 @@ unsigned RoomPreview_Measure(int x, int y, uint32_t frame, int extra, int vertic
   ArRenderRectF rect; int fill;
   if (!EditorRoomScene_ResolveCamera(s_room, x, y, frame, extra, vertical, &baseline, skybox, &camera) ||
       !EditorRoomScene_MeasureView(s_room, frame, extra, vertical, &view, skybox, &camera, bg, &rect, &fill)) return 0;
-  const float result[] = {camera.x, camera.y, camera.travel.minimum, camera.travel.maximum, camera.maximum_y,
+  const float result[] = {camera.x, camera.y, camera.minimum_x, camera.maximum_x, camera.maximum_y,
     rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, fill, view.visible_width, view.visible_height,
     view.viewport.x, view.viewport.y, view.viewport.w, view.viewport.h};
   memcpy(DioramaPreview_Input(), result, sizeof(result));
@@ -534,6 +534,7 @@ int RoomPreview_CameraX(void) { return s_cached ? s_x : 0; }
 unsigned RoomPreview_Uploads(void) { return s_uploads; }
 void RoomPreview_ClearObjects(void) {
   if(!s_objects.snapshot.storage)return;
+  if(s_room)EditorRoomScene_SetNativeCapture(s_room,NULL);
   EditorObjectPreview_Reset(&s_objects,DioramaPreview_Device());
   for(unsigned band=0;band<4;++band) {
     const unsigned planes[]={DioramaPlaneForObjectPriority(band),kDioramaPlane_ObjAttributes0+band};
@@ -542,7 +543,6 @@ void RoomPreview_ClearObjects(void) {
       s_textures[planes[i]]=ArRenderTexture_Invalid();s_pixels[planes[i]]=NULL;
     }
   }
-  if(s_room)EditorRoomScene_SetNativeActors(s_room,NULL,0,false);
   s_cached=false;
 }
 int RoomPreview_LoadObjects(unsigned size) {
@@ -560,8 +560,7 @@ int RoomPreview_LoadObjects(unsigned size) {
   if(!valid)return 0;
   s_receivers.mask=0;
   EditorRoomScene_PreviewBinding(s_room,false,0,0,0,0);
-  EditorRoomScene_SetNativeActors(s_room,s_objects.snapshot.view.actors,
-      s_objects.snapshot.view.actor_count,true);
+  EditorRoomScene_SetNativeCapture(s_room,&s_objects.snapshot.view);
   s_cached=false;return 1;
 }
 unsigned RoomPreview_ObjectInfo(void) {
@@ -571,6 +570,15 @@ unsigned RoomPreview_ObjectInfo(void) {
     v->camera_x,v->camera_y,v->world_x,v->world_y,v->width,v->height,
     v->voxel_sprites.count,v->actor_count,v->extra_x,v->extra_top};
   memcpy(DioramaPreview_Input(),info,sizeof(info));return sizeof(info)/sizeof(*info);
+}
+unsigned RoomPreview_ObjectAccents(void) {
+  const DioramaActorAccentSnapshot *a=&s_objects.snapshot.view.accents;
+  if(!a->captured)return 0;
+  /* Three counts followed by one kind per actor accent. */
+  uint8_t *info=DioramaPreview_Input();
+  info[0]=a->effect_count;info[1]=a->dust_count;info[2]=a->smoke.count;
+  for(unsigned i=0;i<a->effect_count;++i)info[3+i]=a->effects[i].kind;
+  return 3+a->effect_count;
 }
 void RoomPreview_Reset(void) {
   DioramaTrunkGuardUpload_Reset(&s_trunk_guard, DioramaPreview_Device());
@@ -1172,7 +1180,9 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   }
   }
   if (options.source_effect_batch && !options.source_effect_batch(DioramaPreview_Device(), true)) return 0;
-  bool drawn = DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldOverlay, kArRenderBlendMode_Add, true, true) &&
+  bool drawn = (!effects.frame->fireball_smoke.count ||
+       DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldSmoke, kArRenderBlendMode_Alpha, false, true)) &&
+      DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldOverlay, kArRenderBlendMode_Add, true, true) &&
       DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldDust, kArRenderBlendMode_Alpha, false, true) &&
       DrawEffectLayer(&effects, kActionEffectRenderLayer_ForegroundLight, kArRenderBlendMode_Light, true, false);
   if (options.source_effect_batch) drawn = options.source_effect_batch(DioramaPreview_Device(), false) && drawn;

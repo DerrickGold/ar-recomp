@@ -4,6 +4,7 @@
  * painted scenery, raster animation and camera policies remain unchanged. */
 #include "room_scene.h"
 #include "action/action_voxel.h"
+#include "diorama/diorama_object_snapshot.h"
 #include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
@@ -15,6 +16,25 @@ static SrPpuBgPacket *packet;
 static unsigned frames, full_add_frames, full_add_rows, owned_frames, fallback_frames;
 static const char *current_room;
 static unsigned current_view, current_config;
+
+static void RecordedCameraAtRoomEdge(EditorRoomScene *scene) {
+  const DioramaView view = {.camera={.distance=3.25f}, .distance_scale=1,
+    .visible_width=360, .visible_height=224, .viewport={0,0,960,600}};
+  const DioramaObjectSnapshotView recorded = {
+    .camera_x=75,.camera_y=(int)EditorRoomScene_Height(scene)-224
+  };
+  EditorRoomCamera ordinary, replay;
+  assert(EditorRoomScene_ResolveCamera(scene,recorded.camera_x,recorded.camera_y,830,
+      120,64,&view,kDioramaSky_Only,&ordinary));
+  assert(ordinary.x>recorded.camera_x && ordinary.y<recorded.camera_y);
+  EditorRoomScene_SetNativeCapture(scene,&recorded);
+  assert(EditorRoomScene_ResolveCamera(scene,recorded.camera_x,recorded.camera_y,830,
+      120,64,&view,kDioramaSky_Only,&replay));
+  assert(replay.x==recorded.camera_x && replay.y==recorded.camera_y);
+  assert(replay.minimum_x==recorded.camera_x && replay.maximum_y==recorded.camera_y);
+  assert(replay.travel.minimum==ordinary.travel.minimum && replay.travel.maximum==ordinary.travel.maximum);
+  EditorRoomScene_SetNativeCapture(scene,NULL);
+}
 
 static void Equal(uint32_t expected, uint32_t actual, unsigned mode,
                   unsigned source, unsigned band, unsigned x, unsigned y) {
@@ -379,6 +399,7 @@ int main(int argc, char **argv) {
       VoxelMarshModes(scene,&assets->scene);
       VoxelTerrainSourceScroll(scene,ini);
     }
+    if(assets->scene.group==2 && assets->scene.map==5) RecordedCameraAtRoomEdge(scene);
     if(assets->scene.group==1 && assets->scene.map==2) VoxelCutoutModes(scene);
     if(assets->scene.group==1 && (assets->scene.map==3 || assets->scene.map==4))
       VoxelPolicyModes(scene,1,assets->scene.map);
