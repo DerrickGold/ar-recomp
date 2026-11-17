@@ -295,6 +295,10 @@ for(const row of assetRows.filter(row=>!row.dataset.variant)){
   ui.set(label,key); ui.set(button,key);
   ui.set(row.querySelector(".asset-source"),"builder.assets.source",{id:row.dataset.track,source:row.dataset.source});
   button.dataset.track=row.dataset.track;
+  // WebKit may focus the enclosing tabindex=-1 workspace instead of this
+  // button on mouse down. Keep focus in the picker until click selects it.
+  // Use mousedown so touch scrolling and keyboard activation keep working.
+  button.addEventListener("mousedown",event=>{ if(event.button===0) event.preventDefault(); });
   button.addEventListener("click",()=>{ selectedTrack=row.dataset.track; syncAssetSelection(); closeTrackPicker(true); });
   trackButtons.set(row.dataset.track,button); trackList.append(button);
 }

@@ -511,6 +511,37 @@ test("real asset controller keeps unsaved files, playback, search and form state
   }
 });
 
+test("music track mouse clicks retain search focus through WebKit's default focus fallback",async()=>{
+  const s=setupAssetApp([["title-theme","Title Theme"],["song-13","Track 13"]]);
+  const toggle=s.node("asset-track-toggle"),options=s.node("asset-track-options"),search=s.node("asset-search");
+  const track=s.list.children[1],workspace=s.node("workspace");
+  workspace.setAttribute("tabindex","-1");
+  await toggle.fire("click");
+  await s.doc.fire("pointerdown",{target:track,button:0,pointerType:"mouse"});
+  let prevented=false;
+  await track.fire("mousedown",{target:track,button:0,preventDefault(){prevented=true;}});
+  // Native WebKit can focus the tabindex=-1 workspace instead of the button.
+  // This is the mouse event's default action, before mouseup and click.
+  if(!prevented){
+    await s.pickerHost.fire("focusout",{target:search,currentTarget:s.pickerHost,relatedTarget:workspace});
+    workspace.focus();await s.doc.fire("focusin",{target:workspace});
+  }
+  // A held press must neither dismiss the picker nor select a track early.
+  await new Promise(setImmediate);
+  assert.equal(options.hidden,false,"the pressed track must survive default mouse focus movement");
+  assert.equal(s.doc.activeElement,search);
+  assert.equal(s.rows[0].hidden,false);assert.equal(s.rows[1].hidden,true);
+  await track.fire("mouseup",{target:track,button:0});
+  await track.fire("click",{target:track,button:0});
+  assert.equal(s.rows[0].hidden,true);assert.equal(s.rows[1].hidden,false);
+  assert.equal(s.node("asset-selected-track").textContent,s.rows[1].label.textContent);
+  assert.equal(options.hidden,true);assert.equal(s.doc.activeElement,toggle);
+  // Secondary presses retain their native behavior and never select a track.
+  await toggle.fire("click");
+  await s.list.children[0].fire("mousedown",{button:2,preventDefault(){assert.fail("secondary mouse defaults must remain available");}});
+  assert.equal(s.rows[0].hidden,true);assert.equal(s.rows[1].hidden,false);
+});
+
 test("music track clicks survive WebKit's null focusout and preserve pending uploads",async()=>{
   const s=setupAssetApp([["title-theme","Title Theme"],["song-01","Sky Palace"]]);
   const [title,palace]=s.rows,[titleButton,palaceButton]=s.list.children;
