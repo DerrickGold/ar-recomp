@@ -393,6 +393,11 @@ body[data-scene-motion=off] #workshop-atmosphere { visibility:hidden }
 .scene-stage[data-motion=off] {
   visibility:hidden
 }
+@media (min-width:900px) {
+  #home-rom-checklist #rom-checklist-rows {
+    grid-template-columns:repeat(3,minmax(0,1fr))
+  }
+}
 .section-heading {
   display:flex;
   align-items:center;

@@ -142,7 +142,7 @@ body[data-big-screen=true] {
 .rom-slot[data-invalid=true] .rom-slot-status { color:var(--gold); }
 #rom-checklist-feedback, #rom-checklist-unavailable { margin:8px 0 0; color:var(--muted); overflow-wrap:anywhere; }
 #rom-import-selected { margin-top:10px; }
-.home-companion .scene-stage { margin-top:16px; }
+[data-big-screen=true] .home-companion .scene-stage { margin-top:16px; }
 [data-big-screen=true] #rom-checklist-rows {
   max-height:44vh;
   overflow:auto;

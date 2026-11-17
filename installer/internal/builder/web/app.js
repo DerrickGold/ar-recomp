@@ -40,6 +40,7 @@ const romLabel=document.querySelector("#rom-label"), clearROMUpload=document.que
 const romBuildHint=document.querySelector("#rom-build-hint"), bigROMHelp=document.querySelector("#big-rom-help");
 const romChecklistSection=document.querySelector("#rom-checklist");
 const homeROMChecklist=document.querySelector("#home-rom-checklist"), buildROMChecklist=document.querySelector("#build-rom-checklist");
+const bigScreenROMChecklist=document.querySelector("#big-screen-rom-checklist");
 const startBigScreen=document.body.dataset.bigScreen==="true";
 let bigScreen=false;
 const playSession=document.body.dataset.playSession==="true";
@@ -1462,6 +1463,7 @@ function setView(next, destination){
     if(activeTab!==tabs[0]) selectTab(tabs[0],{history:false,focus:false,activate:false});
     bigScreen=true;
     document.body.dataset.bigScreen="true";
+    bigScreenROMChecklist.append(romChecklistSection);
     bigActions.prepend(homePrimary);
     bigROM.append(form);
     document.querySelector("#big-screen-status").prepend(state,bigProgress);
