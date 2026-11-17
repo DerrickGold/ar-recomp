@@ -33,9 +33,13 @@ For example, `ActRaiserRecomp.app.portable` belongs beside
 `utils`; an empty sidecar means `.`. `--portable` instead uses the caller's
 current working directory.
 
-The Builder's portable download uses a `BuilderData` directory. Builder data
-and the generated game's saves/settings are separate. The default game output
-is an `ActRaiserRecomp` folder beside the Builder.
+The macOS and Windows portable ZIPs include a `.portable` marker that selects
+the `BuilderData` directory. To keep using an existing per-user Builder
+workspace, leave the marker out of the extracted download before opening it.
+For a portable Linux Builder, create a file beside the AppImage with `.portable`
+appended to its full filename and put `BuilderData` on the first line.
+The Builder's workspace is separate from the generated game's saves and
+settings. The default game output is an `ActRaiserRecomp` folder beside the Builder.
 
 On Windows, the Builder automatically stages `zig.exe` at a short path when
 the bundled compiler's path exceeds the Windows process-launch limit. It uses
@@ -61,8 +65,8 @@ content while retaining the original.
 
 ## RecompLauncher
 
-Use the Windows portable ZIP, Linux AppImage (including Steam Deck), or either
-macOS Builder ZIP on Apple Silicon. The Windows and macOS ZIPs ship
+Use the Windows portable ZIP, Linux AppImage (including Steam Deck), or the
+macOS ARM64 portable ZIP on Apple Silicon. The Windows and macOS ZIPs ship
 `recomplauncher.json` beside the Builder, and Linux AppImages embed it. Play
 opens the Builder, where you can build from your ROM, rebuild after an update,
 or run the existing game. The Builder waits while the game runs and returns
@@ -153,11 +157,39 @@ data directory without starting the game. Launcher logs live under `logs/` in
 that directory. Startup errors appear in a dialog, or on stderr when no desktop
 session is available.
 
-If an AppImage cannot mount because FUSE is unavailable, try:
+### Linux AppImage requirements
+
+| Builder download | Host glibc baseline | Wayland client required by bundled SDL | Test target |
+| --- | --- | --- | --- |
+| Linux x64 | 2.35 | `libwayland-client.so.0` 1.17.93 or newer | Steam Deck / SteamOS |
+| Linux ARM64 | 2.38 | `libwayland-client.so.0` 1.23.0 or newer | Ubuntu 26.04 LTS ARM64. Smoke-tested on 26.04.1. |
+
+Both AppImages bundle GTK 3, WebKitGTK, SDL 3.4.18, and SDL_ttf 3.2.2.
+The host supplies a graphical session, graphics drivers, and system libraries
+such as OpenGL, EGL, GLES, and the Wayland client. The SDL package dependencies
+are recorded in the [x64 lockfile](../installer/packaging/sdl-sdk-linux-amd64.json)
+and [ARM64 lockfile](../installer/packaging/sdl-sdk-linux-arm64.json). The ARM64
+SDL build links the Wayland client even in an X11 session. Ubuntu 24.04 ships
+Wayland 1.22, which can let the Workshop open while blocking the game runtime.
+
+Normal AppImage mounting needs `/dev/fuse` and the FUSE 2 compatibility library
+(`libfuse2t64` on Ubuntu 26.04). Minimal Ubuntu installations may also need
+`libegl1` and `libgles2` for WebKit to start.
+
+If FUSE is unavailable, run the AppImage with `APPIMAGE_EXTRACT_AND_RUN=1`.
+Use your download's filename in place of this example.
 
 ```sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./ActRaiserRecomp.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./ActRaiserRecompBuilder-v0900-linux-arm64.AppImage
 ```
+
+### Linux browser Builder fallback
+
+If the AppImage Workshop cannot open, download the `.tar.xz` for your
+architecture, extract it, and run `./run-build.sh` from that folder. The Workshop
+opens in your browser. The archive includes the compiler and SDL SDK, and the
+game still needs the relevant host SDL dependencies listed in the included
+`README.txt`.
 
 ### Faster startup and full verification
 
@@ -174,7 +206,7 @@ To force a complete integrity check, close the Builder and start it with
 `--verify-bundle`:
 
 ```powershell
-.\ActRaiserRecompBuilder-v0900-windows-arm64.exe --verify-bundle
+.\ActRaiserRecompBuilder.exe --verify-bundle
 ```
 
 ```sh
@@ -202,6 +234,16 @@ date, the Builder says so before preparing anything and offers to open
 [Microsoft's WebView2 page](https://developer.microsoft.com/microsoft-edge/webview2/).
 Install the **Evergreen** runtime there, then start the Builder again. On a
 managed device, ask your administrator to install it.
+
+### Windows Builder under Proton
+
+The Windows ARM64 Builder opened under GE-Proton 11-12 after installing ARM64
+WebView2 in the prefix. Building from the ROM stopped at compilation with
+`CacheCheckFailed`. Wine rejects the `NtLockFile` call that Zig uses for its
+compiler cache. A local test change got a small C file to compile, but the
+MinGW libraries still failed to build during linking. Use the native Linux
+browser Builder archive as the fallback when the AppImage Workshop cannot
+open. [WineHQ bug #59935](https://bugs.winehq.org/show_bug.cgi?id=59935)
 
 ### Windows Application Control
 
@@ -292,8 +334,9 @@ brew install go cmake pkgconf xz zstd squashfs glib shared-mime-info sevenzip
 ```
 
 Run `make release` from the repository root to build the configured platform
-downloads without a VM, including native desktop packages and their portable
-companions. For one platform, use a target such as `make release-windows-arm64`.
+downloads without a VM. The default matrix publishes portable ZIPs for macOS
+and Windows, and an AppImage plus a browser Builder archive for each Linux
+architecture. For one platform, use a target such as `make release-windows-arm64`.
 These commands run packaging directly; they do not require Python lint modules,
 Node.js lint tools, or the game test dependencies.
 
@@ -335,17 +378,15 @@ For validation followed by packaging, set up the
 `make check-release` (the ordinary checks plus optimized tests) first and stop
 if a check fails. `make check-release` also works independently.
 
-`make release DESKTOP=0` selects archive-only packaging. For the Linux
-browser-based Builder, use `make release-linux-x86_64 DESKTOP=0` or
-`make release-linux-arm64 DESKTOP=0`. These archives can coexist with the
-AppImages. The x64 AppImage is audited against glibc 2.35 and ARM64 against
-glibc 2.38. See the
-[Builder README](https://github.com/DerrickGold/ar-recomp/tree/main/installer) for building and running the CLI locally.
+`make release DESKTOP=0` selects script-based archive packaging on every
+platform. To build only the Linux browser Builder archive, use
+`make release-linux-x86_64 DESKTOP=0` or `make release-linux-arm64 DESKTOP=0`.
+The [Builder README](../installer/README.md) covers local CLI builds.
 
-Both Linux architectures pin SDL 3.4.18 and SDL_ttf 3.2.2. The release build
-reads the checked-in package URLs and checksums, so an upstream update cannot
-silently change the runtime. For an SDL upgrade, verify the x64 AppImage
-against the glibc 2.35 limit and test it on Steam Deck before updating the pins.
+The release build verifies the checked-in SDL package URLs and checksums.
+When updating the pins, check both glibc limits and the host dependencies in
+each lockfile. Test the x64 AppImage on Steam Deck and the ARM64 AppImage on
+Ubuntu 26.04 LTS, including bundled SDL initialization.
 
 Each download bundles the pinned Zig compiler with only the parts of its
 library that the platform's game builds read: the compiler's support code and
@@ -374,8 +415,8 @@ current machine directly without SSH. Each active host starts with one target
 in the order listed in `PLATFORMS`. Remaining targets enter a shared queue:
 whenever a host finishes, it takes the next queued target, so faster machines
 can pick up work while slower machines are still building. Active builds remain
-on their original host. Each target is assigned exactly once; its desktop and
-portable artifacts stay together. Repeated host names or targets are rejected,
+on their original host. Each target is assigned exactly once, and both Linux
+downloads come from the same worker. Repeated host names or targets are rejected,
 and hosts beyond the number of selected targets remain idle. Use
 `REMOTE_DRY_RUN=1` to inspect the initial assignments and shared queue. Later
 assignments depend on which host finishes first and are printed as they happen.
@@ -389,6 +430,12 @@ must support all selected targets, since it may take any target from the queue;
 host capabilities are not detected automatically.
 SSH must work without an interactive password prompt. The alias and credentials stay in your
 local SSH configuration; no machine configuration is saved in the repository.
+
+On macOS, the Linux SDK disk image stays in the download cache and mounts under
+`/private/tmp`. This allows build caches on external volumes with ownership
+disabled. If an interrupted build leaves a `downloads/desktop/linux-sdk.lock`
+directory, wait until that host is idle and inspect `hdiutil info` on the host.
+Detach the SDK image if it is still listed before removing the empty lock directory.
 
 Install the build prerequisites on the remote host itself. For a macOS host,
 connect with `ssh build-host` and run the `brew install …` command above there.
@@ -430,7 +477,8 @@ local release artifacts; nothing is published until every active host succeeds.
 Finished packages and SHA-256 sidecars are verified on their build host and
 again by the coordinator, then copied into `release/`. Returned target manifests
 must match their assignments, and duplicate artifact names are rejected.
-Only the selected downloads are replaced; unrelated local files remain.
+Publishing replaces selected downloads and removes their superseded
+same-version desktop downloads. Other versions and unrelated local files remain.
 Each build host retains reusable dependency downloads,
 host toolchain, and Go compiler caches in
 `~/.cache/actraiser-recomp/release-remote/`. Override this with `REMOTE_DIR=…`

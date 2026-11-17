@@ -2,7 +2,7 @@
 #
 # `make release` cross-builds every platform's self-contained bundle
 # (plus SHA-256 sidecars) into ./release/:
-# macOS .app.zip, Windows .exe, and Linux AppImages (including Steam Deck).
+# Portable ZIPs for macOS and Windows, plus Linux AppImages and browser Builder archives.
 # Requires Go and CMake; the C
 # toolchain and supported SDL3 redistributables are downloaded and bundled by
 # the packaging project. Desktop releases also need native host packaging tools;

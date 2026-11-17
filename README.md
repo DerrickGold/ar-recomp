@@ -74,16 +74,17 @@ build runs offline on your computer. You supply the ROM separately.
 
 ### 1. Download and open the Builder
 
-Get the archive for your machine from [GitHub Releases](https://github.com/DerrickGold/ar-recomp/releases)
-and extract it to a folder you can write to. Download names include the release
-tag; these examples use `v0900`.
+Get the download for your machine from [GitHub Releases](https://github.com/DerrickGold/ar-recomp/releases).
+Extract ZIP and `.tar.xz` downloads to a writable folder. Download names include
+the release tag. These examples use `v0900`.
 
 | Platform | Download | Open |
 |---|---|---|
 | macOS (Apple Silicon or Intel) | `ActRaiserRecompBuilder-v0900-macos-arm64-portable.zip` or `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder.app` |
 | Windows (x64 or ARM64) | `ActRaiserRecompBuilder-v0900-windows-x64-portable.zip` or `-windows-arm64-portable.zip` | `ActRaiserRecompBuilder.exe` |
 | Linux x64, including Steam Deck | `ActRaiserRecompBuilder-v0900-linux-x64.AppImage` | Open the AppImage. On Steam Deck, use Desktop Mode for a manual install. |
-| Linux ARM64 | `ActRaiserRecompBuilder-v0900-linux-arm64.AppImage` | Open the AppImage on a system with glibc 2.38 or newer. |
+| Linux ARM64 | `ActRaiserRecompBuilder-v0900-linux-arm64.AppImage` | Open the AppImage on Ubuntu 26.04 LTS or a system that meets the [Linux AppImage requirements](docs/desktop-packaging.md#linux-appimage-requirements). |
+| Linux browser Builder fallback (x64 or ARM64) | `ActRaiserRecompBuilder-v0900-linux-x64.tar.xz` or `-linux-arm64.tar.xz` | Run `./run-build.sh` in the extracted folder. It opens the Workshop in your browser. |
 
 Older releases label the Linux x64 AppImage `steam-deck`. Keep the portable
 Builder beside its `.portable` file. On first launch, the Builder may take a
@@ -95,7 +96,8 @@ few minutes to check and prepare its tools.
 - [macOS Gatekeeper](docs/desktop-packaging.md#macos-gatekeeper)
 - [Windows WebView2](docs/desktop-packaging.md#windows-webview2-runtime)
 - [Windows Application Control](docs/desktop-packaging.md#windows-application-control)
-- [Linux AppImage startup](docs/desktop-packaging.md#inspecting-paths-and-troubleshooting)
+- [Linux AppImage requirements and startup](docs/desktop-packaging.md#linux-appimage-requirements)
+- [Windows Builder under Proton](docs/desktop-packaging.md#windows-builder-under-proton)
 
 </details>
 

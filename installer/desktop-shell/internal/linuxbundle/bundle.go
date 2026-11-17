@@ -536,12 +536,11 @@ func stage(root, shell string, sdk *linuxsdk.SDK) error {
 func writeLauncher(root, webkitRel string) error {
 	launcher := `#!/bin/sh
 set -eu
+# Host commands such as mktemp must use the host's libraries. Only the
+# bundled GUI executables and their children need the AppImage's loader path.
+unset LD_LIBRARY_PATH LD_PRELOAD
 APPDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 export APPDIR
-# Keep only the GUI's loader search paths here. The Go host removes them from
-# the child builder's environment before starting any compilation or game.
-export LD_LIBRARY_PATH="$APPDIR/usr/lib"
-unset LD_PRELOAD
 export GIO_MODULE_DIR="$APPDIR/usr/lib/gio/modules"
 export GIO_EXTRA_MODULES="$GIO_MODULE_DIR"
 export GSETTINGS_SCHEMA_DIR="$APPDIR/usr/share/glib-2.0/schemas"
@@ -562,12 +561,14 @@ export GTK_IM_MODULE_FILE="$cache/immodules.cache"
 export GST_REGISTRY_1_0="$cache/gstreamer.bin"
 # A helper that cannot run costs image/input-method plugins, not the launch;
 # the Builder itself still reports any loader error that affects it too.
+LD_LIBRARY_PATH="$APPDIR/usr/lib" \
 "$APPDIR/usr/bin/gdk-pixbuf-query-loaders" "$GDK_PIXBUF_MODULEDIR/"*.so > "$GDK_PIXBUF_MODULE_FILE" ||
     echo "Builder: image loader cache unavailable; continuing" >&2
+LD_LIBRARY_PATH="$APPDIR/usr/lib" \
 "$APPDIR/usr/bin/gtk-query-immodules-3.0" "$APPDIR/usr/lib/gtk-3.0/3.0.0/immodules/"*.so > "$GTK_IM_MODULE_FILE" ||
     echo "Builder: input method cache unavailable; continuing" >&2
 cd "$APPDIR/usr"
-"$APPDIR/usr/bin/ActRaiserRecompBuilder" "$@"
+LD_LIBRARY_PATH="$APPDIR/usr/lib" "$APPDIR/usr/bin/ActRaiserRecompBuilder" "$@"
 `
 	launcher = strings.ReplaceAll(launcher, "@WEBKIT@", webkitRel)
 	if err := os.WriteFile(filepath.Join(root, "AppRun"), []byte(launcher), 0755); err != nil {

@@ -51,6 +51,53 @@ func TestLauncherSurvivesCacheHelperFailure(t *testing.T) {
 	}
 }
 
+func TestLauncherScopesLibraryPathToBundledExecutables(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX launcher")
+	}
+	root, hostBin, temp := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := writeLauncher(root, "lib/aarch64-linux-gnu/webkit2gtk-4.1"); err != nil {
+		t.Fatal(err)
+	}
+	bundleBin := filepath.Join(root, "usr/bin")
+	if err := os.MkdirAll(bundleBin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, program := range []string{"dirname", "mktemp", "rm", "rmdir"} {
+		stub := `#!/bin/sh
+if [ "${LD_LIBRARY_PATH+x}${LD_PRELOAD+x}" ]; then
+    echo "${0##*/} inherited AppImage loader settings" >&2
+    exit 1
+fi
+PATH="$TEST_SYSTEM_PATH"
+exec "${0##*/}" "$@"
+`
+		if err := os.WriteFile(filepath.Join(hostBin, program), []byte(stub), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, program := range []string{"gdk-pixbuf-query-loaders", "gtk-query-immodules-3.0", name} {
+		stub := `#!/bin/sh
+test "$LD_LIBRARY_PATH" = "$APPDIR/usr/lib" && printf '%s\n' "${0##*/}"
+`
+		if err := os.WriteFile(filepath.Join(bundleBin, program), []byte(stub), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("/bin/sh", filepath.Join(root, "AppRun"))
+	systemPath := os.Getenv("PATH")
+	cmd.Env = append(os.Environ(), "PATH="+hostBin+":"+systemPath, "TEST_SYSTEM_PATH="+systemPath,
+		"TMPDIR="+temp, "LD_LIBRARY_PATH=/outer-appimage/lib")
+	out, err := cmd.CombinedOutput()
+	if err != nil || string(out) != name+"\n" {
+		t.Fatalf("launcher failed to isolate loader settings: %v\n%s", err, out)
+	}
+	entries, err := os.ReadDir(temp)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("launcher left its temporary cache behind: %v %v", entries, err)
+	}
+}
+
 func TestRelocationIsNarrowAndPreservesELFOffsets(t *testing.T) {
 	path := "/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1"
 	input := []byte("header\x00" + path + "\x00" + path + "/WebKitWebProcess\x00/usr/share/unrelated\x00" + path + "-different\x00embedded:" + path + "\x00")

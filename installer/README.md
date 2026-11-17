@@ -83,10 +83,10 @@ cd installer/packaging
 cmake --workflow --preset release
 ```
 
-The downloads include native macOS and Windows applications, Linux x64 and
-ARM64 AppImages, and portable companions. The Linux x64 AppImage also supports
-Steam Deck. `make release DESKTOP=0` selects archive-only packaging, including
-the Linux browser-based Builder.
+The downloads include portable macOS and Windows ZIPs plus AppImages and
+browser Builder archives for Linux x64 and ARM64. The Linux x64 AppImage also
+supports Steam Deck. `make release DESKTOP=0` builds only the script-based
+archives.
 
 For storage locations, launcher options, and packaging a locally compiled game,
 see [Desktop packages and user data](../docs/desktop-packaging.md).

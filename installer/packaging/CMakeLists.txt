@@ -625,7 +625,7 @@ set(CPACK_PACKAGE_NAME "actraiser-recomp")
 set(CPACK_PACKAGE_VERSION "${SNESBUILD_VERSION}")
 # Use the same archive names as the release plan and remote publisher.
 set(_release_platform "${_os_name}-${_arch_name}")
-builder_release_layout("${_release_platform}" TRUE _release_kind _release_filename _release_retired)
+builder_release_layout("${_release_platform}" TRUE _release_kind _release_filename _release_fallback _release_retired)
 string(REGEX REPLACE "\\.(tar\\.xz|zip)$" "" CPACK_PACKAGE_FILE_NAME "${_release_filename}")
 set(CPACK_PACKAGE_DIRECTORY "${GAME_ROOT}/release")
 set(CPACK_PACKAGE_CHECKSUM "SHA256")

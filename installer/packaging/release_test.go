@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -19,6 +20,85 @@ func releaseCMake(t *testing.T) string {
 		t.Skip("CMake required for release policy tests")
 	}
 	return cmake
+}
+
+func TestLinuxSDKMountCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mount helper")
+	}
+	for _, mode := range []string{"mounted", "attach-failed", "partially-attached"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			cache := filepath.Join(root, "external cache")
+			if err := os.Mkdir(cache, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cache, "linux-sdk.sparseimage"), nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			stub := `#!/bin/sh
+set -eu
+case "$1" in
+    info)
+        if test -f "$SDK_TEST_DIR/attached"; then
+            printf 'image-path      : %s\n' "$(cat "$SDK_TEST_DIR/attached")"
+        fi
+        ;;
+    attach)
+        test "$6" = -mountpoint
+        printf '%s\n' "$7" > "$SDK_TEST_DIR/mountpoint"
+        test "$SDK_TEST_MODE" != attach-failed || exit 41
+        printf '%s\n' "$2" > "$SDK_TEST_DIR/attached"
+        test "$SDK_TEST_MODE" != partially-attached || exit 42
+        ;;
+    detach)
+        printf '%s\n' "$2" > "$SDK_TEST_DIR/detach"
+        test "$SDK_TEST_MODE" != partially-attached || exit 42
+        rm "$SDK_TEST_DIR/attached"
+        ;;
+    *) exit 1 ;;
+esac
+`
+			if err := os.WriteFile(filepath.Join(root, "hdiutil"), []byte(stub), 0755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("/bin/sh", "../desktop-shell/with-linux-sdk-volume.sh", cache,
+				"/bin/sh", "-c", `test "$BUILDER_LINUX_SDK_VOLUME" = "$(cat "$SDK_TEST_DIR/mountpoint")"`)
+			cmd.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "TMPDIR="+cache,
+				"SDK_TEST_DIR="+root, "SDK_TEST_MODE="+mode)
+			output, runErr := cmd.CombinedOutput()
+			var wantExit int
+			switch mode {
+			case "attach-failed":
+				wantExit = 41
+			case "partially-attached":
+				wantExit = 1
+			}
+			if (wantExit == 0 && runErr != nil) || (wantExit != 0 && cmd.ProcessState.ExitCode() != wantExit) {
+				t.Fatalf("wanted exit %d: %v\n%s", wantExit, runErr, output)
+			}
+			data, err := os.ReadFile(filepath.Join(root, "mountpoint"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			mountpoint := strings.TrimSpace(string(data))
+			temp, err := filepath.EvalSymlinks("/tmp")
+			if err != nil || filepath.Dir(mountpoint) != temp || !strings.HasPrefix(filepath.Base(mountpoint), "actraiser-linux-sdk.") {
+				t.Fatalf("SDK mountpoint must use the internal temporary directory: %s (%v)", mountpoint, err)
+			}
+			t.Cleanup(func() { _ = os.Remove(mountpoint) })
+			_, detachErr := os.Stat(filepath.Join(root, "detach"))
+			if os.IsNotExist(detachErr) != (mode == "attach-failed") {
+				t.Fatalf("unexpected detach attempt: %v", detachErr)
+			}
+			for _, dir := range []string{mountpoint, filepath.Join(cache, "linux-sdk.lock")} {
+				_, err := os.Stat(dir)
+				if (mode == "partially-attached" && err != nil) || (mode != "partially-attached" && !os.IsNotExist(err)) {
+					t.Fatalf("wrong cleanup result for %s: %v\n%s", dir, err, output)
+				}
+			}
+		})
+	}
 }
 
 func TestDefaultReleaseMatrixAndExplicitLegacyEscapeHatch(t *testing.T) {
@@ -40,26 +120,26 @@ func TestDefaultReleaseMatrixAndExplicitLegacyEscapeHatch(t *testing.T) {
 					base := "ActRaiserRecompBuilder-" + version + "-" + strings.ReplaceAll(platform, "x86_64", "x64")
 					want := platform + " | archive | " + base + ".tar.xz"
 					if !legacy {
-						want = platform + " | desktop | " + base + ".AppImage | portable | " + base + "-portable.tar.xz"
+						want = platform + " | desktop | " + base + ".AppImage | archive | " + base + ".tar.xz"
 					}
 					if !strings.Contains(text, want) {
 						t.Fatal("missing Linux release", text)
 					}
-					for _, pair := range [][4]string{
-						{"macos-" + arch, ".app.zip", ".zip", ".tar.xz"},
-						{"windows-" + arch, ".exe", ".zip", ".zip"},
+					for _, pair := range [][2]string{
+						{"macos-" + arch, ".tar.xz"},
+						{"windows-" + arch, ".zip"},
 					} {
 						publicPlatform := strings.ReplaceAll(pair[0], "windows-x86_64", "windows-x64")
 						if legacy {
-							want := pair[0] + " | archive | actraiser-recomp-" + version + "-" + publicPlatform + pair[3]
+							want := pair[0] + " | archive | actraiser-recomp-" + version + "-" + publicPlatform + pair[1]
 							if !strings.Contains(text, want) {
 								t.Fatal("wrong legacy archive name", text)
 							}
 						} else {
 							base := "ActRaiserRecompBuilder-" + version + "-" + publicPlatform
-							want := pair[0] + " | desktop | " + base + pair[1] + " | portable | " + base + "-portable" + pair[2]
+							want := pair[0] + " | desktop | " + base + "-portable.zip"
 							if !strings.Contains(text, want) {
-								t.Fatal("missing desktop release pair", text)
+								t.Fatal("missing portable ZIP", text)
 							}
 						}
 					}
@@ -69,11 +149,13 @@ func TestDefaultReleaseMatrixAndExplicitLegacyEscapeHatch(t *testing.T) {
 						t.Fatal("legacy archive unexpectedly gained desktop portable companion", text)
 					}
 				} else {
-					if strings.Count(text, " | portable | ") != 6 {
-						t.Fatal("wrong portable desktop bundle count", text)
+					if strings.Count(text, " | archive | ") != 2 || strings.Count(text, "-portable.zip") != 4 {
+						t.Fatal("wrong desktop or Linux fallback count", text)
 					}
-					if strings.Contains(text, " | archive | ") {
-						t.Fatal("redundant archives in default release", text)
+					for _, retired := range []string{".exe", ".app.zip", "-portable.tar.xz"} {
+						if strings.Contains(text, retired) {
+							t.Fatal("redundant desktop download in default release", text)
+						}
 					}
 				}
 			})
@@ -199,7 +281,7 @@ func TestReleasePruningOnlyRemovesSupersededFilesAfterPublication(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"normal", "missing-replacement", "missing-portable", "retired-directory", "retired-symlink", "replacement-symlink", "portable-symlink"} {
+	for _, mode := range []string{"normal", "missing-portable", "missing-checksum", "retired-directory", "retired-symlink", "portable-symlink"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			keep := filepath.Join(root, "ActRaiserRecompBuilder-v0900-windows-x64.exe")
@@ -213,20 +295,18 @@ func TestReleasePruningOnlyRemovesSupersededFilesAfterPublication(t *testing.T) 
 				}
 			}
 			switch mode {
-			case "missing-replacement":
-				os.Remove(keep)
 			case "missing-portable":
 				os.Remove(portable)
+			case "missing-checksum":
+				os.Remove(portable + ".sha256")
 			case "retired-directory":
 				os.Remove(old)
 				if err := os.Mkdir(old, 0700); err != nil {
 					t.Fatal(err)
 				}
-			case "retired-symlink", "replacement-symlink", "portable-symlink":
+			case "retired-symlink", "portable-symlink":
 				link := old
-				if mode == "replacement-symlink" {
-					link = keep
-				} else if mode == "portable-symlink" {
+				if mode == "portable-symlink" {
 					link = portable
 				}
 				os.Remove(link)
@@ -250,6 +330,11 @@ func TestReleasePruningOnlyRemovesSupersededFilesAfterPublication(t *testing.T) 
 			}
 			_, statErr := os.Lstat(old + ".sha256")
 			if mode == "normal" {
+				for _, name := range []string{keep, keep + ".sha256"} {
+					if _, err := os.Lstat(name); !os.IsNotExist(err) {
+						t.Fatal("obsolete Windows EXE retained", name, err)
+					}
+				}
 				if !os.IsNotExist(statErr) {
 					t.Fatal("obsolete checksum retained", statErr)
 				}
@@ -263,7 +348,7 @@ func TestReleasePruningOnlyRemovesSupersededFilesAfterPublication(t *testing.T) 
 	}
 }
 
-func TestLinuxAppImageDoesNotRemoveExplicitArchive(t *testing.T) {
+func TestLinuxAppImageKeepsFallbackAndRetiresDuplicateAppImageArchive(t *testing.T) {
 	cmake := releaseCMake(t)
 	policy, err := filepath.Abs("release_policy.cmake")
 	if err != nil {
@@ -283,6 +368,19 @@ func TestLinuxAppImageDoesNotRemoveExplicitArchive(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
+	fallbackChecksum := base + ".tar.xz.sha256"
+	if err := os.Remove(fallbackChecksum); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(cmake, "-P", script).CombinedOutput(); err == nil {
+		t.Fatal("duplicate retired before Linux fallback was ready", string(output))
+	}
+	if _, err := os.Stat(base + "-portable.tar.xz"); err != nil {
+		t.Fatal("old Linux download lost before fallback publication", err)
+	}
+	if err := os.WriteFile(fallbackChecksum, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if output, err := exec.Command(cmake, "-P", script).CombinedOutput(); err != nil {
 		t.Fatal(err, string(output))
 	}
@@ -291,23 +389,31 @@ func TestLinuxAppImageDoesNotRemoveExplicitArchive(t *testing.T) {
 			t.Fatal("explicit archive or checksum removed", err)
 		}
 	}
+	for _, suffix := range []string{"-portable.tar.xz", "-portable.tar.xz.sha256"} {
+		if _, err := os.Lstat(base + suffix); !os.IsNotExist(err) {
+			t.Fatal("duplicate AppImage archive retained", err)
+		}
+	}
 }
 
 func TestDesktopReleaseUsesFinalPayloadVersion(t *testing.T) {
 	t.Run("windows-x86_64", func(t *testing.T) {
-		testDesktopReleaseUsesFinalPayloadVersion(t, "windows-x86_64", "windows", "windows-x64.exe", "windows-x64-portable.zip")
+		testDesktopReleaseUsesFinalPayloadVersion(t, "windows-x86_64", "windows", "windows-x64-portable.zip")
 	})
 	t.Run("macos-arm64", func(t *testing.T) {
 		if _, err := exec.LookPath("ditto"); err != nil {
 			t.Skip("ditto required for macOS releases")
 		}
-		testDesktopReleaseUsesFinalPayloadVersion(t, "macos-arm64", "macos", "macos-arm64.app.zip", "macos-arm64-portable.zip")
+		testDesktopReleaseUsesFinalPayloadVersion(t, "macos-arm64", "macos", "macos-arm64-portable.zip")
+	})
+	t.Run("linux-arm64", func(t *testing.T) {
+		testDesktopReleaseUsesFinalPayloadVersion(t, "linux-arm64", "linux", "linux-arm64.AppImage")
 	})
 }
 
 const macOSBuilderProgram = "ActRaiserRecompBuilder.app/Contents/MacOS/ActRaiserRecompBuilder"
 
-func testDesktopReleaseUsesFinalPayloadVersion(t *testing.T, platform, kind, direct, portable string) {
+func testDesktopReleaseUsesFinalPayloadVersion(t *testing.T, platform, kind, filename string) {
 	t.Helper()
 	cmake := releaseCMake(t)
 	root := t.TempDir()
@@ -355,30 +461,27 @@ file(WRITE "%s" "built payload for v1.0\n")
 	}
 	release := filepath.Join(root, "release")
 	entries, err := os.ReadDir(release)
-	if err != nil || len(entries) != 4 {
-		t.Fatalf("expected only the final direct/portable files and checksums: %v, %v", entries, err)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("expected only the desktop download and its checksum: %v, %v", entries, err)
 	}
-	const prefix = "ActRaiserRecompBuilder-v1.0-"
-	for _, suffix := range []string{direct, portable} {
-		name := prefix + suffix
-		data, err := os.ReadFile(filepath.Join(release, name))
-		if err != nil {
-			t.Fatal("missing final-version artifact", err)
-		}
-		checksum, err := os.ReadFile(filepath.Join(release, name+".sha256"))
-		want := fmt.Sprintf("%x  %s\n", sha256.Sum256(data), name)
-		if err != nil || string(checksum) != want {
-			t.Fatalf("checksum must identify the final version: %q, %v", checksum, err)
-		}
+	name := "ActRaiserRecompBuilder-v1.0-" + filename
+	data, err := os.ReadFile(filepath.Join(release, name))
+	if err != nil {
+		t.Fatal("missing final-version artifact", err)
+	}
+	checksum, err := os.ReadFile(filepath.Join(release, name+".sha256"))
+	want := fmt.Sprintf("%x  %s\n", sha256.Sum256(data), name)
+	if err != nil || string(checksum) != want {
+		t.Fatalf("checksum must identify the final version: %q, %v", checksum, err)
 	}
 	if kind == "macos" {
 		extracted := t.TempDir()
-		cmd := exec.Command(cmake, "-E", "tar", "xf", filepath.Join(release, prefix+direct))
+		cmd := exec.Command(cmake, "-E", "tar", "xf", filepath.Join(release, name))
 		cmd.Dir = extracted
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatal(err, string(output))
 		}
-		checkReleaseLauncherProfile(t, extracted, macOSBuilderProgram)
+		checkReleaseLauncherProfile(t, filepath.Join(extracted, strings.TrimSuffix(name, ".zip")), macOSBuilderProgram)
 	}
 }
 

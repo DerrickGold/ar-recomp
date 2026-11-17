@@ -181,10 +181,10 @@ class RemoteReleaseTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         release = self.root / "release"
         names = {p.name for p in release.iterdir()}
-        self.assertEqual(len(names), 8)
+        self.assertEqual(len(names), 6)
         self.assertIn(f"ActRaiserRecompBuilder-{self.version}-macos-arm64-portable.zip", names)
         self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-arm64.AppImage", names)
-        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-arm64-portable.tar.xz", names)
+        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-arm64.tar.xz", names)
         for path in release.iterdir():
             if not path.name.endswith(".sha256"):
                 self.assertEqual(path.read_text(), "dirty source")
@@ -192,11 +192,20 @@ class RemoteReleaseTest(unittest.TestCase):
         self.assertEqual((self.remote / "downloads/retained.txt").read_text(), "cached dependency")
         self.assertFalse(list(self.remote.glob("work-*")))
         (release / "unrelated.txt").write_text("keep me")
+        stale = [f"ActRaiserRecompBuilder-{self.version}-macos-arm64.app.zip",
+                 f"ActRaiserRecompBuilder-{self.version}-linux-arm64-portable.tar.xz"]
+        for name in stale + [name + ".sha256" for name in stale]:
+            (release / name).write_text("old output")
+        previous = release / "ActRaiserRecompBuilder-v0805-macos-arm64.app.zip"
+        previous.write_text("previous version")
         (self.root / "edited.txt").write_text("next source")
         result = self.run_release()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((release / f"ActRaiserRecompBuilder-{self.version}-linux-arm64.AppImage").read_text(), "next source")
         self.assertEqual((release / "unrelated.txt").read_text(), "keep me")
+        self.assertEqual(previous.read_text(), "previous version")
+        self.assertEqual({path.name for path in release.iterdir()},
+                         names | {"unrelated.txt", previous.name})
 
     def test_legacy_keep_build_version_and_alias_matching_a_local_target(self):
         # An SSH alias called 'clean' must never execute the local clean recipe.
@@ -224,10 +233,9 @@ class RemoteReleaseTest(unittest.TestCase):
                                           "PLATFORMS=windows-x86_64 linux-arm64", host="localhost")
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("Release " + version + ":", result.stdout)
-                artifacts = [f"ActRaiserRecompBuilder-{version}-windows-x64.exe",
-                             f"ActRaiserRecompBuilder-{version}-windows-x64-portable.zip",
+                artifacts = [f"ActRaiserRecompBuilder-{version}-windows-x64-portable.zip",
                              f"ActRaiserRecompBuilder-{version}-linux-arm64.AppImage",
-                             f"ActRaiserRecompBuilder-{version}-linux-arm64-portable.tar.xz"]
+                             f"ActRaiserRecompBuilder-{version}-linux-arm64.tar.xz"]
                 names = artifacts + [name + ".sha256" for name in artifacts]
                 release_remote.verify_artifacts(release, names)
                 previous_names.update(names)
@@ -500,7 +508,7 @@ class RemoteReleaseTest(unittest.TestCase):
         (self.bin / "ssh").write_text("#!/bin/sh\nexit 87\n")
         result = self.run_release(host="localhost")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(len(list((self.root / "release").iterdir())), 8)
+        self.assertEqual(len(list((self.root / "release").iterdir())), 6)
         self.assertFalse(list(self.remote.glob("work-*")))
         self.assertTrue((self.remote / "downloads/retained.txt").exists())
         self.assertTrue((self.root / "fresh.txt").exists())
@@ -541,9 +549,9 @@ class RemoteReleaseTest(unittest.TestCase):
         self.assertEqual(len(set(versions)), 1)
         self.assertTrue(versions[0].endswith("-dirty"))
         names = {p.name for p in (self.root / "release").iterdir()}
-        self.assertEqual(len(names), 24)
+        self.assertEqual(len(names), 16)
         self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-x64.AppImage", names)
-        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-x64-portable.tar.xz", names)
+        self.assertIn(f"ActRaiserRecompBuilder-{self.version}-linux-x64.tar.xz", names)
         self.assertTrue((self.root / "edited.txt").exists())
 
     def test_steam_deck_alias_returns_linux_x64_downloads(self):
@@ -551,7 +559,7 @@ class RemoteReleaseTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         release = self.root / "release"
         base = f"ActRaiserRecompBuilder-{self.version}-linux-x64"
-        artifacts = [base + ".AppImage", base + "-portable.tar.xz"]
+        artifacts = [base + ".AppImage", base + ".tar.xz"]
         names = artifacts + [name + ".sha256" for name in artifacts]
         self.assertCountEqual([path.name for path in release.iterdir()], names)
         release_remote.verify_artifacts(release, names)

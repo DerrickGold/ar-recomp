@@ -331,7 +331,19 @@ def publish(directory, output, version):
     if output.is_symlink() or (output.exists() and not output.is_dir()):
         raise ValueError(f"Unexpected local release directory: {output}")
     output.mkdir(parents=True, exist_ok=True)
+    retired = []
+    prefix = re.escape(f"ActRaiserRecompBuilder-{version}-")
     for name in names:
+        portable = re.fullmatch(rf"({prefix}(macos|windows)-(?:arm64|x86_64|x64))-portable\.zip", name)
+        appimage = re.fullmatch(rf"({prefix}linux-(?:arm64|x64))\.AppImage", name)
+        if portable:
+            extension = ".app.zip" if portable[2] == "macos" else ".exe"
+            retired.append(portable[1] + extension)
+        elif appimage and appimage[1] + ".tar.xz" in names:
+            retired.append(appimage[1] + "-portable.tar.xz")
+    retired += [name + ".sha256" for name in retired]
+    retired = [name for name in retired if name not in names]
+    for name in [*names, *retired]:
         target = output / name
         if target.is_symlink() or (target.exists() and not target.is_file()):
             raise ValueError(f"Unsafe local release destination: {name}")
@@ -343,6 +355,8 @@ def publish(directory, output, version):
             shutil.copy2(directory / name, staged / name)
         for name in names:
             os.replace(staged / name, output / name)
+        for name in retired:
+            (output / name).unlink(missing_ok=True)
     print(f"Retrieved {len(names) // 2} verified release artifacts into {output}", flush=True)
 
 

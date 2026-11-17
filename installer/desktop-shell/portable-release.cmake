@@ -72,8 +72,8 @@ function(builder_create_portable_release kind platform artifact stage out_artifa
     endif()
 
     if(kind STREQUAL "macos")
-        # Preserve resource forks and Finder metadata just like the direct app
-        # ZIP; the portable marker remains outside the signed bundle.
+        # Preserve resource forks and Finder metadata. The portable marker
+        # stays outside the signed bundle.
         execute_process(COMMAND "${_ditto}" -c -k --keepParent --sequesterRsrc
             "${_root}" "${_archive}" COMMAND_ERROR_IS_FATAL ANY)
     elseif(_filename MATCHES "\\.zip$")
