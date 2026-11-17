@@ -154,7 +154,8 @@ typedef struct Recorder {
 } Recorder;
 
 static void CheckTrunkSideCaps(Recorder *,const ArRenderVertex2D *,int,const float *);
-static void CheckGroundCoverDraw(Recorder *,const ArRenderVertex2D *,int,const float *);
+static void CheckGroundCoverDraw(Recorder *, const ArRenderVertex2D *, int, const float *,
+                                const float *);
 
 static float Exposure(void *context,float u,float v,float inside_u,float inside_v) {
   (void)inside_u;(void)inside_v;
@@ -474,7 +475,7 @@ static bool Geometry(void *ctx, ArRenderTexture t, const ArRenderVertex2D *v,
   assert(!t.value || (t.value < 128 && r->textures[t.value].width > 0));
   const ArRenderTexture source=r->copied_sources[t.value].value?r->copied_sources[t.value]:t;
   if(r->ground_cover&&!t.value&&!r->ground_cover->shared_depth)
-    CheckGroundCoverDraw(r,v,nv,NULL);
+    CheckGroundCoverDraw(r, v, nv, NULL, NULL);
   if(r->trunk_side && r->trunk_side->material.value && t.value==r->trunk_side->material.value)
     CheckTrunkSideCaps(r,v,nv,NULL);
   if(r->voxel_cull)for(unsigned f=0;f<r->voxel_cull->count;++f) {
@@ -951,7 +952,7 @@ static bool DepthGeometry(void *context,ArRenderDevice *device,const DioramaDept
     assert(!draw->native_actor && draw->blend==kArRenderBlendMode_Alpha && draw->clip_w);
     assert(!draw->lighting && draw->vertex_count%3==0);
     assert(draw->plane==kDioramaPlane_Bg1Far||draw->plane==kDioramaPlane_Bg1Hi||draw->plane==SR_PPU_OVERLAY_BG1);
-    CheckGroundCoverDraw(r,draw->vertices,draw->vertex_count,draw->depths);
+    CheckGroundCoverDraw(r, draw->vertices, draw->vertex_count, draw->depths, draw->clip_w);
     Record(22);Record(draw->plane);Record(false);Record(draw->vertex_count);
     for(int i=0;i<draw->vertex_count;++i) {
       assert(isfinite(draw->depths[i])&&draw->depths[i]>0&&draw->depths[i]<1);
@@ -2238,6 +2239,14 @@ static unsigned VoxelStumpContourFixture(unsigned scenario) {
   for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
   assert(!r.live);return s_count;
 }
+/* A fixture edits geometry in place, while a production rebuild gets a new
+ * revision from ActionVoxel_Create. Keep fixture revisions unique so the
+ * compositor's revision-keyed caches cannot reuse another room's geometry. */
+static void ReviseVoxelFixture(ActionVoxelGeometry *voxel) {
+  static uint64_t revision = UINT64_C(1) << 63;
+  voxel->revision = ++revision;
+}
+
 #include "diorama_native_transform.inc"
 #include "diorama_surface_texture.inc"
 #include "diorama_surface_native_x.inc"

@@ -54,7 +54,7 @@ static unsigned VoxelMaterialSkinFixture(unsigned scenario) {
     const int shift=frame>=3?256:0;
     const DioramaVoxelTransform transform={.px=84+shift,.py=100,.pz=.09f,
         .dx=frame>=3?-256:0,.dy=frame>=3?-5:0,.sx=frame>=3?.75f:1,.sy=1,.sz=1};
-    if(frame!=2 && frame!=4)++voxel->revision;
+    if(frame!=2 && frame!=4)ReviseVoxelFixture(voxel);
     capture.bg1_camera_x=frame==2?3:0;
     voxel->authored_cap_art_count=frame?1:0;
     voxel->authored_count=voxel->native_transform_count=frame>=3?1:0;
@@ -172,7 +172,7 @@ static unsigned VoxelFlatRearJoinFixture(unsigned scenario) {
   const float knots[]={0,contact,depth};
   for(unsigned frame=0;frame<2;++frame) {
     for(unsigned i=0;i<4;++i)voxel->edges[i].flat_rear_join=frame;
-    ++voxel->revision;probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
+    ReviseVoxelFixture(voxel);probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
     assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
     assert(projection.valid && probe.count && r.actor_seen);
     unsigned seam[3]={0},brown_phase=0,retained=0;

@@ -103,7 +103,7 @@ static unsigned NativeAffineFixture(unsigned scenario) {
         .dx=frame>=3?-256:frame==2?16:0,.dy=frame>=2?-10:0,
         .dz=frame==4?-.05f:0,.sx=frame>=2?.5f:1,.sy=1,.sz=frame==4?1.2f:1};
     probe.count=0;probe.source_shift=shift;memset(probe.submitted,0,sizeof(probe.submitted));
-    r.actor_seen=false;++voxel->revision;
+    r.actor_seen=false;ReviseVoxelFixture(voxel);
     voxel->authored_count=frame?8:0;
     voxel->native_transform_count=voxel->hidden_native_front_count=frame>1?8:0;
     voxel->transformed_rear_count=frame>1?8:0;
@@ -227,7 +227,7 @@ static unsigned NativeAffineFixture(unsigned scenario) {
       voxel->pass_edges[3][voxel->pass_counts[3]++]=i;
   }
   for(unsigned i=0;i<8;++i)for(unsigned q=0;q<4;++q)voxel->authored[i].priority[q]=1;
-  ++voxel->revision;probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
+  ReviseVoxelFixture(voxel);probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
   assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
   assert(projection.valid && projection.bg1_high_plane.valid && r.actor_seen);
   unsigned high_fronts=0;
@@ -243,7 +243,7 @@ static unsigned NativeAffineFixture(unsigned scenario) {
   /* A top-art edit promotes one member to an authored surface, but its Auto
    * native front still needs the same filtering as the rest of its group. */
   VoxelAuthoredCell *mixed=&voxel->authored[0];mixed->surface=true;mixed->native_transform=false;
-  mixed->native_front_hidden=false;--voxel->native_transform_count;++voxel->revision;
+  mixed->native_front_hidden=false;--voxel->native_transform_count;ReviseVoxelFixture(voxel);
   probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
   assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
   unsigned mixed_fronts=0;
@@ -278,7 +278,7 @@ static unsigned NativeAffineFixture(unsigned scenario) {
   assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&shaded,&projection)));
   assert(r.creates==shaded_creates && r.uploads==shaded_uploads);
   /* An explicit front donor keeps the ordinary authored-art filter. */
-  mixed->native_front_art=false;++voxel->revision;
+  mixed->native_front_art=false;ReviseVoxelFixture(voxel);
   probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
   assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
   unsigned custom_fronts=0;

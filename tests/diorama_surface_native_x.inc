@@ -66,7 +66,7 @@ static unsigned VoxelNativeXSurfaceFixture(unsigned scenario) {
       voxel->authored_contours[0]=(VoxelAuthoredContour){.x=0,.y=0,.length=1,.side=0};
       voxel->authored_contours[1]=(VoxelAuthoredContour){.x=2,.y=0,.length=14,.side=0};
     }
-    ++voxel->revision;probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
+    ReviseVoxelFixture(voxel);probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
     assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
     assert(projection.valid && probe.count && probe.uploaded && r.actor_seen);
     unsigned before=0,after=0,narrow_samples=0,generic_holes=0,clipped=0,joins=0;

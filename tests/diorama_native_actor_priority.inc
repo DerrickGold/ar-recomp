@@ -178,7 +178,7 @@ static unsigned NativeActorPriorityFixture(unsigned scenario) {
       voxel->authored_contours[0].length=8;
       voxel->authored_contours[2]=(VoxelAuthoredContour){.x=8,.y=0,.length=8,.side=0};
     }
-    ++voxel->revision;probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));
+    ReviseVoxelFixture(voxel);probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));
     r->actor_seen=false;test.count=0;
     assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
     assert(projection.valid&&r->actor_seen&&probe.count);

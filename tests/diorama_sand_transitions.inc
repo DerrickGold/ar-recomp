@@ -21,7 +21,7 @@ static void SandTransitionRenderFixture(unsigned scenario) {
   unsigned joints=0,endpoints=0;
   for(unsigned frame=0;frame<4;++frame) {
     const bool mode=frame&1,unavailable=frame>=2;const int y=unavailable?226-(int)extent:96;
-    ++g->revision;g->edge_count=g->pass_counts[1]=3;g->pass_counts[0]=0;
+    ReviseVoxelFixture(g);g->edge_count=g->pass_counts[1]=3;g->pass_counts[0]=0;
     g->high_deck_count=g->pass_counts[3]=2;g->pass_edges[3][0]=0;g->pass_edges[3][1]=1;
     for(unsigned i=0;i<3;++i) {
       g->pass_edges[1][i]=i;g->edges[i]=(VoxelEdge){.x=i==2?(left?80:95):80+8*i,.y=y,.length=i==2?1:8,

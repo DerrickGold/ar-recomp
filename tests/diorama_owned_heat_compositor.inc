@@ -91,7 +91,7 @@ static unsigned OwnedHeatTransportFixture(unsigned scenario) {
     transport.active=frame!=0;transport.skin=transport.finite=transport.crisp=transport.native=transport.before=transport.after=0;
     memset(transport.seen,0,sizeof(transport.seen));scene.scenery_heat.motion[0][0]=frame?3:0;
     capture.bg1_camera_x=frame==3?3:0;view.camera.tilt_y=((scenario&1)?-1:1)*(frame==2?.3f:.4f);
-    if(frame==0||frame==4)++voxel->revision;
+    if(frame==0||frame==4)ReviseVoxelFixture(voxel);
     voxel->authored_count=authored||frame==4;voxel->native_transform_count=!authored&&frame==4;
     voxel->transformed_rear_count=authored&&frame==4;
     memset(voxel->authored_at,0,(size_t)(voxel->width/16)*(voxel->height/16)*sizeof(*voxel->authored_at));

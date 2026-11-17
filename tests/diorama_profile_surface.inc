@@ -54,14 +54,14 @@ static unsigned VoxelProfileSurfaceFixture(unsigned scenario) {
   for(unsigned frame=0;frame<4;++frame) {
     if(frame==1) {
       voxel->patches[0].surface_compiled=1;voxel->patches[0].surface_count=2;
-      voxel->authored_cap_art_count=2;++voxel->revision;
+      voxel->authored_cap_art_count=2;ReviseVoxelFixture(voxel);
       r.owned_cap=true;r.owned_cap_pixel=0xff000000;
     }
     if(frame==2)view.camera.tilt_y+=.03f;
     if(frame==3) {
       /* All source cells now belong to authored geometry. An empty compiled
        * profile must not revive the old captured native side panel. */
-      voxel->patches[0].surface_count=0;++voxel->revision;
+      voxel->patches[0].surface_count=0;ReviseVoxelFixture(voxel);
       r.cap_texture=textures[high?kDioramaPlane_Bg1Hi:kDioramaPlane_Bg1Far];
     }
     const unsigned uploads=r.uploads,creates=r.creates;

@@ -52,7 +52,7 @@ static unsigned NativeInwardSpanFixture(unsigned scenario) {
      * face still has a real triangle nearer y96; mode2 must keep it. Compare
      * a fresh raw-source frame before the optional-art frame, not old poses. */
     if(family==2)voxel->column_curves[0].base_y=frame>=5?112:160;
-    if(frame!=2)++voxel->revision;
+    if(frame!=2)ReviseVoxelFixture(voxel);
     voxel->authored_cap_art_count=mode?1:0;
     memset(voxel->pass_counts,0,sizeof(voxel->pass_counts));voxel->edge_count=0;
     for(unsigned side=family==0?1:0;side<4;++side) {

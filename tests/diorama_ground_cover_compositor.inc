@@ -57,15 +57,21 @@ static void GroundCoverObserve(void *userdata,const DioramaGroundCoverObservatio
   }
 }
 
-/* Invert actual submitted screen XYZ, independently of the cover adapter.
- * This catches cover painted on a parallel plane or stretched across a pit. */
-static void GroundCoverNativePoint(const Recorder *r,const ArRenderVertex2D *v,float depth,float out[3]) {
+/* Invert submitted screen XY and clip W to recover the geometry before
+ * the renderer applies a depth bias to snow lips and closing risers. */
+static void GroundCoverNativePoint(const Recorder *r, const ArRenderVertex2D *v,
+                                   float depth, float clip_w, float out[3]) {
   const DioramaProjection *p=r->projection;const float *m=p->matrix;
-  const double ndc[3]={2.*v->position.x/p->output_width-1,1-2.*v->position.y/p->output_height,2.*depth-1};
+  const unsigned rows[] = {0, 1, 3};
+  const double clip[] = {
+    (2. * v->position.x / p->output_width - 1) * clip_w,
+    (1 - 2. * v->position.y / p->output_height) * clip_w,
+    clip_w,
+  };
   double a[3][4];
   for(unsigned row=0;row<3;++row) {
-    for(unsigned col=0;col<3;++col)a[row][col]=m[col*4+row]-ndc[row]*m[col*4+3];
-    a[row][3]=ndc[row]*m[15]-m[12+row];
+    for(unsigned col=0;col<3;++col)a[row][col]=m[col*4+rows[row]];
+    a[row][3]=clip[row]-m[12+rows[row]];
   }
   for(unsigned col=0;col<3;++col) {
     unsigned pivot=col;for(unsigned row=col+1;row<3;++row)if(fabs(a[row][col])>fabs(a[pivot][col]))pivot=row;
@@ -76,6 +82,9 @@ static void GroundCoverNativePoint(const Recorder *r,const ArRenderVertex2D *v,f
       const double d=a[row][col];for(unsigned j=col;j<4;++j)a[row][j]-=d*a[col][j];
     }
   }
+  const double clip_z = m[2]*a[0][3] + m[6]*a[1][3] + m[10]*a[2][3] + m[14];
+  const double depth_lead = clip_z / clip_w * .5 + .5 - depth;
+  assert(fabs(depth_lead) < .000001 || fabs(depth_lead - .00002) < .000001);
   const double z=a[2][3],scale=r->ground_cover->dedicated?1:1-z/p->camera_distance;
   const float ox=r->capture->bg1_camera_x-(r->capture->width-256)*.5f-r->capture->obj_apron;
   const float oy=r->capture->camera_y-r->capture->authentic_y0+1;
@@ -83,7 +92,8 @@ static void GroundCoverNativePoint(const Recorder *r,const ArRenderVertex2D *v,f
   out[1]=oy+(.5-a[1][3]/scale/p->height_scale)*r->capture->height;
   out[2]=r->ground_cover->dedicated?z:-z;
 }
-static void CheckGroundCoverDraw(Recorder *r,const ArRenderVertex2D *vertices,int count,const float *depths) {
+static void CheckGroundCoverDraw(Recorder *r, const ArRenderVertex2D *vertices, int count,
+                                 const float *depths, const float *clip_w) {
   GroundCoverProbe *p=r->ground_cover;assert(p&&!p->empty&&!p->unsupported);
   const unsigned step=depths?3:4;assert(count>0&&(unsigned)count%step==0);
   for(unsigned at=0;at<(unsigned)count;at+=step) {
@@ -93,7 +103,7 @@ static void CheckGroundCoverDraw(Recorder *r,const ArRenderVertex2D *vertices,in
     bool lip=depths!=NULL;
     const float near_z=p->dedicated?(p->kind==2?0:-.24f):0;
     if(depths)for(unsigned j=0;j<3;++j) {
-      GroundCoverNativePoint(r,&vertices[at+j],depths[at+j],xyz[j]);
+      GroundCoverNativePoint(r, &vertices[at+j], depths[at+j], clip_w[at+j], xyz[j]);
       if(p->pressure_transform){xyz[j][0]=88+(xyz[j][0]-128)*.5f;xyz[j][1]=112+(xyz[j][1]-128)/1.5f;}
       lip&=fabsf(xyz[j][2]-near_z)<.00002f;
     }
@@ -156,7 +166,8 @@ static unsigned GroundCoverFixture(unsigned scenario) {
   }
   ActionVoxelGeometry *voxel=ActionVoxel_Create();assert(voxel);
   voxel->active_group=voxel->active_room=1;voxel->profile=kActionVoxelProfile_FillmoreForest;
-  voxel->settings=ActionVoxel_SettingsForRoom(1,1);voxel->width=256;voxel->height=224;voxel->ready=true;voxel->revision=10000+scenario*4;
+  voxel->settings=ActionVoxel_SettingsForRoom(1,1);voxel->width=256;voxel->height=224;voxel->ready=true;
+  ReviseVoxelFixture(voxel);
   if(kind==0) {
     voxel->edge_count=voxel->pass_counts[0]=2;
     voxel->edges[0]=(VoxelEdge){.x=80,.y=120,.length=32,.side=0,.far_rank=2,.colliding=1};
@@ -224,7 +235,7 @@ static unsigned GroundCoverFixture(unsigned scenario) {
      * erase it or change the actual submitted mesh. */
     if(frame==1)scene.trunk_particles=false;
     if(frame==3) {
-      ++voxel->revision;++trunk.revision;
+      ReviseVoxelFixture(voxel);++trunk.revision;
       if(kind==0)voxel->edge_count=voxel->pass_counts[0]=0;
       if(kind==1)voxel->authored[0].faces&=~kDioramaVoxelFaceMask_Top;
       if(kind>=2){memset(trunk.masks,0,sizeof(trunk.masks));memset(trunk.side_masks,0,sizeof(trunk.side_masks));}
@@ -321,7 +332,8 @@ static unsigned GroundCoverSnowFixture(unsigned scenario) {
     probe.lip_triangles=probe.top_vertices=0;probe.lip_feather_area=0;
     probe.before_actor=probe.after_actor=0;memset(probe.snow_columns,0,sizeof(probe.snow_columns));r.actor_seen=false;
     probe.seen_z0=INFINITY;probe.seen_z1=-INFINITY;
-    voxel->origin_x=ox;voxel->origin_y=oy;voxel->revision=100000+scenario*64+frame;
+    voxel->origin_x=ox;voxel->origin_y=oy;
+    ReviseVoxelFixture(voxel);
     voxel->profile=!transformed&&frame==2?kActionVoxelProfile_FillmoreForest:kActionVoxelProfile_NorthwallSnow;
     memset(voxel->front,0,256*224);memset(voxel->soft_surfaces,!transformed&&frame==3?0:1,16*14);
     voxel->edge_count=voxel->pass_counts[0]=0;

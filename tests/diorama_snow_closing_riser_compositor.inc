@@ -1,25 +1,43 @@
-typedef struct SnowCoverRecorded {ArRenderVertex2D v[8192];float z[8192];unsigned n;} SnowCoverRecorded;
+typedef struct SnowCoverRecorded {
+  ArRenderVertex2D v[8192];
+  float z[8192], w[8192];
+  unsigned n;
+} SnowCoverRecorded;
 static SnowCoverRecorded snow_record,snow_paths[2];
 static unsigned snow_faces;static uint64_t snow_face_hash;
 static void SnowFaceObserve(void*unused,const DioramaVoxelPickFace*f) {
   (void)unused;++snow_faces;const unsigned char*p=(const unsigned char*)f;
   for(unsigned i=0;i<sizeof(*f);++i)snow_face_hash=snow_face_hash*UINT64_C(1099511628211)^p[i];
 }
-static void SnowRecord(const ArRenderVertex2D*v,const int32_t*ix,int ni,const float*z) {
+static void SnowRecord(const ArRenderVertex2D *v, const int32_t *ix, int ni,
+                       const float *z, const float *w) {
   assert(snow_record.n+(unsigned)ni<=8192);
   for(int t=0;t<ni;t+=3) {
     const ArRenderPointF a=v[ix[t]].position,b=v[ix[t+1]].position,c=v[ix[t+2]].position;
     /* Portable geometry packs an existing triangle into a degenerate quad;
      * compare actual covered triangles, not the zero-area second half. */
     if(fabs((double)(b.x-a.x)*(c.y-a.y)-(double)(b.y-a.y)*(c.x-a.x))<.000000001)continue;
-    for(int j=0;j<3;++j){const int i=t+j;snow_record.v[snow_record.n]=v[ix[i]];snow_record.z[snow_record.n]=z?z[ix[i]]:0;++snow_record.n;}
+    for (int j=0; j<3; ++j) {
+      const int vertex = ix[t+j];
+      const unsigned dst = snow_record.n++;
+      snow_record.v[dst] = v[vertex];
+      snow_record.z[dst] = z ? z[vertex] : 0;
+      snow_record.w[dst] = w ? w[vertex] : 0;
+    }
   }
 }
 static bool SnowCoverGeometry(void*ctx,ArRenderTexture t,const ArRenderVertex2D*v,int nv,const int32_t*ix,int ni,const ArRenderDrawState*s) {
-  if(!t.value&&s->blend==kArRenderBlendMode_Alpha)SnowRecord(v,ix,ni,NULL);return Geometry(ctx,t,v,nv,ix,ni,s);
+  if (!t.value && s->blend == kArRenderBlendMode_Alpha) SnowRecord(v, ix, ni, NULL, NULL);
+  return Geometry(ctx,t,v,nv,ix,ni,s);
 }
 static bool SnowCoverDepth(void*ctx,ArRenderDevice*d,const DioramaDepthSubmission*s) {
-  if(!s->texture.value){assert(!s->lighting&&!s->native_actor&&s->blend==kArRenderBlendMode_Alpha&&s->clip_w);for(int i=0;i<s->vertex_count;++i)assert(isfinite(s->depths[i])&&s->depths[i]>0&&s->depths[i]<1&&s->clip_w[i]>0);SnowRecord(s->vertices,s->indices,s->index_count,s->depths);return true;}
+  if (!s->texture.value) {
+    assert(!s->lighting && !s->native_actor && s->blend == kArRenderBlendMode_Alpha && s->clip_w);
+    for (int i=0; i<s->vertex_count; ++i)
+      assert(isfinite(s->depths[i]) && s->depths[i]>0 && s->depths[i]<1 && s->clip_w[i]>0);
+    SnowRecord(s->vertices, s->indices, s->index_count, s->depths, s->clip_w);
+    return true;
+  }
   return DepthGeometry(ctx,d,s);
 }
 static bool SnowSameVertex(const ArRenderVertex2D*a,const ArRenderVertex2D*b) {
@@ -54,7 +72,7 @@ static void SnowCoverRender(unsigned scenario) {
   const DioramaDepthSink sink={.submit=SnowCoverDepth,.userdata=&r};DioramaScene scene={.render=&options,.depth_sink=shared?&sink:NULL,.map_group=6,.map_number=1,.voxel_geometry=g,.trunk_effects=&effects};
   SnowCoverRecorded baseline={0};uint64_t original_faces=0;unsigned original_count=0;
   for(unsigned frame=0;frame<2;++frame) {
-    ++g->revision;g->edges[0].snow_closing_riser[!left]=frame?2:0;snow_record.n=0;snow_faces=0;snow_face_hash=0;
+    ReviseVoxelFixture(g);g->edges[0].snow_closing_riser[!left]=frame?2:0;snow_record.n=0;snow_faces=0;snow_face_hash=0;
     assert(PresentationOutcome_IsUsable(Diorama_Composite(&d,&capture,&view,&scene,&projection))&&projection.valid&&snow_record.n);
     if(!frame){baseline=snow_record;original_faces=snow_face_hash;original_count=snow_faces;continue;}
     fprintf(stderr,"Snow submission case%u frame%u baseline%u candidate%u faces%u/%u marker%u\n",scenario,frame,baseline.n,snow_record.n,original_count,snow_faces,g->edges[0].snow_closing_riser[!left]);assert(snow_face_hash==original_faces&&snow_faces==original_count);assert(snow_record.n>baseline.n);
@@ -64,7 +82,9 @@ static void SnowCoverRender(unsigned scenario) {
     if(shared) {
       GroundCoverProbe dummy={0};r.ground_cover=&dummy;unsigned risers=0,joins=0;
       for(unsigned i=0;i<snow_record.n;i+=3) {
-        float xyz[3][3];for(unsigned j=0;j<3;++j)GroundCoverNativePoint(&r,snow_record.v+i+j,snow_record.z[i+j],xyz[j]);
+        float xyz[3][3];
+        for (unsigned j=0; j<3; ++j)
+          GroundCoverNativePoint(&r, snow_record.v+i+j, snow_record.z[i+j], snow_record.w[i+j], xyz[j]);
         if(fabsf(xyz[0][0]-82)>.02f||fabsf(xyz[1][0]-82)>.02f||fabsf(xyz[2][0]-82)>.02f)continue;
         if(fabsf(xyz[0][2]-xyz[1][2])+fabsf(xyz[0][2]-xyz[2][2])<.00001f)continue;
         ++risers;for(unsigned j=0;j<3;++j){assert(xyz[j][1]>=84&&xyz[j][1]<=98.02f&&xyz[j][2]>=-.00002f&&xyz[j][2]<=.20002f);

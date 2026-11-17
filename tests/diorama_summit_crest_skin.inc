@@ -43,7 +43,7 @@ static unsigned SummitCrestSkinRenderFixture(unsigned scenario) {
     const int shift=frame==3?256:0;
     const DioramaVoxelTransform transform={.px=base+8+shift,.py=104,.pz=.09f,
         .dx=frame==3?-256:0,.dy=frame==3?-5:0,.sx=frame==3?.75f:1,.sy=1,.sz=1};
-    if(frame!=2)++g->revision;
+    if(frame!=2)ReviseVoxelFixture(g);
     capture.bg1_camera_x=base-80+(frame==2?3:0);
     g->authored_count=g->native_transform_count=frame==3;
     memset(g->authored_at,0,(size_t)(g->width/16)*(g->height/16)*sizeof(*g->authored_at));
