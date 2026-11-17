@@ -1040,73 +1040,72 @@ const char *ActionBgTuner_RowHelp(const ActionBgTunerRow *row) {
   if (!row) return "";
   switch (row->kind) {
     case kActionBgTunerRow_Apply:
-      return "A/B the sparse draft against the canonical room plan. Drafts "
-             "start off and are never persisted.";
+      return "Switch between the draft and the built-in room settings. Drafts start off and "
+             "last for this session.";
     case kActionBgTunerRow_Guides:
-      return "Draw the active BG1/BG2 extent boundaries over the game output.";
+      return "Draw guides on screen to show where BG1 and BG2 end.";
     case kActionBgTunerRow_Layer:
-      return "Open this background layer's source, edge, and per-side extent "
-             "controls. Reset clears only this layer's draft.";
+      return "Open this layer's source, edge fill, and size limits. Reset clears this "
+             "layer's draft.";
     case kActionBgTunerRow_Edge:
-      return "Choose how this layer supplies pixels outside the authentic "
-             "viewport. The extent remains an independent maximum.";
+      return "Choose how this layer fills space outside the original view. Its size limits "
+             "still apply.";
     case kActionBgTunerRow_Motion:
-      return "Fill-relative preserves legacy reflected motion. Normal scroll "
-             "keeps mirrored padding moving in the authentic layer direction.";
+      return "Fill-relative reverses the motion of mirrored pixels. Normal scroll moves "
+             "them in the same direction as the original layer.";
     case kActionBgTunerRow_IgnoreSideBounds:
-      return "Let this background use every horizontally available canvas "
-             "pixel past its Diorama side guides. The shared canvas and edge "
-             "strategy still apply; stored caps return unchanged when off.";
+      return "Draw available background pixels past the side guides. The canvas and edge "
+             "fill still limit the layer. Turn off to use the stored caps.";
     case kActionBgTunerRow_IgnoreVerticalBounds:
-      return "Let this background use every vertically available canvas row "
-             "past its Diorama top/bottom guides. Finite world edges still "
-             "apply; stored caps return unchanged when off.";
+      return "Draw available background pixels past the top and bottom guides. Finite world "
+             "edges still apply. Turn off to use the stored caps.";
     case kActionBgTunerRow_HorizontalMode:
     case kActionBgTunerRow_VerticalMode:
-      return "Available uses every pixel the source and canvas can supply. "
-             "Fixed adds an independent per-side presentation cap.";
+      return "Available draws as far as the source and canvas allow. Fixed lets you limit "
+             "each side.";
     case kActionBgTunerRow_Left:
     case kActionBgTunerRow_Right:
     case kActionBgTunerRow_Top:
     case kActionBgTunerRow_Bottom:
-      return "Maximum pixels this layer may contribute beyond that authentic "
-             "viewport edge. It cannot manufacture unavailable source pixels.";
+      return "Limit how many pixels this layer can draw past this edge of the original "
+             "view. The source may provide fewer pixels.";
     case kActionBgTunerRow_BandMode:
-      return "Override the layer's horizontal cap only on this canonical row "
-             "band. Inherit follows the layer; Available removes its cap.";
+      return "Set the width limit for this band. Inherit uses the layer's limit. Available "
+             "uses all the pixels the source and canvas allow.";
     case kActionBgTunerRow_BandLeft:
     case kActionBgTunerRow_BandRight:
-      return "Maximum horizontal extension for this row band on the named side.";
+      return "Limit how far this band can extend on this side, in pixels.";
     case kActionBgTunerRow_BandAdd:
-      return "Add a behavior-neutral band in the largest uncovered authentic "
-             "row interval. Up to four non-overlapping bands are supported.";
+      return "Add a band in the largest unused range of rows. It starts with the current "
+             "behavior. You can have up to four bands, with no overlaps.";
     case kActionBgTunerRow_BandAnchor:
-      return "Screen bands stay on fixed authentic rows. World bands follow "
-             "the layer camera and parallax through a stable content boundary. "
-             "Mixed anchors that could cross later are rejected.";
+      return "Screen pins the band to screen rows. World moves it with the layer. The "
+             "editor rejects bands with different anchors if they could cross.";
     case kActionBgTunerRow_BandStart:
     case kActionBgTunerRow_BandEnd:
-      return "Edit this half-open band's authored row boundary in four-pixel "
-             "steps. Overlap and empty intervals are rejected.";
+      return "Move the band's edge in four-pixel steps. The end row is excluded. The editor "
+             "rejects empty bands and overlaps.";
     case kActionBgTunerRow_BandEdge:
-      return "Choose this band's fill independently of the layer default.";
+      return "Choose how this band fills the margins. The rest of the layer uses its own "
+             "setting.";
     case kActionBgTunerRow_BandMotion:
-      return "Choose whether mirrored padding reflects apparent movement or "
-             "retains the authentic layer's normal scrolling direction.";
+      return "Choose whether mirrored padding reverses motion or scrolls in the layer's "
+             "original direction.";
     case kActionBgTunerRow_BandDelete:
-      return "Delete this session-local band from the effective draft.";
+      return "Remove this band from the draft.";
     case kActionBgTunerRow_Print:
-      return "Print the fully resolved draft to stderr for transcription into "
-             "the canonical action background policy.";
+      return "Print the full draft to stderr so you can copy it into the room's background "
+             "settings.";
     case kActionBgTunerRow_Reset:
-      return "Discard every sparse override for this room and disable applying "
-             "the draft. Guide visibility is left unchanged.";
+      return "Clear this room's draft and turn off Apply draft. Extent guides keep their "
+             "current setting.";
     case kActionBgTunerRow_BandHeader:
-      return "Open this authored band. Its anchor, boundaries, fill, motion, "
-             "and extent can be tuned independently.";
+      return "Open this band to adjust its anchor, row boundaries, fill, scrolling, and "
+             "width.";
     case kActionBgTunerRow_Header:
     default:
-      return "Session-local action background extent authoring.";
+      return "Adjust action background edges for the current room. Drafts last for this "
+             "session.";
   }
 }
 

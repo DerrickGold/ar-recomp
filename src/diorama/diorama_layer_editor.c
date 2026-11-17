@@ -513,44 +513,32 @@ const char *DioramaLayerEditor_RowHelp(DioramaEditorRowKind kind,
                                        DioramaEditorParam param,
                                        DioramaDepthStrategy strategy) {
   if (kind == kDioramaEditorRow_ResetRoom)
-    return "Clear the plane overrides authored by this in-game editor, "
-           "restoring their inherited built-in look. Standalone action-editor "
-           "virtual layers are preserved.";
+    return "Clear the in-game plane edits for the room or section named here. This restores "
+           "the built-in look and keeps standalone action editor layers.";
   if (kind == kDioramaEditorRow_Header)
-    return "The editor authors the room you are standing in. Walk into a stage "
-           "on this level to edit it.";
+    return "Enter an action stage to edit the room you're in.";
 
   if (kind == kDioramaEditorRow_Plane) {
     switch (strategy) {
       case kDioramaDepth_Flat:
-        return "Flat: a sheet parallel to the screen, as every room shipped. "
-               "Left/Right picks a depth shape; B expands its settings.";
+        return "Keep the layer flat and parallel to the screen. Use Left/Right to choose a "
+               "shape. Confirm to open its settings.";
       case kDioramaDepth_Rake:
-        return "Rake: tilts the plane, top edge keeps its depth and the bottom "
-               "comes forward. Right for a surface that recedes -- water, a "
-               "floor. COST: the plane's own rows end up at different depths, "
-               "so it picks up two parallax rates and shears as the camera "
-               "moves. Try bow if that shows.";
+        return "Tilt the bottom toward the camera, like a receding floor or water surface. "
+               "The ends scroll at different speeds, so the layer can appear to shear.";
       case kDioramaDepth_Bow:
-        return "Bow: the same tilt eased on a curve. The top keeps its original "
-               "depth and only the bottom bends forward, so the distortion sits "
-               "where the geometry needs it. Still a tilt, so still more than "
-               "one parallax rate.";
+        return "Curve the bottom toward the camera while keeping the top at its original "
+               "depth. Rows at different depths scroll at different speeds.";
       case kDioramaDepth_Thick:
-        return "Thick: extrudes the bottom edge forward into a near face, "
-               "leaving the plane's own art square to the camera. COST: the "
-               "skirt hangs from the QUAD's edge, so it bands across "
-               "transparent art. Use voxel for an island.";
+        return "Extend the bottom edge toward the camera to add a front face. It spans "
+               "transparent gaps too. Voxel follows the shape of the visible art.";
       case kDioramaDepth_Stack:
-        return "Stack: parallel repeats filling the gap, fading with distance. "
-               "Nothing tilts, so every copy has ONE parallax rate and the "
-               "layer keeps its flat motion. COST: copies are discrete, so gaps "
-               "remain between slices.";
+        return "Fill depth with parallel copies that fade with distance. Copies scroll at "
+               "the same speed. Gaps may show between them.";
       case kDioramaDepth_Voxel:
-        return "Voxel: dense repeats with no fade, so the layer reads as one "
-               "solid object -- and because copies carry the layer's own alpha, "
-               "each art island extrudes itself and the silhouette survives. "
-               "COST: the most expensive shape here.";
+        return "Draw dense copies without fading to make the art look solid. The copies "
+               "preserve the outline and transparent gaps. This shape uses the most "
+               "rendering work.";
       default:
         break;
     }
@@ -558,43 +546,33 @@ const char *DioramaLayerEditor_RowHelp(DioramaEditorRowKind kind,
 
   switch (param) {
     case kDioramaEditorParam_Depth:
-      return "How far the shape reaches, in the scene's own depth units. The "
-             "backdrop sits at 0.00 and the HUD at 0.95, so 0.29 is roughly the "
-             "gap between two neighbouring layers.";
+      return "Set how far the shape extends in depth. The backdrop is at 0.00 and the HUD "
+             "at 0.95. About 0.29 separates neighboring layers.";
     case kDioramaEditorParam_Copies:
-      return "How many slices fill the depth. More closes the gaps between them "
-             "at one extra draw of the whole layer each -- which is why a stack "
-             "and a voxel have different caps.";
+      return "Set how many slices fill the depth. More slices close the gaps and take more "
+             "work to draw.";
     case kDioramaEditorParam_Density:
-      return "Slices per unit of depth, so the spacing you SEE stays the same "
-             "when the depth changes or the value is reused in another room. An "
-             "explicit count overrides this.";
+      return "Set slices per unit of depth to keep spacing even as depth changes. An "
+             "explicit slice count takes priority.";
     case kDioramaEditorParam_Direction:
-      return "Which side of the plane to fill. Higher depth is nearer the "
-             "camera, so forward fills toward you -- what a layer sitting "
-             "behind what it should meet needs.";
+      return "Choose which side of the plane to fill. Forward extends toward the camera, "
+             "where depth values are higher.";
     case kDioramaEditorParam_Z:
-      return "This plane's depth in the projection. Also sets how blurred it is: "
-             "depth of field focuses on 0.50, so moving a plane changes its "
-             "focus as well as its position.";
+      return "Move the plane closer or farther away. Depth of field focuses at 0.50, so "
+             "moving the plane also changes how sharp it looks.";
     case kDioramaEditorParam_Alpha:
-      return "This plane's opacity. Lets a room compensate for a translucency "
-             "the capture did not reproduce.";
+      return "Set how transparent this plane is. This can restore translucency lost during "
+             "capture.";
     case kDioramaEditorParam_TransparentFill:
-      return "Pre-fills the complete base BG plane before its tiles draw, so "
-             "empty map cells and colour-zero pixels cannot reveal the "
-             "diorama skybox. Mirror, repeat, clamp and live-world tiles paint "
-             "over this backing normally; the high-priority band stays sparse. "
-             "B opens the live CGRAM palette, Left turns it off, Right uses "
-             "fixed black.";
+      return "Fill gaps in the base background so the skybox stays behind it. The "
+             "high-priority band keeps its transparency. Confirm opens the palette. Left "
+             "turns fill off. Right uses black.";
     case kDioramaEditorParam_Source:
-      return "Skybox image source. Captured uses the current room's BG2; ROM "
-             "GG/MM BG1 or BG2 reconstructs that action room directly from "
-             "the cartridge. It is visible when Diorama skybox is enabled.";
+      return "Choose a skybox image. Captured uses the current room's BG2. ROM GG/MM BG1 or "
+             "BG2 loads that room's layer from the cartridge. Requires Skybox.";
     case kDioramaEditorParam_Order:
-      return "Where the plane sits in the paint sequence, back to front. "
-             "Separate from depth on purpose, so reordering a plane does not "
-             "also refocus it.";
+      return "Set the order in which the planes draw, back to front. Depth and focus have "
+             "their own controls.";
     case kDioramaEditorParam_None:
     default:
       return "";

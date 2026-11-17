@@ -1210,34 +1210,35 @@ static int FormatGamepadSlot(char *buffer, int buffer_size,
     InputMap_ParseBindingField, InputMap_FormatBindingField }
 #define BINDING_SETTINGS(action_enum, id_suffix, text) \
   BINDING_SETTING(action_enum, kInputClass_Keyboard, "bind_key_" id_suffix, \
-                  text, "Press Enter, then the key to bind. " \
-                  "Y resets it to the default."), \
+                  text, "Press Enter, then press the key you want to assign. Use the Reset " \
+                  "shortcut to restore the default."), \
   BINDING_SETTING(action_enum, kInputClass_Gamepad, "bind_pad_" id_suffix, \
-                  text, "Press Enter, then the button to bind. " \
-                  "Y resets it to the default.")
+                  text, "Confirm, then press the button you want to assign. Use the Reset " \
+                  "shortcut to restore the default.")
 /* Camera rows exist for both classes: the pad gets the stick, and a keyboard
  * player who prefers keys to the mouse can bind them (unbound by default). */
 #define BINDING_CAM_SETTINGS(action_enum, id_suffix, text) \
   BINDING_SETTING(action_enum, kInputClass_Keyboard, "bind_key_" id_suffix, \
-                  text, "Diorama / 3D town Free Cam only. Press Enter, then " \
-                  "the key to bind. Y resets it to the default."), \
+                  text, "Works in Free Cam for diorama and 3D towns. Press Enter, then " \
+                  "press the key you want to assign."), \
   BINDING_SETTING(action_enum, kInputClass_Gamepad, "bind_pad_" id_suffix, \
-                  text, "Diorama / 3D town Free Cam only. Push the stick or " \
-                  "press the button to bind. Y resets it to the default.")
+                  text, "Works in Free Cam for diorama and 3D towns. Confirm, then move the " \
+                  "stick or press the button you want to assign.")
 /* Town twin-stick rows. Unbound by default; a pad row may take a camera
  * stick direction, and either row may share an SNES button (input_map.c). */
 #define BINDING_SHOOT_SETTINGS(action_enum, id_suffix, text) \
   BINDING_SETTING(action_enum, kInputClass_Keyboard, "bind_key_" id_suffix, \
-                  text, "Town twin-stick: hold to fire this way while you " \
-                  "steer. Press Enter, then the key to bind."), \
+                  text, "Fire in this direction while steering in towns. Press Enter, then " \
+                  "press the key you want to assign."), \
   BINDING_SETTING(action_enum, kInputClass_Gamepad, "bind_pad_" id_suffix, \
-                  text, "Town twin-stick: hold to fire this way while you " \
-                  "steer. A right-stick direction replaces its camera control.")
+                  text, "Fire in this direction while steering in towns. Assigning a " \
+                  "right-stick direction replaces the camera binding for that " \
+                  "direction.")
 /* Gamepad-only host action: no keyboard twin. */
 #define BINDING_HOST_SETTING(action_enum, id_suffix, text) \
   BINDING_SETTING(action_enum, kInputClass_Gamepad, "bind_pad_" id_suffix, \
-                  text, "Press Enter, then the button to bind. " \
-                  "Y resets it to the default.")
+                  text, "Confirm, then press the button you want to assign. Use the Reset " \
+                  "shortcut to restore the default.")
 
 /* ---- Randomizer support. Enum labels and availability/refresh callbacks for
  * the descriptors below; the transform itself lives in src/randomizer/randomizer.c. */
@@ -1323,7 +1324,7 @@ static bool RandoEnemyTypesOn(void) {
     (int)(sizeof(labels) / sizeof((labels)[0])), NULL, NULL, NULL, NULL, \
     .save_page = page }
 #define SAVE_SCORE_FIELD(region, act, id, text) \
-  { id, NULL, text, "Stage the saved BCD score (0-99990 by 10).", \
+  { id, NULL, text, "Set the saved act score from 0 to 99,990, in steps of 10.", \
     kSettingType_Int, kApply_Save, kSettingCat_Save, \
     &g_settings.save_scores[region][act], 0, 0, 10000, 1, false, \
     NULL, 0, NULL, NULL, ParseStagedScore, FormatStagedScore, \
@@ -1331,88 +1332,88 @@ static bool RandoEnemyTypesOn(void) {
 
 const SettingDesc g_setting_descs[] = {
   { "interface_language", "AR_INTERFACE_LANGUAGE", "Interface language",
-    "Choose this settings menu's language independently of game text.",
+    "Choose the language for this menu. Game text has its own language setting.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Interface,
     &g_settings.interface_language, 0, 0, kArUiLocale_Count - 1, 1, false,
     kInterfaceLanguageLabels, kArUiLocale_Count, NULL, NULL, NULL, NULL, true },
   { "localization_content", "AR_LOCALIZATION_CONTENT", "Text source",
-    "Select an installed translation by package name. Packs sharing a locale "
-    "remain separate. External packs require enhanced rendering; the built-in "
-    "USA source supports both native and enhanced fonts.",
+    "Choose an installed translation by name. Packs in the same language are listed "
+    "separately. Packs require Enhanced text rendering. Native US works with either "
+    "renderer.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Localization,
     &g_settings.localization_content, 0, 0, kSettingsLocalizationMaximumPacks + 1, 1, false,
     kLocalizationContentLabels, 2, NULL, NULL,
     ParseLocalizationContent, FormatLocalizationContent, true,
     .enum_maximum = LocalizationContentMaximum, .serialize = SerializeLocalizationContent },
   { "localization_presentation", "AR_LOCALIZATION_PRESENTATION", "Text rendering",
-    "Native retains the untouched USA text and font. External packs require "
-    "Enhanced to display their text. Select Native US to use native rendering.",
+    "Native shows the original US text and font. Enhanced can show translation packs and "
+    "use the font options below. Choose Native US to use Native rendering.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Localization,
     &g_settings.localization_presentation, 0, 0, 1, 1, false,
     kLocalizationPresentationLabels, 2, TextPresentationSelectable, NULL, NULL,
     FormatLocalizationPresentation, true,
     .serialize = SerializeLocalizationPresentation },
   { "localization_button_prompts", "AR_LOCALIZATION_BUTTON_PROMPTS", "Button prompts",
-    "Text displays the current binding as letters, preserving the game’s text style. "
-    "Button glyphs displays artwork for the active controller. Keyboard bindings use text. "
-    "Applies when the next dialogue begins.",
+    "Choose Text for button names in the game's style or Button glyphs for controller "
+    "icons. Keyboard prompts use text. Applies at the next dialogue.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Localization,
     &g_settings.localization_button_prompts, 0, 0, 1, 1, false,
     kLocalizationButtonPromptLabels, 2, EnhancedTextSelected, NULL, NULL, NULL, true },
   { "localization_font_scale_percent", "AR_LOCALIZATION_FONT_SCALE_PERCENT",
-    "Font size (%)", "Enhanced text size. Layout fits within its safe box.",
+    "Font size (%)", "Resize enhanced game text. The game fits it inside the space "
+                     "available.",
     kSettingType_Int, kApply_Passive, kSettingCat_LocalizationFont,
     &g_settings.localization_font_scale_percent, 140, 80, 140, 5, false,
     NULL, 0, EnhancedTextSelected, NULL, NULL, NULL, true },
   { "localization_font_sampling", "AR_LOCALIZATION_FONT_SAMPLING", "Sampling",
-    "Crisp keeps sharp pixel edges; Smooth blends scaled text edges.",
+    "Crisp keeps text edges sharp. Smooth softens them when the text is scaled.",
     kSettingType_Enum, kApply_Passive, kSettingCat_LocalizationFont,
     &g_settings.localization_font_sampling, 0, 0, 1, 1, false,
     kLocalizationSamplingLabels, 2, EnhancedTextSelected, NULL, NULL, NULL, true },
   { "localization_font_pixelation", "AR_LOCALIZATION_FONT_PIXELATION",
-    "Pixelation", "Full-resolution text, lower-resolution upscaling, or "
-    "a mosaic applied to the high-resolution font.",
+    "Pixelation", "None keeps text at full resolution. Low resolution enlarges a smaller "
+    "image. Mosaic adds pixel blocks to the full-resolution font.",
     kSettingType_Enum, kApply_Passive, kSettingCat_LocalizationFont,
     &g_settings.localization_font_pixelation, 2, 0, 2, 1, false,
     kLocalizationPixelationLabels, 3, EnhancedTextSelected, NULL, NULL, NULL, true },
   { "localization_font_pixel_size", "AR_LOCALIZATION_FONT_PIXEL_SIZE",
-    "Pixel size", "Pixelation strength in output pixels: 2, 4, 6, or 8.",
+    "Pixel size", "Set the size of the pixel blocks on screen, in pixels.",
     kSettingType_Int, kApply_Passive, kSettingCat_LocalizationFont,
     &g_settings.localization_font_pixel_size, 2, 2, 8, 2, false,
     NULL, 0, TextPixelationSelected, NULL, NULL, NULL, true },
   { "display_mode", "AR_DISPLAY_MODE", "Render profile",
-    "Switch between authentic 4:3, uncorrected wide output, and full HLE widescreen.",
+    "4:3 authentic shows the original frame. Widescreen raw widens it without fixes. "
+    "Widescreen full adds scenery and object fixes for the wider view.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.display_mode, kDisplayMode_WideFull, kDisplayMode_43,
     kDisplayMode_WideFull, 1, false, kDisplayModeLabels,
     kDisplayMode_PresetCount, WidescreenActive, DisplayModeChanged, NULL, NULL },
   { "hud_scale_percent", "AR_HUD_SCALE", "HUD output scale",
-    "Scale the promoted HUD after game upscaling; 100 is native 1x output "
-    "pixels. Set it anywhere; it takes effect where the HUD shows.",
+    "Resize the enhanced HUD. At 100%, it draws at its original size in output pixels. The "
+    "change appears wherever the enhanced HUD is visible.",
     kSettingType_Int, kApply_Passive, kSettingCat_Display,
     &g_settings.hud_scale_percent, 0, 0, 400, 25, false, NULL, 0,
     NULL, NULL, ParseHudScale, FormatHudScale },
   { "menu_scale_percent", "AR_MENU_SCALE", "Menu output scale",
-    "Scale host menu contents independently; Auto fits them to the window.",
+    "Resize the settings menu. Auto fits the menu to the window.",
     kSettingType_Int, kApply_Passive, kSettingCat_Display,
     &g_settings.menu_scale_percent, 0, 0, 800, 25, false, NULL, 0,
     NULL, NULL, ParseMenuScale, FormatMenuScale },
   BOOL_SETTING(hd_replacements, "AR_HD_REPLACEMENTS", "HD replacements",
-               "Substitute HD art per game-assets/manifest.ini entries when their art is present.",
+               "Use installed HD artwork for matching game assets.",
                kSettingCat_Display, 1, false, HdReplacementsAvailable, NULL),
   { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Screen ratio",
-    "4:3, 16:9, 16:10, Stretch, or Auto. Auto adapts action, world navigation, "
-    "and towns to the window without stretching. Extra rows need action or "
-    "3D world/town rendering. Scene bounds and capture limits can leave borders. "
-    "Action is capped at 16:9.",
+    "Auto fits action stages, world navigation, and towns to the window without stretching. "
+    "Extra height needs an action scene or a 3D world or town view. Scene limits can leave "
+    "borders. Action stages go up to 16:9.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.extended_aspect, kScreenAspect_43,
     kScreenAspect_43, kScreenAspect_Auto, 1, false,
     kScreenAspectLabels, kScreenAspect_Count, NULL, OnScreenRatioChanged,
     ParseExtendedAspect, NULL, .modern_env = true },
   { "render_resolution", "AR_RENDER_RESOLUTION", "Render resolution",
-    "Limit the game image to this height. Width follows Screen ratio. "
-    "Fixed presets also size the window when it fits. Native follows the output.",
+    "Set the height of the game image. Screen ratio sets its width. A fixed preset also "
+    "sizes the window if it fits on your display. Native follows the output size.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.render_resolution, kRenderResolution_Native,
     kRenderResolution_Native, kRenderResolution_Count - 1, 1, false,
@@ -1420,53 +1421,51 @@ const SettingDesc g_setting_descs[] = {
                          "1080p", "1440p", "2160p"},
     kRenderResolution_Count, NULL, NULL, NULL, NULL, .modern_env = true },
   BOOL_SETTING_MODERN(scene_supersampling, "AR_SCENE_SUPERSAMPLING", "3D supersampling",
-    "Allow a fixed Render resolution above the viewport size for 3D scenes. "
-    "Downsampling smooths edges and uses more GPU time. Native follows the viewport.",
+    "Smooth 3D edges by drawing at a higher resolution and shrinking the image. Choose a "
+    "fixed Render resolution above the view size. This uses more GPU time.",
     kSettingCat_Display, 0, false, NULL, NULL),
   { "scene_antialiasing", "AR_SCENE_ANTIALIASING", "3D anti-aliasing",
-    "Smooth jagged edges in 3D scenes. FXAA is lighter and SMAA can preserve more detail. "
-    "Active supersampling uses its own filter.",
+    "Smooth jagged edges in 3D scenes. FXAA is faster. SMAA can keep more detail. "
+    "Supersampling uses its own filter when active.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Display,
     &g_settings.scene_antialiasing, kSceneAntiAliasing_Off,
     kSceneAntiAliasing_Off, kSceneAntiAliasing_Count-1, 1, false,
     (const char *const[]){"Off", "FXAA", "SMAA"}, kSceneAntiAliasing_Count,
     NULL, NULL, NULL, NULL, .modern_env = true },
   { "pixel_aspect", "AR_ASPECT_PAR", "Pixel aspect",
-    "Use the original 4:3 CRT pixel stretch or square output pixels.",
+    "Choose the original 4:3 CRT proportions or use square pixels.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.pixel_aspect, kPixelAspect_Crt43,
     kPixelAspect_Square, kPixelAspect_Crt43, 1, false,
     kPixelAspectLabels, kPixelAspect_Count, NULL, NULL,
     ParsePixelAspect, NULL, .modern_env = true },
   { "window_mode", "AR_WINDOW_MODE", "Window mode",
-    "Windowed, borderless desktop-fullscreen, or exclusive fullscreen.",
+    "Choose a window, a borderless window that fills the desktop, or exclusive fullscreen.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.window_mode, kWindowMode_Windowed,
     kWindowMode_Windowed, kWindowMode_Exclusive, 1, false,
     kWindowModeLabels, kWindowMode_Count, NULL, NULL, NULL, NULL, .modern_env = true },
   { "window_scale", "AR_WINDOW_SCALE", "Window scale",
-    "Size of the window as a multiple of the game output. This only changes "
-    "the window in Windowed mode; fullscreen uses the display's resolution.",
+    "Resize the window by a multiple of the game image. This applies only in Windowed mode.",
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.window_scale, 3, 1, 8, 1, false, NULL, 0,
     WindowScaleAvailable, NULL, NULL, NULL, .modern_env = true, .menu_hidden = true },
   { "picture_in_picture_corner", "AR_PICTURE_IN_PICTURE_CORNER", "PiP corner",
-    "Place the authentic picture-in-picture in this corner. Hold Render "
-    "comparison to toggle the picture-in-picture view.",
+    "Choose a corner for the small authentic view. Hold Compare rendering to show or hide "
+    "it.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Display,
     &g_settings.picture_in_picture_corner, kPictureInPicture_BottomRight,
     kPictureInPicture_BottomRight, kPictureInPicture_TopLeft, 1, false,
     kPictureInPictureCornerLabels, kPictureInPictureCorner_Count,
     NULL, NULL, NULL, NULL, .modern_env = true },
   BOOL_SETTING_MODERN(picture_in_picture_window, "AR_PICTURE_IN_PICTURE_WINDOW",
-    "PiP separate window", "Show the authentic picture-in-picture in its own "
-    "window. Move it to another display for side-by-side viewing. Hold Render "
-    "comparison to toggle it.", kSettingCat_Display, 0, false,
+    "PiP separate window", "Put the authentic view in its own window. Move it to another "
+    "display to compare both views side by side. Hold Compare "
+    "rendering to show or hide it.", kSettingCat_Display, 0, false,
     PictureInPictureWindowAvailable, NULL),
   BOOL_SETTING_MODERN(picture_in_picture_fullscreen, "AR_PICTURE_IN_PICTURE_FULLSCREEN",
-    "PiP fullscreen", "Fill the separate PiP window's display. Move that window "
-    "to the desired display before enabling this. The main window keeps its "
-    "own window mode.", kSettingCat_Display, 0, false,
+    "PiP fullscreen", "Fill the display used by the separate PiP window. Move that window "
+    "to the display you want before turning this on.", kSettingCat_Display, 0, false,
     PictureInPictureFullscreenAvailable, NULL),
   { "ignore_aspect_ratio", "AR_IGNORE_ASPECT_RATIO", "Stretch to window",
     "Legacy compatibility alias for Screen ratio > Stretch.",
@@ -1474,16 +1473,14 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.ignore_aspect_ratio, 0, 0, 1, 1, false, NULL, 0,
     NULL, OnLegacyStretchChanged, NULL, NULL, .modern_env = true },
   { "refresh_mode", "AR_REFRESH_MODE", "Refresh rate",
-    "Vsync delegates presentation timing to the renderer; Uncapped disables "
-    "vsync and soft-caps at twice the display's nominal refresh; Limit uses "
-    "a chosen FPS; Unlimited removes all presentation throttling.",
+    "Vsync follows the display refresh. Uncapped turns off Vsync and aims to stay below "
+    "twice the display refresh. Limit uses Frame limit. Unlimited removes the frame cap.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.refresh_mode, kRefreshMode_Vsync,
     kRefreshMode_Vsync, kRefreshMode_Unlimited, 1, false,
     kRefreshModeLabels, kRefreshMode_Count, NULL, NULL, NULL, NULL, .modern_env = true },
   { "frame_limit_fps", "AR_FRAME_LIMIT_FPS", "Frame limit",
-    "Target frames per second when Refresh rate is Limit; independent of the "
-    "display refresh.",
+    "Set the target frames per second used by Refresh rate: Limit.",
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.frame_limit_fps, 60, 20, 480, 5, false, NULL, 0,
     FrameLimitActive, NULL, NULL, NULL, .modern_env = true },
@@ -1492,142 +1489,126 @@ const SettingDesc g_setting_descs[] = {
    * (2026-09-16) pointed at that path, so players can pick the API that suits
    * their system. */
   { "gpu_backend", "AR_GPU_BACKEND", "Graphics API",
-    "Automatic uses the platform default (Direct3D 12 on Windows). Try "
-    "another API if the game runs slowly or draws incorrectly on this system. "
-    "If the chosen API cannot start, Automatic is used instead. Takes effect "
-    "after restart.",
+    "Automatic picks the default for your platform (Direct3D 12 on Windows). Try another "
+    "API if you see graphics or performance problems. If it fails to start, the game uses "
+    "Automatic.",
     kSettingType_Enum, kApply_Restart, kSettingCat_Display,
     &g_settings.gpu_backend, kGpuBackend_Automatic,
     kGpuBackend_Automatic, kGpuBackend_Metal, 1, false,
     kGpuBackendLabels, kGpuBackend_Count, NULL, NULL, NULL, NULL,
     .modern_env = true, .value_available = GpuBackendOffered },
   BOOL_SETTING_MODERN(show_fps, "AR_SHOW_FPS", "FPS counter",
-               "Show completed host presents per second in the top-right. Use "
-               "Refresh rate: Unlimited to measure maximum rendering throughput.",
+               "Show frames presented per second in the top-right corner. Choose Unlimited "
+               "refresh rate to measure peak rendering speed.",
                kSettingCat_Display, 0, false, NULL, NULL),
   { "performance_overlay", "AR_PERFORMANCE_OVERLAY", "Performance overlay",
-    "Show CPU pipeline timings, frame pacing and worker activity. Detailed "
-    "adds nested stage timings; reports are also written to the run log. GPU "
-    "execution time is unavailable on this renderer, not inferred from CPU waits.",
+    "Show CPU timings, frame pacing, and worker activity. Detailed breaks down more steps. "
+    "The run log also records timings. GPU timings are unavailable.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Display,
     &g_settings.performance_overlay, 0, 0, 2, 1, false,
     kPerformanceOverlayLabels, 3,
     NULL, NULL, NULL, NULL, .modern_env = true },
   BOOL_SETTING_MODERN(sim3d_mode, "AR_SIM3D", "Simulation town 3D",
-               "Tilt the simulation-town map into a projected ground plane. "
-               "Map pickers stay in the tilted space too (build with "
-               "AR_SIM3D_PICKER_TOPDOWN=1 to restore the flat picker view).",
+               "Tilt town maps into a 3D view. Map pickers also use the tilted view.",
                kSettingCat_Simulation, 0, false, NULL,
                NULL),
   BOOL_SETTING_MODERN(sim3d_church, "AR_SIM3D_CHURCH", "Church interior 3D",
-               "View audiences and offerings inside a softly lit church overlooking "
-               "the town. Off keeps the original church graphics. Requires Simulation town 3D.",
+               "Show audiences and offerings in a softly lit church overlooking the town. "
+               "Requires Simulation town 3D.",
                kSettingCat_Simulation, 0, false, Sim3D_ModeIsOn, NULL),
   { "sim_menu_style", "AR_SIM_MENU_STYLE", "SIM menu",
-    "Original uses the original town menu. Modern uses a compact crossbar. "
-    "Use Describe menu item to read descriptions; remap it under Controls. "
-    "Works with native and enhanced rendering.",
+    "Original uses the classic town menu. Modern uses a compact crossbar. Use Describe menu "
+    "item to read the selected item's help. Set its shortcut under Controls.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim_menu_style, 0, 0, 1, 1, false,
     (const char *const[]){"Original", "Modern"}, 2,
     NULL, NULL, NULL, NULL, .modern_env = true, .player_visible = true },
   { "sim_menu_scale_percent", "AR_SIM_MENU_SCALE", "SIM menu scale (%)",
-    "Size of the modern dock, submenus, confirmations and Message Speed selector. "
-    "50% is compact; 100% uses the full layout. Descriptions, follow-up dialogue, "
-    "HUD and native PiP keep their own size.",
+    "Resize the modern town menu, prompts, and Message Speed selector. Dialogue, the HUD, "
+    "and the authentic comparison view have their own size.",
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim_menu_scale_percent, 50, 50, 100, 5, false, NULL, 0,
     SimMenuModernSelected, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim_view_range", "AR_SIM_VIEW_RANGE", "Extended actor range",
-    "Gameplay-affecting. Keep simulation actors and projectiles alive and "
-    "host-renderable this many original pixels beyond the authentic view. "
-    "Larger values increase pressure on the game's fixed 44 world-record "
-    "slots; 0 preserves authentic lifetime.",
+    "Keep town actors and projectiles active farther offscreen, in original game pixels. "
+    "The game has 44 slots for them, so higher values can fill the slots sooner. 0 uses the "
+    "original range.",
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim_view_range, 0, 0, 256, 16, false, NULL, 0,
     Sim3D_ModeIsOn, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   BOOL_SETTING_MODERN(sim3d_world_navigation, "AR_SIM3D_WORLD_NAV",
                "World navigation 3D",
-               "Render inter-town Sky Palace navigation on a full relief "
-               "globe with fixed town geography and an angled 3D camera.",
+               "Travel between towns on a 3D globe with raised terrain.",
                kSettingCat_Simulation, 0, false, NULL,
                NULL),
   BOOL_SETTING_MODERN(sim3d_sky_palace, "AR_SIM3D_SKY_PALACE",
                "Sky Palace globe backdrop",
-               "Look across the globe from cloud level behind the native "
-               "Sky Palace pillars, angel and menus. Requires World navigation 3D.",
+               "Look across the globe from cloud level behind the Sky Palace pillars. "
+               "Requires World navigation 3D.",
                kSettingCat_Simulation, 1, false,
                WorldNavigation3DEnabled, NULL),
   BOOL_SETTING_MODERN(sim3d_sky_palace_volumetric, "AR_SIM3D_SKY_PALACE_VOLUMETRIC",
                "Sky Palace volumetric clouds",
-               "Render lit cloud volumes around the Palace horizon. Disable "
-               "for cheaper single-layer clouds. Clouds, density and drift "
-               "controls apply to both modes.",
+               "Draw clouds with depth and lighting around the Sky Palace. Turn this off to "
+               "use a faster single cloud layer. Cloud density and drift apply to both.",
                kSettingCat_Simulation, 1, false, SkyPalaceCloudsAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_lighting,
                "AR_SIM3D_WORLD_NAV_LIGHTING",
                "World navigation lighting",
-               "Light the globe and its relief and add directional cloud "
-               "shadows to the inter-town world. Uses the shared controls and "
-               "also lights the connected SIM underlay.",
+               "Light the globe, its terrain, and the connected world underlay in towns. "
+               "World navigation cloud shadows use this lighting too.",
                kSettingCat_Simulation, 1, false,
                WorldGlobeAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_clouds,
                "AR_SIM3D_WORLD_NAV_CLOUDS",
                "World navigation clouds",
-               "Draw world-anchored cloud banks over the full inter-town map. "
-               "The authentic zoom controls whether the camera is above the "
-               "cloud deck: bodies are visible while zoomed out and fade "
-               "away as the Palace descends below them.",
+               "Show cloud banks over the globe. They are visible when zoomed out and fade "
+               "as the Sky Palace descends beneath them.",
                kSettingCat_Simulation, 1, false,
                WorldNavigation3DEnabled, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_cloud_shadows,
                "AR_SIM3D_WORLD_NAV_CLOUD_SHADOWS",
                "World navigation cloud shadows",
-               "Cast cloud shadows onto the globe. Disable this separately "
-               "to keep visible cloud cover with less rendering work. "
-               "Requires world navigation lighting and clouds.",
+               "Cast cloud shadows on the globe. Turning this off saves rendering work "
+               "while the clouds stay visible. Requires world navigation lighting and "
+               "clouds.",
                kSettingCat_Simulation, 1, false,
                WorldNavigation3DEnabled, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_atmosphere,
                "AR_SIM3D_WORLD_NAV_ATMOSPHERE",
                "World navigation atmosphere",
-               "Draw the blue atmospheric envelope around the planet. "
-               "Disable it independently of clouds, haze and the space backdrop.",
+               "Show the blue atmosphere around the globe. Clouds, haze, and the space "
+               "backdrop have separate controls.",
                kSettingCat_Simulation, 1, false,
                WorldNavigation3DEnabled, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_towns,
                "AR_SIM3D_WORLD_NAV_TOWNS",
                "World navigation town models",
-               "Embed authored 3D buildings and vegetation for developed towns. "
-               "Off skips model compilation and drawing, retaining the live "
-               "town map artwork on the globe. Does not change town 3D settings.",
+               "Show 3D buildings and trees in developed towns on the globe. Off shows "
+               "their live map artwork. The 3D view inside a town has its own setting.",
                kSettingCat_Simulation, 1, false,
                WorldGlobeAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_relief,
                "AR_SIM3D_WORLD_NAV_RELIEF",
                "World navigation terrain relief",
-               "Raise mountains and town terrain above the globe. Off skips "
-               "heightfield preparation and sampling while keeping spherical "
-               "navigation. Does not flatten terrain inside simulation towns.",
+               "Raise mountains and town terrain above the globe. Off keeps the globe "
+               "smooth. Terrain inside towns has its own setting.",
                kSettingCat_Simulation, 1, false,
                WorldGlobeAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_ground_detail,
                "AR_SIM3D_WORLD_NAV_GROUND_DETAIL",
                "World navigation detailed ground",
-               "Use native-resolution town ground with live paths, shorelines "
-               "and terrain. Off skips this ground blend; native mountains "
-               "may still use the shared source atlas. Does not change town 3D settings.",
+               "Show live paths, shorelines, and terrain at the original town map "
+               "resolution on the globe.",
                kSettingCat_Simulation, 1, false,
                WorldGlobeAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_mountains,
                "AR_SIM3D_WORLD_NAV_MOUNTAINS",
                "World navigation native mountains",
-               "Use the town mountains' native cutouts, inclined faces and "
-               "side walls on the globe. Off retains overview relief and "
-               "skips native mountain work; landscape relief must also be enabled.",
+               "Show detailed mountain faces and walls from the town maps on the globe. Off "
+               "uses simpler relief. Requires World navigation terrain relief.",
                kSettingCat_Simulation, 1, false,
                WorldGlobeAvailable, NULL),
   /* The enhanced renderer, stage by stage. Each is an ordinary toggle so a
@@ -1637,24 +1618,19 @@ const SettingDesc g_setting_descs[] = {
    * matter how it is tuned. */
   BOOL_SETTING_MODERN(sim3d_separated_composite, "AR_SIM3D_SEPARATED",
                "Separated layer capture",
-               "Rebuild the town from captured semantic layers and the object "
-               "atlas instead of the authentic composite. Every other stage "
-               "below depends on this one.",
+               "Draw the town from separate map and sprite layers. The other town 3D "
+               "effects depend on this step.",
                kSettingCat_Simulation, 1, false, Sim3DSeparatedAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_ground_projection, "AR_SIM3D_GROUND",
                "Ground projection",
-               "Project the map through the oblique camera instead of drawing "
-               "it flat.",
+               "Tilt the town map back into the scene. Off draws the map flat.",
                kSettingCat_Simulation, 1, false, Sim3DGroundAvailable,
                NULL),
   { "sim3d_voxel_preset", "AR_SIM3D_VOXEL_PRESET", "Voxel town quality",
-    "Off preserves the original background tiles. Performance uses compact "
-    "models and basic lighting. Balanced adds authored architecture, AO and "
-    "pixel-clean edges. Quality enables the complete geometry, palette and "
-    "Smooth 2x treatment. Custom exposes every control below without presets "
-    "overwriting those stored values. Globe navigation shares the model "
-    "detail/style limit; its effects have independent switches.",
+    "Off uses tile art. Performance uses simpler models. Balanced adds detail, contact "
+    "shadows, and crisp edges. Quality adds Smooth 2x and more detail. Custom uses the "
+    "controls below. The globe shares model detail and style.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_voxel_preset, kSimBackgroundVoxelPreset_Balanced,
     kSimBackgroundVoxelPreset_Off, kSimBackgroundVoxelPreset_Custom, 1,
@@ -1663,10 +1639,8 @@ const SettingDesc g_setting_descs[] = {
     .modern_env = true, .player_visible = true },
   { "sim3d_landscape_height_pct", "AR_SIM3D_LANDSCAPE_HEIGHT",
     "Landscape height (%)",
-    "Scale the audited town relief independently from buildings and flying "
-    "objects. World navigation embeds the same heights and blends them into "
-    "the surrounding globe. 100 keeps the full landscape, 50 gives half-"
-    "height hills, and 0 makes the relief flat.",
+    "Set the height of terrain in towns and on the globe. 100% keeps full height, 50% "
+    "halves it, and 0% flattens it. Buildings and flying objects have their own height.",
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_landscape_height_pct,
     kSimTownTerrainLandscapeHeightDefaultPct,
@@ -1677,10 +1651,8 @@ const SettingDesc g_setting_descs[] = {
     .modern_env = true,
     .player_visible = AR_SIM3D_TERRAIN_ELEVATION != 0 },
   { "sim3d_voxel_detail", "AR_SIM3D_VOXEL_DETAIL", "Voxel model detail",
-    "Performance target for simulation-town buildings and trees. Low uses "
-    "compact silhouettes for dense maps; Balanced is the conservative model; "
-    "High adds finer roofs and facade relief; Ultra enables the complete "
-    "voxel detail set.",
+    "Set how much detail buildings and trees have. Low favors speed. Balanced keeps common "
+    "details. High adds finer roofs and walls. Ultra uses the full models.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_voxel_detail, kSimBackgroundVoxelDetail_High,
     kSimBackgroundVoxelDetail_Low, kSimBackgroundVoxelDetail_Ultra, 1, false,
@@ -1688,10 +1660,8 @@ const SettingDesc g_setting_descs[] = {
     Sim3DOrWorldNavigationModelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_lod", "AR_SIM3D_VOXEL_LOD", "Voxel detail scaling",
-    "Fixed uses the selected model detail everywhere. Adaptive treats model "
-    "detail as an upper limit and reuses cheaper cached meshes for buildings "
-    "and trees whose projected silhouettes are too small to show the extra "
-    "geometry.",
+    "Fixed uses your chosen detail everywhere. Adaptive uses simpler models when buildings "
+    "or trees appear too small to show the extra detail.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_voxel_lod, kSimBackgroundVoxelLod_Adaptive,
     kSimBackgroundVoxelLod_Fixed, kSimBackgroundVoxelLod_Adaptive, 1, false,
@@ -1699,10 +1669,8 @@ const SettingDesc g_setting_descs[] = {
     Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_shading", "AR_SIM3D_VOXEL_SHADING", "Voxel shading",
-    "Lighting cost for simulation-town buildings and trees. Basic uses one "
-    "directional value per face; Ambient occlusion adds contact gradients; "
-    "Materials + AO also gives foliage, masonry, roofs and metal distinct "
-    "light responses.",
+    "Basic lights each face evenly. Ambient occlusion adds contact shadows. Materials + AO "
+    "also lights foliage, stone, roofs, and metal differently.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_voxel_shading,
     kSimBackgroundVoxelShading_MaterialAware,
@@ -1712,10 +1680,8 @@ const SettingDesc g_setting_descs[] = {
     Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_style", "AR_SIM3D_VOXEL_STYLE", "Voxel styling",
-    "Geometry family for authored background models. Basic preserves clean "
-    "silhouettes; Silhouette trim adds eaves and broad facade accents; "
-    "Architectural adds factory courtyard treatment; Varied adds "
-    "deterministic model variations without animation.",
+    "Basic keeps simple shapes. Silhouette trim adds eaves and wall details. Architectural "
+    "adds factory courtyards. Varied gives models more individual details.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_voxel_style, kSimBackgroundVoxelStyle_Varied,
     kSimBackgroundVoxelStyle_Basic, kSimBackgroundVoxelStyle_Varied, 1,
@@ -1723,9 +1689,8 @@ const SettingDesc g_setting_descs[] = {
     Sim3DOrWorldNavigationModelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_facing", "AR_SIM3D_VOXEL_FACING", "Voxel camera facing",
-    "Shared lean tilts every model equally toward the camera. Per-model lean "
-    "keeps houses and windmills upright while preserving more roof and crown "
-    "depth on factories and trees. Both paths retain real 3D volume.",
+    "Shared lean tilts every model toward the camera by the same amount. Per-model lean "
+    "keeps houses and windmills upright and shows more depth in factories and trees.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_voxel_facing, kSimBackgroundVoxelFacing_PerModel,
     kSimBackgroundVoxelFacing_Shared, kSimBackgroundVoxelFacing_PerModel, 1,
@@ -1734,12 +1699,9 @@ const SettingDesc g_setting_descs[] = {
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_render_scale", "AR_SIM3D_VOXEL_RENDER_SCALE",
     "Voxel edge quality",
-    "Native draws directly into the scene. Pixel-clean locks projected "
-    "corners to the output pixel grid for crisp voxel edges. Smooth 2x "
-    "renders the background voxel pass at double resolution and downsamples "
-    "it on High or Ultra detail; Low and Balanced remain native, and large "
-    "output windows automatically stay native to bound GPU memory and fill "
-    "cost.",
+    "Native draws at scene resolution. Pixel-clean aligns edges with screen pixels. Smooth "
+    "2x draws at double resolution on High or Ultra detail. It uses Native in large "
+    "windows.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_voxel_render_scale,
     kSimBackgroundVoxelRenderScale_PixelClean,
@@ -1750,87 +1712,68 @@ const SettingDesc g_setting_descs[] = {
     .modern_env = true, .player_visible = true },
   BOOL_SETTING_MODERN(sim3d_object_billboards, "AR_SIM3D_BILLBOARDS",
                "Object billboards",
-               "Draw world records as individually placed sprites standing on "
-               "the projected ground.",
+               "Draw objects as separate sprites standing on the tilted town map.",
                kSettingCat_Simulation, 1, false, Sim3DBillboardsAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_virtual_height, "AR_SIM3D_HEIGHT",
                "Object heights",
-               "Lift flying actors and effects onto their classified height "
-               "above the map. Needs object billboards.",
+               "Draw flying actors and effects above the ground at their assigned heights. "
+               "Requires Object billboards.",
                kSettingCat_Simulation, 1, false, Sim3DVirtualHeightAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_shadows, "AR_SIM3D_SHADOWS", "Ground shadows",
-               "Cast per-object shadows onto the ground only. Needs object "
-               "billboards; darkness is set by Shadow darkness below.",
+               "Cast shadows from objects onto the town ground. Requires Object billboards. "
+               "Set darkness with Shadow darkness.",
                kSettingCat_Simulation, 1, false, Sim3DShadowsAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_soft_shadows, "AR_SIM3D_SOFT_SHADOWS",
                "Soft shadows",
-               "Blur the ground shadow mask instead of leaving a hard "
-               "silhouette edge. Needs ground shadows; radius is set by "
-               "Shadow softness.",
+               "Soften the edges of ground shadows. Requires Ground shadows. Set the blur "
+               "with Shadow softness.",
                kSettingCat_Simulation, 1, false, Sim3DSoftShadowsAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_rim_light, "AR_SIM3D_RIM_LIGHT", "Rim light",
-               "Add a lit edge to billboard silhouettes on the side facing "
-               "the light. Needs object billboards; brightness is set by Rim "
-               "light strength.",
+               "Light the edges of sprites facing the light. Requires Object billboards. "
+               "Set brightness with Rim light strength.",
                kSettingCat_Simulation, 1, false, Sim3DRimLightAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_effect_lighting, "AR_SIM3D_EFFECT_LIGHTING",
                "Effect lighting",
-               "Add transient local illumination when simulation miracles "
-               "and enemy attacks emit light. Uses portable additive SDL "
-               "geometry and does not require GPU shader effects.",
+               "Light up the area around town miracles and enemy attacks as they happen.",
                kSettingCat_Simulation, 1, false,
                Sim3DEffectLightingAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_particles, "AR_SIM3D_PARTICLES", "Effect particles",
-               "Add deterministic host particles synchronized to simulation "
-               "miracles and enemy attacks. Uses the same captured effect "
-               "lifecycle as Effect lighting.",
+               "Add particles to town miracles and enemy attacks.",
                kSettingCat_Simulation, 1, false,
                Sim3DParticlesAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_underlay, "AR_SIM3D_WORLD_UNDERLAY",
                "World map underlay",
-               "Extend the ground past the town edge with the live world "
-               "map, so the neighbouring regions are visible instead of "
-               "empty space. Needs the ground projection; distance fade is "
-               "set by World map haze.",
+               "Show the world map beyond the town edges, including nearby regions. "
+               "Requires Ground projection. World map haze controls the fade.",
                kSettingCat_Simulation, 1, false, Sim3DWorldUnderlayAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_globe_underlay, "AR_SIM3D_GLOBE_UNDERLAY",
                "Connected world underlay",
-               "Show the globe and nearby low-detail towns behind the active "
-               "3D town, preserving its authored terrain and actors. Limits "
-               "camera zoom and orbit to the local area. Uses world terrain, "
-               "lighting and model settings, with SIM haze and cloud shroud. "
-               "Off uses the cheaper flat world map. Requires 3D town models "
-               "and World map underlay; does not enable world navigation.",
+               "Show the globe and nearby towns behind the active town. This limits orbit "
+               "and zoom to the local area. Requires World map underlay and a Voxel town "
+               "quality other than Off.",
                kSettingCat_Simulation, 1, false, Sim3DGlobeUnderlayAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_cloud_shroud, "AR_SIM3D_CLOUDS", "Cloud shroud",
-               "Cover the extended ground with drifting cloud banks. Sprites "
-               "can only be drawn near the camera, so the far ground is always "
-               "actor-free; the clouds read that as distance instead of as an "
-               "empty town. Needs the world map underlay.",
+               "Cover the distant ground with drifting clouds where the game stops drawing "
+               "sprites. Requires World map underlay.",
                kSettingCat_Simulation, 1, false, Sim3DCloudShroudAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_cull_haze, "AR_SIM3D_CULL_HAZE_STAGE",
                "Local-area haze",
-               "Fade the town ground into the distant world map outside the "
-               "sprite-drawable window, so the bright area reads as where "
-               "actors can be rather than as clouds having gaps. Unlike the "
-               "shroud this is continuous. During 3D world navigation the "
-               "same stage keeps the ROM-selected location clear and hazes "
-               "the other regions.",
+               "Fade the ground where the game stops drawing town sprites. In world "
+               "navigation, the same effect keeps the selected location clear and hazes "
+               "nearby regions.",
                kSettingCat_Simulation, 1, false,
                Sim3DOrWorldNavigationHazeAvailable, NULL),
   { "sim3d_camera_mode", "AR_SIM3D_CAMERA_MODE", "Camera mode",
-    "Free Cam: manual orbit and zoom with the right mouse button, and the "
-    "pose persists. Dynamic Cam: its own baseline pose, leaning toward the "
-    "angel's direction of travel and jolting when the angel is hit. Switching "
-    "restores that mode's own camera rather than carrying the other one over.",
+    "Free Cam remembers your manual orbit and zoom. Dynamic Cam has its own resting "
+    "position, leans as the angel moves, and jolts when hit.",
     kSettingType_Enum, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_camera_mode, kSimCam_Dynamic,
     kSimCam_Free, kSimCam_Dynamic, 1, false,
@@ -1840,287 +1783,237 @@ const SettingDesc g_setting_descs[] = {
    * sim3d defaults note above), so the shipped Dynamic view is the one that
    * was actually tuned rather than whatever Free Cam was last left at. */
   { "sim3d_dyncam_baseline_tilt_x_mrad", NULL, "Dynamic baseline pitch",
-    "Dynamic Cam's resting pitch in milliradians. The supported range runs "
-    "from the authored three-quarter view toward a low near-horizontal view.",
+    "Set the Dynamic Cam's resting pitch in milliradians, from a high three-quarter view "
+    "toward ground level.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_dyncam_baseline_tilt_x_mrad, -575,
     kSim3DCameraPitchMinimumMrad, kSim3DCameraPitchMaximumMrad, 25, false,
     NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_dyncam_baseline_tilt_y_mrad", NULL, "Dynamic baseline yaw",
-    "Dynamic Cam's resting yaw in milliradians; the lean works around this.",
+    "Set the Dynamic Cam's resting yaw in milliradians. The camera leans around this angle.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_dyncam_baseline_tilt_y_mrad, 0,
     kSim3DCameraYawMinimumMrad, kSim3DCameraYawMaximumMrad, 20, false,
     NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_dyncam_baseline_distance_x100", NULL, "Dynamic baseline distance",
-    "Dynamic Cam's resting camera distance (hundredths); 0 auto-fits.",
+    "Set the Dynamic Cam's resting distance in hundredths. 0 fits the scene automatically.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_dyncam_baseline_distance_x100, 300, 0, 2000, 25, false,
     NULL, 0, Sim3DDynamicCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   BOOL_SETTING_MODERN(sim3d_cull_lift_inset, "AR_SIM3D_LIFT_INSET",
                "Account for flight height at the edge",
-               "Pull the bottom of the in-range area in by the height flying "
-               "actors are drawn at. The lit ground can only describe the "
-               "boundary for something standing on it, so without this a "
-               "flying actor is drawn above the edge and appears to vanish "
-               "over clear ground. Costs a little of the bright area along "
-               "the near edge.",
+               "Move the clear area's near edge inward so flying sprites disappear under "
+               "cover. This leaves less clear ground along that edge.",
                kSettingCat_Simulation, 1, false, Sim3DCullHazeEnabled,
                NULL),
   BOOL_SETTING_MODERN(sim3d_backdrop, "AR_SIM3D_BACKDROP", "Atmospheric backdrop",
-               "Draw a graded sky behind the finite ground instead of a flat "
-               "clear. Town mode anchors it to the tilted map's horizon; "
-               "world navigation uses its synthetic horizon beyond the "
-               "finite world edges.",
+               "Draw a sky gradient behind the ground. It follows the tilted town horizon "
+               "or the globe's on-screen horizon in world navigation.",
                kSettingCat_Simulation, 1, false, Sim3DBackdropAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_picker_exit_ease, "AR_SIM3D_PICKER_EASE",
                "Ease picker exit",
-               "Ease the return from a completed map picker instead of "
-               "cutting; not implemented yet.",
+               "Reserved for a smooth camera return after choosing a map location.",
                kSettingCat_Simulation, 0, false, Sim3DPickerEaseAvailable,
                NULL),
   { "sim3d_diagnostic_layers", "AR_SIM3D_DIAGNOSTIC_LAYERS",
     "SIM diagnostic layers",
-    "Developer-only hexadecimal visibility mask for isolated SIM captures; "
-    "zero shows the selected complete profile.",
+    "Show only the town 3D layers selected by this hexadecimal mask. Use 0 to draw the full "
+    "profile.",
     kSettingType_Mask, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_diagnostic_layers, 0, 0, 0xFFFF, 1, false,
     NULL, 0, Sim3DSeparatedEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_tilt_y_mrad", "AR_SIM3D_YAW", "Camera yaw",
-    "SIM free-camera yaw in milliradians; right-drag horizontally to adjust.",
+    "Turn the Free Cam left or right, in milliradians. You can also drag horizontally with "
+    "the right mouse button.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_tilt_y_mrad, 0,
     kSim3DCameraYawMinimumMrad, kSim3DCameraYawMaximumMrad,
     20, false, NULL, 0,
     Sim3DFreeCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_tilt_x_mrad", "AR_SIM3D_PITCH", "Camera pitch",
-    "SIM free-camera pitch in milliradians; right-drag vertically between "
-    "the authored three-quarter view and a low near-horizontal view.",
+    "Tilt the Free Cam up or down, in milliradians. You can also drag vertically with the "
+    "right mouse button.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_tilt_x_mrad, -575,
     kSim3DCameraPitchMinimumMrad, kSim3DCameraPitchMaximumMrad,
     25, false, NULL, 0,
     Sim3DFreeCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_distance_x100", "AR_SIM3D_DISTANCE", "Camera distance",
-    "SIM camera distance in hundredths; 0 auto-fits, and the mouse wheel zooms.",
+    "Set camera distance in hundredths. 0 fits the scene automatically. The mouse wheel "
+    "also zooms.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_distance_x100, 300, 0, 2000, 25, false, NULL, 0,
     Sim3DFreeCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_height_scale_x100", "AR_SIM3D_HEIGHT_SCALE",
     "Object height scale",
-    "Scale every classified SIM flight plane as a percentage of its "
-    "catalogue height; 100 keeps the documented planes and 0 grounds every "
-    "billboard without disabling the height stage.",
+    "Scale the height of flying sprites. 100% uses their assigned heights. 0% draws them at "
+    "ground level.",
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_height_scale_x100, 100, 0, 400, 10, false, NULL, 0,
     Sim3DVirtualHeightEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_shadow_opacity_pct", "AR_SIM3D_SHADOW_OPACITY",
     "Shadow darkness",
-    "Darkness of town object shadows and world-navigation cloud shadows as a "
-    "percentage; 0 skips the applicable shadow pass.",
+    "Set how dark object shadows and world-navigation cloud shadows appear. 0% skips "
+    "drawing those shadows.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_shadow_opacity_pct, kSimShadowOpacityDefaultPct,
     0, 100, 5, false, NULL, 0,
     Sim3DOrWorldNavigationShadowAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_light_azimuth_deg", "AR_SIM3D_LIGHT_AZIMUTH",
     "Light direction",
-    "Compass direction the shadow is thrown, in degrees: 0 casts to the "
-    "right, 90 away from the camera, 180 left, 270 toward the camera. Only "
-    "matters when the light is off vertical. Shared by town objects and "
-    "world-navigation cloud shadows.",
+    "Set which way shadows fall. 0° casts right, 90° away from the camera, 180° left, and "
+    "270° toward the camera. This also applies to cloud shadows.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_light_azimuth_deg, kSimLightAzimuthDefaultDeg,
     0, 359, 15, false, NULL, 0,
     Sim3DOrWorldNavigationLightingAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_light_elevation_deg", "AR_SIM3D_LIGHT_ELEVATION",
     "Light height",
-    "How high the light sits, in degrees above the ground: 90 is straight "
-    "overhead and puts each shadow directly under its caster, lower values "
-    "push shadows further out along the light direction. Lower values also "
-    "strengthen world navigation's warm colour treatment.",
+    "Set the light angle above the ground. 90° puts shadows directly below objects. Lower "
+    "angles cast longer shadows and warm the light in world navigation.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_light_elevation_deg, kSimLightElevationDefaultDeg,
     20, 90, 5, false, NULL, 0,
     Sim3DOrWorldNavigationLightingAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_shadow_softness_pct", "AR_SIM3D_SHADOW_SOFTNESS",
     "Shadow softness",
-    "Blur radius for the shadow mask, as a percentage. 0 keeps the hard "
-    "town silhouette; navigation clouds use it to spread their soft shadow "
-    "samples.",
+    "Soften shadow edges. 0% keeps hard town shadows. Higher values spread cloud shadows in "
+    "world navigation.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_shadow_softness_pct, kSimShadowSoftnessDefaultPct,
     0, 100, 5, false, NULL, 0,
     Sim3DOrWorldNavigationSoftShadowAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_rim_strength_pct", "AR_SIM3D_RIM_STRENGTH",
     "Rim light strength",
-    "Brightness of the lit edge added to sprite silhouettes, as a percentage. "
-    "0 leaves sprite colours untouched even with rim light enabled.",
+    "Set how bright the lit side of a sprite's outline appears. 0% leaves the sprite's "
+    "colors unchanged.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimLighting,
     &g_settings.sim3d_rim_strength_pct, kSimRimStrengthDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DRimLightEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_underlay_haze_pct", "AR_SIM3D_UNDERLAY_HAZE",
     "World map haze",
-    "How far the world map underlay fades toward the scene backdrop, as a "
-    "percentage. During world navigation this is the haze strength outside "
-    "the active labelled region. 0 draws it at full strength.",
+    "Fade the distant world map into the backdrop. In world navigation, this controls the "
+    "haze around the selected region. 0% removes the haze.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_underlay_haze_pct, kSimUnderlayHazeDefaultPct,
     0, 100, 5, false, NULL, 0,
     Sim3DOrWorldNavigationHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_opacity_pct", "AR_SIM3D_CLOUD_OPACITY",
     "Cloud density",
-    "Opacity of town cloud banks and whole-world navigation weather, as a "
-    "percentage. 0 draws no clouds without disabling either stage.",
+    "Set how opaque town and world-navigation clouds look. 0% makes them invisible.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_opacity_pct, kSimCloudOpacityDefaultPct,
     0, 100, 5, false, NULL, 0,
     Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_falloff_px", "AR_SIM3D_CLOUD_FALLOFF",
     "Cloud edge softness",
-    "How far past the sprite-drawable edge the clouds take to reach full "
-    "cover, in original pixels. Smaller values make them part sharply as you "
-    "approach; larger values keep a long hazy gradient.",
+    "Set the width of the cloud fade beyond the sprite range, in original game pixels. "
+    "Higher values give a softer edge.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_falloff_px, kSimCloudFalloffDefaultPx,
     16, 512, 16, false, NULL, 0, Sim3DCloudShroudEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_inset_px", "AR_SIM3D_CLOUD_INSET",
     "Cloud edge overlap",
-    "How far inside the sprite-drawable edge the cloud cover starts building, "
-    "in original pixels. Sprites stop being drawn at that edge, so starting "
-    "the build-up before it means an actor is already under cloud when it "
-    "disappears. Zero starts the ramp exactly at the edge, which leaves a "
-    "clear band where actors vanish into nothing.",
+    "Start the cloud fade this many original game pixels inside the sprite range. Higher "
+    "values cover sprites sooner, before they disappear.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_inset_px, kSimCloudInsetDefaultPx,
     0, 512, 16, false, NULL, 0, Sim3DCloudShroudEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_lead_px", "AR_SIM3D_CULL_LEAD",
     "Cloud lead on culled sprites",
-    "How far before the sprite-drawable edge a record's own cloud cover "
-    "reaches full strength, in original pixels. The cover has to arrive "
-    "before the sprite goes, not after: too small and an actor blinks out a "
-    "moment ahead of the cloud that should have hidden it.",
+    "Set how far inside the sprite range clouds fully cover a sprite, in original game "
+    "pixels. Small values can make sprites pop out of view.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_lead_px, kSimCullLeadDefaultPx,
     8, 256, 8, false, NULL, 0, Sim3DCloudShroudEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_haze_pct", "AR_SIM3D_CULL_HAZE",
     "Out-of-range ground fade",
-    "How far the town ground fades toward the distant world map outside the "
-    "sprite-drawable window, as a percentage. The bright region is where "
-    "actors can exist, so this reads as an area of effect rather than as "
-    "sprites failing. It fades rather than dims so the target brightness is "
-    "the world map's own, which is already hazed for distance. Zero keeps the "
-    "ground at full opacity everywhere. World navigation uses the separate "
-    "World map haze strength for its active-location boundary.",
+    "Fade the ground into the distant map beyond the range where sprites are drawn. 0% "
+    "keeps the ground fully visible. World navigation uses World map haze instead.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_pct, kSimCullHazeDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DCullHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_dim_pct", "AR_SIM3D_CULL_DIM",
     "Out-of-range darkening",
-    "How far the ground outside the sprite-drawable window is darkened, as a "
-    "percentage. Separate from the fade above: the fade decides which layer "
-    "is showing out there, this decides how lit it is. It multiplies the "
-    "colour down rather than mixing toward the sky, so raising it makes the "
-    "far field darker instead of hazier.",
+    "Darken the ground outside the range where sprites are drawn. Out-of-range ground fade "
+    "controls how much of the distant map shows through.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_dim_pct, kSimCullDimDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DCullHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_haze_lead_px", "AR_SIM3D_CULL_HAZE_LEAD",
     "Ground fade ramp width",
-    "How many original pixels the fade takes to reach full strength, "
-    "measured from the active edge. In world navigation the ROM-selected "
-    "256x256 location stays fully clear and this ramp extends outward. Short "
-    "by default so the town's own vision range stays bright; raise it to "
-    "trade that brightness for a softer transition.",
+    "Set how many original game pixels the ground fade takes to reach full strength. A "
+    "longer fade softens the edge. In world navigation, the selected location stays clear.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_haze_lead_px, kSimCullHazeLeadDefaultPx,
     16, 512, 16, false, NULL, 0,
     Sim3DOrWorldNavigationHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cull_corner_px", "AR_SIM3D_CULL_CORNER",
     "Ground fade corner rounding",
-    "How far the corners of the in-range area are rounded, in original "
-    "pixels. Zero gives the sprite-drawable rectangle exactly, which reads as "
-    "a hard-edged box laid over the world; rounding reads as framing. "
-    "Rounding only ever adds cover at the corners, so it cannot expose a "
-    "sprite the window was going to take away.",
+    "Round the corners of the clear area, in original game pixels. 0 keeps the clear area "
+    "rectangular.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cull_corner_px, kSimCullCornerDefaultPx,
     0, 256, 8, false, NULL, 0, Sim3DCullHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_underlay_defocus_pct", "AR_SIM3D_DEFOCUS",
     "World map defocus",
-    "How far out of focus the distant world map goes outside the "
-    "active town or location, as a percentage. Blur says \"too far away to "
-    "resolve\" in a way dimming cannot, but it is a cheap downsample rather "
-    "than a real lens. Zero keeps the map sharp everywhere.",
+    "Blur the distant map outside the active town or location. 0% keeps it sharp.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_underlay_defocus_pct, kSimUnderlayDefocusDefaultPct,
     0, 100, 5, false, NULL, 0,
     Sim3DOrWorldNavigationHazeEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_altitude_px", "AR_SIM3D_CLOUD_ALTITUDE",
     "Cloud altitude",
-    "How far above the ground the cloud banks float, in original pixels. Zero "
-    "lays them flat on the terrain, where they read as fog painted onto the "
-    "map; lifting them puts them between the camera and the world, so they "
-    "pass over trees and flying actors instead of through them. In top-down "
-    "world navigation it controls both directional shadow displacement and "
-    "the zoom point where the camera crosses the cloud deck.",
+    "Raise the clouds above the ground, in original game pixels. 0 lays them on the "
+    "terrain. On the globe, this also affects where shadows fall and when the view crosses "
+    "the clouds.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_altitude_px, kSimCloudAltitudeDefaultPx,
     0, 256, 8, false, NULL, 0,
     Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_cloud_drift_pct", "AR_SIM3D_CLOUD_DRIFT",
     "Cloud drift speed",
-    "How fast the cloud banks move, as a percentage of their built-in rates. "
-    "The layers drift at different speeds, so they pass through each other "
-    "and the field churns rather than sliding across as one image. Zero holds "
-    "them still.",
+    "Set how fast the cloud layers drift. Each layer has its own base speed. 0% holds them "
+    "still.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_cloud_drift_pct, kSimCloudDriftDefaultPct,
     0, 500, 10, false, NULL, 0,
     Sim3DOrWorldNavigationCloudsAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_backdrop_strength_pct", "AR_SIM3D_BACKDROP_STRENGTH",
     "Sky gradient strength",
-    "How far the sky is mixed from the scene's own backdrop colour toward blue, "
-    "as a percentage. It brightens toward the horizon and deepens overhead. A "
-    "town that picks a coloured backdrop tints the result; most pick black, "
-    "which is why the sky is mixed toward a blue rather than derived from the "
-    "backdrop alone. Zero is the flat fill the projected view used before.",
+    "Blend the scene's backdrop color into a blue sky that brightens toward the horizon. 0% "
+    "uses the flat backdrop color.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_backdrop_strength_pct, kSimBackdropStrengthDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DBackdropEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_backdrop_horizon_pct", "AR_SIM3D_BACKDROP_HORIZON",
     "Sky horizon height",
-    "Where the sky's bright end sits, as a percentage of screen height from "
-    "the top when the projected horizon is unavailable. This is the normal "
-    "world-navigation path and places the gradient where sky reads beyond "
-    "the finite map.",
+    "Set the sky gradient's horizon as a percentage from the top of the screen. Used when "
+    "the scene has no projected horizon, including world navigation.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimAtmosphere,
     &g_settings.sim3d_backdrop_horizon_pct, kSimBackdropHorizonDefaultPct,
     0, 100, 5, false, NULL, 0, Sim3DBackdropEnabled, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_reactive_strength", "AR_SIM3D_REACTIVE",
     "Camera reactivity",
-    "How far the town camera leans toward the angel's direction of travel and "
-    "how hard it jolts when the angel is hit, as a percentage. Zero holds the "
-    "camera at the pose the pitch/yaw/zoom settings describe.",
+    "Set how strongly the camera leans as the angel moves and jolts when hit. 0% keeps it "
+    "at its resting position.",
     kSettingType_Int, kApply_Passive, kSettingCat_SimCamera,
     &g_settings.sim3d_reactive_strength, 100, 0, 200, 10, false, NULL, 0,
     Sim3DDynamicCameraAvailable, NULL, NULL, NULL, .modern_env = true },
   { "sim3d_height_pop_pct", "AR_SIM3D_HEIGHT_POP",
     "Flying sprite pop",
-    "Extra size for a flying sprite at its catalogue height, as a percentage. "
-    "The true perspective gain from being lifted is about 1%, too subtle to "
-    "read; 0 keeps only that. Raising the object height scale raises this "
-    "with it.",
+    "Make flying sprites look larger at their assigned height. 0% keeps natural "
+    "perspective. Higher Object height scale also increases this effect.",
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_height_pop_pct, 0, 0, 50, 1, false, NULL, 0,
     Sim3DVirtualHeightEnabled, NULL, NULL, NULL, .modern_env = true },
   ACTION_SETTING("sim3d_reset_camera", kSettingAction_SimCameraReset,
                  kSettingCat_SimCamera, Sim3D_ModeIsOn, false, "Reset camera",
-                     "Return the camera mode in use to its default pitch, yaw, and distance."),
+                     "Restore the current camera mode's default angle and zoom."),
   { "diorama_mode", NULL, "Action 3D",
-    "Off uses the flat view. Diorama is the default 3D mode and adds depth "
-    "between layers. Voxel 3D is a work in progress, adding modeled "
-    "environments in supported rooms.",
+    "Off keeps action stages flat. Diorama adds depth between layers and is the default 3D "
+    "mode. Voxel 3D adds modeled scenery in supported rooms and is still in development.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Presentation,
     &g_settings.diorama_mode, kAction3D_Off, kAction3D_Off, kAction3D_Voxel,
     1, false, kAction3DModeLabels, kAction3D_Count, NULL,
@@ -2129,9 +2022,8 @@ const SettingDesc g_setting_descs[] = {
    * lean and event kicks around its baseline; switching modes restores the
    * selected mode's own camera instead of carrying the other pose across. */
   { "diorama_camera_mode", NULL, "Camera mode",
-    "Free Cam: manual orbit and zoom, with a persistent pose. Dynamic Cam: "
-    "leans with gameplay motion and reacts to impacts around its own baseline. "
-    "Manual orbit and zoom return to this baseline after input stops.",
+    "Free Cam remembers your manual orbit and zoom. Dynamic Cam follows gameplay motion and "
+    "reacts to impacts. It returns to its resting position after manual adjustments.",
     kSettingType_Enum, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_camera_mode, kDioramaCam_Dynamic,
     kDioramaCam_Free, kDioramaCam_Dynamic, 1, false,
@@ -2142,23 +2034,24 @@ const SettingDesc g_setting_descs[] = {
    * 3/4 tilt (~0.20 rad pitch), symmetric yaw (0), auto-fit distance. Same
    * step convention as their free-cam counterparts just below. */
   { "diorama_dyncam_baseline_tilt_y_mrad", NULL, "Dynamic baseline yaw",
-    "Dynamic Cam's resting yaw in milliradians; sway leans around this, not 0.",
+    "Set the Dynamic Cam's resting yaw in milliradians. The camera sways around this angle.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_dyncam_baseline_tilt_y_mrad, 0, -700, 700, 20, false,
     NULL, 0, DioramaDynamicCameraAvailable, NULL, NULL, NULL },
   { "diorama_dyncam_baseline_tilt_x_mrad", NULL, "Dynamic baseline pitch",
-    "Dynamic Cam's resting pitch in milliradians; sway leans around this, not 0.",
+    "Set the Dynamic Cam's resting pitch in milliradians. The camera sways around this "
+    "angle.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_dyncam_baseline_tilt_x_mrad, 200, -700, 700, 25, false,
     NULL, 0, DioramaDynamicCameraAvailable, NULL, NULL, NULL },
   { "diorama_dyncam_baseline_distance_x100", NULL, "Dynamic baseline distance",
-    "Dynamic Cam's resting camera distance (hundredths); 0 auto-fits the frame.",
+    "Set the Dynamic Cam's resting distance in hundredths. 0 fits the frame automatically.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_dyncam_baseline_distance_x100, 0, 0, 2000, 25, false,
     NULL, 0, DioramaDynamicCameraAvailable, NULL, NULL, NULL },
   INT_SETTING(diorama_reactive_strength, NULL, "Reactive strength",
-              "Dynamic Cam: how strongly the camera sways with gameplay "
-              "motion; 0 holds it fixed at the baseline pose.",
+              "Set how strongly Dynamic Cam sways with gameplay. 0 keeps it at its resting "
+              "position.",
               kSettingCat_DioramaCamera, 35, 0, 100, NULL,
               DioramaDynamicCameraAvailable),
   /* Promotes BG2 to an enveloping dimmed+DoF'd skybox so
@@ -2166,9 +2059,8 @@ const SettingDesc g_setting_descs[] = {
    * quad's edges. Off keeps the default presentation; see DioramaSkyMode
    * (settings.h) for what the other two modes do. */
   { "diorama_skybox", NULL, "Skybox",
-    "Off: BG2 is an in-box parallax plane (void may show at the margins "
-    "under tilt). Skybox only: BG2 fills the background instead. Plane + "
-    "skybox: both — keeps BG2's parallax AND backstops the void/gaps.",
+    "Off keeps BG2 on a scrolling plane, which can leave gaps at the edges. Skybox only "
+    "fills the background. Plane + skybox keeps the scrolling plane and fills its gaps.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Presentation,
     &g_settings.diorama_skybox, kDioramaSky_Off,
     kDioramaSky_Off, kDioramaSky_Both, 1, false,
@@ -2176,9 +2068,8 @@ const SettingDesc g_setting_descs[] = {
     NULL, NULL },
     BOOL_SETTING_MODERN(
         death_heim_completion_world, "AR_DEATH_HEIM_COMPLETION_WORLD", "Death Heim completion scene",
-        "Replace Death Heim's completion background with a heavenly ocean vista. "
-        "Requires Action Diorama 3D; applies its own backdrop settings. Independent of Town and "
-        "World navigation 3D; preserves the original platform, hero and game timing.",
+        "Show a sunlit ocean when you clear Death Heim. Requires Diorama or Voxel 3D. The "
+        "scene sets its own skybox and enclosure.",
         kSettingCat_Presentation, 1, false, CompletionSceneAvailable, NULL),
     COMPLETION_EFFECT_SETTING(death_heim_completion_waves, "AR_DEATH_HEIM_COMPLETION_WAVES",
                         "Ocean waves", "Animate the completion ocean's waves and spray."),
@@ -2212,10 +2103,8 @@ const SettingDesc g_setting_descs[] = {
    * byte, which is what makes it a usable comparison rather than a
    * half-migration. */
   { "diorama_margin_fix", "AR_DIORAMA_MARGIN_FIX", "Edge margin fix",
-    "Fixes the black wedge at a level's start/end: pads captured layers to the "
-    "full widescreen budget, fills the frame's edge gaps with the scene "
-    "backdrop instead of black, and crops the skybox to BG2's valid span. "
-    "Off restores the previous behaviour for comparison.",
+    "Fill gaps at the start and end of an action stage with the scene backdrop. This also "
+    "keeps the skybox inside the valid BG2 area.",
     kSettingType_Bool, kApply_Passive, kSettingCat_Presentation,
     &g_settings.diorama_margin_fix, 1, 0, 1, 1, false,
     NULL, 0, Diorama_ModeIsOn, NULL,
@@ -2224,9 +2113,7 @@ const SettingDesc g_setting_descs[] = {
    * off-screen edges. Composes with B5 (skybox fills the far opening);
    * independent so each can be A/B'd alone. */
   BOOL_SETTING(diorama_shoebox, NULL, "Shoebox walls",
-               "Enclose the layer stack in a floor, ceiling, and side "
-               "walls so its off-screen edges are masked instead of "
-               "ending in void.",
+               "Add a floor, ceiling, and walls to hide the edges of the diorama's layers.",
                kSettingCat_Presentation, 0, false, Diorama_ModeIsOn, NULL),
   /* M5 (followup doc): these three were INT_SETTING, which hardcodes
    * step=1 — an arrow press moved the camera by 1 mrad / 0.01x, ~1400
@@ -2238,12 +2125,14 @@ const SettingDesc g_setting_descs[] = {
    * 520 isn't a multiple of 25, so a step of 25 would snap the untouched
    * default to -200 the first time anything round-trips it). */
   { "diorama_tilt_y_mrad", NULL, "Camera yaw",
-    "Diorama camera yaw in milliradians; negative swings the left edge toward you.",
+    "Turn the diorama camera left or right, in milliradians. Negative values bring the left "
+    "edge closer.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_tilt_y_mrad, -180, -700, 700, 20, false, NULL, 0,
     DioramaFreeCameraAvailable, NULL, NULL, NULL },
   { "diorama_tilt_x_mrad", NULL, "Camera pitch",
-    "Diorama camera pitch in milliradians; 0 keeps sprites planted on their platforms.",
+    "Tilt the diorama camera up or down, in milliradians. Use 0 to line sprites up with "
+    "their platforms.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_tilt_x_mrad, 0, -700, 700, 25, false, NULL, 0,
     DioramaFreeCameraAvailable, NULL, NULL, NULL },
@@ -2254,7 +2143,7 @@ const SettingDesc g_setting_descs[] = {
    * the floor at consume time (diorama.c) so a stray value in that gap
    * renders a valid scene instead of clipping into the near plane. */
   { "diorama_distance_x100", NULL, "Camera distance",
-    "Diorama camera distance (hundredths); 0 auto-fits the frame to the window.",
+    "Set the diorama camera distance in hundredths. 0 fits the frame to the window.",
     kSettingType_Int, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_distance_x100, 0, 0, 2000, 25, false, NULL, 0,
     DioramaFreeCameraAvailable, NULL, NULL, NULL },
@@ -2263,13 +2152,13 @@ const SettingDesc g_setting_descs[] = {
    * measured 48px camera jump while exact signed OBJ positions avoid the
    * 8-bit OAM Y ambiguity. Auto uses the same Diorama capture budget. */
   { "diorama_vertical_extend", NULL, "Vertical extend",
-    "Diorama extra rows per side, including Screen ratio Auto. "
-    "0 keeps the authentic 224-line frame.",
+    "Draw extra rows above and below the scene, including with Screen ratio set to Auto. 0 "
+    "keeps the original 224-line height.",
     kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
     &g_settings.diorama_vertical_extend, 64, 0, 64, 4, false, NULL, 0,
     Diorama_ModeIsOn, NULL, NULL, NULL },
   INT_SETTING(diorama_depth_shade, NULL, "Depth shading",
-              "Strength of the atmospheric darkening applied to farther planes.",
+              "Set how much darker distant layers appear.",
               kSettingCat_Presentation, 100, 0, 100, NULL, Diorama_ModeIsOn),
   /* Default off: the backdrop plane is a finite quad drawn behind everything,
    * and at a level bound the never-written margin columns read as an opaque
@@ -2278,26 +2167,24 @@ const SettingDesc g_setting_descs[] = {
    * tilted box wants in every mode. Turn it on to get the flat backdrop
    * colour back. */
   BOOL_SETTING(diorama_layer_backdrop, NULL, "Show backdrop",
-               "Diorama: show the backdrop plane. Off by default — the plane "
-               "is finite, so at a level's start/end its unwritten margins "
-               "show as a black seam.",
+               "Show the diorama backdrop plane. Its edges can leave a dark seam at the "
+               "start or end of a stage.",
                kSettingCat_Presentation, 0, false, Diorama_ModeIsOn, NULL),
   BOOL_SETTING(diorama_layer_bg2, NULL, "Show BG2",
-               "Diorama: show the BG2 parallax plane.",
+               "Show the BG2 scrolling background in the diorama.",
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
   BOOL_SETTING(diorama_layer_bg1, NULL, "Show BG1",
-               "Diorama: show the BG1 playfield plane.",
+               "Show the BG1 playfield in the diorama.",
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
   BOOL_SETTING(diorama_layer_obj, NULL, "Show sprites",
-               "Diorama: show the sprite (OBJ) plane.",
+               "Show the sprite layer in the diorama.",
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
   BOOL_SETTING(diorama_layer_bg3, NULL, "Show BG3/HUD",
-               "Diorama: show the BG3 (HUD) plane.",
+               "Show the BG3 HUD layer in the diorama.",
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
   BOOL_SETTING(diorama_hud_flat, NULL, "Flat HUD",
-               "On: HUD (ACT/TIME/SCORE, health, boss bar) stays flat, "
-               "scalable, and screen-anchored like flat mode. Off: it is an "
-               "unanchored tilted plane in the box, matching the pre-fix look.",
+               "On keeps the HUD flat, scaled, and fixed to the screen. Off tilts it with "
+               "the other diorama layers.",
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
   ACTION_SETTING("diorama_reset", kSettingAction_DioramaReset,
                  kSettingCat_DioramaCamera, Diorama_ModeIsOn, false, "Reset defaults",
@@ -2309,59 +2196,52 @@ const SettingDesc g_setting_descs[] = {
                OnLegacyUncappedChanged),
   BOOL_SETTING(action_effect_lighting, "AR_ACTION_EFFECT_LIGHTING",
                "Action spell lighting",
-               "Add transient local illumination to action-stage magic. Uses "
-               "portable SDL additive geometry in both flat and diorama mode.",
+               "Light up the area around spells cast in action stages.",
                kSettingCat_Graphics, 1, false,
                ActionEffectRendererAvailable, NULL),
   BOOL_SETTING(action_effect_particles, "AR_ACTION_EFFECT_PARTICLES",
                "Action spell particles",
-               "Add deterministic host particles synchronized to captured "
-               "action-stage spell actors.",
+               "Add particles that follow spell effects in action stages.",
                kSettingCat_Graphics, 1, false,
                ActionEffectRendererAvailable, NULL),
   BOOL_SETTING(action_environmental_effects, "AR_ACTION_ENVIRONMENTAL_EFFECTS",
                "Environmental effects",
-               "Enhance action-stage scenery with environmental lighting and "
-               "particles. Spell and combat effects are controlled separately.",
+               "Add lighting and particles to action-stage scenery. Spell effects have "
+               "separate controls.",
                kSettingCat_Graphics, 1, false,
                ActionEffectRendererAvailable, NULL),
   /* Load/save compatibility for configurations that exposed the old optional
    * backend switch. host_video.c forces this value on because SIM3D depth is a
    * baseline renderer capability; the effect rows remain independently live. */
   { "gpu_shaders_enabled", "AR_GPU_SHADERS", "GPU shader effects",
-    "The GPU renderer is required. This retained setting only preserves "
-    "older configuration files; individual effects remain configurable.",
+    "Kept for older settings files. The GPU renderer is required. Each effect has its own "
+    "switch.",
     kSettingType_Bool, kApply_Restart, kSettingCat_Graphics,
     &g_settings.gpu_shaders_enabled, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
   BOOL_SETTING(gpu_fx_rim, "AR_GPU_FX_RIM", "Rim lighting",
-               "Diorama: warm edge glow on sprite silhouettes.",
+               "Add a warm glow around sprite edges in the diorama.",
                kSettingCat_Graphics, 1, false, GpuShadersActive, NULL),
   BOOL_SETTING(gpu_fx_dof, "AR_GPU_FX_DOF", "Depth of field",
-               "Diorama: blur background layers by distance from the main "
-               "playfield.",
+               "Blur layers farther from the main playfield in the diorama.",
                kSettingCat_Graphics, 1, false, GpuShadersActive, NULL),
   BOOL_SETTING(gpu_fx_edgeaa, "AR_GPU_FX_EDGEAA", "Edge anti-aliasing",
-               "Diorama: add one-pixel screen-space coverage outside tilted "
-               "background layer edges.",
+               "Smooth the edges of tilted diorama layers with a one-pixel border.",
                kSettingCat_Graphics, 1, false, GpuShadersActive, NULL),
   BOOL_SETTING(gpu_fx_shadow, "AR_GPU_FX_SHADOW", "Soft shadow blur",
-               "Diorama: blur sprite/layer drop shadows. KNOWN ISSUE: can "
-               "bleed onto transparent gaps in the layer behind it (e.g. a "
-               "hazy patch over the sky) — off by default until fixed.",
+               "Soften shadows in the diorama. This can leave a haze in transparent areas, "
+               "including the sky. Off by default.",
                kSettingCat_Graphics, 0, false, GpuShadersActive, NULL),
   /* One existing opt-in owns the replacement frame-generation path. */
   BOOL_SETTING(gpu_interp_enabled, "AR_INTERP_ENABLE",
                "Frame interpolation",
-               "Diorama: generate intermediate captured-layer frames for "
-               "smoother motion on high-refresh (>60Hz) displays.",
+               "Generate extra frames between game frames for smoother diorama motion on "
+               "displays above 60 Hz.",
                kSettingCat_Graphics, 0, false, Diorama_ModeIsOn, NULL),
   { "gpu_interp_source_rate", "AR_INTERP_SOURCE_RATE",
     "Interpolation source test",
-    "Native preserves authentic 60 Hz gameplay. Test 30 -> 60 Hz deliberately "
-    "runs Diorama gameplay in slow motion at 30 Hz while presentation remains "
-    "at the selected refresh rate, making every generated midpoint visible on "
-    "a 60 Hz Vsync display.",
+    "Native keeps gameplay at 60 Hz. Test 30 -> 60 Hz slows diorama gameplay to 30 Hz so "
+    "you can see the generated frames on a 60 Hz display with Vsync.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Graphics,
     &g_settings.gpu_interp_source_rate, kInterpolationSource_Native,
     kInterpolationSource_Native, kInterpolationSource_Test30, 1, false,
@@ -2375,86 +2255,82 @@ const SettingDesc g_setting_descs[] = {
    * bounded control rather than a developer dial. Defaults are the
    * tuned-by-eye values, which is what the effect is meant to look like. */
   BOOL_SETTING(crt_enabled, "AR_CRT", "CRT effect",
-               "Simulate a curved colour CRT: barrel glass, scanlines, "
-               "phosphor mask and corner falloff. Applies to every mode "
-               "(flat, diorama and 3D town) at once.",
+               "Give every scene curved glass, scanlines, a phosphor mask, and darker "
+               "corners like a colour CRT.",
                kSettingCat_Crt, 0, false, GpuShadersActive, NULL),
   INT_SETTING(crt_curvature_x100, "AR_CRT_CURVE", "Glass curvature",
-              "How far the tube bows the picture. 0 is flat glass; the "
-              "corners darken and the image pulls in as this rises.",
+              "Curve the image like CRT glass. Higher values pull in the image and darken "
+              "the corners. 0 keeps the image flat.",
               kSettingCat_Crt, 45, 0, 200, NULL, GpuShadersActive),
   INT_SETTING(crt_scanline_x100, "AR_CRT_SCAN", "Scanline depth",
-              "How dark the gaps between the 224 source scanlines go. "
-              "Follows the signal, so the count holds at any window size.",
+              "Darken the gaps between the 224 original scanlines. The line count stays the "
+              "same at any window size.",
               kSettingCat_Crt, 35, 0, 100, NULL, GpuShadersActive),
   INT_SETTING(crt_mask_x100, "AR_CRT_MASK", "Phosphor mask",
-              "Strength of the red/green/blue aperture grille. Sits on the "
-              "glass at output-pixel pitch, so it does not warp with the "
-              "picture.",
+              "Set how visible the red, green, and blue phosphor stripes are. The pattern "
+              "follows the screen's pixels.",
               kSettingCat_Crt, 40, 0, 100, NULL, GpuShadersActive),
   INT_SETTING(crt_aberration_x100, "AR_CRT_ABERR", "Colour fringing",
-              "Horizontal red/blue split, in output pixels. Reads as beam "
-              "convergence error; high values fringe hard edges heavily.",
+              "Separate red and blue horizontally, in output pixels. Higher values make "
+              "colored fringes stand out along sharp edges.",
               kSettingCat_Crt, 25, 0, 300, NULL, GpuShadersActive),
   INT_SETTING(crt_bandwidth_x100, "AR_CRT_BAND", "Signal bandwidth",
-              "Horizontal smear between neighbouring pixels, in source "
-              "pixels. Composite and RF carried less bandwidth than the pixel "
-              "clock, which is what let dithered art blend into extra "
-              "apparent colours. Vertical detail stays sharp.",
+              "Blend neighboring pixels horizontally, like a composite or RF signal. This "
+              "softens dithered patterns and keeps vertical detail sharp.",
               kSettingCat_Crt, 30, 0, 200, NULL, GpuShadersActive),
   INT_SETTING(crt_vignette_x100, "AR_CRT_VIG", "Corner falloff",
-              "Darkening toward the corners of the tube.",
+              "Darken the image toward the corners.",
               kSettingCat_Crt, 25, 0, 100, NULL, GpuShadersActive),
   INT_SETTING(crt_brightness_x100, "AR_CRT_BRIGHT", "Brightness",
-              "Lifts the whole picture to compensate for the light the "
-              "scanlines and phosphor mask absorb. 100 is unmodified.",
+              "Add brightness to make up for light lost to scanlines and the phosphor mask. "
+              "100% adds no extra light.",
               kSettingCat_Crt, 125, 50, 300, NULL, GpuShadersActive),
   { "audio_enabled", "AR_ENABLE_AUDIO", "Enable audio",
-    "Mute or unmute output while authentic and enhanced audio timelines keep "
-    "running.",
+    "Turn sound output on or off. Music and sound effects continue to advance when muted.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Audio,
     &g_settings.audio_enabled, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL, .modern_env = true },
   { "audio_frequency", "AR_AUDIO_FREQ", "Audio frequency",
-    "Auto matches the audio device's native rate. 32.04 kHz is raised to 44.1 "
-    "(SDL's device minimum).",
+    "Set the audio output rate. Auto follows the audio device. Selecting 32.04 kHz uses "
+    "44.1 kHz for output.",
     kSettingType_Enum, kApply_Restart, kSettingCat_Audio,
     &g_settings.audio_frequency, kAudioFrequency_Auto,
     kAudioFrequency_32040, kAudioFrequency_Auto, 1, false,
     kAudioFrequencyLabels, kAudioFrequency_Count, NULL, NULL,
     ParseAudioFrequency, NULL, .modern_env = true },
   { "audio_samples", "AR_AUDIO_SAMPLES", "Audio buffer samples",
-    "Set the host audio callback buffer size on the next device initialization.",
+    "Set the number of samples in the audio buffer. The change takes effect the next time "
+    "the audio device opens.",
     kSettingType_Int, kApply_Restart, kSettingCat_Audio,
     &g_settings.audio_samples, 2048, 64, 8192, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL, .modern_env = true },
   { "audio_master_volume", "AR_AUDIO_VOLUME", "Master volume",
-    "Scale the final game output, including music, sound effects, and MSU-1 audio.",
+    "Adjust the overall volume for music and sound effects, including MSU-1 audio.",
     kSettingType_Int, kApply_Callback, kSettingCat_Audio,
     &g_settings.audio_master_volume, 100, 0, 100, 5, false, NULL, 0,
     NULL, NULL, ParseAudioVolume, FormatAudioVolume },
   { "audio_music_volume", "AR_MUSIC_VOLUME", "Music volume",
-    "Scale authentic SPC music and enhanced replacement music without changing sound effects.",
+    "Adjust both original and replacement music.",
     kSettingType_Int, kApply_Callback, kSettingCat_Audio,
     &g_settings.audio_music_volume, 100, 0, 100, 5, false, NULL, 0,
     NULL, NULL, ParseAudioVolume, FormatAudioVolume, .modern_env = true },
   { "audio_sfx_volume", "AR_SFX_VOLUME", "Sound effects volume",
-    "Scale native sound effects without changing authentic or enhanced music.",
+    "Adjust the volume of original sound effects.",
     kSettingType_Int, kApply_Callback, kSettingCat_Audio,
     &g_settings.audio_sfx_volume, 100, 0, 100, 5, false, NULL, 0,
     NULL, NULL, ParseAudioVolume, FormatAudioVolume, .modern_env = true },
   { "audio_extended_channels", "AR_EXTENDED_AUDIO_CHANNELS",
     "Extended sound channels",
-    "Keep all eight music voices and use four added hardware-style effect "
-    "banks. Repeated sounds can restart their own lane. Takes effect after restart.",
+    "Keep all eight music voices and give sound effects four extra channels. A repeated "
+    "sound can restart on its own channel.",
     kSettingType_Bool, kApply_Restart, kSettingCat_Audio,
     &g_settings.audio_extended_channels, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL, .modern_env = true },
   BOOL_SETTING(audio_dialog_blip, "AR_DIALOG_BLIP", "Dialogue text blip",
-               "Play the per-character sound while Sky Palace dialogue is printed.",
+               "Play a short blip for each character as Sky Palace dialogue appears.",
                kSettingCat_Audio, 1, false, NULL, NULL),
   { "music_replacements", "AR_MUSIC_REPLACEMENTS", "Enhanced music",
-    "Replace authentic music with matching OGG tracks from game-assets/manifest.ini.",
+    "Play installed replacement music when a matching OGG track is available.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Audio,
     &g_settings.music_replacements, 1, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
@@ -2466,57 +2342,57 @@ const SettingDesc g_setting_descs[] = {
    * save editor uses, so the category stays readable instead of showing 34
    * rows at once. */
   { "input_device", NULL, "Input device",
-    "Which device drives the game. Auto uses Gamepad on Steam Deck. Elsewhere, it "
-    "accepts the keyboard while the selected gamepad is idle.",
+    "Choose what controls the game. Auto uses the gamepad on Steam Deck. Elsewhere, Auto "
+    "accepts keyboard input when the selected gamepad is idle.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Input,
     &g_settings.input_device, kInputDevice_Auto, kInputDevice_Auto,
     kInputDevice_Gamepad, 1, false, kInputDeviceLabels, kInputDevice_Count,
     NULL, NULL, NULL, NULL },
   { "input_gamepad_slot", NULL, "Gamepad",
-    "Which connected controller to read. First connected follows hotplug.",
+    "Choose which controller to use. First connected follows controllers as they connect or "
+    "disconnect.",
     kSettingType_Int, kApply_Passive, kSettingCat_Input,
     &g_settings.input_gamepad_slot, 0, 0, 8, 1, false, NULL, 0,
     NULL, NULL, ParseGamepadSlot, FormatGamepadSlot },
   { "input_bind_page", NULL, "Configure bindings for",
-    "Choose which device's bindings the rows below show and edit.",
+    "Choose whether the rows below edit keyboard or gamepad bindings.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Input,
     &g_settings.input_bind_page, kInputClass_Keyboard, kInputClass_Keyboard,
     kInputClass_Gamepad, 1, false, kInputClassLabels, kInputClass_Count,
     NULL, NULL, NULL, NULL, .menu_hidden = true },
   BOOL_SETTING(input_stick_as_dpad, NULL, "Left stick as D-Pad",
-               "Steer with the left analog stick in addition to the D-Pad. "
-               "Recommended on Steam Deck.",
+               "Use the left stick as well as the D-Pad for directions. Useful on Steam "
+               "Deck.",
                kSettingCat_Input, 1, false, NULL, NULL),
   INT_SETTING(input_stick_deadzone, NULL, "Stick deadzone",
-              "How far the left stick must travel before it counts as a "
-              "direction, as a percent of full travel.",
+              "Set how far you must move the left stick before it counts as a D-Pad "
+              "direction, as a percentage of full travel.",
               kSettingCat_Input,
               kInputStickDeadzoneDefaultPercent,
               kInputStickDeadzoneMinimumPercent,
               kInputStickDeadzoneMaximumPercent, NULL, NULL),
   BOOL_SETTING(input_analog_angel, NULL, "Analog angel movement",
-               "Use left-stick direction and deflection for angel movement in towns. "
-               "Hold fire to keep one of four facing directions while moving; "
-               "release fire to turn. Movement follows fixed map axes. "
-               "Input recording and replay use digital controls.",
+               "Move the angel with the left stick's direction and distance. Hold fire to "
+               "keep facing the same way and release it to turn. Movement follows the map "
+               "axes. Recordings and replays use digital controls.",
                kSettingCat_Input, 1, false, NULL, NULL),
   INT_SETTING(input_angel_deadzone, NULL, "Angel stick deadzone",
-              "Radial deadzone for analog angel movement, as a percent of full travel.",
+              "Set how far you must move the left stick from its center before the angel "
+              "moves, as a percentage of full travel.",
               kSettingCat_Input, kAngelDeadzoneDefaultPercent, 0,
               kAngelDeadzoneMaximumPercent, NULL, NULL),
   INT_SETTING(input_cam_sensitivity, NULL, "Camera sensitivity",
-              "Speed of stick-driven camera orbit and zoom in the diorama and "
-              "3D town, as a percent of the base rate.",
+              "Set how fast the camera stick orbits and zooms in the diorama and 3D towns.",
               kSettingCat_Input, 100, 10, 400, NULL, NULL),
   INT_SETTING(input_cam_deadzone, NULL, "Camera stick deadzone",
-              "How far the camera stick must travel before it orbits. Lower "
-              "than the D-Pad deadzone so small nudges still aim.",
+              "Set how far you must move the camera stick before the view moves. Lower "
+              "values respond to smaller nudges.",
               kSettingCat_Input,
               kInputCameraDeadzoneDefaultPercent,
               kInputCameraDeadzoneMinimumPercent,
               kInputCameraDeadzoneMaximumPercent, NULL, NULL),
   BOOL_SETTING(input_cam_invert_y, NULL, "Invert camera Y",
-               "Push the camera stick up to pitch the view down.",
+               "Push the camera stick up to tilt the view down.",
                kSettingCat_Input, 0, false, NULL, NULL),
 
   BINDING_SETTINGS(kInputAction_Up, "up", "Up"),
@@ -2563,21 +2439,20 @@ const SettingDesc g_setting_descs[] = {
      Inert until the Cheats tab's "Cycle magic spell" toggle arms it. */
   BINDING_SETTING(kInputAction_MagicCycle, kInputClass_Keyboard,
                   "bind_key_magic_cycle", "Cycle magic spell",
-                  "Debug aid; needs the Cycle magic spell cheat. Press "
-                  "Enter, then the key to bind. Y resets it to the default."),
+                  "Enable the Cycle magic spell cheat to use this shortcut. Press Enter, "
+                  "then press the key you want to assign."),
   BINDING_SETTING(kInputAction_MagicCycle, kInputClass_Gamepad,
                   "bind_pad_magic_cycle", "Cycle magic spell",
-                  "Debug aid; needs the Cycle magic spell cheat. Press "
-                  "Enter, then the button to bind. Y resets it to the "
-                  "default."),
+                  "Enable the Cycle magic spell cheat to use this shortcut. Confirm, then "
+                  "press the button you want to assign."),
   BINDING_SETTING(kInputAction_RenderCompare, kInputClass_Keyboard,
                   "bind_key_render_compare", "Compare rendering",
-                  "Click to swap authentic and enhanced. Hold to toggle a "
-                  "persistent authentic picture-in-picture."),
+                  "Press briefly to switch between authentic and enhanced rendering. Hold "
+                  "to show or hide the small authentic view."),
   BINDING_SETTING(kInputAction_RenderCompare, kInputClass_Gamepad,
                   "bind_pad_render_compare", "Compare rendering",
-                  "Click to swap authentic and enhanced. Hold to toggle a "
-                  "persistent authentic picture-in-picture."),
+                  "Press briefly to switch between authentic and enhanced rendering. Hold "
+                  "to show or hide the small authentic view."),
   BINDING_SETTINGS(kInputAction_SimDescribe, "sim_describe", "Describe menu item"),
   BINDING_SHOOT_SETTINGS(kInputAction_ShootUp, "shoot_up", "Shoot up"),
   BINDING_SHOOT_SETTINGS(kInputAction_ShootRight, "shoot_right", "Shoot right"),
@@ -2590,16 +2465,13 @@ const SettingDesc g_setting_descs[] = {
    * while the census and redraw hooks preserve their support and tiles. */
   BOOL_SETTING(show_debug_settings, "AR_SHOW_DEBUG_SETTINGS",
                "Show debug settings",
-               "Reveal developer-only rows: the diorama and town 3D numeric "
-               "tuning dials, their layer and stage A/B toggles, and the scene "
-               "inspector. Off keeps the menu to the master toggles and major "
-               "on/off effects.",
+               "Show advanced controls for diorama and 3D town rendering, along with the "
+               "scene inspector and other developer tools.",
                kSettingCat_Extras, 0, false, NULL, NULL),
   { .key = "ar2_master", .env = "AR_AR2_MASTER", .label = "ActRaiser 2 Master",
-    .tooltip = "Switch between the original Master and ActRaiser 2's Master, including "
-               "gliding, diving and sword moves. Applies during the current level. "
-               "Import an ActRaiser 2 (USA) ROM in Workshop > Sights & sounds > "
-               "Game imports first.",
+    .tooltip = "Switch to the ActRaiser 2 Master mid-level to glide, dive, and use his "
+               "sword moves. First import your ActRaiser 2 (USA) ROM in Workshop > Sights & "
+               "sounds > Game imports.",
     .type = kSettingType_Bool, .apply = kApply_Passive,
     .category = kSettingCat_Enhancements, .field = &g_settings.ar2_master,
     .defval = 0, .maxval = 1, .step = 1, .available = Ar2MasterAvailable,
@@ -2607,52 +2479,45 @@ const SettingDesc g_setting_descs[] = {
     .hide_when_unavailable = true },
   GAME_CHANGE_BOOL_SETTING(
       native_menu_quick_use, "AR_NATIVE_MENU_QUICK_USE", "Native menu quick use",
-      "In the Original SIM menu, Use skips optional explanations and goes to the "
-      "confirmation or action. Describe menu item runs the full original flow, "
-      "including its explanations. Remap Describe under Controls. Modern keeps "
-      "its own Use/Describe behavior.",
+      "In the Original town menu, Use skips optional explanations. Describe menu item runs "
+      "the full command flow with explanations. Set the shortcut under Controls.",
       0, false, kSettingGameChange_QualityOfLife),
   GAME_CHANGE_BOOL_SETTING(
       fix_bridge_limit, "AR_FIX_BRIDGE_LIMIT", "Bridge-free limit",
-      "Completed bridges stop counting toward the 128-structure population "
-      "cap; they migrate to spare save space and keep their tiles, crossing, "
-      "and support.",
+      "Free up space for other buildings by excluding completed bridges from a town's "
+      "128-structure limit. The bridges still work as usual.",
       0, true, kSettingGameChange_QualityOfLife),
   GAME_CHANGE_BOOL_SETTING(
       remember_last_town, "AR_REMEMBER_LAST_TOWN", "Remember last town",
-      "Remember the last SIM town visited for each save. Continue starts the "
-      "Sky Palace and world navigation over that town, in native and enhanced "
-      "views. Does not save gameplay progress. Ignored during recording/replay.",
+      "Continue puts the Sky Palace above the last town you visited in this save. Save game "
+      "progress separately. This is disabled during recording or replay.",
       1, false, kSettingGameChange_QualityOfLife),
   GAME_CHANGE_BOOL_SETTING(
       fix_aitos_event_queue, "AR_FIX_AITOS_EVENT_QUEUE",
       "Correct Aitos messages",
-      "Prevents the northeast-mountain discovery from repeating Aitos's "
-      "earlier all-monsters-defeated message when the events overlap. Off "
-      "reproduces the original game.",
+      "Keep Aitos from repeating the all-monsters-defeated message when the northeast "
+      "mountain discovery overlaps it. Off uses the original behavior.",
       0, false, kSettingGameChange_OriginalBugFix),
   GAME_CHANGE_BOOL_SETTING(
       fix_windmill_wind_stop, "AR_FIX_WINDMILL_WIND_STOP",
       "Wind stops every windmill",
-      "Aitos's no-wind event only stills the windmills that already existed, "
-      "so one the town builds during it keeps turning. On, every windmill in "
-      "the town holds until the Wind miracle restores them. Off reproduces "
-      "the original game. Affects the enhanced town view only.",
+      "Stop all Aitos windmills during the no-wind event, including newly built ones. The "
+      "Wind miracle starts them again. Applies to the enhanced town view.",
       1, false, kSettingGameChange_OriginalBugFix),
   GAME_CHANGE_INT_SETTING(
       turbo_multiplier, "AR_TURBO_MULT", "Turbo multiplier",
-      "Number of game frames advanced per rendered frame while turbo is active.",
+      "Set how many game frames advance per drawn frame during turbo.",
       8, 2, 64, ParseTurboMultiplier, kSettingGameChange_QualityOfLife),
   { "warp_target", "AR_WARP", "Warp target",
-    "Raw hexadecimal region/map target used by Warp now; see docs/manual.md for verified values.",
+    "Enter the hexadecimal destination for Warp now. The manual lists verified region and "
+    "map values.",
     kSettingType_Custom, kApply_Passive, kSettingCat_Extras,
     &g_settings.warp_target, 0x0101, 0, 0xffff, 1, false, NULL, 0,
     NULL, NULL, ParseWarpTarget, FormatWarpTarget, .menu_hidden = true },
   { .key = "death_heim_roster", .env = "AR_DEATH_HEIM_ROSTER", .label = "Death Heim boss roster",
-    .tooltip = "Standard fights six Act 2 bosses. Act boss swap fights six Act 1 bosses. "
-               "Extended boss rush fights each city's Act 1 then Act 2 boss. "
-               "The final boss always follows the full roster. "
-               "Locked during a rush and recording/replay.",
+    .tooltip = "Standard uses six Act 2 bosses. Act boss swap uses six Act 1 bosses. "
+               "Extended fights Act 1 then Act 2 per town. The final boss comes last. "
+               "Locked during a rush or recording/replay.",
     .type = kSettingType_Enum, .apply = kApply_Passive, .category = kSettingCat_Enhancements,
     .field = &g_settings.death_heim_roster, .defval = kActRaiserDeathHeimRoster_Standard,
     .maxval = kActRaiserDeathHeimRoster_Extended, .step = 1,
@@ -2663,89 +2528,87 @@ const SettingDesc g_setting_descs[] = {
     .value_available = DeathHeimRosterAvailable, .prepare_change = DeathHeimPrepareChange },
   { .key = "death_heim_shuffle_order", .env = "AR_DEATH_HEIM_SHUFFLE_ORDER",
     .label = "Shuffle boss order",
-    .tooltip = "Shuffle Death Heim's selected roster without repeats. The final boss stays last. "
-               "The same roster and seed keep the same order, including retries.",
+    .tooltip = "Shuffle Death Heim’s bosses without repeats. The final boss stays last. The "
+               "same roster and seed give the same order on retries.",
     .type = kSettingType_Bool, .apply = kApply_Passive, .category = kSettingCat_RandoBosses,
     .field = &g_settings.death_heim_shuffle_order, .maxval = 1, .step = 1,
     .modern_env = true, .can_change = DeathHeimCanChange,
     .prepare_change = DeathHeimPrepareChange },
   { .key = "death_heim_seed", .env = "AR_DEATH_HEIM_SEED", .label = "Boss order seed",
-    .tooltip = "Seed for Death Heim's boss order, saved with this campaign. "
-               "Independent of enemy and item randomization. Change it before entering Death Heim.",
+    .tooltip = "Set the seed for Death Heim's boss order before entering. Your campaign "
+               "saves this seed separately from the enemy and item randomizer.",
     .type = kSettingType_Int, .apply = kApply_Passive, .category = kSettingCat_RandoBosses,
     .field = &g_settings.death_heim_seed, .defval = 1,
     .maxval = kActRaiserDeathHeimRushSeedMax, .step = 1, .modern_env = true,
     .can_change = DeathHeimCanChange, .prepare_change = DeathHeimPrepareChange },
   /* ---- Randomizer title draft (src/randomizer/randomizer.c). Confirmed campaigns bind
    * the full recipe, rather than reading mutable per-install settings. */
-  { "rando_start", NULL, "Start new randomized game...", "Copy this setup into an empty slot. The current campaign stays unchanged.",
+  { "rando_start", NULL, "Start new randomized game...", "Start a new campaign in an empty "
+                                                         "slot using this randomizer setup.",
     kSettingType_Action, kApply_Action, kSettingCat_RandoSeed,
     NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, NULL, NULL,
     .action = kSettingAction_NewRandomizedGame },
   { "rando_enable", "AR_RANDO", "Randomizer",
-    "Choose a randomizer setup before New Game. The seed and options "
-    "are saved with that campaign and restored on Continue. Return "
-    "to the title screen to configure a different run.",
+    "Choose what to randomize before starting a new game. Continue restores that campaign's "
+    "seed and rules. Return to the title screen to set up a different run.",
     kSettingType_Bool, kApply_Passive, kSettingCat_RandoSeed,
     &g_settings.rando_enable, 0, 0, 1, 1, false, NULL, 0,
     RandoRuntimeAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
     .can_change = Randomizer_CanEditDraft },
   { "rando_seed", "AR_RANDO_SEED", "Seed",
-    "The seed determines the next campaign's rolls. The same seed, "
-    "options and starting regional rules reproduce the same setup. "
-    "Continue restores the saved seed without rerolling.",
+    "Set the number that drives randomization. The same seed, options, and starting "
+    "regional rules give the same setup. Continue restores the saved seed.",
     kSettingType_Int, kApply_Passive, kSettingCat_RandoSeed,
     &g_settings.rando_seed, 1, 0, 999999999, 1, false, NULL, 0,
     RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
     .can_change = Randomizer_CanEditDraft },
   { "rando_reroll", NULL, "New seed",
-    "Draw a fresh seed for the next New Game. Existing saves keep their own seed.",
+    "Pick a fresh seed for the next new game. Existing saves keep their seeds.",
     kSettingType_Action, kApply_Action, kSettingCat_RandoSeed,
     NULL, 0, 0, 0, 0, false, NULL, 0, RandoAvailable, NULL, NULL, NULL,
     .action = kSettingAction_Reroll },
 
   { "rando_regional_action", "AR_RANDO_REGIONAL_ACTION", "Regional action rules",
-    "Roll each action gameplay rule between US, Japanese and European "
-    "versions at New Game. HP and damage multipliers apply afterward. "
-    "Difficulty, title access, controls and artwork stay as selected.",
+    "Pick each action rule from the US, Japanese, or European version when you start a "
+    "game. Enemy health and damage multipliers apply afterward. Difficulty, title access, "
+    "controls, and art stay as selected.",
     kSettingType_Bool, kApply_Passive, kSettingCat_RandoSeed,
     &g_settings.rando_regional_action, 0, 0, 1, 1, false, NULL, 0,
     RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
     .can_change = Randomizer_CanEditDraft },
   { "rando_regional_towns", "AR_RANDO_REGIONAL_TOWNS", "Regional town rules",
-    "Roll town gameplay rules at New Game, including construction, "
-    "lairs and miracles. Population support and story goals stay "
-    "compatible. Continue never rerolls developed towns.",
+    "Pick regional town rules at random when you start a new game, including construction, "
+    "lairs, and miracles. Continue keeps the rules for the towns you've already started.",
     kSettingType_Bool, kApply_Passive, kSettingCat_RandoSeed,
     &g_settings.rando_regional_towns, 0, 0, 1, 1, false, NULL, 0,
     RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
     .can_change = Randomizer_CanEditDraft },
 
   { "rando_enemy_hp", "AR_RANDO_ENEMY_HP", "Enemy health",
-    "Scales each enemy's selected regional base HP. Applied at spawn "
-    "before difficulty adjustments; some bosses later replace their own HP.",
+    "Scale enemy health when an enemy spawns, before difficulty adjustments. Some bosses "
+    "set their own health later.",
     kSettingType_Int, kApply_Passive, kSettingCat_RandoEnemies,
     &g_settings.rando_enemy_hp, 100, 10, 1000, 1, false, NULL, 0,
     RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
     .can_change = Randomizer_CanEditDraft },
   { "rando_enemy_atk", "AR_RANDO_ENEMY_ATK", "Enemy damage",
-    "Scales each enemy's selected regional base contact and attack damage. "
-    "Applied at spawn before difficulty adjustments; terrain damage is separate.",
+    "Scale enemy contact and attack damage when an enemy spawns, before difficulty "
+    "adjustments. Terrain damage has its own rules.",
     kSettingType_Int, kApply_Passive, kSettingCat_RandoEnemies,
     &g_settings.rando_enemy_atk, 100, 10, 1000, 1, false, NULL, 0,
     RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
     .can_change = Randomizer_CanEditDraft },
   { "rando_enemy_types", "AR_RANDO_ENEMY_TYPES", "Enemy types",
-    "Shuffle which enemy stands where. Bosses and item statues are left alone.",
+    "Shuffle which regular enemy appears at each position. Bosses and item statues keep "
+    "their places.",
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoEnemies,
     &g_settings.rando_enemy_types, kRandomMode_Off, kRandomMode_Off,
     kRandomMode_Shuffle, 1, false, kRandoShuffleLabels, 2,
     RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
     .can_change = Randomizer_CanEditDraft },
   { "rando_enemy_scope", "AR_RANDO_ENEMY_SCOPE", "Enemy shuffle range",
-    "How far an enemy may move. Act is the widest safe range: every map of an "
-    "act shares one animation set, so a type moved inside an act still draws "
-    "correctly.",
+    "Shuffle enemies within each map or across a whole act. Maps in the same act share "
+    "animations, so moved enemies still display correctly.",
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoEnemies,
     &g_settings.rando_enemy_scope, kRandomScope_Act, kRandomScope_Map,
     kRandomScope_Act, 1, false, kRandoScopeLabels, kRandomScope_Count,
@@ -2753,16 +2616,15 @@ const SettingDesc g_setting_descs[] = {
     .can_change = Randomizer_CanEditDraft },
 
   { "rando_statue_drops", "AR_RANDO_DROPS", "Statue drops",
-    "What the breakable statues hold. Shuffle redistributes the items a map "
-    "already has; Random rolls each one fresh.",
+    "Shuffle moves existing drops among a map's breakable statues. Random picks a fresh "
+    "drop for each statue.",
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoItems,
     &g_settings.rando_statue_drops, kRandomMode_Off, kRandomMode_Off,
     kRandomMode_Random, 1, false, kRandoModeLabels, kRandomMode_Count,
     RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
     .can_change = Randomizer_CanEditDraft },
   { "rando_statue_spots", "AR_RANDO_STATUES", "Statue placement",
-    "Swap the statues of a map between each other's positions. Every result is "
-    "somewhere a statue already stood, so none can end up unreachable.",
+    "Swap breakable statues among their existing positions within each map.",
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoItems,
     &g_settings.rando_statue_spots, kRandomMode_Off, kRandomMode_Off,
     kRandomMode_Shuffle, 1, false, kRandoShuffleLabels, 2,
@@ -2770,15 +2632,15 @@ const SettingDesc g_setting_descs[] = {
     .can_change = Randomizer_CanEditDraft },
 
   { "rando_lair_spots", "AR_RANDO_LAIRS", "Lair positions",
-    "Swap each town's four monster lairs between their own positions. Kept "
-    "within a town because nothing in the game checks a lair against terrain.",
+    "Swap a town's four monster lairs among their existing positions.",
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoSim,
     &g_settings.rando_lair_spots, kRandomMode_Off, kRandomMode_Off,
     kRandomMode_Shuffle, 1, false, kRandoShuffleLabels, 2,
     RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
     .can_change = Randomizer_CanEditDraft },
   { "rando_lair_types", "AR_RANDO_LAIR_TYPES", "Lair monsters",
-    "Which monster each lair sends out. Any town can host any of the four.",
+    "Shuffle swaps existing monster types across all lairs. Random picks one of the four "
+    "types for each lair.",
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoSim,
     &g_settings.rando_lair_types, kRandomMode_Off, kRandomMode_Off,
     kRandomMode_Random, 1, false, kRandoModeLabels, kRandomMode_Count,
@@ -2786,49 +2648,48 @@ const SettingDesc g_setting_descs[] = {
     .can_change = Randomizer_CanEditDraft },
 
   BOOL_SETTING(scene_inspector, "AR_SCENE_INSPECTOR", "Scene inspector",
-               "Click the game to pause and identify BG tiles, OAM sprites, "
-               "VRAM addresses, palettes, hashes, and manifest gates.",
+               "Click the game view to pause and inspect tiles, sprites, palettes, memory "
+               "addresses, and asset rules.",
                kSettingCat_Inspector, 0, false, NULL, NULL),
   ACTION_SETTING("dump_scene_assets", kSettingAction_DumpSceneAssets,
                  kSettingCat_Inspector, NULL, false, "Dump scene assets",
-      "Export every resident BG tilemap, OBJ animation-tile atlas, all 128 "
-      "OAM sprites, palettes, raw PPU memory, and a metadata index as PNG "
-      "and data files in this run's diagnostic folder."),
+      "Export scene tilemaps, sprite art, palettes, and graphics memory to the current "
+      "run's diagnostic folder as images and data files."),
   /* The in-game manual. Its own section rather than a row under System > Tools:
    * it is something a player reaches for, not a host command, and the reader it
    * opens is a full mode rather than a toggle. */
   ACTION_SETTING("manual_open", kSettingAction_Manual,
                  kSettingCat_Manual, NULL, false, "Read the manual",
-      "Open the scanned game manual. Arrows or the shoulder buttons turn "
-      "pages, +/- zooms, Escape returns here."),
+      "Read the scanned manual. Use arrows or shoulder buttons to turn pages, + or - to "
+      "zoom, and Escape to return."),
   BOOL_SETTING(manual_spreads, NULL, "Two-page spreads",
-               "Show the manual as facing pages, the way the booklet reads. "
-               "Artwork drawn across the gutter stays whole; turn this off to "
-               "read one page at a time, which suits a wide, short manual.",
+               "Show facing pages together so artwork across the center stays whole. Turn "
+               "this off to read one page at a time.",
                kSettingCat_Manual, true, false, NULL, NULL),
   ACTION_SETTING("toggle_pause", kSettingAction_TogglePause,
                  kSettingCat_Extras, NULL, false, "Pause / resume",
-                 "Toggle game pause after the settings overlay closes."),
+                 "Pause or resume the game when you close the overlay."),
   ACTION_SETTING("toggle_turbo", kSettingAction_ToggleTurbo,
                  kSettingCat_Extras, NULL, false, "Toggle turbo",
-                 "Toggle fast-forward using the configured turbo multiplier."),
+                 "Turn fast-forward on or off. Turbo multiplier sets its speed."),
   ACTION_SETTING("save_state", kSettingAction_SaveState,
                  kSettingCat_Extras, NULL, true, "Save state",
-                 "Capture a debug hardware/RAM snapshot (F5). Inspection "
-                 "only; this is not a resumable save state."),
+                 "Capture a memory and hardware snapshot for debugging. Use an in-game save "
+                 "to keep playable progress."),
   ACTION_SETTING("load_state", kSettingAction_LoadState,
                  kSettingCat_Extras, NULL, true, "Load state",
-                 "Unsupported debug restore (F7). Requests are rejected "
-                 "without changing game state; use battery saves instead."),
+                 "Debug snapshot restore is unavailable. Use Continue to load an in-game "
+                 "save."),
   ACTION_SETTING("warp_now", kSettingAction_Warp,
                  kSettingCat_Extras, NULL, true, "Warp now",
-                 "Stage the configured raw warp target through the game's transition path."),
+                 "Go to the destination set in Warp target using the game's transition."),
   ACTION_SETTING("take_snapshot", kSettingAction_Snapshot,
                  kSettingCat_Extras, NULL, false, "Take snapshot",
-                 "Capture WRAM, VRAM, CGRAM, OAM, and the current game framebuffer."),
+                 "Save a diagnostic snapshot of the current image, game memory, palettes, "
+                 "and sprite data."),
   ACTION_SETTING("restart_game", kSettingAction_Restart,
                  kSettingCat_Extras, NULL, false, "Restart game",
-                 "Persist settings and battery SRAM, then reset the game in this window."),
+                 "Save settings and cartridge data, then restart the game in this window."),
   { .key = "retry_imported_level", .label = "Retry level",
     .tooltip = "Start this level again from its entrance.",
     .type = kSettingType_Action, .apply = kApply_Action, .category = kSettingCat_Extras,
@@ -2841,116 +2702,129 @@ const SettingDesc g_setting_descs[] = {
     .hide_when_unavailable = true },
   ACTION_SETTING("exit_desktop", kSettingAction_Exit,
                  kSettingCat_Extras, NULL, false, "Exit to desktop",
-                 "Persist settings and battery SRAM, then close the application."),
+                 "Save settings and cartridge data, then close the game."),
   { "save_slots", NULL, "Slots", "Manage campaigns and start a new game in an empty slot.",
     kSettingType_Action, kApply_Action, kSettingCat_Save,
     NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, NULL, NULL,
     .action = kSettingAction_SaveSlots },
   { "save_backend", "AR_SAVE_BACKEND", "New slot format",
-    "New slots use this format. Existing slots keep their own format. Diagnostic saves use it after restart.",
+    "Choose the format for new slots. Existing slots keep their format. External diagnostic "
+    "saves use the selected format after restart.",
     kSettingType_Enum, kApply_Restart, kSettingCat_Save,
     &g_settings.save_backend, 0, 0, 1, 1, false,
     kSaveBackendLabels, 2, NULL, NULL, ParseSaveBackend, NULL },
   BOOL_SETTING(save_edit_armed, "AR_SAVE_EDIT", "Allow save edits",
-               "Safety switch: permits Apply actions and next-boot staged overrides to change SRAM.",
+               "Allow edits to an external diagnostic save. Applies to the Apply actions "
+               "and any changes staged for the next launch.",
                kSettingCat_Save, 0, false, NULL, NULL),
   BOOL_SETTING(save_autobackup, "AR_SAVE_BACKUP", "Auto-backup",
-               "Back up the active campaign to saves/backups/<slot> before the first persistent edit or import.",
+               "Back up the active campaign to saves/backups before the first edit that "
+               "writes to disk or replaces the slot.",
                kSettingCat_Save, 1, false, NULL, NULL),
   { "save_editor_page", NULL, "Edit section",
-    "Choose Actions, Progress, Status, Magic, Items, or Scores; the overlay drives this from its tab bar.",
+    "Choose a page of save editor controls. The overlay uses the tabs to switch pages.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Save,
     &g_settings.save_editor_page, kSaveEditorPage_Actions,
     kSaveEditorPage_Actions, kSaveEditorPage_Count - 1, 1, false,
     kSaveEditorPageLabels, kSaveEditorPage_Count, NULL, NULL, NULL, NULL, .menu_hidden = true },
   SAVE_PROGRESS_SETTING(0, "save_prog_fillmore", "AR_SAVE_PROG_FILLMORE",
-                        "Fillmore State", "Stage Fillmore's Act/state flags."),
+                        "Fillmore State", "Choose which act is available or cleared for "
+                                          "this town in the save."),
   SAVE_PROGRESS_SETTING(1, "save_prog_bloodpool", "AR_SAVE_PROG_BLOODPOOL",
-                        "Bloodpool State", "Stage Bloodpool's Act/state flags."),
+                        "Bloodpool State", "Choose which act is available or cleared for "
+                                           "this town in the save."),
   SAVE_PROGRESS_SETTING(2, "save_prog_kasandora", "AR_SAVE_PROG_KASANDORA",
-                        "Kasandora State", "Stage Kasandora's Act/state flags."),
+                        "Kasandora State", "Choose which act is available or cleared for "
+                                           "this town in the save."),
   SAVE_PROGRESS_SETTING(3, "save_prog_aitos", "AR_SAVE_PROG_AITOS",
-                        "Aitos State", "Stage Aitos's Act/state flags."),
+                        "Aitos State", "Choose which act is available or cleared for this "
+                                       "town in the save."),
   SAVE_PROGRESS_SETTING(4, "save_prog_marahna", "AR_SAVE_PROG_MARAHNA",
-                        "Marahna State", "Stage Marahna's Act/state flags."),
+                        "Marahna State", "Choose which act is available or cleared for this "
+                                         "town in the save."),
   SAVE_PROGRESS_SETTING(5, "save_prog_northwall", "AR_SAVE_PROG_NORTHWALL",
-                        "Northwall State", "Stage Northwall's Act/state flags."),
+                        "Northwall State", "Choose which act is available or cleared for "
+                                           "this town in the save."),
   SAVE_ENUM_FIELD(kSaveEditorPage_Progress, &g_settings.save_death_heim_state,
                   "save_death_heim_state", "Death Heim State",
-                  "Stage Death Heim as locked, unlocked, or cleared.",
+                  "Choose whether the saved Death Heim state is locked, unlocked, or "
+                  "cleared.",
                   kSaveDeathHeimLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Progress, &g_settings.save_professional_mode,
                   "save_professional_mode", "Professional Mode",
-                  "Stage the title-screen Professional mode unlock marker.",
+                  "Choose whether Professional mode is unlocked on the title screen.",
                   kSaveProfessionalLabels),
   { "save_player_name", NULL, "Player Name",
-    "Stage the saved player name (1-8 printable characters).",
+    "Set the saved player name. Use 1 to 8 printable characters.",
     kSettingType_Custom, kApply_Save, kSettingCat_Save,
     g_settings.save_player_name, 0, 0, 0, 0, false,
     NULL, 0, NULL, NULL, ParseSavePlayerName, FormatSavePlayerName,
     .save_page = kSaveEditorPage_Status },
   SAVE_STAGE_DIRECT(save_master_level, "save_master_level", "Master Level",
-                    "Stage the persistent Master level (1-17).", 17),
+                    "Set the Master's saved level from 1 to 17.", 17),
   SAVE_STAGE_DIRECT(save_master_hp, "save_master_hp", "Master HP",
-                    "Stage persistent Master health (1-24).", 24),
+                    "Set the Master's saved health from 1 to 24.", 24),
   SAVE_STAGE_ZERO(save_master_mp, "save_master_mp", "Master MP",
-                  "Stage persistent magic scrolls/MP (0-10).", 10),
+                  "Set the Master's saved magic scroll count from 0 to 10.", 10),
   SAVE_STAGE_DIRECT(save_lives, "save_lives", "Lives",
-                    "Stage the displayed life count (1-9).", 9),
+                    "Set the saved life count shown on screen, from 1 to 9.", 9),
   SAVE_STAGE_ZERO(save_angel_sp_current, "save_angel_sp_current",
-                  "Angel Current SP", "Stage current simulation SP (0-999).", 999),
+                  "Angel Current SP", "Set the angel's current miracle points (SP) from 0 "
+                                      "to 999.", 999),
   SAVE_STAGE_ZERO(save_angel_sp_max, "save_angel_sp_max",
-                  "Angel Maximum SP", "Stage maximum simulation SP (0-999).", 999),
+                  "Angel Maximum SP", "Set the angel's maximum miracle points (SP) from 0 "
+                                      "to 999.", 999),
   SAVE_STAGE_ZERO(save_angel_hp_current, "save_angel_hp_current",
-                  "Angel Current HP", "Stage current Angel health (0-24).", 24),
+                  "Angel Current HP", "Set the angel's current health from 0 to 24.", 24),
   SAVE_STAGE_DIRECT(save_angel_hp_max, "save_angel_hp_max",
-                    "Angel Maximum HP", "Stage maximum Angel health (1-24).", 24),
+                    "Angel Maximum HP", "Set the angel's maximum health from 1 to 24.", 24),
   SAVE_STAGE_ZERO(save_message_speed, "save_message_speed", "Message Speed",
-                  "Stage the saved native dialogue-speed value (0-9).", 9),
+                  "Set the saved dialogue speed from 0 to 9.", 9),
   SAVE_ENUM_FIELD(kSaveEditorPage_Magic, &g_settings.save_equipped_magic,
                   "save_equipped_magic", "Equipped Magic",
-                  "Stage the equipped spell; that spell must exist in a magic slot.",
+                  "Choose the active spell from the ones in your magic slots. Choose None "
+                  "to unequip it.",
                   kSaveEquippedMagicLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Magic, &g_settings.save_magic_slots[0],
                   "save_magic_slot_1", "Magic Slot 1",
-                  "Stage the spell stored in magic inventory slot 1.",
+                  "Choose a spell for this magic slot, or Empty to clear it.",
                   kSaveMagicSlotLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Magic, &g_settings.save_magic_slots[1],
                   "save_magic_slot_2", "Magic Slot 2",
-                  "Stage the spell stored in magic inventory slot 2.",
+                  "Choose a spell for this magic slot, or Empty to clear it.",
                   kSaveMagicSlotLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Magic, &g_settings.save_magic_slots[2],
                   "save_magic_slot_3", "Magic Slot 3",
-                  "Stage the spell stored in magic inventory slot 3.",
+                  "Choose a spell for this magic slot, or Empty to clear it.",
                   kSaveMagicSlotLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Magic, &g_settings.save_magic_slots[3],
                   "save_magic_slot_4", "Magic Slot 4",
-                  "Stage the spell stored in magic inventory slot 4.",
+                  "Choose a spell for this magic slot, or Empty to clear it.",
                   kSaveMagicSlotLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[0],
                   "save_item_slot_1", "Item Slot 1",
-                  "Stage the item stored in inventory slot 1.", kSaveItemLabels),
+                  "Choose an item for this inventory slot, or Empty to clear it.", kSaveItemLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[1],
                   "save_item_slot_2", "Item Slot 2",
-                  "Stage the item stored in inventory slot 2.", kSaveItemLabels),
+                  "Choose an item for this inventory slot, or Empty to clear it.", kSaveItemLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[2],
                   "save_item_slot_3", "Item Slot 3",
-                  "Stage the item stored in inventory slot 3.", kSaveItemLabels),
+                  "Choose an item for this inventory slot, or Empty to clear it.", kSaveItemLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[3],
                   "save_item_slot_4", "Item Slot 4",
-                  "Stage the item stored in inventory slot 4.", kSaveItemLabels),
+                  "Choose an item for this inventory slot, or Empty to clear it.", kSaveItemLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[4],
                   "save_item_slot_5", "Item Slot 5",
-                  "Stage the item stored in inventory slot 5.", kSaveItemLabels),
+                  "Choose an item for this inventory slot, or Empty to clear it.", kSaveItemLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[5],
                   "save_item_slot_6", "Item Slot 6",
-                  "Stage the item stored in inventory slot 6.", kSaveItemLabels),
+                  "Choose an item for this inventory slot, or Empty to clear it.", kSaveItemLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[6],
                   "save_item_slot_7", "Item Slot 7",
-                  "Stage the item stored in inventory slot 7.", kSaveItemLabels),
+                  "Choose an item for this inventory slot, or Empty to clear it.", kSaveItemLabels),
   SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[7],
                   "save_item_slot_8", "Item Slot 8",
-                  "Stage the item stored in inventory slot 8.", kSaveItemLabels),
+                  "Choose an item for this inventory slot, or Empty to clear it.", kSaveItemLabels),
   SAVE_SCORE_FIELD(0, 0, "save_score_fillmore_1", "Fillmore Act 1"),
   SAVE_SCORE_FIELD(0, 1, "save_score_fillmore_2", "Fillmore Act 2"),
   SAVE_SCORE_FIELD(1, 0, "save_score_bloodpool_1", "Bloodpool Act 1"),
@@ -2965,45 +2839,57 @@ const SettingDesc g_setting_descs[] = {
   SAVE_SCORE_FIELD(5, 1, "save_score_northwall_2", "Northwall Act 2"),
   ACTION_SETTING("save_apply_session", kSettingAction_SaveApplySession,
                  kSettingCat_Save, NULL, false, "Apply for session",
-                      "Apply only to live SRAM; use a natural return to title, not Restart."),
+                      "Apply edits in memory for this session. To load them, return to the "
+                      "title screen through normal play and choose Continue. Restart "
+                      "discards session edits."),
   ACTION_SETTING("save_apply_persist", kSettingAction_SaveApplyPersist,
                  kSettingCat_Save, NULL, false, "Apply and save",
-                      "Back up and save staged fields; then Restart Game and Continue."),
+                      "Write edits to the save file, with a backup if enabled. Choose "
+                      "Restart game, then Continue to load them."),
   ACTION_SETTING("save_apply_restart", kSettingAction_SaveApplyRestart,
                  kSettingCat_Save, NULL, false, "Apply and restart",
-                 "Save staged edits and restart in this window. Choose Continue to load them."),
+                 "Save your edits and restart in this window. Choose Continue to load the "
+                 "changes."),
   ACTION_SETTING("save_import", kSettingAction_SaveImport,
                  kSettingCat_Save, NULL, false, "Import save",
-                      "Choose a campaign (.arsave), SRAM (.srm) or INI file, then review replacement of the active slot. Import restarts the game in this window."),
+                      "Pick a campaign (.arsave), SRAM (.srm), or INI file. After you "
+                      "confirm, it replaces the active slot and restarts the game."),
   ACTION_SETTING("save_export_campaign", kSettingAction_SaveExportCampaign,
                  kSettingCat_Save, NULL, false, "Export campaign",
-                      "Choose a new .arsave file for saved progress, campaign settings and name. Unsaved gameplay is not included; existing files are preserved."),
+                      "Export saved progress, campaign settings, and the player name to a "
+                      "new .arsave file. Save in-game first to include your latest "
+                      "progress."),
   ACTION_SETTING("save_export_srm", kSettingAction_SaveExportSrm,
                  kSettingCat_Save, NULL, false, "Export raw SRAM",
-                      "Choose a new .srm file for emulator-compatible cartridge data. Use Export campaign to preserve campaign settings and enhanced name. Existing files are preserved."),
+                      "Export cartridge data to a new .srm file for emulators. Use Export "
+                      "campaign to include campaign settings and the enhanced player name."),
   ACTION_SETTING("save_export_ini", kSettingAction_SaveExportIni,
                  kSettingCat_Save, NULL, false, "Export raw INI",
-                      "Choose a new .ini file for readable cartridge data used by tools. Use Export campaign to preserve campaign settings and enhanced name. Existing files are preserved."),
+                      "Export cartridge data to a new readable .ini file for tools. Use "
+                      "Export campaign to include campaign settings and the enhanced player "
+                      "name."),
   BOOL_SETTING(cheat_all_magic, "AR_ALL_MAGIC", "All magic",
-               "Unlock all four spells; disabling cannot undo unlocks already written.",
+               "Unlock all four spells. The spells stay unlocked after you turn this off.",
                kSettingCat_Cheats, 0, true, NULL, NULL),
   BOOL_SETTING(cheat_ranged_sword, "AR_RANGED_SWORD", "Ranged sword",
-               "Pin the sword-projectile flag while enabled.",
+               "Give the Master's sword a ranged projectile attack.",
                kSettingCat_Cheats, 0, false, NULL, NULL),
   INT_SETTING(cheat_inf_mp, "AR_INF_MP", "Infinite MP",
-              "Pin working magic scrolls; 1 maps to 10 for env compatibility.",
+              "Keep the Master's magic scrolls at the selected count. A value of 1 refills "
+              "them to 10.",
               kSettingCat_Cheats, 0, 0, 255, ParseInfMp, NULL),
   BOOL_SETTING(cheat_inf_sp, "AR_INF_SP", "Infinite SP",
-               "Pin current simulation SP to its live maximum.",
+               "Keep the angel's miracle points (SP) at their current maximum.",
                kSettingCat_Cheats, 0, false, NULL, NULL),
   BOOL_SETTING(cheat_angel_hp, "AR_ANGEL_HP", "Infinite angel HP",
-               "Pin current angel HP to its live maximum.",
+               "Keep the angel's health at its current maximum.",
                kSettingCat_Cheats, 0, false, NULL, NULL),
   INT_SETTING(cheat_inf_hp, "AR_INF_HP", "Infinite action HP",
-              "1 tracks the stage high-water mark; larger values are literal HP.",
+              "Refill action health continuously. 1 uses the highest health reached in the "
+              "stage. Higher values set the exact health to maintain.",
               kSettingCat_Cheats, 0, 0, 255, ParseInfHp, NULL),
   BOOL_SETTING(cheat_freeze_timer, "AR_FREEZE_TIMER", "Freeze timer",
-               "Pin the action timer until the boss tally drain is detected.",
+               "Hold the action timer steady until the boss tally starts.",
                kSettingCat_Cheats, 0, false, NULL, NULL),
   { "cheat_moonjump", "AR_MOONJUMP", "Moonjump",
     "Hold the game's normal jump button to fly upward while enabled.",
@@ -3011,60 +2897,62 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.cheat_moonjump, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, ParseMoonjumpLegacy, NULL },
   INT_SETTING(cheat_moonjump_speed, "AR_MOONJUMP_SPEED", "Moonjump speed",
-              "Pixels moved upward per frame while jump is held.",
+              "Set how many pixels the Master rises per frame while you hold Jump with "
+              "Moonjump on.",
               kSettingCat_Cheats, 6, 1, 255, NULL, NULL),
   { "cheat_no_knockback", "AR_NO_KNOCKBACK", "No knockback",
-    "Full invulnerability using the game's own i-frames: hits register no "
-    "damage, knockback, or hitstun.",
+    "Prevent damage, knockback, and the brief stun from a hit. The Master flashes while "
+    "this cheat is active.",
     kSettingType_Bool, kApply_Passive, kSettingCat_Cheats,
     &g_settings.cheat_no_knockback, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL },
   BOOL_SETTING(cheat_magic_cycle, "AR_MAGIC_CYCLE", "Cycle magic spell",
-               "Arm the Cycle magic spell control (Controls tab) to step "
-               "through the spells you have unlocked during an action stage, "
-               "reloading that spell's OBJ tiles. A cheat badge is shown "
-               "while this is on.",
+               "Cycle through unlocked spells during action stages. Set the shortcut under "
+               "Controls. This shows a cheat badge.",
                kSettingCat_Cheats, 0, false, NULL, NULL),
   { "pins", "AR_PIN", "Custom PAR pins",
-    "Comma-separated 7Exxxxvv/7Fxxxxvv codes, enforced every frame.",
+    "Enter comma-separated Pro Action Replay codes in 7Exxxxvv or 7Fxxxxvv format. The game "
+    "applies them every frame.",
     kSettingType_Custom, kApply_Passive, kSettingCat_Cheats,
     &g_settings.pin_count, 0, 0, 32, 1, true, NULL, 0, NULL, NULL,
     ParsePins, FormatPins },
 
   BOOL_SETTING(ws_action, "AR_WS_ACTION", "Wide action stages",
-               "Enable wide geometry in action regions.",
+               "Draw action stages beyond the original 4:3 playfield in widescreen.",
                kSettingCat_Widescreen, 1, false, NULL,
                WidescreenSettingChanged),
   BOOL_SETTING(ws_sim, "AR_WS_SIM", "Wide simulation towns",
-               "Enable wide geometry in simulation towns.",
+               "Draw more of the map in widescreen simulation towns.",
                kSettingCat_Widescreen, 1, false, NULL,
                WidescreenSettingChanged),
   BOOL_SETTING(ws_bgrefresh, "AR_WS_BGREFRESH", "Legacy BG margin refresh",
-               "Load-only compatibility alias; action world margins now use "
-               "the bounded HLE provider.",
+               "Kept for older settings files. Action-stage margins now use the current "
+               "widescreen renderer.",
                kSettingCat_Widescreen, 1, false, NULL, NULL),
   BOOL_SETTING(ws_skypalace_bg, "AR_WS_SKYPALACE_BG", "Sky Palace BG repair",
-               "Reconstruct box-free colonnade tiles in BG2 margins.",
+               "Fill the sides of the Sky Palace backdrop with matching pillar tiles.",
                kSettingCat_Widescreen, 1, false, NULL,
                WidescreenSettingChanged),
   BOOL_SETTING(ws_sprites, "AR_WS_SPRITES", "Wide action sprites",
-               "Emit action sprite components into side margins.",
+               "Draw action-stage sprites in the widescreen margins.",
                kSettingCat_Widescreen, 1, false, NULL,
                WidescreenSettingChanged),
   BOOL_SETTING(ws_margin_objects, "AR_WS_MARGIN_OBJECTS", "Draw margin objects",
-               "Draw initialized action objects in the wide view.",
+               "Draw active action-stage objects in the widescreen margins.",
                kSettingCat_Widescreen, 1, false, NULL,
                WidescreenSettingChanged),
   BOOL_SETTING(ws_margin_activation, "AR_WS_MARGIN_ACTIVATION", "Activate margin objects",
-               "Extend action object activation to the live wide window.",
+               "Let action-stage objects activate when they enter the wider view.",
                kSettingCat_Widescreen, 1, false, NULL,
                WidescreenSettingChanged),
   BOOL_SETTING(ws_bg2_padding, "AR_WS_BG2_MIRROR", "Decorative BG2 padding",
-               "Use the mapped mirror/repeat strategies for 256px BG2 layers.",
+               "Fill the sides of narrow scrolling backgrounds with the room's mirror or "
+               "repeat rules.",
                kSettingCat_Widescreen, 1, false, NULL,
                WidescreenSettingChanged),
   BOOL_SETTING(ws_sim_sprites, "AR_WS_SIM_SPRITES", "Wide simulation sprites",
-               "Widen town world sprites and angel projectile lifetime.",
+               "Draw town sprites in the wider view and keep angel projectiles active "
+               "there.",
                kSettingCat_Widescreen, 1, false, NULL,
                WidescreenSettingChanged),
 };
@@ -3587,7 +3475,7 @@ bool Settings_IsDebugOnly(const SettingDesc *desc) {
 const char *Settings_ApplyKindName(SettingApplyKind apply) {
   switch (apply) {
     case kApply_Passive: return "Live";
-    case kApply_Callback: return "Live callback";
+    case kApply_Callback: return "Applies now";
     case kApply_Restart: return "Restart required";
     case kApply_Save: return "Staged save edit";
     case kApply_Action: return "Action";
