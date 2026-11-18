@@ -10,7 +10,8 @@
         3,
         3
       ],
-      "flags": 512,
+      "flags": 10486272,
+      "complete_rear_matte": true,
       "origins": [
         [
           3,
@@ -80,7 +81,7 @@
         1,
         1
       ],
-      "flags": 128,
+      "flags": 2097280,
       "origins": [
         [
           4,
@@ -204,7 +205,8 @@
         3,
         3
       ],
-      "flags": 512,
+      "flags": 10486272,
+      "complete_rear_matte": true,
       "origins": [
         [
           3,
@@ -1470,7 +1472,7 @@
         1,
         1
       ],
-      "flags": 0,
+      "flags": 2097152,
       "origins": [
         [
           4,
@@ -1923,7 +1925,8 @@
         3,
         3
       ],
-      "flags": 512,
+      "flags": 10486272,
+      "complete_rear_matte": true,
       "origins": [
         [
           3,
@@ -2594,7 +2597,8 @@
         3,
         3
       ],
-      "flags": 512,
+      "flags": 10486272,
+      "complete_rear_matte": true,
       "origins": [
         [
           3,
@@ -2983,7 +2987,7 @@
         1,
         1
       ],
-      "flags": 128,
+      "flags": 2097280,
       "origins": [
         [
           4,
@@ -3039,7 +3043,7 @@
         1,
         1
       ],
-      "flags": 128,
+      "flags": 2097280,
       "origins": [
         [
           4,
@@ -3179,7 +3183,7 @@
         1,
         1
       ],
-      "flags": 128,
+      "flags": 2097280,
       "origins": [
         [
           4,
@@ -3391,7 +3395,7 @@
         1,
         1
       ],
-      "flags": 128,
+      "flags": 2097280,
       "origins": [
         [
           4,
@@ -3446,7 +3450,7 @@
         1,
         1
       ],
-      "flags": 0,
+      "flags": 2097152,
       "origins": [
         [
           4,
@@ -3807,7 +3811,7 @@
         1,
         1
       ],
-      "flags": 128,
+      "flags": 2097280,
       "origins": [
         [
           4,
@@ -4459,7 +4463,7 @@
         1,
         1
       ],
-      "flags": 128,
+      "flags": 2097280,
       "origins": [
         [
           4,
@@ -4557,7 +4561,7 @@
         1,
         1
       ],
-      "flags": 128,
+      "flags": 2097280,
       "origins": [
         [
           4,

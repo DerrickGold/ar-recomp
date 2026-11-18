@@ -156,12 +156,12 @@ static void ForestRootStamp(const ActionRoomScene *s,ActionVoxelGeometry *edited
       assert(rear[y*16+x]==expected);
     }
     /* The same native bank/crown relationship survives reflected negative
-     * stamps; the inherited rear copy keeps every original alpha hole. */
+     * stamps; the rear border keeps every original alpha hole. */
     const int crown_x=flip?0:-3;
     for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)
       low[y*16+x]=ForestNativeColor(s,2032+(flip?15-x:x),368+y,&frame);
     assert(ActionVoxel_Split(edited,crown_x*16,-32,16,16,16,&frame,low,16,rear,front));
-    for(unsigned p=0;p<256;++p)assert(rear[p]==low[p] && front[p]==low[p]);
+    for(unsigned p=0;p<256;++p)assert(rear[p]==low[p] && !front[p]);
   }
 }
 static uint64_t ForestBackingHash(const void *bytes,size_t count) {
@@ -169,69 +169,56 @@ static uint64_t ForestBackingHash(const void *bytes,size_t count) {
   for(size_t i=0;i<count;++i)hash=(hash^p[i])*UINT64_C(1099511628211);
   return hash;
 }
-/* These mixed bank-edge cards are independent of the bark above them. The
- * prior curved-root-only repair left their original, opaque rear footprint
- * completely empty. Locate reviewed specimens by source IDs in this fixture;
- * the production contract uses exact native artwork fingerprints. */
+/* The noncolliding border keeps its original artwork only on the rear.
+ * Source IDs locate independent reviewed controls in regional fixtures;
+ * production classification uses decoded artwork fingerprints. */
 static bool ForestBorderBackingVerify(const ActionRoomScene *s,const ActionVoxelGeometry *g,unsigned region) {
-  const ActionRoomSceneFrameState frame={.brightness=15};unsigned cells=0,opaque=0,missing=0;
+  const ActionRoomSceneFrameState frame={.brightness=15};unsigned cells=0,ink=0,missing=0;
   unsigned crowns=0,crown_opaque=0,rear_plants=0,growth_plants=0,root_crowns=0;
   for(unsigned y=0;y<ActionRoomScene_TileHeight(s,1)/2;++y)
     for(unsigned x=0;x<ActionRoomScene_TileWidth(s,1)/2;++x) {
       uint16_t word;uint8_t id;assert(ActionRoomScene_LookupTile(s,1,x*2,y*2,&word,&id));
-      bool crown=false,rear_plant=false,growth_plant=false,joins_root=false;
+      bool crown=false,growth_plant=false,joins_root=false;
       if(id==2 || id==0xc1 || id==0xd1) {
         uint8_t below;assert(ActionRoomScene_LookupTile(s,1,x*2,(y+1)*2,&word,&below));
-        /* Native crown02 and C1 have identical artwork. Its bank support is
-         * the independent witness: copying this fingerprint everywhere would
-         * incorrectly add a backstop to foreground thorn-platform plants. */
+        /* Native crown02 and C1 have identical artwork. The complete noncolliding border stays
+         * on the rear, including crowns above foreground thorn hazards. */
         crown=below==0xc9;
         joins_root=(x==84 && y==39) || (x==175 && y==34) ||
             (region==1 && ((x==38 && y==42) || ((x==205 || x==215) && y==34)));
         if(joins_root)assert(below==0xba || below==0xbb);
         root_crowns+=joins_root;
         growth_plant=(below==0xba || below==0xbb) && !joins_root;
-        rear_plant=!crown && !growth_plant;
         assert(crown || growth_plant || joins_root || below==0x1b || below==0x1d || below==0x0a || below==0x0b || below==0xb0);
-        crowns+=crown;rear_plants+=rear_plant;growth_plants+=growth_plant;
+        crowns+=crown;++rear_plants;growth_plants+=growth_plant;
       } else if(id!=0xb9 && id!=0xc0 && id!=0xc9)continue;
       else ++cells;
       uint32_t low[256],rear[256],front[256];ForestRootNative(s,x,y,&frame,low);
       assert(ActionVoxel_Split(g,x*16,y*16,16,16,16,&frame,low,16,rear,front));
       for(unsigned py=0;py<16;++py)for(unsigned px=0;px<16;++px) {
         const unsigned at=py*16+px;
-        assert(front[at]==(rear_plant?0:low[at]));
+        assert(!front[at]);
         if(low[at]) {
           const unsigned role=g->front[(size_t)(y*16+py-g->origin_y)*g->width+x*16+px-g->origin_x];
-          assert((role&kVoxelKindMask)==(rear_plant?kVoxelRearOnly:kVoxelFoliage) && !(role&(kVoxelColliding|kVoxelHighPriority)));
+          assert((role&kVoxelKindMask)==kVoxelRearOnly && !(role&(kVoxelColliding|kVoxelHighPriority)));
           if(growth_plant)assert(!(role&kVoxelRearCopy));
-          else {missing+=rear[at]!=low[at];if(crown)++crown_opaque;else if(!rear_plant)++opaque;}
-        } else if(joins_root) {
-          /* Existing thorn backing can show through native alpha holes. */
-          uint32_t backing=0;
-          for(unsigned i=0;i<g->rear_fill_count;++i) {
-            const VoxelRearFill *fill=&g->rear_fills[i];
-            if(fill->x==(int)x*16 && fill->y==(int)y*16 && (fill->colors[at]&0x8000) &&
-                (!fill->preserve_existing || !backing))
-              backing=ActionVoxel_AuthoredColor(fill->colors[at],&frame);
-          }
-          assert(rear[at]==backing);
-        } else if(!growth_plant)assert(!rear[at]); /* Preserve the irregular outer silhouette. */
+          missing+=rear[at]!=low[at];++ink;if(crown)++crown_opaque;
+        } else assert(!rear[at]); /* Preserve the original crown, including its alpha holes. */
       }
     }
   assert(cells==(region==1?5u:3u));
   assert(crowns==(region==1?2u:1u) && growth_plants==(region==1?8u:5u) &&
       root_crowns==(region==1?5u:2u));
   /* Recorded before/after hashes independently expose any accidental geometry
-   * change in this backing-only contract. Ignore only its intended source tag. */
+   * change in this rear-border contract. Ignore only the rear-copy source tag. */
   uint64_t mask=UINT64_C(14695981039346656037);
   for(size_t i=0;i<(size_t)g->width*g->height;++i)mask=(mask^(g->front[i]&~kVoxelRearCopy))*UINT64_C(1099511628211);
-  printf("forest border terrain%u: cells%u opaque%u missing%u mask%016llx edges%016llx recess%016llx curves%016llx\n",
-      region,cells,opaque,missing,(unsigned long long)mask,
+  printf("forest border terrain%u: cells%u native-ink%u missing%u mask%016llx edges%016llx recess%016llx curves%016llx\n",
+      region,cells,ink,missing,(unsigned long long)mask,
       (unsigned long long)ForestBackingHash(g->edges,g->edge_count*sizeof(*g->edges)),
       (unsigned long long)ForestBackingHash(g->front_recess,(size_t)(g->width/8)*(g->height/8)),
       (unsigned long long)ForestBackingHash(g->trunk_cells,(size_t)(g->width/8)*(g->height/8)));
-  printf("forest crown census terrain%u: %u backed crowns/%u native ink pixels, %u existing rear plants, %u independent growth crowns unchanged\n",
+  printf("forest crown census terrain%u: %u bank crowns/%u native ink pixels, %u rear plants, %u crowns above foreground thorns\n",
       region,crowns,crown_opaque,rear_plants,growth_plants);
   return missing==0;
 }
@@ -244,14 +231,14 @@ static void ForestBorderBackingEdits(const ActionRoomScene *s,const ActionVoxelG
   *cell=(DioramaVoxelCell){.x=cx,.y=cy,.fields=kDioramaVoxelCell_Backing,.backing=kDioramaVoxelBacking_None};
   assert(ActionVoxel_Build(edited,s,&terrain,settings));
   assert(ActionVoxel_Split(edited,cx*16,cy*16,16,16,16,&frame,low,16,rear,front));
-  for(unsigned at=0;at<256;++at)assert(!rear[at] && front[at]==low[at]);
+  for(unsigned at=0;at<256;++at)assert(!rear[at] && !front[at]);
   cell->fields|=kDioramaVoxelCell_BackArt;cell->backing=kDioramaVoxelBacking_Replace;
   cell->backing_art=(DioramaVoxelArt){.set=true,.bg=1,.size=16};
   for(unsigned q=0;q<4;++q)assert(ActionRoomScene_LookupTile(s,1,258+(q&1),48+(q>>1),&cell->backing_art.words[q],NULL));
   assert(ActionVoxel_Build(edited,s,&terrain,settings));
   assert(ActionVoxel_Split(edited,cx*16,cy*16,16,16,16,&frame,low,16,rear,front));
   for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x) {
-    assert(front[y*16+x]==low[y*16+x]);
+    assert(!front[y*16+x]);
     assert(rear[y*16+x]==ForestNativeColor(s,2064+x,384+y,&frame));
   }
   *cell=(DioramaVoxelCell){.x=cx,.y=cy,.fields=kDioramaVoxelCell_FrontArt,.front_art=cell->backing_art};
@@ -262,16 +249,16 @@ static void ForestBorderBackingEdits(const ActionRoomScene *s,const ActionVoxelG
   *cell=(DioramaVoxelCell){.x=cx,.y=cy}; /* Clear artwork/undo uses native front and backing. */
   assert(ActionVoxel_Build(edited,s,&terrain,settings));SameGeometry(base,edited);
   assert(ActionVoxel_Split(edited,cx*16,cy*16,16,16,16,&frame,low,16,rear,front));
-  for(unsigned at=0;at<256;++at)assert(rear[at]==low[at] && front[at]==low[at]);
+  for(unsigned at=0;at<256;++at)assert(rear[at]==low[at] && !front[at]);
   memset(&terrain,0,sizeof(terrain));terrain.pixel_layers[0].count=1;
   DioramaPixelEdit *pixel=&terrain.pixel_layers[0].edits[0];
   *pixel=(DioramaPixelEdit){.by_cell=true,.x=cx,.y=cy};pixel->transparent[3]=0x1000;
   assert(ActionVoxel_Build(edited,s,&terrain,settings));low[3*16+3]=0;
   assert(ActionVoxel_Split(edited,cx*16,cy*16,16,16,16,&frame,low,16,rear,front));
-  for(unsigned at=0;at<256;++at)assert(rear[at]==low[at] && front[at]==low[at]);
+  for(unsigned at=0;at<256;++at)assert(rear[at]==low[at] && !front[at]);
   uint32_t neighbor[256];ForestRootNative(s,127,24,&frame,neighbor);
   assert(ActionVoxel_Split(edited,2032,384,16,16,16,&frame,neighbor,16,rear,front));
-  for(unsigned at=0;at<256;++at)assert(rear[at]==neighbor[at] && front[at]==neighbor[at]);
+  for(unsigned at=0;at<256;++at)assert(rear[at]==neighbor[at] && !front[at]);
 }
 static void ForestRootBackingFixtures(const char *directory) {
   if(!directory)return;
@@ -295,7 +282,7 @@ static void ForestRootBackingFixtures(const char *directory) {
           if(!phase){repaired_cells+=repaired!=0;repaired_pixels+=repaired;}
         }
       }
-    assert(roots==36 && repaired_cells>20 && repaired_cells<roots && base->rear_fill_count<kVoxelMaxRearFills);
+    assert(roots==36 && repaired_cells>20 && repaired_cells<=roots && base->rear_fill_count<kVoxelMaxRearFills);
     remapped=*s;Renumber(&remapped);assert(ActionVoxel_Build(edited,&remapped,NULL,settings));SameGeometry(base,edited);
     assert(!memcmp(base->front,edited->front,(size_t)base->width*base->height));
     assert(base->trunk_curve_count==edited->trunk_curve_count && !memcmp(base->trunk_curves,edited->trunk_curves,sizeof(base->trunk_curves)));

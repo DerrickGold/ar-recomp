@@ -182,6 +182,7 @@ static unsigned Fixtures(const char *directory) {
   }
   return checked;
 }
+static bool FixtureCell(const ActionRoomScene *s,unsigned id,int *tx,int *ty);
 static unsigned FixturePixel(const ActionRoomScene *s,int x,int y);
 static bool EdgeInPatch(const VoxelEdge *e,const VoxelPatch *p) {
   return e->x>=p->x && e->x+((e->side&1)?1:e->length)<=p->x+p->width &&
@@ -270,7 +271,7 @@ static void ForestProfiles(const ActionRoomScene *source, const ActionVoxelGeome
   assert(thin_sides>0);
 
   /* Reviewed thorn beside a two-row grass border in every regional layout.
-   * The old repair filled only the bottom row, leaving a rectangular notch.
+   * Repair its missing base while the crown retains its own rear artwork.
    * Capture only the destination: donor art must not require an onscreen tile. */
   enum {x=1344,y=640,w=32,h=32,pitch=37};
   uint32_t rear[pitch*h],front[pitch*h],expected[pitch*h];
@@ -283,8 +284,8 @@ static void ForestProfiles(const ActionRoomScene *source, const ActionVoxelGeome
     if(xx<16 && rear[yy*pitch+xx]) { if(yy<16)++tall;else ++base; }
     assert(front[yy*pitch+xx]==0);
   }
-  if (!(tall>16 && base>128)) fprintf(stderr,"thorn backing: tall=%u, base=%u\n",tall,base);
-  assert(tall>16 && base>128);
+  if (!(tall==0 && base>128)) fprintf(stderr,"thorn backing: tall=%u, base=%u\n",tall,base);
+  assert(tall==0 && base>128);
   memcpy(expected,rear,sizeof(expected));
   assert(ActionVoxel_Split(renumbered,x,y-16,w,h,pitch,&frame,NULL,0,rear,front));
   assert(!memcmp(rear,expected,sizeof(rear)));
@@ -663,7 +664,7 @@ static unsigned ForestFixtures(const char *directory) {
           unsigned front_pixels=0;
           for(unsigned yy=0;yy<16;++yy)for(unsigned xx=0;xx<16;++xx) {
             front_pixels+=front[yy*width+xx]!=0;
-            if(ground || mixed) {
+            if(ground || cap || mixed) {
               const bool curve=mixed && front[yy*width+xx] &&
                   ActionVoxel_TrunkCurveForCell(variant?b:a,x+xx/8,y+yy/8);
               /* A native shrub donor may fill the removed bark footprint;
@@ -681,7 +682,7 @@ static unsigned ForestFixtures(const char *directory) {
             assert(front[wood]==low[wood] && front[leaves]==0);
             for(unsigned xx=0;xx<16;++xx)assert(front[15*width+xx]==0);
             assert(front_pixels>32 && front_pixels<128);
-          } else assert(ground?front_pixels==0:front_pixels>64);
+          } else assert(front_pixels==0);
         }
         border_cases |= crown==0xb0?4:crown==0xb8?8:crown==0x39?16:
                         crown==0x30?32:crown==0x31?64:ground?1:2;
@@ -698,13 +699,55 @@ static unsigned ForestFixtures(const char *directory) {
   }
   return 3;
 }
+/* These reviewed fixture cells have opaque native matte. A whole-matte 8px
+ * quadrant has no front entry; a partly carved one uses rear-only entries. */
+static bool FixtureFrontMatteRows(const ActionVoxelGeometry *g,int tx,int ty,uint8_t rows[8]) {
+  if(!g || !g->ready || !rows || tx<g->origin_x/8 || ty<g->origin_y/8 ||
+      tx>=g->origin_x/8+g->width/8 || ty>=g->origin_y/8+g->height/8)return false;
+  ActionVoxel_CutoutRows(g,tx,ty,rows);unsigned any=0;
+  for(unsigned y=0;y<8;++y) {
+    for(unsigned x=0;x<8;++x) {
+      const unsigned kind=g->front[(size_t)(ty*8+y-g->origin_y)*g->width+tx*8+x-g->origin_x]&kVoxelKindMask;
+      if(!kind || kind==kVoxelRearOnly)rows[y]|=1u<<(7-x);
+    }
+    any|=rows[y];
+  }
+  return any!=0;
+}
+/* Full native footprints, rather than a selected screenshot: every occurrence
+ * of the reviewed rock/carved platforms and both spike orientations must
+ * retain an opaque rear. Native artwork here was opaque before voxelization. */
+static void FillmoreFixtureRearCoverage(const ActionRoomScene *s,const ActionVoxelGeometry *g) {
+  const uint8_t cave_rocks[]={0x8d,0x8e,0x91,0x92,0x93,0x94,0x97,0x9a,0x9d,
+      0xa1,0xa2,0xa3,0xa4,0xa5,0xa6,0xa7,0xab,0xac,0xad,0xae,0xaf,0xb0,
+      0xb5,0xb8,0xb9,0xba,0xbb,0xbc,0xbd,0xbe,0xbf,0xc0,0xc1,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7};
+  const ActionRoomSceneFrameState frame={.brightness=15};unsigned cells=0;
+  for(int ty=0;ty<ActionRoomScene_TileHeight(s,1);ty+=2)
+    for(int tx=0;tx<ActionRoomScene_TileWidth(s,1);tx+=2) {
+      uint16_t word;uint8_t id;assert(ActionRoomScene_LookupTile(s,1,tx,ty,&word,&id));
+      bool reviewed=id==0x18 || id==0x19 || id==0x20 ||
+          (id>=0x54 && id<=0x57) || (id>=0x5c && id<=0x5f);
+      if(s->map==2)for(unsigned i=0;i<sizeof(cave_rocks);++i)reviewed|=id==cave_rocks[i];
+      else reviewed|=id==0x17 || id==0x1e;
+      if(!reviewed)continue;
+      uint32_t native[256],rear[256],front[256];
+      for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x) {
+        native[y*16+x]=ForestNativeColor(s,tx*8+x,ty*8+y,&frame);
+        assert(native[y*16+x]>>24==255);
+      }
+      assert(ActionVoxel_Split(g,tx*8,ty*8,16,16,16,&frame,native,16,rear,front));
+      for(unsigned p=0;p<256;++p)assert(rear[p]>>24==255);
+      ++cells;
+    }
+  assert(cells || s->map==4); /* The tower fixture contains none of these shared materials. */
+  printf("Fillmore room%u rear coverage: %u complete spike/platform footprints\n",s->map,cells);
+}
 static void CaveCutouts(const ActionRoomScene *source, const ActionVoxelGeometry *original) {
   /* Native spike tip at (320,368). Black matte clears; its coloured center and
    * enclosed shadows on other rock art remain opaque, even in a black fade. */
   uint8_t left[8]={0},right[8]={0};
-  assert(ActionVoxel_HasCutouts(original));
-  assert(ActionVoxel_CutoutRows(original,40,47,left));
-  assert(ActionVoxel_CutoutRows(original,41,47,right));
+  assert(FixtureFrontMatteRows(original,40,47,left));
+  assert(FixtureFrontMatteRows(original,41,47,right));
   const uint8_t expected_left[8]={0xfe,0xfe,0xfe,0xfe,0xff,0xff,0xff,0xff};
   const uint8_t expected_right[8]={0x3f,0x3f,0x3f,0x3f,0x7f,0x7f,0x7f,0x7f};
   assert(!memcmp(left,expected_left,8) && !memcmp(right,expected_right,8));
@@ -719,7 +762,7 @@ static void CaveCutouts(const ActionRoomScene *source, const ActionVoxelGeometry
       uint16_t word;uint8_t id;
       assert(ActionRoomScene_LookupTile(source,1,x,y,&word,&id));
       if(id!=0x8d)continue;
-      uint8_t rows[8]={0};assert(ActionVoxel_CutoutRows(original,x,y+1,rows));
+      uint8_t rows[8]={0};assert(FixtureFrontMatteRows(original,x,y+1,rows));
       assert(!(rows[6]&0x20)); /* Native black pixel (2,14) enclosed by rock. */
       enclosed_shadow=true;
     }
@@ -746,8 +789,8 @@ static void CaveCutouts(const ActionRoomScene *source, const ActionVoxelGeometry
     assert(ActionVoxel_Build(edited,source,&terrain,settings));
     for(unsigned q=0;q<4;++q) {
       uint8_t actual[8]={0},expected[8]={0};
-      assert(ActionVoxel_CutoutRows(edited,-2+(q&1),q>>1,actual));
-      assert(ActionVoxel_CutoutRows(original,40+((q^flip)&1),46+((q^flip)>>1),expected));
+      assert(FixtureFrontMatteRows(edited,-2+(q&1),q>>1,actual));
+      assert(FixtureFrontMatteRows(original,40+((q^flip)&1),46+((q^flip)>>1),expected));
       for(unsigned y=0;y<8;++y)for(unsigned x=0;x<8;++x)
         assert(!!(actual[y]&(128>>x))==!!(expected[(flip&2)?7-y:y]&(128>>((flip&1)?7-x:x))));
     }
@@ -760,7 +803,7 @@ static void CaveCutouts(const ActionRoomScene *source, const ActionVoxelGeometry
   *paint=(DioramaPixelEdit){.by_cell=true,.x=20,.y=23};
   paint->black[15]=0x8000;
   assert(ActionVoxel_Build(edited,source,&terrain,settings));
-  memset(left,0,8);assert(ActionVoxel_CutoutRows(edited,40,47,left));assert(left[7]==0x7f);
+  memset(left,0,8);assert(FixtureFrontMatteRows(edited,40,47,left));assert(left[7]==0x7f);
   uint32_t native[256],rear[256],front[256];
   for(unsigned i=0;i<256;++i)native[i]=0xff000000;
   const ActionRoomSceneFrameState frame={.brightness=15};
@@ -768,7 +811,7 @@ static void CaveCutouts(const ActionRoomScene *source, const ActionVoxelGeometry
   assert(front[15*16]==0xff000000);
   assert(ActionVoxel_Split(original,320,368,16,16,16,&frame,native,16,rear,front));
   assert(front[15*16]==0);
-  memset(left,0,8);assert(ActionVoxel_CutoutRows(original,40,47,left));assert(left[7]==0xff);
+  memset(left,0,8);assert(FixtureFrontMatteRows(original,40,47,left));assert(left[7]==0xff);
   /* A different picture at the same numeric ID is not authorized by the rule. */
   variant=*source;
   variant.characters[(words[0]&1023)*32]^=1;
@@ -778,8 +821,36 @@ static void CaveCutouts(const ActionRoomScene *source, const ActionVoxelGeometry
   const ActionVoxelGeometry *retained=ActionVoxel_Retain(edited);
   assert(!ActionVoxel_Build(edited,&variant,NULL,settings));
   ActionVoxel_Release(edited);
-  memset(left,0,8);assert(ActionVoxel_CutoutRows(retained,40,47,left));assert(left[7]==0xff);
+  memset(left,0,8);assert(FixtureFrontMatteRows(retained,40,47,left));assert(left[7]==0xff);
   ActionVoxel_Release(retained);
+}
+/* Capitals keep exterior matte only on the rear. Enclosed black carving
+ * stays opaque on the front, so the recess never becomes a black extrusion. */
+static void CaveCapitalCutouts(const ActionRoomScene *s,const ActionVoxelGeometry *g) {
+  const unsigned ids[]={0x54,0x55,0x56,0x57,0x5c,0x5d,0x5e,0x5f};
+  const ActionRoomSceneFrameState frame={.brightness=15};
+  unsigned erased=0,black_details=0;
+  for(unsigned i=0;i<sizeof(ids)/sizeof(*ids);++i) {
+    int tx,ty;assert(FixtureCell(s,ids[i],&tx,&ty));
+    uint16_t mask[16]={0};
+    for(unsigned q=0;q<4;++q) {
+      uint8_t rows[8]={0};FixtureFrontMatteRows(g,tx+(q&1),ty+(q>>1),rows);
+      for(unsigned y=0;y<8;++y)mask[(q>>1)*8+y]|=(uint16_t)rows[y]<<((q&1)?0:8);
+    }
+    uint32_t native[256],rear[256],front[256];
+    for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x) {
+      const unsigned at=y*16+x;const uint32_t color=ForestNativeColor(s,tx*8+x,ty*8+y,&frame);
+      if(mask[y]&(1u<<(15-x))) {assert(color==UINT32_C(0xff000000));native[at]=color;++erased;}
+      else {native[at]=color;black_details+=color==UINT32_C(0xff000000);}
+    }
+    assert(ActionVoxel_Split(g,tx*8,ty*8,16,16,16,&frame,native,16,rear,front));
+    for(unsigned p=0;p<256;++p) {
+      assert(front[p]==((mask[p/16]&(1u<<(15-p%16)))?0:native[p]));
+      assert(rear[p]==native[p]);
+    }
+  }
+  assert(erased && black_details);
+  printf("cave capital alpha: %u exterior matte pixels removed, %u opaque black details retained\n",erased,black_details);
 }
 static unsigned CaveFixtures(const char *directory) {
   static ActionSceneSnapshot fixture;
@@ -796,10 +867,20 @@ static unsigned CaveFixtures(const char *directory) {
     assert(ActionVoxel_Build(a,source,NULL,settings) && ActionVoxel_Active(a,1,2));
     assert(ActionVoxel_Profile(a)==kActionVoxelProfile_FillmoreCave);
     CaveCutouts(source,a);
+    CaveCapitalCutouts(source,a);
+    FillmoreFixtureRearCoverage(source,a);
     unsigned spike_count;const VoxelPatch *spikes=ActionVoxel_Patches(a,&spike_count);
     assert(spike_count>0);
-    for(unsigned i=0;i<spike_count;++i)
-      assert(spikes[i].kind==kVoxelPatch_Spikes && spikes[i].width%16==0 && spikes[i].height%16==0);
+    for(unsigned i=0;i<spike_count;++i) {
+      if(spikes[i].kind==kVoxelPatch_Spikes)
+        assert(spikes[i].width%16==0 && spikes[i].height%16==0);
+      else {
+        assert(spikes[i].kind==kVoxelPatch_SideProfile);
+        uint16_t word;uint8_t id;
+        assert(ActionRoomScene_LookupTile(source,1,spikes[i].x/8,spikes[i].y/8,&word,&id));
+        assert((id>=0x54 && id<=0x57) || (id>=0x5c && id<=0x5f));
+      }
+    }
     unsigned n;const VoxelWaterSurface *water=ActionVoxel_WaterSurfaces(a,&n);assert(n==3);
     const int expected[][3]={{1088,304,224},{896,688,208},{0,896,880}};
     for(unsigned i=0;i<n;++i)assert(water[i].x==expected[i][0] && water[i].y==expected[i][1] &&
@@ -879,6 +960,7 @@ static unsigned TempleFixtures(const char *directory) {
     assert(ActionVoxel_Build(a,source,NULL,settings) && ActionVoxel_Active(a,1,room));
     assert(ActionVoxel_Profile(a)==(room==3?kActionVoxelProfile_FillmoreTemple:kActionVoxelProfile_FillmoreTower));
     assert(ActionVoxel_HasCutouts(a));
+    FillmoreFixtureRearCoverage(source,a);
     variant=*source;Renumber(&variant);
     assert(ActionVoxel_Build(b,&variant,NULL,settings));SameGeometry(a,b);
     unsigned width=ActionRoomScene_TileWidth(source,1),height=ActionRoomScene_TileHeight(source,1),recessed=0;
@@ -1115,7 +1197,6 @@ static void DesertMaterial(const ActionVoxelGeometry *g,const ActionRoomScene *s
     assert(rear[i]==(expected==kVoxelForeground || expected==kVoxelFoliage?0:low[i]));
   }
 }
-static bool FixtureCell(const ActionRoomScene *s,unsigned id,int *tx,int *ty);
 static void DesertNativeLow(const ActionRoomScene *s,int tx,int ty,uint32_t pixels[256]) {
   memset(pixels,0,256*sizeof(*pixels));
   for(unsigned q=0;q<4;++q) {

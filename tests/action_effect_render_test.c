@@ -2890,6 +2890,61 @@ static void TestTempleGroundMist(void) {
   CHECK(!first.vertex_count && !first.index_count); /* Unproved spans are omitted. */
 }
 
+static void TestTempleDustVolume(void) {
+  DioramaProjection projection=RakedApronProjection();
+  projection.voxel_scenery=true;
+  projection.texture_x_origin=0;projection.texture_width=4096;projection.texture_height=2048;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1,.z_world=-.24f};
+  projection.bg1_high_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1};
+  const ActionEffectProjectionContext context={.diorama_projection=&projection};
+  ActionEffectProjectionContext volume;DioramaProjection resolved;
+  CHECK(ActionEffectProjection_VolumeContext(&context,0,&volume,&resolved));
+  CHECK(resolved.bg1_plane.z_world==-.24f);
+  CHECK(ActionEffectProjection_VolumeContext(&context,1,&volume,&resolved));
+  CHECK(resolved.bg1_plane.z_world==0);
+  CHECK(ActionEffectProjection_VolumeContext(&context,.5f,&volume,&resolved));
+  CHECK(fabsf(resolved.bg1_plane.z_world+.12f)<.00001f);
+  CHECK(!ActionEffectProjection_VolumeContext(&context,NAN,&volume,&resolved));
+  CHECK(!ActionEffectProjection_VolumeContext(&context,-.1f,&volume,&resolved));
+  ActionSceneEffectFrame frame={.decoration_count=1,.decoration_visible_count=1};
+  frame.decorations[0]=(ActionEffectInstance){.kind=kActionEffect_TempleDust,
+      .phase=kActionEffectPhase_CaveEnvironment,.flags=kActionEffectFlag_Visible,
+      .environment_room=3,.world_x=828,.world_y=1270,.phase_ticks=512,
+      .render_layer=kActionEffectRenderLayer_WorldOverlay,.projection_plane=kActionEffectProjectionPlane_Bg1,
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-384,0,384,544}}};
+  static ActionEffectSourcePrimitive primitives[512],retained[512];
+  static ActionSceneEffectRenderBatch batch;
+  ActionEffectSourceBatch source={.context=context,.primitives=primitives,.capacity=512};
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,false,true,
+      ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&batch));
+  CHECK(source.count>8 && !source.failed);
+  float first=0;bool varied=false;
+  for(unsigned i=0;i<source.count;++i) {
+    CHECK(primitives[i].meta[0]==kActionSourceParticle && ((unsigned)primitives[i].origin[2]&64));
+    const float depth=primitives[i].points[5][3];
+    CHECK(depth>=.12f && depth<=.88f);
+    if(!i)first=depth;else varied|=depth!=first;
+  }
+  CHECK(varied);const unsigned count=source.count;
+  memcpy(retained,primitives,count*sizeof(*primitives));
+  /* Entry staging has no camera. It must produce exactly the packet used
+   * after rotation, rather than selecting fresh depths on each draw. */
+  source.count=0;source.context.diorama_projection=NULL;source.context.staged_voxel_scenery=true;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,false,true,
+      ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&batch));
+  CHECK(source.count==count && !memcmp(retained,primitives,count*sizeof(*primitives)));
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,false,true,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,(void *)&context,&batch));
+  CHECK(batch.vertex_count>0);
+  projection.voxel_scenery=false;source.count=0;source.context=context;
+  CHECK(!ActionEffectProjection_VolumeContext(&context,.5f,&volume,&resolved));
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,false,true,
+      ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&batch));
+  CHECK(source.count==count);
+  for(unsigned i=0;i<source.count;++i)
+    CHECK(primitives[i].meta[0]==kActionSourceQuad && !((unsigned)primitives[i].origin[2]&64));
+}
+
 static void TestVoxelContactPlanes(void) {
   DioramaProjection projection=RakedApronProjection();
   projection.texture_x_origin=0;projection.texture_width=4096;projection.texture_height=2048;
@@ -5347,6 +5402,7 @@ int main(void) {
   TestCavePolishGeometry();
   TestLandingParticleGeometry();
   TestVoxelContactPlanes();
+  TestTempleDustVolume();
   TestCaveEnvironmentGeometry();
   TestCaveWaterUsesHighPlane();
   TestCaveAmbientScroll();

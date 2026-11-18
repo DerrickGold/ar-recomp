@@ -343,6 +343,26 @@ bool ActionEffectProjection_BillboardBounds(const ActionEffectProjectionContext 
   return ClipRectIsValid(bounds);
 }
 
+bool ActionEffectProjection_VolumeContext(const ActionEffectProjectionContext *context, float depth,
+    ActionEffectProjectionContext *out, DioramaProjection *projection) {
+  if (!context || !out || !projection || !isfinite(depth) || depth < 0 || depth > 1 ||
+      !context->diorama_projection || !context->diorama_projection->voxel_scenery) return false;
+  const DioramaProjection *source = context->diorama_projection;
+  const DioramaPlaneProjection *rear = &source->bg1_plane, *front = &source->bg1_high_plane;
+  if (!rear->valid || !front->valid) return false;
+  *projection = *source;
+  DioramaPlaneProjection *plane = &projection->bg1_plane;
+#define BLEND(member) plane->member = rear->member + (front->member - rear->member) * depth
+  BLEND(u0); BLEND(v0); BLEND(u1); BLEND(v1);
+  BLEND(z_world); BLEND(rake); BLEND(bow); BLEND(world_y_offset);
+  BLEND(capture_offset.x); BLEND(capture_offset.y);
+#undef BLEND
+  plane->overflow_valid = false; /* Air has no folded floor continuation. */
+  *out = *context;
+  out->diorama_projection = projection;
+  return true;
+}
+
 static bool ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,
     float local_x, float local_y, ArRenderPointF *point, bool billboard) {

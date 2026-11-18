@@ -86,6 +86,11 @@ bool ActionEffectProjection_ProjectBillboardPoint(void *, const ActionEffectInst
 bool ActionEffectProjection_BillboardBounds(const ActionEffectProjectionContext *,
     const ActionEffectInstance *, ActionEffectLocalRect *);
 
+/* Airborne particles interpolate between the published rear and front BG1
+ * surfaces. Zero is the wall, one the front edge. This never moves source art. */
+bool ActionEffectProjection_VolumeContext(const ActionEffectProjectionContext *, float depth,
+    ActionEffectProjectionContext *, DioramaProjection *);
+
 /* Source origin before presentation transforms. Midpoint parallax retains
  * half pixels; truncating it produces a second staircase during scrolling. */
 ArRenderPointF ActionEffectProjection_CaptureOrigin(const ActionEffectProjectionContext *,

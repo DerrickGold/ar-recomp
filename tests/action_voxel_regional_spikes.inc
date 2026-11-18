@@ -1,12 +1,10 @@
-/* Regional spike ownership regression. Fixture IDs locate native artwork;
- * Renumber below proves that production ownership is not tied to those IDs.
- * Cave foundations intentionally stay rear-only. Ice lower spikes retain
- * their existing foliage/spike patch contract. Neither becomes a solid deck
- * merely because the European native definition has collision15. */
+/* Shared spike artwork keeps one 3D hazard contract across rooms and regions.
+ * Native collision is preserved, including the European lower-row bits;
+ * reviewed exterior matte remains transparent instead of becoming a deck. */
 #include "action/action_voxel_internal.h"
 
 typedef struct RegionalSpikeFixture {
-  unsigned group,room,id,kind,semantic,count[3];
+  unsigned group,room,id,kind,semantic,count[3],eu_collision;
 } RegionalSpikeFixture;
 
 static void RegionalSpikeLoad(const char *directory,unsigned region,
@@ -72,7 +70,7 @@ static unsigned RegionalSpikeCells(const RegionalSpikeFixture *spec,
   for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)
     reference_pixels[y*16+x]=(uint8_t)FixturePixel(us,reference_tx*8+x,reference_ty*8+y);
   DesertNativeLow(us,reference_tx,reference_ty,reference_colors);
-  assert(RegionalSpikeCollision(s,spec->id)==(region==2?15u:0u));
+  assert(RegionalSpikeCollision(s,spec->id)==(region==2?spec->eu_collision:0u));
   const ActionRoomSceneFrameState frame={.brightness=15};
   unsigned cells=0,ink=0,front_ink=0,rear_ink=0;
   for(int ty=0;ty<ActionRoomScene_TileHeight(s,1);ty+=2)
@@ -96,12 +94,25 @@ static unsigned RegionalSpikeCells(const RegionalSpikeFixture *spec,
       assert(g->semantic_cells[semantic]==spec->semantic);
       uint32_t native[256],rear[256],front[256];DesertNativeLow(s,tx,ty,native);
       assert(!memcmp(native,reference_colors,sizeof(native)));
+      uint16_t cutouts[16]={0},matte[16]={0};
+      for(unsigned q=0;q<4;++q) {
+        uint8_t rows[8]={0};ActionVoxel_CutoutRows(g,tx+(q&1),ty+(q>>1),rows);
+        for(unsigned y=0;y<8;++y)cutouts[(q>>1)*8+y]|=(uint16_t)rows[y]<<((q&1)?0:8);
+        memset(rows,0,sizeof(rows));
+        if(spec->group==1)FixtureFrontMatteRows(g,tx+(q&1),ty+(q>>1),rows);
+        for(unsigned y=0;y<8;++y)matte[(q>>1)*8+y]|=(uint16_t)rows[y]<<((q&1)?0:8);
+      }
+      for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)
+        if(cutouts[y]&(1u<<(15-x)))native[y*16+x]=0;
       assert(ActionVoxel_Split(g,tx*8,ty*8,16,16,16,&frame,native,16,rear,front));
       for(unsigned py=0;py<16;++py)for(unsigned px=0;px<16;++px) {
         const unsigned p=FixturePixel(s,tx*8+px,ty*8+py),at=py*16+px;
         assert(p==reference_pixels[at]);
         const unsigned m=g->front[RegionalSpikePixelAt(g,tx*8+px,ty*8+py)];
-        const unsigned expected=p ? (spec->kind==kVoxelFoliage && p==1?kVoxelRearOnly:spec->kind) : 0;
+        const bool cut=(cutouts[py]&(1u<<(15-px)))!=0;
+        const unsigned expected=p && !cut ?
+            ((spec->group==1 && (matte[py]&(1u<<(15-px)))) ||
+             (spec->group==6 && spec->kind==kVoxelFoliage && p==1)?kVoxelRearOnly:spec->kind) : 0;
         if((m&kVoxelKindMask)!=expected)
           fprintf(stderr,"regional spike %02u/%02u terrain%u cell%d,%d pixel%u,%u: role%u expected%u nativecollision%u\n",
               spec->group,spec->room,region,tx/2,ty/2,px,py,m&kVoxelKindMask,expected,RegionalSpikeCollision(s,id));
@@ -109,28 +120,21 @@ static unsigned RegionalSpikeCells(const RegionalSpikeFixture *spec,
          * flag. Native collision remains15 in EU even on rear/thin art. */
         assert((m&kVoxelKindMask)==expected);
         assert(!(m&kVoxelHighPriority));
-        assert(!!(m&kVoxelColliding)==(p && region==2));
+        assert(!!(m&kVoxelColliding)==(p && !cut && region==2 && spec->eu_collision));
         assert(!(m&kVoxelTexturedTop));
         assert(front[at]==(expected && expected!=kVoxelRearOnly?native[at]:0));
-        assert(rear[at]==(expected==kVoxelFoliage?0:native[at]));
-        assert(!(front[at] && rear[at]));
+        if(spec->group==1)assert(rear[at]==(expected==kVoxelRearOnly?native[at]:UINT32_C(0xff000000)));
+        else {
+          assert(rear[at]==(expected==kVoxelFoliage?0:native[at]));
+          assert(!(front[at] && rear[at]));
+        }
         ink+=p!=0;front_ink+=front[at]!=0;rear_ink+=rear[at]!=0;
       }
       for(unsigned q=0;q<4;++q)
         assert(RegionalSpikePatchOwners(g,tx*8+(q&1)*8,ty*8+(q>>1)*8)==(spec->kind==kVoxelFoliage?1u:0u));
-      /* The cave's native pointed upper row is independently rear-only.
-       * Do not invent a foliage/physical hazard contract for that profile. */
-      if(spec->group==1) {
-        assert(ty>=2);
-        uint8_t above;assert(ActionRoomScene_LookupTile(s,1,tx,ty-2,&word,&above) && above==0x18);
-        assert(RegionalSpikeCollision(s,above)==0);
-        for(unsigned py=0;py<16;++py)for(unsigned px=0;px<16;++px) {
-          const unsigned m=g->front[RegionalSpikePixelAt(g,tx*8+px,(ty-2)*8+py)];
-          assert((m&kVoxelKindMask)==(FixturePixel(s,tx*8+px,(ty-2)*8+py)?kVoxelRearOnly:0));
-        }
-      }
+
     }
-  assert(cells==spec->count[region] && ink && rear_ink);
+  assert(cells==spec->count[region] && ink && (rear_ink || spec->group==1));
   if(spec->kind==kVoxelFoliage)assert(front_ink);else assert(!front_ink);
   /* No solid walking cap or side sheet may be emitted from these source
    * pixels. Adjacent bank contours remain owned by their bank pixels. */
@@ -182,7 +186,7 @@ static void RegionalSpikeEdits(const RegionalSpikeFixture *spec,const ActionRoom
   unsigned first=256;
   for(unsigned y=0;y<16 && first==256;++y)for(unsigned x=0;x<16;++x) {
     const unsigned p=FixturePixel(s,tx*8+x,ty*8+y);
-    if(p && (spec->kind!=kVoxelFoliage || p!=1)){first=y*16+x;break;}
+    if(p && (base->front[RegionalSpikePixelAt(base,tx*8+x,ty*8+y)]&kVoxelKindMask)==spec->kind){first=y*16+x;break;}
   }
   assert(first<256);
   terrain.pixel_layers[0].count=1;
@@ -231,9 +235,11 @@ static void RegionalSpikeEdits(const RegionalSpikeFixture *spec,const ActionRoom
 static void RegionalSpikeFixtures(const char *directory) {
   if(!directory)return;
   static const RegionalSpikeFixture specs[]={
-    {1,2,0x20,kVoxelRearOnly,kVoxelSemantic_Rear,{20,20,20}},
-    {6,2,0x3f,kVoxelFoliage,kVoxelSemantic_Hazard,{17,44,17}},
-    {6,3,0x3f,kVoxelFoliage,kVoxelSemantic_Hazard,{14,14,14}}
+    {1,2,0x18,kVoxelFoliage,kVoxelSemantic_Hazard,{20,20,20},0},
+    {1,2,0x19,kVoxelFoliage,kVoxelSemantic_Hazard,{9,9,9},0},
+    {1,2,0x20,kVoxelFoliage,kVoxelSemantic_Hazard,{20,20,20},15},
+    {6,2,0x3f,kVoxelFoliage,kVoxelSemantic_Hazard,{17,44,17},15},
+    {6,3,0x3f,kVoxelFoliage,kVoxelSemantic_Hazard,{14,14,14},15}
   };
   static ActionSceneSnapshot fixture,us_fixture;
   static ActionRoomScene original,variant;
@@ -250,7 +256,7 @@ static void RegionalSpikeFixtures(const char *directory) {
       const ActionRoomScene *s=&fixture.scene;
       assert(ActionVoxel_Build(base,s,NULL,settings));
       const unsigned checked=RegionalSpikeCells(spec,s,&us_fixture.scene,base,us,region);
-      if(region==2) {
+      if(region==2 && spec->eu_collision) {
         european_cells+=checked;variant=*s;
         for(unsigned q=0;q<4;++q) {
           assert((variant.bg[0].metatiles[spec->id*8+q*2]&2) &&
@@ -267,7 +273,7 @@ static void RegionalSpikeFixtures(const char *directory) {
           !memcmp(base->front,other->front,(size_t)base->width*base->height));
       RegionalSpikeEdits(spec,s,base,other,settings);
       assert(!memcmp(s,&original,sizeof(original)));
-      assert(RegionalSpikeCollision(s,spec->id)==(region==2?15u:0u));
+      assert(RegionalSpikeCollision(s,spec->id)==(region==2?spec->eu_collision:0u));
       printf("regional spikes %02u/%02u terrain%u: %u native cells, exact source/priority/split roles, no solid extrusion, immutable collision, remapping and authored precedence\n",
           spec->group,spec->room,region,checked);
     }

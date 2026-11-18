@@ -109,7 +109,7 @@ void emit_mask_vertex(uint at,vec2 point,vec4 color,vec2 uv) {
     vertices.values[at*2]=vec4(destination_point(point),uv);
     vertices.values[at*2+1]=color;
 }
-bool local_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
+bool local_source_visible(Primitive p, vec4 bounds, vec2 point) {
     uint flags=uint(p.origin.z);
     if((flags&4u)==0u && (any(lessThan(point,p.clip.xy)) || any(greaterThan(point,p.clip.zw))))return false;
     if((flags&5u)==0u) {
@@ -125,7 +125,30 @@ bool local_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
                (source.y>plane.bounds.w && plane.fold.x==0 && (flags&32u)==0u))return false;
         }
     }
-    if(!project_effect(int(p.meta.y), p.origin.xy+point, p.origin.y, (flags&2u)!=0u, screen))return false;
+    return true;
+}
+bool local_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
+    return local_source_visible(p,bounds,point) &&
+        project_effect(int(p.meta.y),p.origin.xy+point,p.origin.y,(uint(p.origin.z)&2u)!=0u,screen);
+}
+bool local_particle_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
+    if((uint(p.origin.z)&64u)==0u)return local_point(p,bounds,point,screen);
+    if(!local_source_visible(p,bounds,point))return false;
+    // Interpolate physical mappings before perspective division, matching
+    // the CPU reference. Packet depth is stable across camera movement.
+    if(settings.planes[1].offset.w==0 || settings.planes[3].offset.w==0)return false;
+    float depth=p.points[5].w;
+    vec4 uv=mix(settings.planes[1].uv,settings.planes[3].uv,depth);
+    vec4 shape=mix(settings.planes[1].shape,settings.planes[3].shape,depth);
+    vec2 source=p.origin.xy+point+effect_motion(1)+
+        mix(settings.planes[1].offset.xy,settings.planes[3].offset.xy,depth);
+    vec2 st=((source+vec2(settings.capture.z,0))/settings.capture.xy-uv.xy)/(uv.zw-uv.xy);
+    float t=clamp(st.y,0,1);
+    vec4 clip=settings.matrix[0]*((st.x-.5)*settings.capture.w)+
+        settings.matrix[1]*((.5-st.y)*settings.geometry.x+shape.w)+
+        settings.matrix[2]*(shape.x+shape.y*t+shape.z*t*t)+settings.matrix[3];
+    if(clip.w<=.0001)return false;
+    screen=settings.viewport.xy+vec2(clip.x/clip.w*.5+.5,.5-clip.y/clip.w*.5)*settings.viewport.zw;
     return true;
 }
 bool local_scale(Primitive p, vec4 bounds, vec2 local, out vec2 point, out float scale) {
@@ -203,7 +226,7 @@ void main() {
         vec2 local[4]=vec2[4](p.points[0].xy,p.points[0].xy+vec2(1,0),p.points[0].xy+vec2(0,1),p.points[1].xy);
         vec2 screen[4];
         for(int j=0;j<4;j++) {
-            if(!local_point(p,bounds,local[j],screen[j]))return;
+            if(!local_particle_point(p,bounds,local[j],screen[j]))return;
         }
         vec2 sizes=vec2(length(screen[1]-screen[0]),length(screen[2]-screen[0]));
         if(any(lessThanEqual(sizes,vec2(0))))return;

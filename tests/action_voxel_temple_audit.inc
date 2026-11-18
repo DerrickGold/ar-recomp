@@ -110,35 +110,43 @@ static void TempleAuditFixtures(const char *directory) {
     const VoxelPatch *pa=ActionVoxel_Patches(fixed,&a),*pb=ActionVoxel_Patches(reference,&b);
     assert(a==b && !memcmp(pa,pb,a*sizeof(*pa)));
     unsigned checked=0;
-    const unsigned artwork[]={0x33,0x5f}; /* Column shoulder; carved capital corner. */
+    const unsigned artwork[]={0x33,0x54,0x57,0x5c,0x5f}; /* Wall shoulder; four open capital corners. */
     for(unsigned art=0;art<sizeof(artwork)/sizeof(*artwork);++art) {
       int tx,ty;assert(FixtureCell(source,artwork[art],&tx,&ty));
       uint16_t matte[16]={0};
       for(unsigned q=0;q<4;++q) {
         uint8_t old[8]={0},now[8]={0};
-        ActionVoxel_CutoutRows(reference,tx+(q&1),ty+(q>>1),old);
-        assert(!ActionVoxel_CutoutRows(fixed,tx+(q&1),ty+(q>>1),now));
+        FixtureFrontMatteRows(reference,tx+(q&1),ty+(q>>1),old);
+        FixtureFrontMatteRows(fixed,tx+(q&1),ty+(q>>1),now);
         for(unsigned y=0;y<8;++y) {
-          assert(!now[y]);
+          assert(now[y]==old[y]);
           matte[(q>>1)*8+y]|=(uint16_t)old[y]<<((q&1)?0:8);
         }
       }
       uint32_t original[256],cut[256],rear[256],front[256],old_rear[256],old_front[256];
-      unsigned first=256,interior=0;
+      unsigned first=256,interior=0,black_detail=0;
       for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x) {
         const unsigned at=y*16+x,pixel=FixturePixel(source,tx*8+x,ty*8+y);
         original[at]=pixel?UINT32_C(0xff030507):0;
         cut[at]=(matte[y]&(1u<<(15-x)))?0:original[at];
         if(original[at] && !cut[at]) {if(first==256)first=at;++checked;}
-        if(cut[at])++interior;
+        if(cut[at]) {
+          ++interior;
+          const ActionRoomSceneFrameState native_frame={.brightness=15};
+          black_detail+=ForestNativeColor(source,tx*8+x,ty*8+y,&native_frame)==UINT32_C(0xff000000);
+        }
+        /* Original matte is retained by the capture for rear reconstruction;
+         * enclosed black carving pixels stay outside the front mask. */
       }
       assert(first<256 && interior);
+      if(art)assert(black_detail); /* Opaque black carving ink survives the matte cutout. */
       for(unsigned dim=0;dim<2;++dim) {
         const ActionRoomSceneFrameState frame={.brightness=dim?2:15,.cgadsub=0x81,.fixed_color=0x421};
         assert(ActionVoxel_Split(fixed,tx*8,ty*8,16,16,16,&frame,original,16,rear,front));
-        assert(ActionVoxel_Split(reference,tx*8,ty*8,16,16,16,&frame,cut,16,old_rear,old_front));
+        assert(ActionVoxel_Split(reference,tx*8,ty*8,16,16,16,&frame,art?original:cut,16,old_rear,old_front));
         /* Carved faces/enclosed shadows keep their exact native foreground.
-         * Exterior matte retains its source colour only at the rear plane. */
+         * Exterior matte remains opaque on the rear and transparent only
+         * on the forward carved geometry. */
         assert(!memcmp(front,old_front,sizeof(front)));
         for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x) {
           const unsigned at=y*16+x;
@@ -174,8 +182,8 @@ static void TempleAuditFixtures(const char *directory) {
       int tx,ty;if(!FixtureCell(source,spikes[i],&tx,&ty))continue;
       for(unsigned q=0;q<4;++q) {
         uint8_t old[8]={0},now[8]={0};
-        ActionVoxel_CutoutRows(reference,tx+(q&1),ty+(q>>1),old);
-        spike_masks+=ActionVoxel_CutoutRows(fixed,tx+(q&1),ty+(q>>1),now);
+        FixtureFrontMatteRows(reference,tx+(q&1),ty+(q>>1),old);
+        spike_masks+=FixtureFrontMatteRows(fixed,tx+(q&1),ty+(q>>1),now);
         assert(!memcmp(old,now,8));
       }
     }

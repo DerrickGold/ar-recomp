@@ -952,6 +952,12 @@ static bool BorderPlant(const CastleMaterial *m) {
     if (m->kind[q] != kVoxelRearOnly || (m->words[q] & 0x2000)) return false;
   return true;
 }
+static bool ForestShrubCrown(const CastleMaterial *m) {
+  if(m->collision || m->flags)return false;
+  for(unsigned q=0;q<4;++q)
+    if(m->kind[q]!=kVoxelFoliage || (m->words[q]&0x2000))return false;
+  return true;
+}
 static bool AppendRearFill(ActionVoxelGeometry *c, const VoxelRearFill *fill) {
   if (c->rear_fill_count == c->rear_fill_capacity) {
     if (c->rear_fill_count == kVoxelMaxRearFills) return false;
@@ -1358,6 +1364,10 @@ static bool BuildRearFill(ActionVoxelGeometry *c, const ActionRoomScene *s,
       if (!LookupMaterial(s,stamps,native,best_x,row,&donor,&id,tiles,tile_pitch) ||
           !LookupMaterial(s,stamps,native,cx,row,&destination,&destination_id,tiles,tile_pitch)) continue;
       if (above && destination.collision) break;
+      /* The shrub above a thorn already supplies its original rear artwork.
+       * Copying the donor crown here changes the plant's silhouette. */
+      if(above && c->profile==kActionVoxelProfile_FillmoreForest &&
+          (target->flags&kVoxelGrowthMaterial) && ForestShrubCrown(&destination))continue;
       const DioramaPixelEdit *edit = terrain ? DioramaLayerOrder_PixelEditAt(terrain,0,best_x,row,id) : NULL;
       const DioramaPixelEdit *destination_edit = !above ? target_edit :
           terrain ? DioramaLayerOrder_PixelEditAt(terrain,0,cx,row,destination_id) : NULL;
@@ -1382,31 +1392,6 @@ static bool BuildRearFill(ActionVoxelGeometry *c, const ActionRoomScene *s,
     }
   return true;
 }
-/* Thorn caps can share a shrub crown with a neighboring tree root. The
- * joining pixels identify the rear shrub independently of the hazard below. */
-static bool ForestCrownJoinsRoot(const ActionRoomScene *s,
-    const DioramaStampLayerOverride *stamps, const CastleMaterial native[256],
-    const CastleMaterial *crown, int cx, int cy, const uint16_t *tiles, size_t tile_pitch) {
-  for (int dx = -1; dx <= 1; dx += 2) {
-    CastleMaterial root;
-    uint8_t id;
-    if (!LookupMaterial(s, stamps, native, cx + dx, cy, &root, &id, tiles, tile_pitch) ||
-        !(root.flags & kVoxelTreeRootMaterial)) continue;
-    const unsigned root_x = dx < 0 ? 7 : 0;
-    const unsigned crown_x = 7 - root_x;
-    for (unsigned y = 0; y < 16; ++y) {
-      const unsigned root_q = (y / 8) * 2 + (dx < 0);
-      const unsigned crown_q = root_q ^ 1;
-      const unsigned row = (y & 7) * 8;
-      const unsigned ink = root.pixels[root_q][row + root_x];
-      if (ink && (root.rear_colors[root_q] & (1u << ink)) &&
-          crown->kind[crown_q] == kVoxelFoliage && crown->pixels[crown_q][row + crown_x])
-        return true;
-    }
-  }
-  return false;
-}
-
 /* A grounded mixed root already contains a complete native foliage patch.
  * Continue that local plant only into the old curved-bark footprint. Keeping
  * a second bark image at the vegetation plane would restore the old depth
@@ -1982,21 +1967,12 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
           LookupMaterial(s, stamps, native, cx, cy + 1, &below, &below_id, tiles, tile_pitch);
       const bool cap = c->profile == kActionVoxelProfile_Castle && have_below &&
                        PlatformCap(&material, &below);
-      /* A shrub crown is also reused above solid thorn caps. Follow its reviewed
-       * border base when present so the whole plant stays on one plane;
-       * identical artwork elsewhere retains its own placement. */
+      /* Noncolliding shrub crowns stay with the rear border, including crowns
+       * above mixed thorn tiles. The lower tile owns the foreground hazard. */
       const bool growth_crown = foliage && have_below && (below.flags & kVoxelGrowthMaterial);
       const bool rear_foliage = foliage && have_below &&
           ((!below.collision && below.kind[0] == kVoxelRearOnly && below.kind[1] == kVoxelRearOnly) ||
-           (growth_crown && ForestCrownJoinsRoot(s, stamps, native, &material, cx, cy, tiles, tile_pitch)));
-      /* A raised bank's original shrub footprint continues through its crown.
-       * Crown artwork is also used on foreground thorn platforms, so inherit
-       * only a reviewed plain foliage base's backing, never its geometry. */
-      bool backed_foliage=foliage && have_below && !material.flags && !below.collision &&
-          below.flags==kVoxelRearCopyMaterial;
-      for(unsigned q=0;backed_foliage && q<4;++q)
-        backed_foliage=material.kind[q]==kVoxelFoliage && below.kind[q]==kVoxelFoliage;
-      if(backed_foliage)material.flags|=kVoxelRearCopyMaterial;
+           (growth_crown && ForestShrubCrown(&material)));
       const DioramaPixelEdit *edit =
           terrain ? DioramaLayerOrder_PixelEditAt(terrain, 0, cx, cy, metatile) : NULL;
       const uint16_t slope_foot=NativeSlopeFootRow(c,s,terrain,stamps,native,&material,cx,cy,edit,tiles,tile_pitch);

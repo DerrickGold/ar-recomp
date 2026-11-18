@@ -85,12 +85,13 @@ static void GroundCoverNativePoint(const Recorder *r, const ArRenderVertex2D *v,
   const double clip_z = m[2]*a[0][3] + m[6]*a[1][3] + m[10]*a[2][3] + m[14];
   const double depth_lead = clip_z / clip_w * .5 + .5 - depth;
   assert(fabs(depth_lead) < .000001 || fabs(depth_lead - .00002) < .000001);
-  const double z=a[2][3],scale=r->ground_cover->dedicated?1:1-z/p->camera_distance;
+  const bool dedicated=r->ground_cover && r->ground_cover->dedicated;
+  const double z=a[2][3],scale=dedicated?1:1-z/p->camera_distance;
   const float ox=r->capture->bg1_camera_x-(r->capture->width-256)*.5f-r->capture->obj_apron;
   const float oy=r->capture->camera_y-r->capture->authentic_y0+1;
   out[0]=ox+(a[0][3]/scale/p->aspect_x+.5)*r->capture->width;
   out[1]=oy+(.5-a[1][3]/scale/p->height_scale)*r->capture->height;
-  out[2]=r->ground_cover->dedicated?z:-z;
+  out[2]=dedicated?z:-z;
 }
 static void CheckGroundCoverDraw(Recorder *r, const ArRenderVertex2D *vertices, int count,
                                  const float *depths, const float *clip_w) {

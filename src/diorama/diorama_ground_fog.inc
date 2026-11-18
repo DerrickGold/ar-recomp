@@ -29,6 +29,7 @@ typedef struct GroundFogSection {
 static struct {
   unsigned span_count, section_count;
   uint8_t claims;
+  const ActionVoxelGeometry *geometry;
   float min_x, max_x, min_y, max_y;
   GroundFogSpan spans[kGroundFogMaxSpans];
   GroundFogSection sections[kGroundFogMaxSections];
@@ -109,6 +110,7 @@ static void GroundFogAddMarshSpans(const DioramaScene *scene, const ActionBloodp
 
 static void GroundFogPrepare(const DioramaScene *scene, const DioramaViewGeometry *g) {
   s_ground_fog.span_count = s_ground_fog.section_count = s_ground_fog.claims = 0;
+  s_ground_fog.geometry = scene->voxel_geometry;
   s_ground_fog.min_x = s_ground_fog.min_y = INFINITY;
   s_ground_fog.max_x = s_ground_fog.max_y = -INFINITY;
   const ActionSceneEffectFrame *frame = scene->trunk_effects;
@@ -179,9 +181,19 @@ static void GroundFogPrepare(const DioramaScene *scene, const DioramaViewGeometr
 }
 
 static bool GroundFogMayTouch(float x0, float x1, float y0, float y1) {
-  return (s_ground_fog.claims & kDioramaFog_Floor) && fmaxf(x0, x1) > s_ground_fog.min_x &&
-      fminf(x0, x1) < s_ground_fog.max_x && fmaxf(y0, y1) >= s_ground_fog.min_y &&
-      fminf(y0, y1) <= s_ground_fog.max_y;
+  if (!(s_ground_fog.claims & kDioramaFog_Floor) || fmaxf(x0,x1)<=s_ground_fog.min_x ||
+      fminf(x0,x1)>=s_ground_fog.max_x) return false;
+  if(fmaxf(y0,y1)>=s_ground_fog.min_y && fminf(y0,y1)<=s_ground_fog.max_y)return true;
+  /* Keep a floor underneath a native colliding spike row in the candidate
+   * set. Gather still checks the exact connected bed at each sample. */
+  unsigned count;const VoxelPatch *patches=ActionVoxel_Patches(s_ground_fog.geometry,&count);
+  for(unsigned i=0;i<count;++i) {
+    const VoxelPatch *p=&patches[i];
+    if(p->kind==kVoxelPatch_Spikes && p->x<fmaxf(x0,x1) && p->x+p->width>fminf(x0,x1) &&
+        p->y+p->height>=fminf(y0,y1)-kGroundFogSupportTolerance &&
+        p->y+p->height<=fmaxf(y0,y1)+kGroundFogSupportTolerance)return true;
+  }
+  return false;
 }
 
 static void GroundFogAddSection(const DioramaCapture *capture, const DioramaViewGeometry *g,
@@ -211,6 +223,27 @@ static void GroundFogAddSection(const DioramaCapture *capture, const DioramaView
   s_ground_fog.order[index] = (GroundCoverFaceOrder){section->depths[0], index};
 }
 
+/* A spike bed is open air above its supporting floor, not a raised solid
+ * receiver. Trace only contiguous compiled spike profiles touching that floor;
+ * a ceiling strip or nearby platform must not lift the mist. */
+static float GroundFogSpikeHeight(float x, float floor_y) {
+  unsigned count;
+  const VoxelPatch *patches=ActionVoxel_Patches(s_ground_fog.geometry,&count);
+  float top=floor_y;
+  for(unsigned joined=0;joined<count;++joined) {
+    float next=top;
+    for(unsigned i=0;i<count;++i) {
+      const VoxelPatch *p=&patches[i];
+      if(p->kind==kVoxelPatch_Spikes && x>=p->x && x<p->x+p->width &&
+          fabsf(p->y+p->height-top)<.001f)
+        next=fminf(next,p->y);
+    }
+    if(next==top)return floor_y-top;
+    top=next;
+  }
+  return floor_y-top;
+}
+
 static void GroundFogGather(const DioramaCapture *capture, const DioramaViewGeometry *g,
     const DioramaGroundCoverCap *cap, unsigned claim, float left_edge, float right_edge) {
   const float width = cap->to.x - cap->from.x;
@@ -229,7 +262,13 @@ static void GroundFogGather(const DioramaCapture *capture, const DioramaViewGeom
     for (float x = first + ceilf((left-first)/spacing)*spacing; x < right; x += spacing) {
       const float u = (x - cap->from.x) / width;
       const float y = cap->from.y + u*(cap->to.y-cap->from.y);
-      if (fabsf(y - span->floor.y) > kGroundFogSupportTolerance) continue;
+      const float spikes=claim==kDioramaFog_Floor?GroundFogSpikeHeight(x,y):0;
+      const float support_gap=y-span->floor.y;
+      /* Some native variants mark the lower spike row as colliding. The
+       * captured mist then names that row, while the physical receiver is
+       * the floor underneath. Accept only the connected hazard interval. */
+      if (fabsf(support_gap) > kGroundFogSupportTolerance &&
+          !(spikes>0 && support_gap>0 && support_gap<=spikes)) continue;
       const float ripple = sinf(x*.067f - span->phase);
       const float rx = fminf(span->radius_x, fminf(x-fmaxf(left_edge, span->floor.x0),
           fminf(right_edge, span->floor.x1)-x));
@@ -238,7 +277,7 @@ static void GroundFogGather(const DioramaCapture *capture, const DioramaViewGeom
         if (f < depth0 || f >= depth1) continue;
         const float v = (f - depth0) / (depth1 - depth0);
         float center[3], across[3], into[3], up[3];
-        const float height = span->floor.height * (.42f + .05f*ripple);
+        const float height = (span->floor.height+spikes) * (.42f + .05f*ripple);
         for (unsigned axis = 0; axis < 3; ++axis) {
           const DioramaGroundCoverCorner *c = cap->corners;
           const float front = c[0].position[axis] + u*(c[1].position[axis]-c[0].position[axis]);

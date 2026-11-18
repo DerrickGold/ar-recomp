@@ -151,8 +151,12 @@ typedef struct Recorder {
   VoxelCullProbe *voxel_cull;
   TrunkSideProbe *trunk_side;
   GroundCoverProbe *ground_cover;
+  bool check_fog;
+  unsigned fog_vertices;
+  float fog_top,fog_bottom,fog_near,fog_far;
 } Recorder;
 
+static void GroundCoverNativePoint(const Recorder *,const ArRenderVertex2D *,float,float,float [3]);
 static void CheckTrunkSideCaps(Recorder *,const ArRenderVertex2D *,int,const float *);
 static void CheckGroundCoverDraw(Recorder *, const ArRenderVertex2D *, int, const float *,
                                 const float *);
@@ -947,6 +951,18 @@ static bool DepthGeometry(void *context,ArRenderDevice *device,const DioramaDept
   assert(draw && draw->depths && draw->vertex_count>0 && draw->index_count>0);
   ++r->depth_draws;r->depth_vertices+=draw->vertex_count;
   if(r->fail_depth)return false;
+  if(r->check_fog && draw->read_only_depth) {
+    assert(!draw->native_actor && draw->blend==kArRenderBlendMode_Alpha && draw->clip_w);
+    assert(draw->vertex_count%9==0);
+    for(int i=0;i<draw->vertex_count;++i) {
+      float xyz[3];GroundCoverNativePoint(r,&draw->vertices[i],draw->depths[i],draw->clip_w[i],xyz);
+      r->fog_top=fminf(r->fog_top,xyz[1]);r->fog_bottom=fmaxf(r->fog_bottom,xyz[1]);
+      r->fog_near=fminf(r->fog_near,xyz[2]);r->fog_far=fmaxf(r->fog_far,xyz[2]);
+      assert(draw->vertices[i].color.a>=0 && draw->vertices[i].color.a<=.5f);
+    }
+    r->fog_vertices+=draw->vertex_count;Record(29);Record(draw->vertex_count);
+    return true;
+  }
   const bool ground_cover=r->ground_cover&&!draw->texture.value;
   if(ground_cover) {
     assert(!draw->native_actor && draw->blend==kArRenderBlendMode_Alpha && draw->clip_w);
@@ -2675,6 +2691,7 @@ static unsigned SkyBatchFixture(unsigned scenario) {
 #include "diorama_voxel_cull.inc"
 #include "diorama_voxel_endpoint.inc"
 #include "diorama_ground_cover_compositor.inc"
+#include "diorama_ground_fog_compositor.inc"
 #include "diorama_waterfall_continuation.inc"
 #include "diorama_death_heim_water.inc"
 #include "diorama_trunk_guard_compositor.inc"
@@ -2694,10 +2711,11 @@ static unsigned SkyBatchFixture(unsigned scenario) {
 #include "diorama_snow_closing_riser_compositor.inc"
 #include "diorama_voxel_clipped_cover.inc"
 #include "diorama_ramp_taper.inc"
-unsigned DioramaFixture_Count(void) { return 662; }
+unsigned DioramaFixture_Count(void) { return 670; }
 const float *DioramaFixture_Trace(void) { return s_trace; }
 unsigned DioramaFixture_Run(unsigned scenario) {
   assert(scenario < DioramaFixture_Count());
+  if(scenario>=662)return GroundFogFixture(scenario-662);
   if(scenario>=654)return RampTaperFixture(scenario-654);
   if(scenario>=650)return ClippedCoverFixture(scenario-650);
   if(scenario>=644)return NativeActorPriorityFixture(scenario-644);

@@ -12291,6 +12291,447 @@
         ]
       ],
       "reason": "Reviewed ice column or diagonal slope matte: only edge-connected palette index 1 outside the ice silhouette; the separate opaque cave-shadow tile and enclosed column shadows remain intact."
+    },
+    {
+      "key": "020ad5e554a6ba9a",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          1
+        ],
+        [
+          1
+        ],
+        [
+          1
+        ],
+        [
+          1
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          24
+        ],
+        [
+          2,
+          1,
+          24
+        ],
+        [
+          2,
+          2,
+          24
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "04475f8a21e0b0b8",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [],
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          87
+        ],
+        [
+          2,
+          1,
+          87
+        ],
+        [
+          2,
+          2,
+          87
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "07db1e9a6e246410",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          1
+        ],
+        [
+          1
+        ],
+        [
+          1
+        ],
+        [
+          1
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          32
+        ],
+        [
+          2,
+          1,
+          32
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "695c42740171b7e0",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          1
+        ],
+        [
+          1
+        ],
+        [
+          1
+        ],
+        [
+          1
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          2,
+          32
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "89e770e773da73e1",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          25
+        ],
+        [
+          2,
+          1,
+          25
+        ],
+        [
+          2,
+          2,
+          25
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "a14254f3ab8dc065",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          92
+        ],
+        [
+          2,
+          1,
+          92
+        ],
+        [
+          2,
+          2,
+          92
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "a374835ae320c8dc",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [],
+        [],
+        [
+          8
+        ],
+        [
+          8
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          85
+        ],
+        [
+          2,
+          1,
+          85
+        ],
+        [
+          2,
+          2,
+          85
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "bb65edae28537b93",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          93
+        ],
+        [
+          2,
+          1,
+          93
+        ],
+        [
+          2,
+          2,
+          93
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "c15b1977df9451c3",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          94
+        ],
+        [
+          2,
+          1,
+          94
+        ],
+        [
+          2,
+          2,
+          94
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "d2cc45c28ddd8a78",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          8
+        ],
+        [],
+        [
+          8
+        ],
+        [
+          8
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          84
+        ],
+        [
+          2,
+          1,
+          84
+        ],
+        [
+          2,
+          2,
+          84
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "fd4f9b2cd275ce68",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [],
+        [],
+        [
+          8
+        ],
+        [
+          8
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          86
+        ],
+        [
+          2,
+          1,
+          86
+        ],
+        [
+          2,
+          2,
+          86
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "ff8242cfa6d61b89",
+      "group": 1,
+      "room": 2,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ],
+        [
+          8
+        ]
+      ],
+      "origins": [
+        [
+          2,
+          0,
+          95
+        ],
+        [
+          2,
+          1,
+          95
+        ],
+        [
+          2,
+          2,
+          95
+        ]
+      ],
+      "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
     }
   ]
 }

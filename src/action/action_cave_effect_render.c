@@ -483,6 +483,31 @@ static bool CaveAmbientLight(ActionEffectGeometryWriter *writer, const ActionEff
   return true;
 }
 
+static bool TempleDustGrain(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    float x, float y, float radius, float aspect, float depth, ArRenderColorF color,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  const ActionEffectProjectionContext *context = writer->source ? &writer->source->context :
+      project_point == ActionEffectProjection_ProjectPoint ? userdata : NULL;
+  const bool voxel = context && (context->diorama_projection ?
+      context->diorama_projection->voxel_scenery : context->staged_voxel_scenery);
+  if (voxel) {
+    if (writer->source) {
+      const bool ok=ActionEffectSource_VolumeParticle(writer->source,effect,
+          x-effect->world_x,y-effect->world_y,radius,radius*aspect,depth,color);
+      writer->vertex_count=(int)writer->source->count;
+      return ok;
+    }
+    ActionEffectProjectionContext volume;
+    DioramaProjection projection;
+    if (ActionEffectProjection_VolumeContext(context,depth,&volume,&projection))
+      return AppendSceneParticle(writer,effect,x-effect->world_x,y-effect->world_y,
+          x-effect->world_x,y-effect->world_y,radius,radius*aspect,color,project_point,&volume);
+    return true;
+  }
+  const ArRenderPointF points[]={{x-radius,y},{x,y-radius*aspect},{x+radius,y},{x,y+radius*aspect}};
+  return CaveQuad(writer,effect,points,color,project_point,userdata);
+}
+
 static bool TempleDust(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     const ActionAtmosphereField *p,
     ActionEffectProjectPointFn project_point, void *userdata) {
@@ -508,20 +533,16 @@ static bool TempleDust(ActionEffectGeometryWriter *writer, const ActionEffectIns
           fade * fade;
       if (p->DustDensity[0]!=0) {
         if (!InCaveField(effect, x, y, p->DustDensity[3])) continue;
-        const ArRenderPointF points[] = {
-          {x-radius,y}, {x,y-radius*p->DustShape[2]}, {x+radius,y}, {x,y+radius*p->DustShape[2]},
-        };
         /* Warm mineral dust reads against the cool masonry; the damp lower hall
          * has fewer bright flecks competing with its ground mist. */
         const float density = y > p->DustDensity[1] ? p->DustDensity[2] : 1;
-        if (!CaveQuad(writer, effect, points, (ArRenderColorF){p->DustColor[0],p->DustColor[1],p->DustColor[2],alpha*density},
+        if (!TempleDustGrain(writer, effect, x,y,radius,p->DustShape[2],.12f+.76f*HashUnit(seed^0xD7u),
+                (ArRenderColorF){p->DustColor[0],p->DustColor[1],p->DustColor[2],alpha*density},
                 project_point, userdata)) return false;
         continue;
       }
-      const ArRenderPointF points[] = {
-        {x-radius,y}, {x,y-radius*p->DustShape[2]}, {x+radius,y}, {x,y+radius*p->DustShape[2]},
-      };
-      if (!CaveQuad(writer, effect, points, (ArRenderColorF){p->DustColor[0],p->DustColor[1],p->DustColor[2],alpha},
+      if (!TempleDustGrain(writer, effect, x,y,radius,p->DustShape[2],.12f+.76f*HashUnit(seed^0xD7u),
+              (ArRenderColorF){p->DustColor[0],p->DustColor[1],p->DustColor[2],alpha},
               project_point, userdata)) return false;
     }
   }

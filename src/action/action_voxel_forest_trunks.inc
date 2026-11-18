@@ -6,7 +6,7 @@ static bool BuildForestTrunkCurves(ActionVoxelGeometry *c,const ActionRoomScene 
     const uint16_t *tiles,size_t tile_pitch) {
   if(c->profile!=kActionVoxelProfile_FillmoreForest)return true;
   const int width=c->width/8,height=c->height/8,total=width*height;
-  enum { bark=1,root=2,branch=4,seen_root=8,occupied=16 };
+  enum { bark=1,root=2,branch=4,seen_root=8,occupied=16,ground_cover=32 };
   unsigned char *types=calloc((size_t)total,1),*halo=calloc((size_t)total,1);
   int *queue=malloc((size_t)total*sizeof(*queue));
   c->trunk_cells=calloc((size_t)total,1);
@@ -26,6 +26,7 @@ static bool BuildForestTrunkCurves(ActionVoxelGeometry *c,const ActionRoomScene 
           const unsigned index=material.pixels[q][pixel];
           if(index && !(material.rear_colors[q]&(1u<<index)))types[at]|=occupied;
         }
+      if(material.flags&kVoxelGrowthMaterial)types[at]|=ground_cover;
       if(material.flags&kVoxelBranchMaterial) {types[at]|=branch;continue;}
       if(!(material.flags&(kVoxelTreeBarkMaterial|kVoxelTreeRootMaterial)))continue;
       if(material.collision || material.kind[q]!=kVoxelForeground)continue;
@@ -56,7 +57,11 @@ static bool BuildForestTrunkCurves(ActionVoxelGeometry *c,const ActionRoomScene 
           const unsigned pixel=c->front[(size_t)(sy+y)*c->width+cx*8+x];
           solid|=(pixel&kVoxelColliding)!=0;
           const unsigned kind=pixel&kVoxelKindMask;
-          rear_border&=!kind || kind==kVoxelRearOnly;
+          /* Reviewed thorn cover sits between a root and its bank. It does
+           * not support the tree or acquire its curve; look through it to
+           * the original colliding ground, just as through rear shrubs. */
+          const bool cover=(types[((sy+y)/8)*width+cx]&ground_cover) && kind==kVoxelFoliage;
+          rear_border&=!kind || kind==kVoxelRearOnly || cover;
         }
         supported|=solid;
         if(solid || !rear_border)break;

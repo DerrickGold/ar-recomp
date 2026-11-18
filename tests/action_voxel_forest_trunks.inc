@@ -105,6 +105,14 @@ static void ForestTrunkCurves(const ActionRoomScene *source,const ActionVoxelGeo
     }
     printf("forest native shaft anchor%d,496: curve%d..%d\n",anchor_x,curve->top_y,curve->base_y);
   }
+  /* Thorn cover must not stop the unbranched tree from reaching the bank. */
+  uint16_t root_word;uint8_t root_id;
+  assert(ActionRoomScene_LookupTile(source,1,2816/8,544/8,&root_word,&root_id));
+  if(root_id==0x30) {
+    const VoxelTrunkCurve *curve=ActionVoxel_TrunkCurveForCell(a,2816/8,544/8);
+    assert(curve && curve->base_y==559);
+    assert(ActionVoxel_TrunkFrontDepth(a,curve,559)==ActionVoxel_Depth(a));
+  }
   static ActionRoomScene fade;fade=*source;memset(fade.palette,0,sizeof(fade.palette));
   ActionVoxelGeometry *edited=ActionVoxel_Create();assert(edited);
   const ActionVoxelSettings settings=ActionVoxel_SettingsForRoom(1,1);
