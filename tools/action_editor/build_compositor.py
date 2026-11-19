@@ -39,7 +39,10 @@ def shader_variants():
         block = re.search(r'uniform Context \{(.*?)\};', text, re.S)
         if not block or re.findall(r'(vec[24]|float)\s+(\w+(?:\[\d+\])?)\s*;', block[1]) != expected:
             raise ValueError(f'Update the WASM uniform bridge for {name}')
-        text = text.replace('#version 450', '#version 300 es\nprecision highp float;')
+        # Fragment shaders otherwise default to mediump integers in GLSL ES.
+        # Cloud openings use 32-bit hashes: narrowing their uint intermediates
+        # changes both the positions and widths on mobile GPUs.
+        text = text.replace('#version 450', '#version 300 es\nprecision highp float;\nprecision highp int;')
         text = re.sub(r'layout\(location = \d+\) in ', 'in ', text)
         text = re.sub(r'layout\(set = 2, binding = 0\) ', '', text)
         text = re.sub(r'layout\(set = 2, binding = [123]\) ', '', text)
@@ -109,7 +112,7 @@ def build(output, compiler='emcc', scene=None):
                *['-Wl,--export=RoomPreview_' + x for x in ('GroundCoverAuditEnable', 'GroundCoverAuditCount', 'GroundCoverAuditComplete', 'GroundCoverAuditValue')],
                *['-Wl,--export=RoomPreview_' + x for x in ('VoxelAuditCount', 'VoxelAuditComplete', 'VoxelAuditRead')],
                *['-Wl,--export=RoomPreview_' + x for x in
-                 ('Load', 'Configure', 'CloudOpenings', 'Policy', 'Set3DMode', 'SetView', 'Measure', 'Render', 'Reset', 'Width', 'Height', 'CameraX', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'ShowBackdrop', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'RecipeError', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'LoadPlayer', 'ReceiverStyle', 'PickReceiver', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],
+                 ('Load', 'Configure', 'CloudOpenings', 'Policy', 'Set3DMode', 'SetView', 'SetCameraPan', 'Measure', 'Render', 'RenderFlat', 'Reset', 'Width', 'Height', 'CameraX', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'ShowBackdrop', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'RecipeError', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'LoadPlayer', 'ReceiverStyle', 'PickReceiver', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],
                '-o', str(wasm)]
     subprocess.run(command, cwd=ROOT, env=compiler_environment(compiler), check=True)
     template = (ROOT / 'tools/action_editor/compositor_preview.html').read_text()

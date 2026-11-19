@@ -551,7 +551,8 @@
           2,
           84
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "1e0bcdd30c231726",
@@ -1637,7 +1638,8 @@
           2,
           86
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "4e4ae74bc24990a4",
@@ -2591,7 +2593,8 @@
           2,
           111
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "8744a93b6760e761",
@@ -2693,7 +2696,8 @@
           2,
           109
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "8aedb7100ab8674e",
@@ -2844,9 +2848,9 @@
     {
       "key": "901b1a42a7345bd5",
       "kinds": [
-        4,
         7,
-        4,
+        7,
+        7,
         7
       ],
       "flags": 9,
@@ -2918,7 +2922,8 @@
         240,
         0,
         240
-      ]
+      ],
+      "review": "The noncolliding low-priority stone jamb beside the closed grille belongs to the rear wall. Preserve native grille ink and its opening animation without a second forward stone post."
     },
     {
       "key": "93125d713d44ff8c",
@@ -3106,7 +3111,8 @@
           2,
           110
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "9d57918b15a4ebae",
@@ -3444,15 +3450,16 @@
           2,
           108
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "aa04c97e8cc0fbd9",
       "kinds": [
         7,
-        4,
         7,
-        4
+        7,
+        7
       ],
       "flags": 9,
       "role": "closed_grille",
@@ -3523,7 +3530,8 @@
         0,
         240,
         0
-      ]
+      ],
+      "review": "The noncolliding low-priority stone jamb beside the closed grille belongs to the rear wall. Preserve native grille ink and its opening animation without a second forward stone post."
     },
     {
       "key": "ad1992191fb3f8a1",
@@ -5263,7 +5271,8 @@
           2,
           85
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     }
   ],
   "native_surfaces": [

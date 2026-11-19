@@ -417,7 +417,9 @@ bool ActionVoxel_CellGeometry(const ActionVoxelGeometry *c,int x,int y,VoxelCell
     for(int yy=0;yy<8;++yy)for(int xx=0;xx<8;++xx) {
       const size_t at=(size_t)(my+yy)*c->width+mx+xx;
       const unsigned k=c->front[at]&kVoxelKindMask;
-      if(k==kVoxelSolid || !kind)kind=k;
+      /* Mixed doorway ink can begin with a rear pixel. Report its structural
+       * stone surface even when that surface appears later in the quadrant. */
+      if(k==kVoxelSolid || !kind || ((kind==kVoxelRearOnly || kind==kVoxelFlatParapet) && k))kind=k;
       branch|=c->branch_pixels && (c->branch_pixels[at>>3]&(1u<<(at&7)));
     }
     const bool modeled=kind && kind!=kVoxelRearOnly && kind!=kVoxelFlatParapet;
@@ -474,6 +476,7 @@ const VoxelTrunkCurve *ActionVoxel_TrunkCurveForEdge(const ActionVoxelGeometry *
 static float TrunkCurveWeight(const VoxelTrunkCurve *curve,float world_y) {
   if(!curve || curve->base_y<=curve->top_y || !isfinite(world_y))return 0;
   const float t=fmaxf(0,fminf(1,(world_y-curve->top_y)/(curve->base_y-curve->top_y)));
+  if(curve->ease_out) {const float remaining=1-t;return 1-remaining*remaining*remaining;}
   return t*t*(3-2*t);
 }
 float ActionVoxel_TrunkFrontDepth(const ActionVoxelGeometry *c,const VoxelTrunkCurve *curve,float world_y) {
@@ -571,9 +574,8 @@ void ActionVoxel_ColumnSection(const VoxelTrunkCurve *curve,float world_x,VoxelT
   memset(section->contact,0,sizeof(section->contact));
 }
 float ActionVoxel_ColumnFrontDepth(const ActionVoxelGeometry *c,const VoxelTrunkCurve *curve,float world_y) {
-  /* Only grounded reviewed desert shafts receive a column owner. Preserve
-   * their full cap join with one native8px underside taper, then clear the actor
-   * contact (.01 ahead of PlayRecess) by .025. Elevated shafts have no owner. */
+  /* Grounded desert supports follow their shadowed underside into the shaft.
+   * Native priority chooses which side of actor contact the shaft retains. */
   const float weight=curve && curve->linear && curve->base_y>curve->top_y && isfinite(world_y)
       ? fmaxf(0,fminf(1,(world_y-curve->top_y)/(curve->base_y-curve->top_y)))
       : TrunkCurveWeight(curve,world_y);
@@ -581,8 +583,10 @@ float ActionVoxel_ColumnFrontDepth(const ActionVoxelGeometry *c,const VoxelTrunk
     const float contact=fmaxf(0,ActionVoxel_PlayRecess(c)-.01f);
     return contact+(ActionVoxel_SceneryRecess(c)-contact)*weight;
   }
-  if(c && c->profile==kActionVoxelProfile_KassandoraDesert && curve)
-    return fminf(ActionVoxel_Depth(c),ActionVoxel_PlayRecess(c)+.015f)*weight;
+  if(c && c->profile==kActionVoxelProfile_KassandoraDesert && curve) {
+    const float target=curve->foreground?fmaxf(0,ActionVoxel_PlayRecess(c)-.025f):ActionVoxel_PlayRecess(c)+.015f;
+    return fminf(ActionVoxel_Depth(c),target)*weight;
+  }
   return ActionVoxel_Depth(c)*weight;
 }
 bool ActionVoxel_ResolveEdgeSpanAtY(const ActionVoxelGeometry *c, const VoxelEdge *e,

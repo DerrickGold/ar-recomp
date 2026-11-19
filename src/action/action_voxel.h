@@ -193,8 +193,9 @@ static inline bool ActionVoxel_BackgroundApron(ActionVoxelProfile profile,unsign
 }
 /* Reviewed pools use a second native map as their geometry source. This
  * governs editor compilation, live publication and authored-edit keys alike. */
-static inline bool ActionVoxel_BackgroundWater(ActionVoxelProfile profile) {
-  return profile==kActionVoxelProfile_FillmoreCave || profile==kActionVoxelProfile_NorthwallIce;
+static inline bool ActionVoxel_BackgroundWater(ActionVoxelProfile profile,unsigned room) {
+  return profile==kActionVoxelProfile_FillmoreCave || profile==kActionVoxelProfile_NorthwallIce ||
+      (profile==kActionVoxelProfile_Castle && room==5);
 }
 /* The tower's flat-layer facade bias crops its modeled walking deck. This
  * policy is available before geometry publication for native camera queries.
@@ -302,6 +303,9 @@ typedef struct VoxelTrunkCurve {
    * evaluating its4px front lip and12px linear return to the rear plane. */
   short contact_x, contact[8];
   unsigned char contact_count, linear;
+  /* A sharp lip eases into a shallow shaft instead of rounding both ends. */
+  unsigned char ease_out;
+  unsigned char foreground; /* Keep a native foreground shaft ahead of actors. */
 } VoxelTrunkCurve;
 const VoxelTrunkCurve *ActionVoxel_TrunkCurveForCell(const ActionVoxelGeometry *c,int tile_x,int tile_y);
 const VoxelTrunkCurve *ActionVoxel_TrunkCurveForEdge(const ActionVoxelGeometry *c,const VoxelEdge *edge);

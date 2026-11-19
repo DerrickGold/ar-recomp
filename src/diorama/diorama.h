@@ -423,6 +423,9 @@ typedef struct DioramaCapture {
 
 typedef struct DioramaView {
   DioramaCameraPose camera;
+  /* Presentation-only translation in authentic pixels, after framing.
+   * Positive X/Y moves the scene right/down without moving the capture. */
+  ArRenderPointF camera_pan;
   /* Applied after auto-fit resolves camera.distance's zero sentinel. */
   float distance_scale;
   float distance_offset;

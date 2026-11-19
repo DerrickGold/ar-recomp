@@ -1,6 +1,7 @@
-/* Include after action_voxel_tomb_caps.inc. The frozen
- * structural hashes below were recorded BEFORE contour skins existed, in
- * surface-polish/castle-caps/fixed-tests.log. They exclude art handles/UVs. */
+/* Include after action_voxel_tomb_caps.inc. Frozen structural hashes exclude
+ * art handles/UVs. Room03/04 was updated for the two foreground trim corner
+ * cutouts; the independent92px silhouette oracle lives in tomb_corners.inc.
+ * All other rows retain their pre-contour-skin structural baselines. */
 static unsigned TombContourRole(const ActionRoomScene *s,const uint16_t words[4],unsigned collision) {
   const uint64_t keys[]={UINT64_C(0xa5d6fa6ee48d8a14),UINT64_C(0xf0bf245766861e4e),
       UINT64_C(0xce0cd58ecedd6301),UINT64_C(0xee8b2ff901056847)};
@@ -192,13 +193,13 @@ static void TombContourSkinFixtures(const char *directory) {
   const unsigned rooms[][2]={{3,3},{3,4},{3,5},{3,6},{7,4}},expected_cells[]={14,44,46,0,0};
   const uint64_t front_hash[5][3]={
     {UINT64_C(0x7cbbb63d2f447244),UINT64_C(0x7cbbb63d2f447244),UINT64_C(0x7cbbb63d2f447244)},
-    {UINT64_C(0x9fb4c01891708bdd),UINT64_C(0x574e8084a3b08c1d),UINT64_C(0x904792e0f8e98bdd)},
+    {UINT64_C(0x4505a2ac905a5c75),UINT64_C(0xec6ad4e8f23ea075),UINT64_C(0xc26f9029b046bc75)},
     {UINT64_C(0x6dfb550c23f37a85),UINT64_C(0x6dfb550c23f37a85),UINT64_C(0xbafc6b01f6f09485)},
     {UINT64_C(0xb9189fb66f095b24),UINT64_C(0xb9189fb66f095b24),UINT64_C(0xb9189fb66f095b24)},
     {UINT64_C(0x2db26ced5ea435a5),UINT64_C(0x2db26ced5ea435a5),UINT64_C(0x2db26ced5ea435a5)}};
   const uint64_t geometry_hash[5][3]={
     {UINT64_C(0x29dd59aebe8106a8),UINT64_C(0x29dd59aebe8106a8),UINT64_C(0x29dd59aebe8106a8)},
-    {UINT64_C(0x63624653841d3a0c),UINT64_C(0x7f0b5e94ae7cfd1c),UINT64_C(0x63624653841d3a0c)},
+    {UINT64_C(0x50b93fdae6474184),UINT64_C(0x6c62581c10a70494),UINT64_C(0x50b93fdae6474184)},
     {UINT64_C(0x54fdb1028e6df763),UINT64_C(0x54fdb1028e6df763),UINT64_C(0x54fdb1028e6df763)},
     {UINT64_C(0xc81b052e417ebbe7),UINT64_C(0xc81b052e417ebbe7),UINT64_C(0xc81b052e417ebbe7)},
     {UINT64_C(0xc929a56cb2a740dc),UINT64_C(0xc929a56cb2a740dc),UINT64_C(0xc929a56cb2a740dc)}};

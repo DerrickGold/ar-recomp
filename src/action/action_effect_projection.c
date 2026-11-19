@@ -281,6 +281,24 @@ bool ActionEffectProjection_ViewBounds(const ActionEffectProjectionContext *cont
       visible.y0 -= context->ws_extra_top + screen_y;
       visible.y1 -= context->ws_extra_top + screen_y;
     }
+    /* Rear-anchored rolling banks distribute their existing billows through
+     * a finite air volume. Admit the union of both depth endpoints so turning
+     * the camera cannot cull a near billow using only the rear sheet. */
+    if(projection->voxel_scenery && !context->light_receiver && !context->scenery_lighting_only &&
+        effect->kind==kActionEffect_AuthoredCloud &&
+        effect->projection_plane==kActionEffectProjectionPlane_Bg1 &&
+        effect->field_style.rolling>0 && effect->field_style.volume>0 &&
+        effect->field_style.placement!=2 && !effect->field_style.point_count) {
+      ActionEffectProjectionContext air;DioramaProjection volume;
+      ActionEffectLocalRect near;
+      if(ActionEffectProjection_VolumeContext(context,.6f*effect->field_style.volume,&air,&volume) &&
+          Diorama_PlaneCaptureBounds(&volume,&volume.bg1_plane,&near.x0,&near.y0,&near.x1,&near.y1)) {
+        visible.x0=fminf(visible.x0,near.x0-context->ws_extra-screen_x);
+        visible.x1=fmaxf(visible.x1,near.x1-context->ws_extra-screen_x);
+        visible.y0=fminf(visible.y0,near.y0-context->ws_extra_top-screen_y);
+        visible.y1=fmaxf(visible.y1,near.y1-context->ws_extra_top-screen_y);
+      }
+    }
   } else {
     if (context->visible_width <= 0 || context->snes_height <= 0 ||
         context->viewport.w <= 0 || context->viewport.h <= 0)

@@ -41,6 +41,59 @@ static void TestVoxelCloudBounds(void) {
   snprintf(text, sizeof(text), "%svoxel-bg1-bounds=0,910,4096,910\n", base);
   assert(!Parse(text) && !memcmp(&table, &before, sizeof(table)));
 }
+static void TestVoxelCloudDepthBudget(void) {
+  char text[2048]="[effects]\nversion=1\n";
+  for(unsigned i=1;i<=3;++i) {
+    const size_t used=strlen(text);
+    snprintf(text+used,sizeof(text)-used,
+        "[emitter:04:01:0:cloud-bank:%u]\nanchor=bg2-point\nplacement=background\n"
+        "textured=1\nrolling=.8\nvolume=1\nstrands=24\nvoxel-bg1-bounds=0,910,4096,1038\n",i);
+    if(i<3)assert(Parse(text));
+    else {
+      before=table;
+      assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));
+    }
+  }
+}
+static void TestVoxelCloudGaps(void) {
+  const char *base="[effects]\nversion=1\n[emitter:04:01:0:cloud-bank:1]\n"
+      "anchor=bg2-point\nplacement=background\ntextured=1\nrolling=.8\nvolume=1\nstrands=24\n"
+      "voxel-bg1-bounds=0,910,4096,1038\n";
+  char text[2048];
+  snprintf(text,sizeof(text),"%svoxel-bg1-gaps=1648,1712 1888,1952 2144,2208 3616,3744\n",base);
+  assert(Parse(text));
+  ActionEnvironmentScene scene={.voxel=true};ActionSceneEffectFrame frame={0};
+  ActionEffectRecipes_Apply(&table,4,1,0,320,&scene,&frame);
+  assert(frame.authored_count==1&&frame.authored[0].field_style.voxel_cloud_gap_count==4);
+  assert(frame.authored[0].field_style.voxel_cloud_gaps[0].x0==1648);
+  assert(frame.authored[0].field_style.voxel_cloud_gaps[3].x1==3744);
+  before=table;
+  const char *invalid[]={"", "nan,1712", "1712,1648", "1648.5,1712", "1648,1712x",
+      "1648,1712 1700,1744", "1888,1952 1648,1712", "-16,16", "4000,4200",
+      "0,4 8,12 16,20 24,28 32,36 40,44 48,52 56,60 64,68"};
+  for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);++i) {
+    snprintf(text,sizeof(text),"%svoxel-bg1-gaps=%s\n",base,invalid[i]);
+    assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));
+  }
+  snprintf(text,sizeof(text),"%svoxel-bg1-gaps=1648,1712\nvoxel-bg1-gaps=1888,1952\n",base);
+  assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));
+  assert(!Parse("[effects]\nversion=1\n[emitter:04:01:0:cloud-bank:1]\n"
+      "textured=1\nrolling=.8\nvoxel-bg1-gaps=1648,1712\n"));
+  assert(!memcmp(&table,&before,sizeof(table)));
+  /* Two uncut volume banks fit. Splitting both at the four openings must
+   * reserve their extra geometry even when the camera sees only one pit. */
+  strcpy(text,"[effects]\nversion=1\n");
+  for(unsigned i=1;i<=2;++i) {
+    const size_t used=strlen(text);
+    snprintf(text+used,sizeof(text)-used,
+        "[emitter:04:01:0:cloud-bank:%u]\nanchor=bg2-point\nplacement=background\n"
+        "textured=1\nrolling=.8\nvolume=1\nstrands=24\ndrift=-128\n"
+        "voxel-bg1-bounds=0,910,4096,1038\n"
+        "voxel-bg1-gaps=1632,1728 1872,1968 2128,2224 3600,3760\n",i);
+    if(i==1)assert(Parse(text));
+    else {before=table;assert(!Parse(text)&&!memcmp(&table,&before,sizeof(table)));}
+  }
+}
 static void TestBackgroundTorchRouting(void) {
   const char *header="[effects]\nversion=1\n[emitter:04:07:0:torch:1]\n"
       "x=168\ny=54\nlight-scenery=1\n";
@@ -688,6 +741,8 @@ static void TestPerPassBudgets(void) {
 
 int main(int argc,char **argv) {
   TestVoxelCloudBounds();
+  TestVoxelCloudDepthBudget();
+  TestVoxelCloudGaps();
   TestBackgroundTorchRouting();
   TestCaveLifeParameters();
   TestDocumentCapacity();

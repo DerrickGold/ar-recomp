@@ -31,7 +31,8 @@ typedef struct ActionEffectSourcePrimitive {
   uint32_t meta[4]; /* kind, projection plane, object priority, shadow enabled */
   float origin[4];  /* capture XY; flags: atmosphere=1, static=2, clipped=4, grid=8,
                     * camera-rate=16, finite authored cloud lower extent=32,
-                    * volume particle=64 (points[5].w is rear-to-front depth); W holds camera rate. */
+                    * airborne volume=64 (points[5].w is rear-to-front depth;
+                    * rainbow triangles use extra.y to preserve all four sun directions); W holds camera rate. */
   float clip[4];    /* effect-local authored bounds, before motion */
   float points[6][4]; /* Grid: points[5] = world X, cell X, spacing; glow: coefficient extent. */
   float colors[3][4];
@@ -94,7 +95,11 @@ bool ActionEffectSource_RainbowTriangle(ActionEffectSourceBatch *, const ActionE
 bool ActionEffectSource_Particle(ActionEffectSourceBatch *, const ActionEffectInstance *, float,
                                  float, float, float, float, float, ArRenderColorF);
 bool ActionEffectSource_VolumeParticle(ActionEffectSourceBatch *, const ActionEffectInstance *,
-    float x, float y, float width, float height, float depth, ArRenderColorF);
+    float x, float y, float previous_x, float previous_y,
+    float width, float height, float depth, ArRenderColorF);
+/* Assign one stable physical depth to a newly emitted band of BG1 particles
+ * or triangles. Positions, colors and primitive/vertex counts stay intact. */
+bool ActionEffectSource_VolumeRange(ActionEffectSourceBatch *,unsigned first,float depth);
 bool ActionEffectSource_Leaf(ActionEffectSourceBatch *, const ActionEffectInstance *,
                              const ArRenderPointF[6], ArRenderColorF, ArRenderColorF);
 bool ActionEffectSource_FloorTriangle(ActionEffectSourceBatch *, const ActionEffectInstance *,

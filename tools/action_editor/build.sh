@@ -45,6 +45,7 @@ if [ "$SHARED_PREVIEWS" = on ]; then
   "${PYTHON:-python3}" tools/action_editor/build_preview.py "$TMP/action-preview.wasm"
   "${PYTHON:-python3}" tools/action_editor/build_compositor.py "$(dirname "$OUT")/ar-renderer-preview.html"
   "${PYTHON:-python3}" tools/action_editor/build.py "$TMP/rooms.json" "$OUT" "$LAYERS" --settings "$VIEW_SETTINGS" --wasm "$TMP/action-preview.wasm" --compositor-href ar-renderer-preview.html --compositor-wasm "$(dirname "$OUT")/ar-renderer-preview.wasm"
+  "${PYTHON:-python3}" tools/action_editor/build_browser.py "$TMP/rooms.json" "$(dirname "$OUT")/ar-level-audit-browser.html" "$LAYERS" --settings "$VIEW_SETTINGS" --wasm "$(dirname "$OUT")/ar-renderer-preview.wasm"
 else
   "${PYTHON:-python3}" tools/action_editor/build.py "$TMP/rooms.json" "$OUT" "$LAYERS" --settings "$VIEW_SETTINGS"
 fi

@@ -73,7 +73,7 @@ struct ActionVoxelGeometry {
   bool ready;
   bool mixed_scenery; /* Reviewed front trim and rear-mounted details coexist. */
   bool contact_scenery; /* Reviewed shallow objects follow native actor contact. */
-  bool material_rear_mounted; /* Mapped Castle relief enables its existing rear-face policy. */
+  bool material_rear_mounted; /* Mapped reviewed relief enables the rear-face policy. */
 };
 static inline float ActionVoxel_LocalTrimDepth(const ActionVoxelGeometry *c,bool thin) {
   return thin ? ActionVoxel_Depth(c)*.10f : ActionVoxel_TrimDepth(c);

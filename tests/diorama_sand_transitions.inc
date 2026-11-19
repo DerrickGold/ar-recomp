@@ -37,6 +37,7 @@ static void SandTransitionRenderFixture(unsigned scenario) {
       const DioramaVoxelPickFace *face=&probe.faces[f];const ArRenderVertex2D *v=&probe.vertices[f][j];
       assert(CapPointEqual(v->position,plain.vertices[f][j].position));
       assert(!memcmp(&v->color,&plain.vertices[f][j].color,sizeof(v->color)));
+      assert(v->color.r==1 && v->color.g==1 && v->color.b==1);
       assert(probe.after_actor[f]==plain.after_actor[f]);
       if(unavailable){assert(CapUvEqual(v->tex_coord,plain.vertices[f][j].tex_coord));continue;}
       const float x=face->world_xy[j*2],yy=face->world_xy[j*2+1];
@@ -46,7 +47,10 @@ static void SandTransitionRenderFixture(unsigned scenario) {
       assert(fabsf(v->tex_coord.y*352-expected)<.002f);
       if(z<.0001f||fabsf(z-ActionVoxel_Depth(g))<.0001f)++endpoints;
       for(unsigned o=0;o<f;++o)for(unsigned k=0;k<4;++k)if(CapPointEqual(v->position,probe.vertices[o][k].position)) {
-        if(face->kind!=probe.faces[o].kind)assert(CapUvEqual(v->tex_coord,probe.vertices[o][k].tex_coord));
+        if(face->kind!=probe.faces[o].kind) {
+          assert(CapUvEqual(v->tex_coord,probe.vertices[o][k].tex_coord));
+          assert(!memcmp(&v->color,&probe.vertices[o][k].color,sizeof(v->color)));
+        }
         if(probe.after_actor[f]!=probe.after_actor[o] &&
             face->world_xy[0]==probe.faces[o].world_xy[0] &&
             face->world_xy[2]==probe.faces[o].world_xy[2])assert(CapUvEqual(v->tex_coord,probe.vertices[o][k].tex_coord));++joints;

@@ -444,6 +444,23 @@ static bool SurfaceSelectPatch(VoxelSurfaceBuild *b,int x,int y,bool top,
   const unsigned q=((y-cy)/8)*2+(x-cx)/8;
   if(!SurfaceStructural(&source,q)) {++stats->semantic_fallbacks;return false;}
   if(!SurfaceStaticWord(b->scene,source.words[q])) {++stats->unsafe_source_fallbacks;return false;}
+  if(top && (source.top_surface&kVoxelTopSurface_Own8MirrorDepth)) {
+    const int ox=cx+(q&1)*8,oy=cy+(q>>1)*8;
+    bool found=SurfaceOpaquePatch(b,&source,edit,ox,oy,8,patch);
+    if(!found && SurfaceSameBand(&source,q,q^1)) {
+      found=SurfaceOpaquePatch(b,&source,edit,cx+4,oy,8,patch) ||
+          SurfaceOpaquePatch(b,&source,edit,cx+((q^1)&1)*8,oy,8,patch);
+      static const unsigned crops[]={3,5,2,6,1,7};
+      for(unsigned i=0;i<sizeof(crops)/sizeof(*crops) && !found;++i)
+        found=SurfaceOpaquePatch(b,&source,edit,cx+crops[i],oy,8,patch);
+    }
+    if(!found){++stats->opaque_fallbacks;return false;}
+    /* Keep the original front strip and horizontal artwork joins. Reflect
+     * only the repeated rear half, once in the immutable owned-art slot. */
+    for(unsigned y=8;y<16;++y)for(unsigned x=0;x<16;++x)
+      patch->pixels[y*16+x]=patch->pixels[(15-y)*16+x];
+    patch->derived=true;return true;
+  }
   if(top && (source.top_surface&(kVoxelTopSurface_OwnTopBand4|kVoxelTopSurface_OwnTopBand5))) {
     const bool beam=!!(source.top_surface&kVoxelTopSurface_OwnTopBand4);
     /* Grain/rail contours inside a beam are not additional walking caps. */

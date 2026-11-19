@@ -12732,6 +12732,154 @@
         ]
       ],
       "reason": "Identical reviewed temple spike or carved capital artwork in the cave hall; clear exterior matte only, preserving enclosed black carving and authored paint."
+    },
+    {
+      "key": "698ebbf41a607ec1",
+      "group": 3,
+      "room": 3,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          15
+        ],
+        [
+          15
+        ],
+        [
+          15
+        ],
+        [
+          15
+        ]
+      ],
+      "native_rgb555": "0000",
+      "origins": [
+        [
+          0,
+          178
+        ],
+        [
+          1,
+          178
+        ],
+        [
+          2,
+          178
+        ]
+      ],
+      "reason": "Only the foreground trim's exterior triangular index15 matte is cleared. Preserve stone/shadow ink, the structural variant's recessed black backing, unrelated black artwork and authored black paint."
+    },
+    {
+      "key": "698ebbf41a607ec1",
+      "group": 3,
+      "room": 4,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          15
+        ],
+        [
+          15
+        ],
+        [
+          15
+        ],
+        [
+          15
+        ]
+      ],
+      "native_rgb555": "0000",
+      "origins": [
+        [
+          0,
+          178
+        ],
+        [
+          1,
+          178
+        ],
+        [
+          2,
+          178
+        ]
+      ],
+      "reason": "Only the foreground trim's exterior triangular index15 matte is cleared. Preserve stone/shadow ink, the structural variant's recessed black backing, unrelated black artwork and authored black paint."
+    },
+    {
+      "key": "698ebbf41a607ec1",
+      "group": 3,
+      "room": 5,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          15
+        ],
+        [
+          15
+        ],
+        [
+          15
+        ],
+        [
+          15
+        ]
+      ],
+      "native_rgb555": "0000",
+      "origins": [
+        [
+          0,
+          178
+        ],
+        [
+          1,
+          178
+        ],
+        [
+          2,
+          178
+        ]
+      ],
+      "reason": "Only the foreground trim's exterior triangular index15 matte is cleared. Preserve stone/shadow ink, the structural variant's recessed black backing, unrelated black artwork and authored black paint."
+    },
+    {
+      "key": "698ebbf41a607ec1",
+      "group": 3,
+      "room": 6,
+      "background": 1,
+      "method": "edge_connected",
+      "colors": [
+        [
+          15
+        ],
+        [
+          15
+        ],
+        [
+          15
+        ],
+        [
+          15
+        ]
+      ],
+      "native_rgb555": "0000",
+      "origins": [
+        [
+          0,
+          178
+        ],
+        [
+          1,
+          178
+        ],
+        [
+          2,
+          178
+        ]
+      ],
+      "reason": "Only the foreground trim's exterior triangular index15 matte is cleared. Preserve stone/shadow ink, the structural variant's recessed black backing, unrelated black artwork and authored black paint."
     }
   ]
 }

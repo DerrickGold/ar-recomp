@@ -1,5 +1,38 @@
 # Action-mode layer editor
 
+### Mobile level audits
+
+The normal build also writes `build/action-editor/ar-level-audit-browser.html`:
+a separate, read-only, self-contained browser with embedded level data, shaders
+and the production C/WASM renderer. It needs no adjacent files or web fonts.
+Transfer that HTML to the phone and open it in a browser that runs HTML scripts
+(a file-manager preview may only display the document).
+
+Choose a room and terrain region. One finger pans; two fingers orbit and pinch
+to zoom, without switching tools. Double-tap or **Reset view** resets angle and
+zoom while keeping your position in the room. In Original 2D, one finger pans.
+Mouse users can Shift-drag or middle/right-drag to pan. **Location** jumps
+through large rooms; **View** provides reset, angle presets, animation, effects
+and the original 2D comparison. The toolbar stays outside the touch canvas in
+portrait and landscape. Animation starts paused to limit battery/GPU work.
+Both views can pan one native viewport beyond each scroll stop, so level
+edges can be centered and inspected up close. Original 2D uses its own native
+scanout bounds rather than the framed 3D camera's limits.
+
+Tap **Report**, then tap the issue to pin a face, or tap **Capture view** to
+report the whole view. **Share** includes the annotated PNG, report text and
+JSON where file sharing supports it;
+**Save image** and **Save report** provide PNG/JSON fallbacks. Reports record
+room/region, native camera position, inspection pan/focus, angle, zoom, frame, effects, tile hit when
+available, source commit and bundle fingerprint. Nothing is sent automatically.
+The report follows the visible viewport when the phone keyboard opens; its
+content scrolls to keep the focused notes field visible.
+This shows terrain and environmental effects; it does not simulate live actors.
+
+Bloodpool's castle moat (`02:05`) has a horizontal Voxel water surface derived
+from its native BG2 waterline. It retains captured water animation and priority,
+works with environmental effects disabled, and follows BG2 tile/pixel edits.
+
 ### Voxel 3D touch-up
 
 Use **3D preview → Mode → Voxel 3D (WIP) → Edit Voxel** to edit
@@ -62,6 +95,9 @@ Drag the X/Y/Z handles to move the group, or enter offsets in native pixels
 (X/Y) and scene depth (Z). Every member uses the same coordinate system, so
 resizing does not open gaps between its tiles. Existing per-tile artwork, depth,
 taper and attached-pull edits remain part of the shape.
+Native ornamental side profiles also retain their complete original face images
+under this transform. Use **Depth Z** to compress their thickness without
+reconstructing the sides from individual tiles.
 Moving or shrinking a group can expose space that its original artwork covered;
 neighboring ground is preserved, and newly exposed space may need artwork.
 Use **Repair backing** or convert the newly exposed cells when they need a fill.
@@ -152,6 +188,9 @@ grain, native silhouettes and priority. A compatible neighboring repeat can
 supply missing artwork; transparent or animated donors retain the existing
 contour treatment. Reviewed architectural tops retain complete 16px brick or
 stone motifs, including matching masonry reused in the cave and Death Heim.
+Reviewed repeated 8px top strips keep their front half and mirror the rear
+half instead of repeating it. Gold ornamental platform caps follow this rule
+through native group depth scaling, while their decorative sides stay intact.
 Mixed-cell background plants, foam fringes and gate ink cannot become automatic
 structural donors. Carved temple capitals and castle walking rims can borrow a
 compatible complete stone tile within eight cells, while preserving their
@@ -1629,6 +1668,20 @@ their density or shading. All lobes stay inside the saved region as it is resize
 BG1 and BG2 anchors, copy/paste, reset and project ZIP export use the same controls.
 The Aitos sky uses BG2 fixed-point anchoring so raster bands cannot bend a cloud.
 
+In Voxel mode, rear BG1 rolling banks distribute their existing billows through
+a shallow air volume. The volume control scales that depth; each body/crest pair
+shares a stable position, with its sparkles following the same billow. The
+rainbow scatters inside the bank. Culling includes the full depth envelope.
+This reuses the existing masks, billow count and geometry budget; 2D rendering
+retains the saved planar presentation.
+
+In Voxel mode, rear BG1 rolling banks distribute their existing billows through
+a shallow physical volume. Each shaded body and bright crest share a stable
+depth, with droplets following their billow and rainbow scattering inside the
+bank. Volume controls the depth spread. Culling includes both depth endpoints;
+the bank keeps the same mask count and opacity, with no additional draw pass.
+The ordinary 2D/Diorama bank keeps its existing planar geometry.
+
 Eight density/lighting pairs are baked from small 3D cloud volumes at startup.
 They use the same two masked quads per lobe and alpha batch as rolling mist;
 there is no per-frame volume integration, new shader or additional render pass.
@@ -1736,6 +1789,15 @@ the native wall's DoF in plane, skybox-only and combined views; receiver light
 remains a separate pass. The flat view retains the usual BG2 winner mask.
 Kassandora sconces use wider amber spill profiles and slow golden motes.
 Act 1's soft sun glare uses an ordinary BG2 light gradient with clipped edges.
+
+In Voxel mode, playfield motes, torch motes, and dust/mote regions and paths
+occupy stable depths between the back wall and the foreground. Light fans
+spread their existing rays through the same space, with their soft halo at
+mid-depth. Surface and actor illumination still samples the original authored
+field; it does not inherit the scattered rays' depth or apply twice. Surface
+glints stay attached to their traced artwork. Other 3D modes and the flat view
+retain the original placement. Camera rotation reprojects retained source
+packets without changing seeds, particle counts, ray counts or opacity.
 
 **Particle paths** trace ordered local X,Y points from source to destination.
 Use them for crest sand, downhill slides and ceiling grit. Unlike ground-cloud
@@ -3053,7 +3115,21 @@ Free background cloud banks can set `voxel-bg1-bounds=x0,y0,x1,y1` in
 `action-effects.ini`. These BG1 world-pixel bounds put the bank on the
 foreground terrain plane in Voxel mode. The native high-priority artwork
 still defines the cloud silhouette. The original anchor and bounds apply
-in ordinary Diorama and flat mode.
+in ordinary Diorama and flat mode. With cloud `volume` enabled, three soft
+interior layers extend behind this front face, reaching up to 60% of the
+rear-to-front BG1 depth at `volume=1`. They reuse the existing lit billows,
+atlas and render pass. Their depths remain fixed as the camera or cloud
+animation moves; the native front artwork and priorities stay unchanged.
+
+`voxel-bg1-gaps=x0,x1 x0,x1 ...` leaves up to eight ordered world-X openings
+through that bank. These apply only to the Voxel BG1 augmentation, including
+its front overlay and interior layers; the original sky bank stays unchanged.
+Use these for lava cavities or other openings which the native cloud artwork
+does not cover. Keep a small clearance beneath adjacent opaque cliff edges so
+rotating the camera does not expose a thin cloud strip inside the cavity.
+Mask clipping preserves the shared cloud seed, animation and texture coordinates
+on both sides. The recipe budget reserves additional split geometry before
+camera culling.
 
 ### Native final-battle nebula
 

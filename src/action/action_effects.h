@@ -300,6 +300,8 @@ enum {
   kActionFlowerVerticesPerPlant = 42, /* Stem, bloom and optional centre: three clipped quads. */
   kActionMistRainbowColumns = 8, kActionMistRainbowRows = 6,
   kActionMistSparklesPerStrand = 4,
+  kActionCloudInteriorLayers = 3,
+  kActionCloudMaxGaps = 8,
   kActionSceneEffectObserverTrackCount = 80,
   kActionEffectObjPriorityCount = 4,
   kActionLandingDustMaxPuffs = 6,
@@ -394,6 +396,10 @@ typedef struct ActionEffectFieldStyle {
   uint8_t opening; /* Fan is an authored enclosure aperture: light, frost and wind share it. */
   float rolling, wake, canopy_response; /* Textured floor mist: billows, body wakes, canopy scattering. */
   float volume; /* Rolling clouds: rounded, internally shaded billows; zero preserves wispy mist. */
+  uint8_t voxel_cloud_gap_count;
+  /* Ordered BG1 world-X openings. Native cloud augmentation leaves these
+   * columns clear through its entire depth, including its front overlay. */
+  struct {float x0,x1;} voxel_cloud_gaps[kActionCloudMaxGaps];
   float rainbow; /* View/light-angle spectral response of spray; zero adds no geometry. */
   float sparkle; /* Small sunlit droplets following moving mist density; zero adds no geometry. */
   float carry; /* Ground dust: downwind distance over which lifted dust settles. */

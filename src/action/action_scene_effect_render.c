@@ -479,6 +479,30 @@ static bool AppendLavaReservoirLighting(
   return AppendLavaBurstLighting(writer,effect,f,project_point,userdata);
 }
 
+const ActionEffectProjectionContext *SceneVoxelVolumeContext(const ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect,ActionEffectProjectPointFn project,void *userdata) {
+  const ActionEffectProjectionContext *context=writer->source?&writer->source->context:
+      project==ActionEffectProjection_ProjectPoint?userdata:NULL;
+  const bool voxel=context && (context->diorama_projection?
+      context->diorama_projection->voxel_scenery:context->staged_voxel_scenery);
+  return voxel && effect->projection_plane==kActionEffectProjectionPlane_Bg1?context:NULL;
+}
+
+bool AppendSceneVolumeParticle(ActionEffectGeometryWriter *writer,const ActionEffectInstance *effect,
+    float x,float y,float previous_x,float previous_y,float width,float reach,float depth,
+    ArRenderColorF color,ActionEffectProjectPointFn project,void *userdata) {
+  const ActionEffectProjectionContext *context=SceneVoxelVolumeContext(writer,effect,project,userdata);
+  if(!context)
+    return AppendSceneParticle(writer,effect,x,y,previous_x,previous_y,width,reach,color,project,userdata);
+  if(writer->source) {
+    const bool ok=ActionEffectSource_VolumeParticle(writer->source,effect,x,y,previous_x,previous_y,width,reach,depth,color);
+    writer->vertex_count=(int)writer->source->count;return ok;
+  }
+  ActionEffectProjectionContext volume;DioramaProjection projection;
+  if(!ActionEffectProjection_VolumeContext(context,depth,&volume,&projection))return true;
+  return AppendSceneParticle(writer,effect,x,y,previous_x,previous_y,width,reach,color,project,&volume);
+}
+
 bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
                                 const ActionEffectInstance *effect,
                                 float x, float y, float previous_x,

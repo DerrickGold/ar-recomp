@@ -156,6 +156,13 @@ bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
 SceneParticleClock
 SceneParticleClockAt(const ActionEffectInstance *effect, unsigned visual_ticks,
                      unsigned index, SceneParticleLifetime timing);
+/* Stable per-particle air depth in Voxel; ordinary modes retain their exact
+ * particle path. CPU preview and retained GPU packets share this decision. */
+const ActionEffectProjectionContext *SceneVoxelVolumeContext(const ActionEffectGeometryWriter *,
+    const ActionEffectInstance *,ActionEffectProjectPointFn,void *);
+bool AppendSceneVolumeParticle(ActionEffectGeometryWriter *,const ActionEffectInstance *,
+    float x,float y,float previous_x,float previous_y,float width,float reach,float depth,
+    ArRenderColorF,ActionEffectProjectPointFn,void *);
 
 ArRenderColorF SceneParticleColor(ArRenderColorF hot,
                                          ArRenderColorF cool,

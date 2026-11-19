@@ -2,6 +2,9 @@
 static void TestVoxelCloudAuthoredLowerExtent(void) {
   DioramaProjection p=RakedApronProjection();
   p.voxel_scenery=true;p.texture_width=640;p.texture_height=512;p.texture_x_origin=0;
+  /* This fixture isolates finite rear-sheet admission. Air-volume placement
+   * has a separate two-plane fixture; no front plane is published here. */
+  p.bg1_high_plane.valid=false;
   p.bg1_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1,.z_world=-.2f,
       .source_bounds_valid=true,.source_u1=1,.source_v1=.5f};
   ActionEffectProjectionContext context={.diorama_projection=&p};

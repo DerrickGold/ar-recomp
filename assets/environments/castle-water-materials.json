@@ -1,0 +1,12 @@
+{
+  "profile": "castle-water",
+  "description": "Reviewed native BG2 moat waterline. Add a horizontal pool surface while preserving captured water artwork, animation, source priority and collision. Source IDs are provenance only.",
+  "materials": [
+    {
+      "key": "17255120eabd869e",
+      "kinds": [1, 1, 1, 1],
+      "flags": 0,
+      "origins": [[5, 0, 21], [5, 1, 21], [5, 2, 21]]
+    }
+  ]
+}

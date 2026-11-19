@@ -10,6 +10,7 @@ args = parser.parse_args()
 ROOT = Path(__file__).resolve().parents[1]
 TABLES = (
     ("castle-materials.json", "Castle", "castle"),
+    ("castle-water-materials.json", "CastleWater", "castle_water"),
     ("fillmore-forest-materials.json", "Forest", "forest"),
     ("fillmore-cave-materials.json", "Cave", "cave"),
     ("fillmore-cave-water-materials.json", "CaveWater", "cave_water"),
@@ -33,7 +34,8 @@ TOP_POLICIES = {'default': (0, 0), 'own16': (1, 0), 'own16_donor': (3, 0),
                 'forest_turf8_donor': (16, 1), 'forest_turf_right8_donor': (16, 2),
                 'forest_turf_left8_donor': (16, 3), 'forest_soil8': (32, 0),
                 'family_cap16': (64, 0), 'family_donor16': (128, 0),
-                'own_top_band5': (256, 0), 'own_top_band4': (512, 0)}
+                'own_top_band5': (256, 0), 'own_top_band4': (512, 0),
+                'own8_mirror_depth': (1024, 0)}
 # Values are shared with the compiler's reviewed donor index; zero denotes
 # ordinary masonry and1..3 are the established forest turf band families.
 # Explicit names prevent an arbitrary material/palette ID becoming a family.
@@ -45,6 +47,12 @@ def top_contract(manifest, record):
     name = record.get('top_surface', 'default')
     if name not in TOP_POLICIES:
         raise ValueError(f'{manifest}: invalid top surface policy for {record["key"]}')
+    # Native side profiles already expose solid caps. Do not add the legacy
+    # textured-top flag just to mirror their art: it also changes fallback UVs.
+    if name == 'own8_mirror_depth' and (record.get('kinds') != [1, 1, 1, 1] or
+            not record.get('flags', 0) & (4 | 128) or
+            any(any(record.get(k, [0, 0, 0, 0])) for k in ('rear_colors','gate_colors','face_colors'))):
+        raise ValueError(f'{manifest}: mirrored native tops require reviewed textured solid or native profile artwork for {record["key"]}')
     if name == 'own_top_band5' and (manifest != 'castle-materials.json' or
             record.get('kinds') != [1, 1, 1, 1] or record.get('flags') != 0 or
             any(record.get(k, [0, 0, 0, 0]) != [0, 0, 0, 0]
@@ -91,6 +99,11 @@ for manifest, symbol, suffix in TABLES:
         face_colors = tuple(record.get("face_colors", [0, 0, 0, 0]))
         if len(face_colors) != 4 or any(type(v) is not int or not 0 <= v <= 65535 or v & 1 for v in face_colors):
             raise ValueError(f'{manifest}: invalid face color mask for {record["key"]}')
+        column_colors = tuple(record.get('column_recess_colors', [0, 0, 0, 0]))
+        if (len(column_colors) != 4 or any(type(v) is not int or not 0 <= v <= 65535 or v & 1 for v in column_colors) or
+                (any(column_colors) and (suffix != 'desert' or record['kinds'] != [1, 1, 1, 1] or record['flags'] != 0 or
+                                        any(rear_colors + gate_colors + face_colors)))):
+            raise ValueError(f'{manifest}: column recession requires reviewed solid desert support ink for {record["key"]}')
         if any(a & (b | c) or b & c for a, b, c in zip(rear_colors, gate_colors, face_colors)):
             raise ValueError(f'{manifest}: overlapping pixel roles for {record["key"]}')
         rear_fold = record.get("rear_fold_pixels", 0)
@@ -108,8 +121,12 @@ for manifest, symbol, suffix in TABLES:
         door_closure = record.get('door_closure', False)
         if type(door_closure) is not bool or (door_closure and record['kinds'] != [1, 1, 1, 1]):
             raise ValueError(f'{manifest}: invalid solid door closure for {record["key"]}')
+        column_shadow = record.get('column_shadow', False)
+        if type(column_shadow) is not bool or (column_shadow and
+                (suffix != 'desert' or record['kinds'] != [1, 1, 1, 1] or record['flags'] != 0)):
+            raise ValueError(f'{manifest}: invalid shadowed column underside for {record["key"]}')
         key = (int(record["key"], 16), tuple(record["kinds"]), record["flags"], rear_colors,
-               gate_colors, face_colors, rear_fold, complete_matte, portal_jamb, door_closure)
+               gate_colors, face_colors, rear_fold, complete_matte, portal_jamb, door_closure, column_colors, column_shadow)
         record_rooms = 0
         for room, terrain, metatile in record["origins"]:
             record_rooms |= 1 << room
@@ -233,7 +250,7 @@ for manifest, symbol, suffix in TABLES:
                 raise ValueError(f'{manifest}: conflicting top surface policies for {key:016x}')
     lines = [f"/* Generated reviewed artwork roles. See assets/environments/{manifest}. */",
              f"static const VoxelMaterialProfile k{symbol}Materials[] = {{"]
-    for (key, kinds, flags, rear_colors, gate_colors, face_colors, rear_fold, complete_matte, portal_jamb, door_closure), rooms in sorted(profiles.items()):
+    for (key, kinds, flags, rear_colors, gate_colors, face_colors, rear_fold, complete_matte, portal_jamb, door_closure, column_colors, column_shadow), rooms in sorted(profiles.items()):
         gate_text = ",{%s}" % ",".join(map(str, gate_colors))
         face_text = ",{%s}" % ",".join(map(str, face_colors))
         # Keep compact profiles: bits24..27 carry an explicitly reviewed band
@@ -244,6 +261,10 @@ for manifest, symbol, suffix in TABLES:
             matte_text += ",.portal_jamb=true"
         if door_closure:
             matte_text += ",.door_closure=true"
+        if any(column_colors):
+            matte_text += ',.column_recess_colors={%s}' % ','.join(map(str, column_colors))
+        if column_shadow:
+            matte_text += ',.column_shadow=true'
         lines.append("  {UINT64_C(0x%016x),0x%04x,{%s},%d,{%s}%s%s%s}," %
                      (key, rooms, ",".join(map(str, kinds)), flags, ",".join(map(str, rear_colors)),
                       gate_text, face_text, matte_text))

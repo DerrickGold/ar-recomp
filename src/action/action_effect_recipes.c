@@ -1,4 +1,5 @@
 #include "action_effect_recipes.h"
+#include "render/cloud_motion.h"
 #include "action_light_kinds.h"
 #include "action_soft_light.h"
 #include "action_effect_members.h"
@@ -268,6 +269,32 @@ static unsigned RecipeCost(const ActionEffectRecipe *r) {
     default: return 8*37;
   }
 }
+static unsigned VoxelCloudCost(const ActionEffectRecipe *r) {
+  const ActionEffectFieldStyle *s=&r->field_style;
+  const unsigned base=RecipeCost(r);
+  if(s->rolling<=0)return base;
+  unsigned splits=0;
+  const CloudBankMotion motion={.x=r->voxel_bg1_bounds.x0,.y=r->voxel_bg1_bounds.y0,
+      .width=r->voxel_bg1_bounds.x1-r->voxel_bg1_bounds.x0,
+      .height=r->voxel_bg1_bounds.y1-r->voxel_bg1_bounds.y0,
+      .drift=s->drift,.rolling=s->rolling,.amplitude=s->amplitude,
+      .strands=s->strands,.volume=s->volume>0};
+  for(unsigned i=0;s->voxel_cloud_gap_count&&i<s->strands;++i) {
+    CloudBankPatch pair[2];
+    CloudMotion_Bank(&motion,i,r->particle_style.seed^(i+1)*0x9e3779b9u,pair);
+    /* Two drift amplitudes conservatively cover every animation phase.
+     * A wispy crest can curl .36 radii and grow to 1.31 body radii.
+     * Count each possible split before camera culling, even offscreen. */
+    const float reach=pair[0].rx*(s->volume>0?1:1.7f)+2*fabsf(s->drift);
+    for(unsigned g=0;g<s->voxel_cloud_gap_count;++g) {
+      if(pair[0].x+reach>s->voxel_cloud_gaps[g].x0 &&
+          pair[0].x-reach<s->voxel_cloud_gaps[g].x1)splits+=16;
+    }
+  }
+  const unsigned lobes=16*s->strands;
+  return lobes+splits+(base-lobes)*(s->voxel_cloud_gap_count+1)+
+      (s->volume>0?(lobes+splits)*kActionCloudInteriorLayers:0);
+}
 static bool ExposureCostQuad(void *context,const float xs[2],const float ys[2],const float factors[4]) {
   (void)xs;(void)ys;(void)factors;unsigned *vertices=context;
   *vertices+=14;return *vertices<=kActionAuthoredMaxVertices;
@@ -319,6 +346,23 @@ static bool VoxelCloudBounds(const char *value, ActionEffectLocalRect *bounds) {
     return false;
   *bounds = (ActionEffectLocalRect){x0, y0, x1, y1};
   return true;
+}
+static bool VoxelCloudGaps(const char *text,ActionEffectFieldStyle *style) {
+  style->voxel_cloud_gap_count=0;
+  while(*text) {
+    if(style->voxel_cloud_gap_count==kActionCloudMaxGaps)return false;
+    char *end;const float x0=strtof(text,&end);
+    if(end==text||*end!=',')return false;
+    text=end+1;const float x1=strtof(text,&end);
+    if(end==text||!isfinite(x0)||!isfinite(x1)||x0 < -2048||x1>16384||x1-x0<4||
+        x0!=floorf(x0)||x1!=floorf(x1)||(*end&&!isspace((unsigned char)*end)))return false;
+    const unsigned n=style->voxel_cloud_gap_count;
+    if(n&&x0<style->voxel_cloud_gaps[n-1].x1)return false;
+    style->voxel_cloud_gaps[n].x0=x0;style->voxel_cloud_gaps[n].x1=x1;
+    ++style->voxel_cloud_gap_count;
+    text=end;while(isspace((unsigned char)*text))++text;
+  }
+  return style->voxel_cloud_gap_count>0;
 }
 static bool UnsignedNumber(const char *s, uint32_t *out) {
   if (!*s) return false;
@@ -774,6 +818,8 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
         bit=UINT64_C(1)<<55;ok=Number(value,0,1,&current->field_style.rolling);
       } else if (!strcmp(key,"voxel-bg1-bounds") && current->kind==kActionEffect_AuthoredCloud) {
         bit=UINT64_C(1)<<59;ok=VoxelCloudBounds(value,&current->voxel_bg1_bounds);
+      } else if (!strcmp(key,"voxel-bg1-gaps") && current->kind==kActionEffect_AuthoredCloud) {
+        bit=UINT64_C(1)<<60;ok=VoxelCloudGaps(value,&current->field_style);
       } else if (!strcmp(key,"volume") && current->kind==kActionEffect_AuthoredCloud) {
         bit=UINT64_C(1)<<63;ok=Number(value,0,1,&current->field_style.volume);
       } else if (!strcmp(key,"plume") && current->kind==kActionEffect_AuthoredCloud) {
@@ -909,6 +955,13 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
       if (r->voxel_bg1_bounds.x1 > r->voxel_bg1_bounds.x0 &&
           (r->anchor != kActionEffectAnchor_Bg2Point || s->placement != 0 ||
            s->point_count || r->actor.target)) {ok=false;break;}
+      if(s->voxel_cloud_gap_count) {
+        if(r->voxel_bg1_bounds.x1<=r->voxel_bg1_bounds.x0||!s->textured||s->rolling<=0){ok=false;break;}
+        for(unsigned g=0;g<s->voxel_cloud_gap_count;++g)
+          if(s->voxel_cloud_gaps[g].x0<r->voxel_bg1_bounds.x0||
+              s->voxel_cloud_gaps[g].x1>r->voxel_bg1_bounds.x1)ok=false;
+        if(!ok)break;
+      }
       if(s->ground_depth>0&&(!s->point_count||s->placement!=2)){ok=false;break;}
       if(s->ground_width>0&&s->ground_depth<=0){ok=false;break;}
       if(s->plume&&(!s->textured||s->point_count||s->rolling||s->volume||s->rainbow||s->sparkle||s->wake||s->canopy_response||r->actor.target)) {ok=false;break;}
@@ -982,6 +1035,11 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
        * but never duplicates foreground powder or loose grains. */
       if(other->kind==kActionEffect_AuthoredCloud&&other->field_style.ground_width>0)
         pass_vertices[kActionEffectRenderLayer_Bg1Mist]+=copies*GroundCoverCost(&other->field_style);
+      /* Voxel cloud augmentation moves into its own terrain alpha batch.
+       * Reserve the complete bank there, including its bounded interior;
+       * the ordinary-mode bank remains budgeted at its original placement. */
+      if(other->kind==kActionEffect_AuthoredCloud&&other->voxel_bg1_bounds.x1>other->voxel_bg1_bounds.x0)
+        pass_vertices[kActionEffectRenderLayer_Bg1Mist]+=copies*VoxelCloudCost(other);
       /* Glow cores/tails are visible particles, not material-light geometry.
        * Receiver passes emit only one clipped spill quad per glow point. */
       const unsigned light_cost=other->kind==kActionEffect_AuthoredFireflies?copies*8*other->particles:cost;

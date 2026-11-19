@@ -1150,8 +1150,8 @@
         7,
         7
       ],
-      "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "flags": 2048,
+      "role": "contextual_cliff_infill",
       "origins": [
         [
           1,
@@ -1183,7 +1183,8 @@
           2,
           11
         ]
-      ]
+      ],
+      "surface_review": "Native rock fill belongs to the front cliff below reviewed flat caps only when its connected wall has no rear ramp/scenery roots. Preserve coherent rear walls and the existing ramp-return backing."
     },
     {
       "key": "1f484a1a26f601d0",
@@ -1525,14 +1526,15 @@
           246
         ]
       ],
-      "face_colors": [
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock",
+      "rear_colors": [
         128,
         128,
         128,
         128
       ],
-      "top_surface": "family_cap16",
-      "surface_family": "mountain_rock"
+      "surface_review": "Ink7 is native waterfall-contact foam, retained only on the rear plane. Brown platform ink keeps its existing structural depth, profile, native priority and collision."
     },
     {
       "key": "2a7a2cd1a59ca4af",
@@ -1835,7 +1837,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "solid_cliff",
       "origins": [
         [
@@ -1855,7 +1857,8 @@
         ]
       ],
       "top_surface": "family_donor16",
-      "surface_family": "mountain_rock"
+      "surface_family": "mountain_rock",
+      "surface_review": "This flat walkable rock cap owns the uninterrupted reviewed cliff infill below it. Preserve source artwork, collision and priority."
     },
     {
       "key": "36d2192b57d57b53",
@@ -1927,14 +1930,15 @@
           252
         ]
       ],
-      "face_colors": [
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock",
+      "rear_colors": [
         128,
         128,
         128,
         128
       ],
-      "top_surface": "family_cap16",
-      "surface_family": "mountain_rock"
+      "surface_review": "Ink7 is native waterfall-contact foam, retained only on the rear plane. Brown platform ink keeps its existing structural depth, profile, native priority and collision."
     },
     {
       "key": "3c44920ad970ed1a",
@@ -2929,10 +2933,10 @@
     {
       "key": "596b523984a70e8a",
       "kinds": [
-        3,
-        3,
-        3,
-        3
+        7,
+        7,
+        7,
+        7
       ],
       "flags": 8,
       "role": "waterfall_spray",
@@ -2967,7 +2971,8 @@
           2,
           129
         ]
-      ]
+      ],
+      "surface_review": "Native waterfall spray stays on the rear waterfall-contact plane in Voxel mode. Preserve source pixels and priorities; do not duplicate this free foam at the rock front."
     },
     {
       "key": "5cd4a29a48756824",
@@ -3368,10 +3373,10 @@
     {
       "key": "6a6d67dfb7ab7396",
       "kinds": [
-        3,
-        3,
-        3,
-        3
+        7,
+        7,
+        7,
+        7
       ],
       "flags": 8,
       "role": "waterfall_spray",
@@ -3406,7 +3411,8 @@
           2,
           54
         ]
-      ]
+      ],
+      "surface_review": "Native waterfall spray stays on the rear waterfall-contact plane in Voxel mode. Preserve source pixels and priorities; do not duplicate this free foam at the rock front."
     },
     {
       "key": "6a8245a35272edd9",
@@ -3572,14 +3578,15 @@
           79
         ]
       ],
-      "face_colors": [
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock",
+      "rear_colors": [
         128,
         128,
         128,
         128
       ],
-      "top_surface": "family_cap16",
-      "surface_family": "mountain_rock"
+      "surface_review": "Ink7 is native waterfall-contact foam, retained only on the rear plane. Brown platform ink keeps its existing structural depth, profile, native priority and collision."
     },
     {
       "key": "6fac45c9e76a7f66",
@@ -3632,8 +3639,8 @@
         7,
         7
       ],
-      "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "flags": 2048,
+      "role": "contextual_cliff_infill",
       "origins": [
         [
           1,
@@ -3680,7 +3687,8 @@
           2,
           10
         ]
-      ]
+      ],
+      "surface_review": "Native rock fill belongs to the front cliff below reviewed flat caps only when its connected wall has no rear ramp/scenery roots. Preserve coherent rear walls and the existing ramp-return backing."
     },
     {
       "key": "7046dc16c7c6d000",
@@ -3930,14 +3938,15 @@
           78
         ]
       ],
-      "face_colors": [
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock",
+      "rear_colors": [
         128,
         128,
         128,
         128
       ],
-      "top_surface": "family_cap16",
-      "surface_family": "mountain_rock"
+      "surface_review": "Ink7 is native waterfall-contact foam, retained only on the rear plane. Brown platform ink keeps its existing structural depth, profile, native priority and collision."
     },
     {
       "key": "7616376a189c2dcd",
@@ -4533,13 +4542,13 @@
     {
       "key": "8c4c0092eb069e63",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        3,
+        3,
+        3,
+        3
       ],
       "flags": 0,
-      "role": "rear_bamboo",
+      "role": "cloud_bank",
       "origins": [
         [
           1,
@@ -5260,8 +5269,8 @@
         7,
         7
       ],
-      "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "flags": 2048,
+      "role": "contextual_cliff_infill",
       "origins": [
         [
           1,
@@ -5293,7 +5302,8 @@
           2,
           19
         ]
-      ]
+      ],
+      "surface_review": "Native rock fill belongs to the front cliff below reviewed flat caps only when its connected wall has no rear ramp/scenery roots. Preserve coherent rear walls and the existing ramp-return backing."
     },
     {
       "key": "a8b325fb81e5c736",
@@ -5346,7 +5356,7 @@
         1,
         1
       ],
-      "flags": 16388,
+      "flags": 20484,
       "role": "solid_cliff",
       "origins": [
         [
@@ -5364,7 +5374,8 @@
           2,
           35
         ]
-      ]
+      ],
+      "surface_review": "This flat walkable rock cap owns the uninterrupted reviewed cliff infill below it. Preserve source artwork, collision and priority."
     },
     {
       "key": "ad9a1b68b7f68961",
@@ -5733,10 +5744,10 @@
     {
       "key": "b3f67bd2e1e8f5a5",
       "kinds": [
-        3,
-        3,
-        3,
-        3
+        7,
+        7,
+        7,
+        7
       ],
       "flags": 8,
       "role": "waterfall_spray",
@@ -5756,18 +5767,19 @@
           2,
           94
         ]
-      ]
+      ],
+      "surface_review": "Native waterfall spray stays on the rear waterfall-contact plane in Voxel mode. Preserve source pixels and priorities; do not duplicate this free foam at the rock front."
     },
     {
       "key": "b426811a42299acb",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        3,
+        3,
+        3,
+        3
       ],
       "flags": 0,
-      "role": "rear_bamboo",
+      "role": "cloud_bank",
       "origins": [
         [
           1,
@@ -6567,14 +6579,15 @@
           254
         ]
       ],
-      "face_colors": [
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock",
+      "rear_colors": [
         128,
         128,
         128,
         128
       ],
-      "top_surface": "family_cap16",
-      "surface_family": "mountain_rock"
+      "surface_review": "Ink7 is native waterfall-contact foam, retained only on the rear plane. Brown platform ink keeps its existing structural depth, profile, native priority and collision."
     },
     {
       "key": "d1c194d390947039",
@@ -7218,14 +7231,15 @@
           244
         ]
       ],
-      "face_colors": [
+      "top_surface": "family_cap16",
+      "surface_family": "mountain_rock",
+      "rear_colors": [
         128,
         128,
         128,
         128
       ],
-      "top_surface": "family_cap16",
-      "surface_family": "mountain_rock"
+      "surface_review": "Ink7 is native waterfall-contact foam, retained only on the rear plane. Brown platform ink keeps its existing structural depth, profile, native priority and collision."
     },
     {
       "key": "ea4310027840cde1",
@@ -7425,8 +7439,8 @@
         7,
         7
       ],
-      "flags": 0,
-      "role": "rear_rock_or_scenery",
+      "flags": 2048,
+      "role": "contextual_cliff_infill",
       "origins": [
         [
           1,
@@ -7473,7 +7487,8 @@
           2,
           18
         ]
-      ]
+      ],
+      "surface_review": "Native rock fill belongs to the front cliff below reviewed flat caps only when its connected wall has no rear ramp/scenery roots. Preserve coherent rear walls and the existing ramp-return backing."
     },
     {
       "key": "f423238f83d717f8",
@@ -7637,13 +7652,13 @@
     {
       "key": "f7d7c93bf52ac141",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        3,
+        3,
+        3,
+        3
       ],
       "flags": 0,
-      "role": "rear_bamboo",
+      "role": "cloud_bank",
       "origins": [
         [
           1,

@@ -365,12 +365,103 @@ static bool TransformedNativeEdgeSpan(const ActionVoxelGeometry *geometry,const 
   span->near_depth=fmaxf(span->near_depth,lo);span->far_depth=fminf(span->far_depth,hi);
   return span->far_depth>span->near_depth;
 }
-static bool NativeBranchHasTransform(const ActionVoxelGeometry *geometry,const VoxelPatch *p) {
+static bool NativePatchHasTransform(const ActionVoxelGeometry *geometry,const VoxelPatch *p) {
   if(!ActionVoxel_HasNativeTransforms(geometry))return false;
   for(int y=p->y/16;y<(p->y+p->height+15)/16;++y)
     for(int x=p->x/16;x<(p->x+p->width+15)/16;++x)
       if(NativeTransformCell(geometry,x*16,y*16))return true;
   return false;
+}
+/* Affine edits retain the complete native side image. Parameterize the
+ * original panel first, then transform its vertices; using the edited depth
+ * as a new texture coordinate would crop or stretch a different face. */
+static bool DrawTransformedNativeProfile(ArRenderDevice *device,const DioramaCapture *capture,
+    const DioramaViewGeometry *g,const DioramaLayerDraw *layer,const VoxelPatch *p,
+    float near_depth,float far_depth,int *count,float blur) {
+  const ActionVoxelGeometry *geometry=layer->voxel_geometry;
+  const float depth=ActionVoxel_Depth(geometry);
+  if(p->width<2 || p->height<2 || !(depth>0))return true;
+  unsigned art_count=0;
+  const VoxelProfileSurface *art=p->surface_compiled?ActionVoxel_ProfileSurfaces(geometry,&art_count):NULL;
+  if(p->surface_compiled && !p->surface_count)return true;
+  if(p->surface_compiled && (!art || p->surface_first>art_count || p->surface_count>art_count-p->surface_first))return false;
+  /* Compiled wet-rock panels exclude face-only foam. Uncompiled ornamental
+   * panels use the legacy half-texel mapping of their complete front image. */
+  const float inset=p->surface_compiled?0:.5f;
+  const float image_width=p->width-2*inset,image_height=p->height-2*inset;
+  const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
+  const float oy=capture->camera_y-capture->authentic_y0+1;
+  const float du=g->u1-g->u0,dv=g->v1-g->v0;
+  for(int cy=(int)floorf(p->y/16.f);cy<(int)ceilf((p->y+p->height)/16.f);++cy)
+    for(int cx=(int)floorf(p->x/16.f);cx<(int)ceilf((p->x+p->width)/16.f);++cx) {
+      const VoxelAuthoredCell *a=NativeTransformCell(geometry,cx*16,cy*16);
+      if(!a) {
+        const VoxelAuthoredCell *owned=ActionVoxel_AuthoredCellAt(geometry,cx,cy);
+        if(owned && owned->surface)continue;
+        return false;
+      }
+      unsigned art_id=a->art_id[0];
+      if(p->surface_compiled) {
+        unsigned i=0;
+        for(;i<p->surface_count;++i)if(art[p->surface_first+i].x==a->x && art[p->surface_first+i].y==a->y) {
+          art_id=art[p->surface_first+i].art_id;break;
+        }
+        if(i==p->surface_count)continue;
+      }
+      if(!VoxelOwnedArtReady(art_id))return false;
+      const DioramaVoxelTransform *t=&a->transform;
+      const float lo=fmaxf(0,t->pz+(near_depth-t->pz-t->dz)/t->sz);
+      const float hi=fminf(depth,t->pz+(far_depth-t->pz-t->dz)/t->sz);
+      if(hi<=lo)continue;
+      const float sx0=fmaxf(p->x+inset,cx*16),sx1=fminf(p->x+p->width-inset,(cx+1)*16);
+      const float sy0=fmaxf(p->y+inset,cy*16),sy1=fminf(p->y+p->height-inset,(cy+1)*16);
+      if(sx1<=sx0 || sy1<=sy0)continue;
+      const float y0=p->y+p->height*(sy0-p->y-inset)/image_height;
+      const float y1=p->y+p->height*(sy1-p->y-inset)/image_height;
+      for(unsigned side=1;side<=2;++side) {
+        const unsigned mask=side==1?kDioramaVoxelFaceMask_Left:kDioramaVoxelFaceMask_Right;
+        if(!(a->faces&mask))continue;
+        const float u0=(sx0-p->x-inset)/image_width,u1=(sx1-p->x-inset)/image_width;
+        const float z0=fmaxf(lo,depth*(side==1?u0:1-u1));
+        const float z1=fminf(hi,depth*(side==1?u1:1-u0));
+        if(z1<=z0)continue;
+        VoxelSide face={.owned_source=true,.heat_finite=true};
+        DioramaVoxelPickFace pick={.authored=true,.kind=kDioramaVoxelFace_Side,
+            .priority=p->high_priority,.plane=layer->description->plane,.cell_x=cx,.cell_y=cy};
+        bool valid=true;
+        for(unsigned j=0;j<4;++j) {
+          const bool end=j==1 || j==2,bottom=j>=2;
+          const float raw_z=end?z1:z0,raw_y=bottom?y1:y0;
+          const float source_x=p->x+inset+image_width*(side==1?raw_z/depth:1-raw_z/depth);
+          const float source_y=p->y+inset+image_height*(raw_y-p->y)/p->height;
+          float x=side==1?p->x:p->x+p->width,y=raw_y,z=raw_z;
+          pick.world_xy[j*2]=x;pick.world_xy[j*2+1]=y;
+          ActionVoxel_TransformPoint(t,x,y,z,&x,&y,&z);
+          face.heat_world_xy[j]=(ArRenderPointF){x,y};
+          const float u=(x-ox)/SR_PPU_SURFACE_MAX_WIDTH,v=(y-oy)/SR_PPU_SURFACE_MAX_HEIGHT;
+          const float scale=1+z/fmaxf(1,g->camera.distance);
+          valid&=VoxelProjectWithW(g,((u-g->u0)/du-.5f)*g->aspect_x*scale,
+              (.5f-(v-g->v0)/dv)*g->height_scale*scale,-z,
+              &face.v[j].position,&face.distance,&face.depths[j],&face.clip_w[j]);
+          face.v[j].tex_coord=VoxelOwnedArtUv(art_id,
+              fmaxf(.5f,fminf(15.5f,source_x-a->x)),fmaxf(.5f,fminf(15.5f,source_y-a->y)));
+          const float su=(source_x-ox)/SR_PPU_SURFACE_MAX_WIDTH,sv=(source_y-oy)/SR_PPU_SURFACE_MAX_HEIGHT;
+          float shade=.86f*(1-.12f*raw_z/depth)*(1-SceneryDimming_Amount(layer->dimming,layer->dimming_ramp,su,sv));
+          if(layer->exposure && layer->exposure->sample)
+            shade*=layer->exposure->sample(layer->exposure->userdata,su,sv,su,sv);
+          face.v[j].color=(ArRenderColorF){layer->shade.r*shade,layer->shade.g*shade,layer->shade.b*shade,1};
+          pick.screen_xy[j*2]=face.v[j].position.x;pick.screen_xy[j*2+1]=face.v[j].position.y;
+          pick.depth[j]=face.depths[j];pick.clip_w[j]=face.clip_w[j];
+          pick.art_uv[j*2]=source_x-a->x;pick.art_uv[j*2+1]=source_y-a->y;
+        }
+        if(!valid)continue;
+        if(g->options->voxel_observe_face)
+          g->options->voxel_observe_face(g->options->voxel_observer_userdata,&pick);
+        if(!ReserveVoxelSide(device,g,layer,count,blur))return false;
+        s_voxel_sides[(*count)++]=face;
+      }
+    }
+  return true;
 }
 static bool DrawTransformedNativeBranch(ArRenderDevice *device,const DioramaCapture *capture,
     const DioramaViewGeometry *g,const DioramaLayerDraw *layer,const VoxelPatch *p,int *count,float blur) {
@@ -684,11 +775,15 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       if (walls && ActionVoxel_Profile(layer->voxel_geometry) == kActionVoxelProfile_FillmoreForest) continue;
       if (pass == kVoxelEdgeHighDeckBehind ? !branch : branch && high_priority) continue;
       if (!walls && far_depth != depth) continue;
+      if(walls && NativePatchHasTransform(castle,&p)) {
+        if(!DrawTransformedNativeProfile(device,capture,g,layer,&p,near_depth,far_depth,&count,blur))return false;
+        continue;
+      }
       if(walls && p.surface_compiled) {
         if(!DrawOwnedProfileSides(device,capture,g,layer,&p,near_depth,far_depth,&count,blur))return false;
         continue;
       }
-      if(branch && NativeBranchHasTransform(castle,&p)) {
+      if(branch && NativePatchHasTransform(castle,&p)) {
         if(!DrawTransformedNativeBranch(device,capture,g,layer,&p,&count,blur))return false;
         continue;
       }
@@ -1193,7 +1288,11 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
           (e.x-ox+.5f)/SR_PPU_SURFACE_MAX_WIDTH,native_y/SR_PPU_SURFACE_MAX_HEIGHT};
       const unsigned shade_side=e.contour_skin
           ?(e.contour_skin==kVoxelContourSkinBottom?2:0):e.side;
-      float shade = ramp_join ? 1 : (soft || shade_side == 0   ? .90f
+      /* Native sand already contains its light/shadow ramp. A second fixed
+       * side/depth tint makes its pixel steps into differently coloured bands.
+       * Keep palette colour continuous; scene exposure/light maps still apply. */
+      const bool sand_top=soft && ActionVoxel_Profile(castle)==kActionVoxelProfile_KassandoraDesert;
+      float shade = ramp_join || sand_top ? 1 : (soft || shade_side == 0   ? .90f
                      : shade_side == 2 ? .54f
                                    : .72f) *
                     (1 - (soft?.18f:.38f) * local_z / depth) * (rear ? .88f : 1);
@@ -1497,7 +1596,11 @@ static bool DrawVoxelWaterSurfaces(ArRenderDevice *device, const DioramaCapture 
     const VoxelWaterSurface p = surfaces[i];
     if (main_water ? p.background || !p.high_priority :
         p.high_priority != high || p.background != bg2) continue;
-    const float shore_offset=jungle?8:3;
+    /* Full opaque lava owns the native body's top edge. A submerged-water
+     * inset leaves an uncovered strip between that face and its depth cap.
+     * Cover the half-texel filtering footprint at the shared native edge. */
+    const bool full_lava=p.opaque && p.sample_y==0 && p.sample_height==16;
+    const float shore_offset=jungle?8:full_lava?-.5f:3;
     const float x0 = fmaxf(0,p.x-ox), x1 = fminf(capture->width,p.x+p.width-ox), y = p.y-oy+shore_offset;
     /* Both terms of native full-add water sample the same submerged band.
      * Pulling BG2 from a different 16px interval introduces a pale straight
@@ -1820,6 +1923,17 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
         const float y0=fmaxf(top,sy+(int)py),y1=fminf(bottom,sy+(int)ey);
         if(x1<=x0 || y1<=y0)continue;
         if(count==kVoxelMaxVisibleFaces)return 0;
+        if(plane==1 && (tag&8)) {
+          const VoxelTrunkCurve *curve=ActionVoxel_ColumnCurveForCell(voxel,tx0+x,ty0+y);
+          float cuts[4];const unsigned n=VoxelTrunkCuts(curve,y0,y1,oy,false,cuts);
+          for(unsigned i=0;i+1<n;++i) {
+            if(count==kVoxelMaxVisibleFaces)return 0;
+            const VoxelFrontQuad quad={.x0=x0,.y0=cuts[i],.x1=x1,.y1=cuts[i+1],
+                .curve=*curve,.curved=true,.column=true};
+            if(CacheVoxelFrontQuad(mesh,g,layer,&quad,oy,&s_voxel_sides[count]))++count;
+          }
+          continue;
+        }
         const float depth=depths[plane];
         const VoxelFrontQuad quad={.x0=x0,.y0=y0,.x1=x1,.y1=y1,.depth=depth};
         if(CacheVoxelFrontQuad(mesh,g,layer,&quad,oy,

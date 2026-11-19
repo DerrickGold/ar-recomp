@@ -989,7 +989,8 @@
           2,
           84
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "1e948ad369473120",
@@ -2588,7 +2589,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "44ecbc32216c41b8",
@@ -2905,7 +2907,8 @@
           2,
           86
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "4d6357b5b2b0daf5",
@@ -3064,7 +3067,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "50add8813c4bc5e5",
@@ -3183,7 +3187,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "548c4f3c099db033",
@@ -3754,7 +3759,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "64d967b8452bf308",
@@ -4497,7 +4503,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "768e76b67f7ce2f9",
@@ -5102,7 +5109,8 @@
         1,
         2,
         3
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "8503c0e950809230",
@@ -9216,7 +9224,8 @@
           2,
           85
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "fd13e79f5418861b",

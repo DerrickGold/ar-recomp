@@ -111,6 +111,7 @@ typedef struct Recorder {
   bool actor_seen, front_seen;
   unsigned water_before_actor, water_after_actor;
   unsigned pool_vertices;
+  ArRenderPointF pool_positions[4];
   bool pool, lava;
   ArRenderTexture grass_texture, thorn_texture;
   unsigned grass_vertices, thorn_vertices;
@@ -597,6 +598,7 @@ static bool Geometry(void *ctx, ArRenderTexture t, const ArRenderVertex2D *v,
         const float expected=(r->lava?159+(i>=2?15.5f:.5f):171+(i>=2?3.5f:.5f))/SR_PPU_SURFACE_MAX_HEIGHT;
         assert(v[i].tex_coord.y==expected);
         assert(v[i].color.a==(r->lava?1.f:.85f));
+        r->pool_positions[i]=v[i].position;
       }
       r->pool_vertices+=4;
     }
@@ -1112,6 +1114,7 @@ static unsigned AstralFixture(unsigned scenario) {
   return s_count;
 }
 
+static ArRenderPointF RootExpectedPoint(const DioramaProjection *,const DioramaCapture *,float,float,float);
 static unsigned VoxelWaterFixture(unsigned scenario) {
   s_count=0;
   const bool lava=scenario>=20;
@@ -1134,8 +1137,8 @@ static unsigned VoxelWaterFixture(unsigned scenario) {
     pixels[i]=&present;
   }
   ActionVoxelGeometry *voxel=ActionVoxel_Create();assert(voxel);
-  voxel->active_group=lava?4:pool?2:1;voxel->active_room=lava?4:pool?1:2;
-  voxel->profile=lava?kActionVoxelProfile_AitosCaverns:
+  voxel->active_group=lava?4:pool?2:1;voxel->active_room=lava?(scenario&1?1:4):pool?1:2;
+  voxel->profile=lava?(scenario&1?kActionVoxelProfile_AitosMountains:kActionVoxelProfile_AitosCaverns):
       pool?kActionVoxelProfile_BloodpoolMarsh:kActionVoxelProfile_FillmoreCave;
   voxel->settings=ActionVoxel_SettingsForRoom(voxel->active_group,voxel->active_room);
   voxel->width=1024;voxel->height=256;voxel->ready=true;
@@ -1152,7 +1155,7 @@ static unsigned VoxelWaterFixture(unsigned scenario) {
       .obj_apron=scenario&2?64:0,.bg_apron_mask=3,
       .textures=textures,.pixels=pixels};
   const DioramaView view={.viewport={0,0,960,600},.visible_width=256,
-      .distance_scale=1,.camera={.tilt_x=.15f,.tilt_y=scenario&1?.4f:-.4f}};
+      .distance_scale=1,.camera={.tilt_x=lava?.7f:.15f,.tilt_y=scenario&1?.4f:-.4f}};
   const DioramaRenderOptions options={.edge_aa=s_depth_fixture,.visible_planes=(1u<<kDioramaPlane_Count)-1};
   const DioramaDepthSink depth_sink={.submit=DepthGeometry,.userdata=&r};
   const DioramaScene scene={.render=&options,.depth_sink=s_depth_fixture?&depth_sink:NULL,.map_group=voxel->active_group,.map_number=voxel->active_room,
@@ -1175,6 +1178,17 @@ static unsigned VoxelWaterFixture(unsigned scenario) {
     if(pool) {
       assert(r.pool_vertices==((scenario<8 && !(scenario&4))?4u:0u));
       if(scenario<8)assert((projection.bg1_plane.z_world==projection.bg1_far_plane.z_world)==!lava);
+      if(r.pool_vertices)for(unsigned i=0;i<4;++i) {
+        /* Both ends of the cap meet the same native body edge. Water keeps
+         * its shoreline inset; molten texture covers the half-texel footprint
+         * at its native y160 edge so filtering cannot reveal a hairline.
+         * Check steep views, both yaw directions, apron and depth backends. */
+        const bool end=i==1||i==2,back=i>=2;
+        const ArRenderPointF expected=RootExpectedPoint(&projection,&capture,
+            end?144:80,lava?159.5f:163,back?ActionVoxel_Depth(voxel):0);
+        assert(fabsf(r.pool_positions[i].x-expected.x)<.002f);
+        assert(fabsf(r.pool_positions[i].y-expected.y)<.002f);
+      }
     }
     assert(r.live<=base_resources+2 && !r.state.target.value && !r.state.viewport_set);
     if(frame)assert(r.creates==creates);
@@ -2264,6 +2278,7 @@ static void ReviseVoxelFixture(ActionVoxelGeometry *voxel) {
 }
 
 #include "diorama_native_transform.inc"
+#include "diorama_native_profile_transform.inc"
 #include "diorama_surface_texture.inc"
 #include "diorama_surface_native_x.inc"
 #include "diorama_native_actor_priority.inc"
@@ -2711,10 +2726,13 @@ static unsigned SkyBatchFixture(unsigned scenario) {
 #include "diorama_snow_closing_riser_compositor.inc"
 #include "diorama_voxel_clipped_cover.inc"
 #include "diorama_ramp_taper.inc"
-unsigned DioramaFixture_Count(void) { return 670; }
+#include "diorama_masked_column.inc"
+unsigned DioramaFixture_Count(void) { return 680; }
 const float *DioramaFixture_Trace(void) { return s_trace; }
 unsigned DioramaFixture_Run(unsigned scenario) {
   assert(scenario < DioramaFixture_Count());
+  if(scenario>=672){s_depth_fixture=scenario>=676;return NativeProfileTransformFixture((scenario-672)%4);}
+  if(scenario>=670)return MaskedColumnFixture(scenario-670);
   if(scenario>=662)return GroundFogFixture(scenario-662);
   if(scenario>=654)return RampTaperFixture(scenario-654);
   if(scenario>=650)return ClippedCoverFixture(scenario-650);
@@ -3068,8 +3086,27 @@ unsigned DioramaFixture_Run(unsigned scenario) {
   if (scenario == 0) {
     const DioramaCapture good_capture = capture;
     const DioramaView good_view = view;
+    const DioramaProjection centered = projection;
+    /* Inspection pan moves the shared transform after edge framing, without
+     * moving native capture coordinates. Effects and picking use this matrix. */
+    view.camera_pan = (ArRenderPointF){48,-32};
+    assert(PresentationOutcome_IsUsable(
+        Diorama_Composite(&device, &capture, &view, &scene, &projection)));
+    assert(capture.camera_y == good_capture.camera_y);
+    assert(capture.framing_x == good_capture.framing_x);
+    for (int i = 0; i < 12; ++i)
+      assert(fabsf(projection.matrix[i] - centered.matrix[i]) < .00001f);
+    for (int i = 0; i < 4; ++i) {
+      const float expected = centered.matrix[12+i] +
+          (48.0f/224)*centered.matrix[i] + (32.0f/224)*centered.matrix[4+i];
+      assert(fabsf(projection.matrix[12+i] - expected) < .00001f);
+    }
+    view = good_view;
+    assert(PresentationOutcome_IsUsable(
+        Diorama_Composite(&device, &capture, &view, &scene, &projection)));
+    assert(!memcmp(projection.matrix, centered.matrix, sizeof(projection.matrix)));
     const unsigned before = s_count;
-    for (int bad = 0; bad < 5; ++bad) {
+    for (int bad = 0; bad < 7; ++bad) {
       capture = good_capture;
       view = good_view;
       if (bad == 0) capture.width = 0;
@@ -3077,6 +3114,8 @@ unsigned DioramaFixture_Run(unsigned scenario) {
       if (bad == 2) capture.authentic_y0 = INT32_MAX;
       if (bad == 3) view.camera.tilt_y = NAN;
       if (bad == 4) view.distance_scale = 0;
+      if (bad == 5) view.camera_pan.x = NAN;
+      if (bad == 6) view.camera_pan.y = INFINITY;
       assert(Diorama_Composite(&device, &capture, &view, &scene, &projection) ==
           kPresentationOutcome_CoreFailure);
       assert(!projection.valid && s_count == before);

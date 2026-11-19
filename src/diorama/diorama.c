@@ -2323,8 +2323,7 @@ static int HollowResolveLayers(const DioramaScene *scene,DioramaResolvedLayer *l
       /* Native high water draws over OBJ2, beneath high masonry. One
        * translucent face sits at the castle lip instead of spanning the
        * walking space with the ordinary room's repeated water sheets. */
-      if(((ActionVoxel_Profile(scene->voxel_geometry)==kActionVoxelProfile_Castle && scene->map_number==5) ||
-          ActionVoxel_BackgroundWater(ActionVoxel_Profile(scene->voxel_geometry))) &&
+      if(ActionVoxel_BackgroundWater(ActionVoxel_Profile(scene->voxel_geometry),scene->map_number) &&
           d->plane==kDioramaPlane_Bg2Hi){
         layers[i].z=.5f;layers[i].alpha=160;
       }
@@ -2730,6 +2729,12 @@ static const DioramaResolvedLayer *CameraFocalLayer(
   return focal;
 }
 
+static void ApplyInspectionPan(float matrix[16], const DioramaView *view, float par) {
+  /* Apply after framing; picking, effects and culling share this transform. */
+  Diorama_TranslateCameraWorldX(matrix, view->camera_pan.x*par/kActRaiserAuthenticHeight);
+  Diorama_TranslateCameraWorldY(matrix, -view->camera_pan.y/kActRaiserAuthenticHeight);
+}
+
 /* UVs describe the displayed capture inside the allocation. World size
  * remains normalized to 224 native rows so margins extend the scene rather
  * than shrinking the playfield. Resolve auto-fit before applying zoom. */
@@ -2840,6 +2845,7 @@ static void PrepareDioramaView(const DioramaCapture *capture,
             geometry->height_scale, focal->z - 0.5f, focal->rake, focal->bow);
       }
     }
+    ApplyInspectionPan(geometry->matrix, view, par);
     return;
   }
   float free_matrix[16];
@@ -2951,6 +2957,7 @@ static void PrepareDioramaView(const DioramaCapture *capture,
       }
     }
   }
+  ApplyInspectionPan(geometry->matrix, view, par);
 }
 
 /* Keep the primary capture's camera and signed native UV space. The wider
@@ -3037,6 +3044,7 @@ bool Diorama_ResolveCaptureFootprint(const DioramaCapture *capture,
       !isfinite(view->camera.tilt_x) || !isfinite(view->camera.tilt_y) ||
       !isfinite(view->camera.distance) || !isfinite(view->distance_offset) ||
       !isfinite(view->distance_scale) || view->distance_scale <= 0 ||
+      !isfinite(view->camera_pan.x) || !isfinite(view->camera_pan.y) ||
       !isfinite(view->camera_framing_weight)) return false;
   DioramaResolvedLayer resolved[kDioramaLayerCount];
   const int count = Diorama_ResolveSceneLayers(scene, resolved);
@@ -5079,6 +5087,7 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
       !isfinite(view->camera.tilt_x) || !isfinite(view->camera.tilt_y) ||
       !isfinite(view->camera.distance) || !isfinite(view->distance_offset) ||
       !isfinite(view->distance_scale) || view->distance_scale <= 0 ||
+      !isfinite(view->camera_pan.x) || !isfinite(view->camera_pan.y) ||
       !isfinite(view->camera_framing_weight) ||
       !isfinite(scene->render->depth_shade) ||
       scene->render->skybox < kDioramaSky_Off || scene->render->skybox >= kDioramaSky_Count)

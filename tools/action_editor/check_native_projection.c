@@ -89,7 +89,12 @@ static uint64_t FrameHash(const SDL_Surface *image) {
   return hash;
 }
 int main(int argc,char **argv) {
-  if(argc<4){fprintf(stderr,"usage: %s output-dir layers.ini room.arscene [...]\nOptional AR_ORACLE_EFFECTS=effects.ini overlays authored recipes on each room.\n",argv[0]);return 2;}
+  if(argc<4){fprintf(stderr,"usage: %s output-dir layers.ini room.arscene [...]\nOptional AR_ORACLE_EFFECTS=effects.ini overlays authored recipes on each room.\nAR_ORACLE_CAMERA=x,y repeats the comparison poses at a reported world camera.\n",argv[0]);return 2;}
+  const char *camera=getenv("AR_ORACLE_CAMERA");int camera_x=0,camera_y=0,camera_end=0;
+  if(camera&&(sscanf(camera,"%d,%d%n",&camera_x,&camera_y,&camera_end)!=2||camera[camera_end]||
+      camera_x<0||camera_y<0||camera_x>16384||camera_y>16384)) {
+    fprintf(stderr,"invalid AR_ORACLE_CAMERA (expected x,y in 0..16384)\n");return 2;
+  }
   if(!SDL_Init(SDL_INIT_VIDEO))return 77;
   SDL_Window *window=SDL_CreateWindow("Complete-room GPU projection comparison",720,448,SDL_WINDOW_HIDDEN);
   if(!window || !ArSdlRenderBackend_CreateForWindow(&s_device,window,NULL))return 77;
@@ -142,7 +147,8 @@ int main(int argc,char **argv) {
           "fade-reference", "fade-retained", "fade-restored", "invalid-slot"};
       const unsigned image_count = sizeof(images)/sizeof(images[0]);
       ++s_capture;
-      const int x=(int)((w>256?w-256:0)*pose/2), y=(int)((h>224?h-224:0)*(2-pose)/2);
+      const int x=camera?camera_x:(int)((w>256?w-256:0)*pose/2);
+      const int y=camera?camera_y:(int)((h>224?h-224:0)*(2-pose)/2);
       if (player && getenv("AR_ORACLE_MIST_WAKE")) {
         RoomPreview_SetSourceProjection(NULL,NULL);
         if (!RoomPreview_SetReceivers(3,x+101,y+196,x+179,y+196) ||

@@ -90,8 +90,7 @@ const char *ActionVoxel_TransformUnsupportedReason(const ActionVoxelGeometry *c,
   }
   for(unsigned i=0;i<c->patch_count;++i) {
     const VoxelPatch *p=&c->patches[i];
-    if(p->kind==kVoxelPatch_BranchRear ||
-        (p->kind==kVoxelPatch_SideProfile && c->profile==kActionVoxelProfile_FillmoreForest))continue;
+    if(p->kind==kVoxelPatch_BranchRear || p->kind==kVoxelPatch_SideProfile)continue;
     if(SemanticRectIntersects(x,y,p->x,p->y,p->width,p->height))
       return "Crossed scenery and hazards cannot be moved or resized as structural groups yet.";
   }

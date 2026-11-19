@@ -80,13 +80,17 @@ static unsigned WetCrownValidate(const ActionVoxelGeometry *g,unsigned region,un
       /* The native wet face is opaque rock plus a separate foam fringe.
        * Follow the two emitted cap strips through that original foam ink,
        * but never bridge an actual alpha hole or a shallow scene object. */
-      const unsigned lower_owner=WetCrownPixel(g,x,bottom)&kVoxelKindMask;
-      bool supported=(lower_owner==kVoxelSolid || lower_owner==kVoxelFoliage) &&
+      const unsigned lower=WetCrownPixel(g,x,bottom),lower_owner=lower&kVoxelKindMask;
+      const bool lower_foam=lower_owner==kVoxelFoliage||
+          (lower_owner==kVoxelRearOnly&&(lower&kVoxelRearCopy));
+      bool supported=(lower_owner==kVoxelSolid || lower_foam) &&
           (WetCrownPixel(g,nx,bottom)&kVoxelKindMask)==kVoxelSolid;
       for(int y=top;y<bottom;++y) {
         const unsigned a=WetCrownPixel(g,x,y),b=WetCrownPixel(g,nx,y),kind=a&kVoxelKindMask;
-        supported&=(kind==kVoxelSolid || kind==kVoxelFoliage) &&
-            (b&kVoxelKindMask)==kVoxelFoliage &&
+        const bool a_foam=kind==kVoxelFoliage||(kind==kVoxelRearOnly&&(a&kVoxelRearCopy));
+        const unsigned bk=b&kVoxelKindMask;
+        const bool b_foam=bk==kVoxelFoliage||(bk==kVoxelRearOnly&&(b&kVoxelRearCopy));
+        supported&=(kind==kVoxelSolid || a_foam) && b_foam &&
             !!(a&kVoxelHighPriority)==!!p->high_priority &&
             !!(b&kVoxelHighPriority)==!!p->high_priority;
       }
@@ -102,10 +106,17 @@ static unsigned WetCrownValidate(const ActionVoxelGeometry *g,unsigned region,un
         assert(e->high_priority==cap->high_priority && e->soft_surface && e->surface_top_material);
         assert(e->length<=2 && (!e->fold_length || e->fold_length<=2));
         assert(e->surface_texture && e->top_sample_size==16 && e->top_owned_art);
-        assert(cap->surface_texture && cap->top_sample_size==16 && cap->top_owned_art);
-        assert(e->top_sample_x==cap->top_sample_x && e->top_sample_y==cap->top_sample_y);
-        assert(!memcmp(ActionVoxel_AuthoredArt(g,e->top_owned_art-1),
-            ActionVoxel_AuthoredArt(g,cap->top_owned_art-1),256*sizeof(uint16_t)));
+        if(cap->room_edge_color) {
+          /* A cropped editor stamp can put this cap at the finite map top.
+           * That boundary deliberately uses a solid seal; its interior stone
+           * join still owns textured art rather than inheriting boundary UVs. */
+          assert(cap->y==g->origin_y && !cap->surface_texture && !cap->top_owned_art);
+        } else {
+          assert(cap->surface_texture && cap->top_sample_size==16 && cap->top_owned_art);
+          assert(e->top_sample_x==cap->top_sample_x && e->top_sample_y==cap->top_sample_y);
+          assert(!memcmp(ActionVoxel_AuthoredArt(g,e->top_owned_art-1),
+              ActionVoxel_AuthoredArt(g,cap->top_owned_art-1),256*sizeof(uint16_t)));
+        }
         VoxelEdgeSpan span;assert(ActionVoxel_ResolveEdgeSpan(g,e,kVoxelEdgeNative,0,ActionVoxel_Depth(g),&span));
         assert(fabsf(span.near_depth)<.000001f && fabsf(span.far_depth-ActionVoxel_Depth(g))<.000001f);
       }
@@ -116,6 +127,14 @@ static unsigned WetCrownValidate(const ActionVoxelGeometry *g,unsigned region,un
     for(unsigned i=0;i<ne;++i) {
       const VoxelEdge *e=&edges[i];if(!(e->side&1) || e->far_rank!=2 ||
           e->x<p->x || e->x>=p->x+p->width || e->y<p->y || e->y>=p->y+p->height)continue;
+      /* Stamped test rooms can end at the exposed brown contour now that
+       * their foam is rear-only. Finite map boundaries still need a seal. */
+      if((e->side==3&&e->x==g->origin_x)||
+          (e->side==1&&e->x==g->origin_x+g->width-1)) {
+        for(int y=e->y;y<e->y+e->length;++y)
+          assert((WetCrownPixel(g,e->x,y)&kVoxelKindMask)==kVoxelSolid);
+        continue;
+      }
       const int column=e->x-p->x,neighbor=column+(e->side==1?1:-1);
       assert(neighbor>=0 && neighbor<p->width && tops[column] && tops[neighbor]);
       assert(e->y==tops[column]->y && tops[neighbor]->y>e->y &&
@@ -175,15 +194,14 @@ static void WetCrownStampCases(const ActionRoomScene *s,ActionVoxelGeometry *g) 
   for(unsigned y=0;y<5;++y)pixel->transparent[y]=1u<<(15-1);
   assert(ActionVoxel_Build(g,s,&terrain,ActionVoxel_SettingsForRoom(4,3)));
   assert(!WetCrownEdgesAt(g,82,129,3,NULL)); /* This edge exists before the deep notch. */
-  /* Actual remaining two-pixel slit: native4E atx89 is rock/foam/rock,
-   * while its next column starts rock aty130. Keep all original face foam,
-   * and close the cap behind it; explicit deletion still opens the gap. */
+  /* Native4E's foam sits behind the rock. Keep the narrow stone cap join
+   * beneath it; erasure/recoloring must preserve its separate rear plane. */
   memset(&terrain,0,sizeof(terrain));
   assert(ActionVoxel_Build(g,s,&terrain,ActionVoxel_SettingsForRoom(4,3)));
-  assert((WetCrownPixel(g,89,129)&kVoxelKindMask)==kVoxelFoliage);
-  const VoxelEdge *foam_edge=NULL;assert(WetCrownEdgesAt(g,89,128,1,&foam_edge)==1);
-  assert(foam_edge->y==128 && foam_edge->length==2 && foam_edge->surface_top_material);
-  uint16_t foam_art[256];memcpy(foam_art,ActionVoxel_AuthoredArt(g,foam_edge->top_owned_art-1),sizeof(foam_art));
+  assert((WetCrownPixel(g,89,129)&kVoxelKindMask)==kVoxelRearOnly);
+  const VoxelEdge *join_edge=NULL;assert(WetCrownEdgesAt(g,89,128,1,&join_edge)==1);
+  assert(join_edge->length==2&&join_edge->surface_top_material);
+  uint16_t join_art[256];memcpy(join_art,ActionVoxel_AuthoredArt(g,join_edge->top_owned_art-1),sizeof(join_art));
   assert(WetCrownEdgesAt(g,89,129,1,NULL)==1);
   terrain.pixel_layers[0].count=1;pixel=&terrain.pixel_layers[0].edits[0];
   *pixel=(DioramaPixelEdit){.by_cell=true,.x=5,.y=8};pixel->transparent[1]=1u<<(15-9);
@@ -191,14 +209,14 @@ static void WetCrownStampCases(const ActionRoomScene *s,ActionVoxelGeometry *g) 
   assert(!WetCrownEdgesAt(g,89,128,1,NULL) && !WetCrownEdgesAt(g,89,129,1,NULL));
   pixel->transparent[1]=0;pixel->black[1]=1u<<(15-9);
   assert(ActionVoxel_Build(g,s,&terrain,ActionVoxel_SettingsForRoom(4,3)));
-  /* Black is opaque recoloring, not erasure. Preserve that native front,
-   * while its cap still uses the same reviewed rock and original mask. */
-  assert((WetCrownPixel(g,89,129)&kVoxelKindMask)==kVoxelFoliage);
-  assert(WetCrownEdgesAt(g,89,128,1,&foam_edge)==1 && foam_edge->length==2);
-  assert(!memcmp(foam_art,ActionVoxel_AuthoredArt(g,foam_edge->top_owned_art-1),sizeof(foam_art)));
+  /* Black is opaque recoloring. The rear pixel and the same narrow stone
+   * join remain visible, without adding a foreground foam copy. */
+  assert((WetCrownPixel(g,89,129)&kVoxelKindMask)==kVoxelRearOnly);
+  assert(WetCrownEdgesAt(g,89,128,1,&join_edge)==1&&join_edge->length==2);
+  assert(!memcmp(join_art,ActionVoxel_AuthoredArt(g,join_edge->top_owned_art-1),sizeof(join_art)));
   const ActionRoomSceneFrameState frame={.brightness=15};uint32_t low[256],rear[256],front[256];
   DesertNativeLow(s,10,16,low);low[25]=UINT32_C(0xff000000);
-  assert(ActionVoxel_Split(g,80,128,16,16,16,&frame,low,16,rear,front) && front[25]==low[25]);
+  assert(ActionVoxel_Split(g,80,128,16,16,16,&frame,low,16,rear,front) && !front[25]&&rear[25]==low[25]);
   unsigned ns;bool masked=false;const VoxelProfileSurface *skins=ActionVoxel_ProfileSurfaces(g,&ns);
   for(unsigned i=0;i<ns;++i)if(skins[i].x==80 && skins[i].y==128) {
     assert(!ActionVoxel_AuthoredArt(g,skins[i].art_id)[25]);masked=true;

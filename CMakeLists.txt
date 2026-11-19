@@ -633,6 +633,11 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tests/action_editor_build_test.py)
         set_tests_properties(actraiser_action_editor_build PROPERTIES
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+        add_test(NAME actraiser_action_audit_browser
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/action_audit_browser_test.py)
+        set_tests_properties(actraiser_action_audit_browser PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
         add_test(NAME actraiser_action_editor_compositor_build
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/action_editor_compositor_build_test.py)
@@ -2681,7 +2686,7 @@ if(BUILD_TESTING)
         actraiser_render_test_support)
     target_include_directories(actraiser_present_action_effects_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
-    target_link_libraries(actraiser_present_action_effects_test PRIVATE actraiser_math)
+    target_link_libraries(actraiser_present_action_effects_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_present_action_effects COMMAND actraiser_present_action_effects_test)
 
     add_executable(actraiser_diorama_camera_test

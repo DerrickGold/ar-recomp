@@ -16,13 +16,16 @@ typedef struct VoxelMaterialProfile {
   bool complete_rear_matte;
   bool portal_jamb;
   bool door_closure;
+  uint16_t column_recess_colors[4]; /* Rock ink within mixed grounded support art. */
+  bool column_shadow; /* Reviewed shadowed underside connected to a support. */
 } VoxelMaterialProfile;
 /* Artwork-only policy is separate from structural flags: existing shape,
  * animation and rear-copy allowlists must not reinterpret a new top donor. */
 enum { kVoxelTopSurface_Own16=1, kVoxelTopSurface_Donor16=2, kVoxelTopSurface_MasonryCap16=4,
        kVoxelTopSurface_TurfBand8=8, kVoxelTopSurface_TurfDonor8=16, kVoxelTopSurface_SoilBand8=32,
        kVoxelTopSurface_FamilyCap16=64, kVoxelTopSurface_FamilyDonor16=128,
-       kVoxelTopSurface_OwnTopBand5=256, kVoxelTopSurface_OwnTopBand4=512 };
+       kVoxelTopSurface_OwnTopBand5=256, kVoxelTopSurface_OwnTopBand4=512,
+       kVoxelTopSurface_Own8MirrorDepth=1024 };
 enum { kVoxelNativeSurfaceIceCrystal=5, kVoxelNativeSurfaceHeadCrown=7, kVoxelNativeSurfaceDesertSandLive=8,
        kVoxelNativeSurfaceLavaStoneCap=11 };
 typedef struct VoxelNativeSurfaceProfile {
@@ -68,6 +71,7 @@ typedef struct VoxelRearDonorProfile {
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #endif
 #include "action_voxel_castle_materials.inc"
+#include "action_voxel_castle_water_materials.inc"
 #include "action_voxel_forest_materials.inc"
 #include "action_voxel_cave_materials.inc"
 #include "action_voxel_cave_water_materials.inc"
@@ -130,6 +134,8 @@ typedef struct CastleMaterial {
   uint16_t rear_colors[4];
   uint16_t gate_colors[4];
   uint16_t face_colors[4];
+  uint16_t column_recess_colors[4];
+  bool column_shadow;
   uint8_t rear_fold_pixels;
   uint16_t cutouts[16];
   uint8_t pixels[4][64];
@@ -168,6 +174,10 @@ static unsigned DepthRank(const ActionVoxelGeometry *c, size_t at) {
  * ragged exterior crown still needs the short joins between its top strips.
  * Admit only the complete one/two-pixel closure above two supported columns;
  * never reopen a hole, an underside, or the profile's full outer panel. */
+static bool WetProfileFoamPixel(unsigned pixel) {
+  const unsigned kind=pixel&kVoxelKindMask;
+  return kind==kVoxelFoliage || (kind==kVoxelRearOnly && (pixel&kVoxelRearCopy));
+}
 static bool KeepWetProfileCrownRiser(const ActionVoxelGeometry *c,
     const VoxelPatch *p, int x, int y, unsigned side) {
   if(c->profile!=kActionVoxelProfile_AitosMountains ||
@@ -189,15 +199,15 @@ static bool KeepWetProfileCrownRiser(const ActionVoxelGeometry *c,
   if(height<1 || height>2 || y<crown[0] || y>=crown[1])return false;
   for(int yy=crown[0];yy<=crown[1];++yy) {
     const size_t at=(size_t)yy*c->width+x,neighbor=(size_t)yy*c->width+nx;
-    const unsigned owner_kind=c->front[at]&kVoxelKindMask;
-    /* The reviewed wet profiles contain opaque face-only foam between rock
-     * pixels. It remains on the original front, while the exterior cap join
-     * closes behind it. Actual alpha holes and erased pixels remain open. */
-    if((owner_kind!=kVoxelSolid && owner_kind!=kVoxelFoliage) ||
+    const unsigned owner=c->front[at];
+    /* The native foam can stay at the rear while the short stone crown join
+     * closes beneath it. Its opaque source witness survives recoloring;
+     * actual alpha holes and erased pixels remain open. */
+    if(((owner&kVoxelKindMask)!=kVoxelSolid && !WetProfileFoamPixel(owner)) ||
         !!(c->front[at]&kVoxelHighPriority)!=!!p->high_priority ||
         !c->soft_surfaces[(size_t)(yy/16)*(c->width/16)+x/16])return false;
     if(yy<crown[1]) {
-      if((c->front[neighbor]&kVoxelKindMask)!=kVoxelFoliage ||
+      if(!WetProfileFoamPixel(c->front[neighbor]) ||
           !!(c->front[neighbor]&kVoxelHighPriority)!=!!p->high_priority)return false;
     } else if(DepthRank(c,neighbor)!=2 ||
         !!(c->front[neighbor]&kVoxelHighPriority)!=!!p->high_priority)return false;
@@ -242,13 +252,23 @@ static bool NativeActorPriorityAt(const ActionVoxelGeometry *c,int x,int y) {
    * Every exposed contour of a reviewed beam follows its source priority. */
   return (quadrants&(1u<<(((y&15)/8)*2+(x&15)/8)))!=0;
 }
+static unsigned ColumnOwnerAtPixel(const ActionVoxelGeometry *c,int x,int y) {
+  if(!c->column_cells)return 0;
+  const size_t cell=(size_t)(y/8)*(c->width/8)+x/8;
+  const unsigned owner=c->column_cells[cell];
+  const unsigned mask=c->pixel_recess_cells?c->pixel_recess_cells[cell]:0;
+  /* A mixed source cell can keep its sand at the front while its rock follows
+   * the column. Boundary ownership must match the partitioned front mesh. */
+  if(owner && mask && !(c->pixel_recess_rows[mask-1][y&7]&(1u<<(7-(x&7)))))return 0;
+  return owner;
+}
 static uint64_t Boundary(const ActionVoxelGeometry *c, int x, int y, unsigned side,
                          const float depths[4]) {
   const int dx[] = {0, 1, 0, -1}, dy[] = {-1, 0, 1, 0};
   const int xx = x + dx[side], yy = y + dy[side];
   const unsigned pixel = c->front[y * c->width + x];
   unsigned far_rank = DepthRank(c, y * c->width + x);
-  if(!far_rank && (pixel&kVoxelKindMask)==kVoxelFoliage && WetProfileFoamCrownRiser(c,x,y,side))
+  if(!far_rank && WetProfileFoamPixel(pixel) && WetProfileFoamCrownRiser(c,x,y,side))
     far_rank=2; /* Cap closure only: never change the native front/profile mask. */
   const bool room_edge = xx < 0 || yy < 0 || xx >= c->width || yy >= c->height;
   const unsigned near_rank = room_edge ? 0 : DepthRank(c, yy * c->width + xx);
@@ -265,10 +285,14 @@ static uint64_t Boundary(const ActionVoxelGeometry *c, int x, int y, unsigned si
       c->raised_scenery_cells[(y/8)*(c->width/8)+x/8];
   const bool neighbor_raised=c->raised_scenery_cells && near_rank==1 &&
       c->raised_scenery_cells[(yy/8)*(c->width/8)+xx/8];
-  const unsigned column=c->column_cells && far_rank==2
-      ? c->column_cells[(size_t)(y/8)*(c->width/8)+x/8] : 0;
-  const unsigned neighbor_column=c->column_cells && near_rank==2
-      ? c->column_cells[(size_t)(yy/8)*(c->width/8)+xx/8] : 0;
+  const unsigned column=far_rank==2?ColumnOwnerAtPixel(c,x,y):0;
+  const unsigned neighbor_column=near_rank==2?ColumnOwnerAtPixel(c,xx,yy):0;
+  /* The sand fringe is a granular top, including its one-pixel contour
+   * steps. Keep those joins out of the hard rock's alternating side shade. */
+  const size_t own_cell=(size_t)(y/8)*(c->width/8)+x/8;
+  const bool sand_contact=c->profile==kActionVoxelProfile_KassandoraDesert &&
+      far_rank==2 && !column && neighbor_column && c->column_cells[own_cell] &&
+      c->pixel_recess_cells && c->pixel_recess_cells[own_cell];
   const float world_y=c->origin_y+y+(side==2);
   bool exposed=depths[far_rank]>depths[near_rank];
   if(c->mixed_scenery || column || neighbor_column) {
@@ -292,7 +316,7 @@ static uint64_t Boundary(const ActionVoxelGeometry *c, int x, int y, unsigned si
              ? far_rank | (near_rank << 2) | ((pixel & kVoxelHighPriority) ? 16 : 0) |
                    ((pixel & kVoxelRearTrim) ? 32 : 0) | ((pixel & kVoxelColliding) ? 64 : 0) |
                    ((pixel & kVoxelTexturedTop) ? 128 : 0) |
-                   ((c->soft_surfaces && c->soft_surfaces[(y/16)*(c->width/16)+x/16]) ? 256 : 0) |
+                   ((sand_contact || (c->soft_surfaces && c->soft_surfaces[(y/16)*(c->width/16)+x/16])) ? 256 : 0) |
                    (rear?512:0) | (neighbor_rear?1024:0)
                    | ((c->trunk_cells && far_rank==1 ?
                        c->trunk_cells[(size_t)(y/8)*(c->width/8)+x/8] : 0u)<<11)
@@ -441,12 +465,18 @@ static const VoxelTopSurfaceProfile *FindTopSurfaceProfile(const ActionRoomScene
       profiles=kForestTopSurfaces;count=sizeof(kForestTopSurfaces)/sizeof(*profiles);break;
     case kActionVoxelProfile_AitosMountains:
       profiles=kMountainsTopSurfaces;count=sizeof(kMountainsTopSurfaces)/sizeof(*profiles);break;
+    case kActionVoxelProfile_AitosCaverns:
+      profiles=kCavernsTopSurfaces;count=sizeof(kCavernsTopSurfaces)/sizeof(*profiles);break;
     case kActionVoxelProfile_NorthwallIce:
       profiles=kIceTopSurfaces;count=sizeof(kIceTopSurfaces)/sizeof(*profiles);break;
     case kActionVoxelProfile_MarahnaJungle:
       profiles=kJungleTopSurfaces;count=sizeof(kJungleTopSurfaces)/sizeof(*profiles);break;
+    case kActionVoxelProfile_MarahnaTemple:
+      profiles=kMarahnaTempleTopSurfaces;count=sizeof(kMarahnaTempleTopSurfaces)/sizeof(*profiles);break;
     case kActionVoxelProfile_KassandoraTomb:
       profiles=kTombTopSurfaces;count=sizeof(kTombTopSurfaces)/sizeof(*profiles);break;
+    case kActionVoxelProfile_KassandoraDesert:
+      profiles=kDesertTopSurfaces;count=sizeof(kDesertTopSurfaces)/sizeof(*profiles);break;
     default:return NULL;
   }
   unsigned lo=0,hi=count;
@@ -611,7 +641,7 @@ static void Material(const ActionRoomScene *s, unsigned bg, const uint16_t words
      * the two soil transitions; vertically flipped bands need fresh review. */
     if((flip&2) && (top->policy&(kVoxelTopSurface_TurfBand8|
         kVoxelTopSurface_TurfDonor8|kVoxelTopSurface_SoilBand8|
-        kVoxelTopSurface_OwnTopBand5|kVoxelTopSurface_OwnTopBand4)))continue;
+        kVoxelTopSurface_OwnTopBand5|kVoxelTopSurface_OwnTopBand4|kVoxelTopSurface_Own8MirrorDepth)))continue;
     out->top_surface=top->policy;out->top_family=top->family;
     if((flip&1) && (out->top_surface&(kVoxelTopSurface_TurfBand8|kVoxelTopSurface_TurfDonor8)) &&
         (out->top_family==2 || out->top_family==3))out->top_family^=1;
@@ -624,12 +654,14 @@ static void Material(const ActionRoomScene *s, unsigned bg, const uint16_t words
       out->rear_colors[q] = p->rear_colors[q ^ flip];
       out->gate_colors[q] = p->gate_colors[q ^ flip];
       out->face_colors[q] = p->face_colors[q ^ flip];
+      out->column_recess_colors[q] = p->column_recess_colors[q ^ flip];
     }
     /* Backing stays in its reviewed source orientation. */
     out->flags = flip ? p->flags & ~kCastleBackingMaterial : p->flags;
     out->complete_rear_matte = p->complete_rear_matte;
     out->portal_jamb = p->portal_jamb;
     out->door_closure = p->door_closure;
+    out->column_shadow = p->column_shadow;
     out->rear_fold_pixels = (flip & 2) ? 0 : (p->flags >> 24) & 15;
     break;
   }
@@ -982,10 +1014,16 @@ static bool MaterialVisible(const CastleMaterial *m, const DioramaPixelEdit *edi
 static unsigned WaterMaterial(const ActionRoomScene *s, const uint16_t words[4],
                                  CastleMaterial *material) {
   Material(s,1,words,0,material);
-  const bool ice=ActionVoxel_ProfileForRoom(s->group,s->map)==kActionVoxelProfile_NorthwallIce;
-  const VoxelMaterialProfile *profiles=ice?kIceWaterMaterials:kCaveWaterMaterials;
-  const unsigned count=ice?sizeof(kIceWaterMaterials)/sizeof(*kIceWaterMaterials):
-      sizeof(kCaveWaterMaterials)/sizeof(*kCaveWaterMaterials);
+  const VoxelMaterialProfile *profiles;
+  unsigned count;
+  switch(ActionVoxel_ProfileForRoom(s->group,s->map)) {
+    case kActionVoxelProfile_Castle:
+      profiles=kCastleWaterMaterials;count=sizeof(kCastleWaterMaterials)/sizeof(*profiles);break;
+    case kActionVoxelProfile_NorthwallIce:
+      profiles=kIceWaterMaterials;count=sizeof(kIceWaterMaterials)/sizeof(*profiles);break;
+    default:
+      profiles=kCaveWaterMaterials;count=sizeof(kCaveWaterMaterials)/sizeof(*profiles);break;
+  }
   for (unsigned flip = 0; flip < 4; ++flip) {
     const uint64_t key = MaterialKey(material,flip);
     for (unsigned i = 0; i < count; ++i)
@@ -995,7 +1033,7 @@ static unsigned WaterMaterial(const ActionRoomScene *s, const uint16_t words[4],
 }
 static bool BuildWaterSurfaces(ActionVoxelGeometry *c, const ActionRoomScene *s,
                                const DioramaRoomOverride *terrain) {
-  if (!ActionVoxel_BackgroundWater(c->profile)) return true;
+  if (!ActionVoxel_BackgroundWater(c->profile,s->map)) return true;
   if (!ActionRoomScene_HasBackground(s,2) || !s->have_character_bank[1]) return false;
   const DioramaStampLayerOverride *stamps = terrain ? &terrain->stamp_layers[1] : NULL;
   int x0 = 0, y0 = 0, x1 = ActionRoomScene_TileWidth(s,2)*8, y1 = ActionRoomScene_TileHeight(s,2)*8;
@@ -1873,6 +1911,7 @@ static bool BuildMountainRampReturns(ActionVoxelGeometry *c,const ActionRoomScen
 #include "action_voxel_jungle_water.inc"
 #include "action_voxel_castle_matte.inc"
 #include "action_voxel_jungle_terminal.inc"
+#include "action_voxel_infill.inc"
 static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
                           const DioramaRoomOverride *terrain, const uint16_t *tiles, size_t tile_pitch) {
   if (!ActionVoxel_Room(s->group, s->map)) return true;
@@ -1902,6 +1941,8 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
   const uint16_t jungle_water_main = JungleWaterMainColor(s, terrain, palette);
   CastleMaterial native[256];
   unsigned backing_material = 256;
+  const bool material_rear_policy=c->profile==kActionVoxelProfile_Castle ||
+      c->profile==kActionVoxelProfile_KassandoraDesert;
   bool contact_materials=false,rear_materials=false;
   for (unsigned m = 0; m < 256; ++m) {
     uint16_t words[4];
@@ -1909,7 +1950,7 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
     Material(s, 0, words, collision, &native[m]);
     if (native[m].flags & kCastleBackingMaterial) backing_material = m;
     contact_materials|=(native[m].flags&kVoxelContactSceneryMaterial)!=0;
-    rear_materials|=c->profile==kActionVoxelProfile_Castle &&
+    rear_materials|=material_rear_policy &&
         (native[m].flags&kVoxelRearMountedMaterial)!=0;
   }
   /* Unknown c->backing art must not silently sample whatever now occupies $4C. */
@@ -1930,7 +1971,7 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
       CastleMaterial material;uint8_t provenance;
       if(LookupMaterial(s,stamps,native,cx,cy,&material,&provenance,tiles,tile_pitch)) {
         c->contact_scenery|=(material.flags&kVoxelContactSceneryMaterial)!=0;
-        c->material_rear_mounted|=c->profile==kActionVoxelProfile_Castle &&
+        c->material_rear_mounted|=material_rear_policy &&
             (material.flags&kVoxelRearMountedMaterial)!=0;
       }
     }
@@ -1941,24 +1982,15 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
   }
   c->semantic_cells=calloc((size_t)c->width/16,c->height/16);
   if(!c->semantic_cells)return false;
+  if(!BuildInfillOwnership(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
   for (int cy = y0 / 16; cy < y1 / 16; ++cy)
     for (int cx = x0 / 16; cx < x1 / 16; ++cx) {
       CastleMaterial material, below;
       uint8_t metatile, below_id;
       if (!LookupMaterial(s, stamps, native, cx, cy, &material, &metatile, tiles, tile_pitch)) continue;
-      /* The same opaque black art fills both islands and shoreline rock. Only
-       * an uninterrupted column below reviewed earth belongs to the solid
-       * island. A scenic rock interior stays with its shallow silhouette. */
-      if (material.flags & kVoxelInfillMaterial) {
-        CastleMaterial above; uint8_t above_id;
-        for (int y=cy-1; y>=y0/16; --y) {
-          if (!LookupMaterial(s,stamps,native,cx,y,&above,&above_id,tiles,tile_pitch)) break;
-          if (above.flags & kVoxelInfillMaterial) continue;
-          if (above.flags & kVoxelTerrainBodyMaterial)
-            for (unsigned q=0; q<4; ++q) material.kind[q]=kVoxelSolid;
-          break;
-        }
-      }
+      if ((material.flags&kVoxelInfillMaterial) &&
+          c->semantic_cells[(size_t)(cy-y0/16)*(c->width/16)+cx-x0/16]==kVoxelSemantic_Platform)
+        for(unsigned q=0;q<4;++q)material.kind[q]=kVoxelSolid;
       bool foliage = false;
       if (c->profile == kActionVoxelProfile_FillmoreForest && !material.collision)
         for (unsigned q = 0; q < 4; ++q)
@@ -2310,7 +2342,7 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
   if(!BuildForestTrunkCurves(c,s,stamps,native,tiles,tile_pitch))return false;
   if(!BuildForestRootBacking(c,s,terrain,stamps,native,palette,tiles,tile_pitch))return false;
   if(!BuildCastleColumns(c,s,stamps,native,tiles,tile_pitch))return false;
-  if(!BuildDesertGroundedColumns(c,s,stamps,native,tiles,tile_pitch))return false;
+  if(!BuildDesertGroundedColumns(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
   if(!BuildMountainRampReturns(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
   if(c->column_cells)for(int cy=0;cy<c->height/16;++cy)for(int cx=0;cx<c->width/16;++cx) {
     bool column=false,ramp=false;

@@ -12,13 +12,18 @@ static const uint64_t kCloudKeys[] = {
   UINT64_C(0x2aea48375a15bd07), UINT64_C(0x815f2e81389f8fe8),
   UINT64_C(0xa0386d40f5e979a1), UINT64_C(0xc12938c78acd55c6),
   UINT64_C(0xce280f834f4658a8), UINT64_C(0xe63716e38b1ed90b),
+  /* The low crests and opaque body complete the same native cloud bank. */
+  UINT64_C(0xb426811a42299acb), UINT64_C(0x8c4c0092eb069e63),
+  UINT64_C(0xf7d7c93bf52ac141),
 };
 static const uint64_t kMixedKeys[] = {
   UINT64_C(0x65e761d1da43126d), UINT64_C(0x7616376a189c2dcd),
   UINT64_C(0x85b46143938db23a), UINT64_C(0xd2323e327c173266),
   UINT64_C(0xd8bfabbb42410938), UINT64_C(0xfc11e71402edc8ec),
 };
-enum { kCloudOnly = 1, kCloudAndRock = 2, kInputPitch = 19, kOutputPitch = 21 };
+enum { kCloudOnly = 1, kCloudAndRock = 2, kInputPitch = 19, kOutputPitch = 21,
+  kCloudKeyCount=sizeof(kCloudKeys)/sizeof(kCloudKeys[0]),
+  kMixedKeyCount=sizeof(kMixedKeys)/sizeof(kMixedKeys[0]) };
 
 static unsigned Ink(const ActionRoomScene *scene, unsigned word, unsigned x, unsigned y) {
   if (word & 0x4000) x = 7 - x;
@@ -28,6 +33,23 @@ static unsigned Ink(const ActionRoomScene *scene, unsigned word, unsigned x, uns
   const uint8_t *p = scene->characters + character * 32;
   return ((p[y * 2] >> bit) & 1u) | (((p[y * 2 + 1] >> bit) & 1u) << 1) |
       (((p[y * 2 + 16] >> bit) & 1u) << 2) | (((p[y * 2 + 17] >> bit) & 1u) << 3);
+}
+
+/* Independent native-art coverage check: do not let a missing fingerprint
+ * quietly remove a cloud family from the split/priority assertions below.
+ * This room's pure clouds use palette4 ink4/5/6, including the solid body.
+ * Mixed cliff joins still require their separately reviewed pixel contract. */
+static bool PureCloudArt(const ActionRoomScene *scene,const uint16_t words[4]) {
+  bool visible=false;
+  for(unsigned q=0;q<4;++q) {
+    if(((words[q]>>10)&7)!=4)return false;
+    for(unsigned y=0;y<8;++y)for(unsigned x=0;x<8;++x) {
+      const unsigned ink=Ink(scene,words[q],x,y);
+      if(ink && (ink<4 || ink>6))return false;
+      visible|=ink!=0;
+    }
+  }
+  return visible;
 }
 
 /* Match reviewed artwork, never the ROM's metatile or character numbering.
@@ -49,7 +71,7 @@ static unsigned Contract(const ActionRoomScene *scene, const uint16_t words[4],
     for (unsigned i = 0; i < sizeof(kCloudKeys) / sizeof(kCloudKeys[0]); ++i)
       if (key == kCloudKeys[i]) { if (key_index) *key_index = i; return kCloudOnly; }
     for (unsigned i = 0; i < sizeof(kMixedKeys) / sizeof(kMixedKeys[0]); ++i)
-      if (key == kMixedKeys[i]) { if (key_index) *key_index = i + 6; return kCloudAndRock; }
+      if (key == kMixedKeys[i]) { if (key_index) *key_index = i + kCloudKeyCount; return kCloudAndRock; }
   }
   return 0;
 }
@@ -110,7 +132,7 @@ static void SplitContract(void) {
 }
 
 typedef struct CloudCounts {
-  unsigned cells, mixed, low, high, rock, keys[12];
+  unsigned cells, mixed, low, high, rock, keys[kCloudKeyCount+kMixedKeyCount];
   int first_x[2], first_y[2];
 } CloudCounts;
 
@@ -127,6 +149,7 @@ static CloudCounts CheckClouds(const ActionRoomScene *scene, const ActionVoxelGe
     const unsigned collision = Collision(scene, id);
     unsigned key_index = 0;
     const unsigned contract = Contract(scene, words, collision, &key_index);
+    if(!collision && PureCloudArt(scene,words))assert(contract==kCloudOnly);
     if (!contract) continue;
     ++counts.cells; ++counts.keys[key_index]; counts.mixed += contract == kCloudAndRock;
     if (counts.first_x[contract - 1] < 0) {

@@ -653,6 +653,7 @@ static void TestAitosLavaLightingAndParticles(void) {
 static void TestAitosStatueFireLightingAndFacing(void) {
   ActionSceneEffectFrame frame = {.effect_count = 3, .visible_count = 3};
   frame.effects[0] = SceneEffect(kActionEffect_AitosStatueFire, 400);
+  frame.effects[0].obj_priority = 2;
   frame.effects[0].visual = 0x1F;
   frame.effects[1] = frame.effects[0];
   frame.effects[1].visual = 0x1E;
@@ -682,6 +683,20 @@ static void TestAitosStatueFireLightingAndFacing(void) {
   left_mean /= 48.0f;
   CHECK(right_mean > frame.effects[0].world_x + 8.0f);
   CHECK(left_mean < frame.effects[1].world_x - 8.0f);
+  /* Both native breath facings, their embers and their glow retain the
+   * sprite's OBJ2 anchor in voxel mode. Receiver lights may illuminate the
+   * rear wall, but must not move the emitter onto that wall. */
+  static ActionEffectSourcePrimitive primitives[1024],retained[1024];
+  ActionEffectSourceBatch source={.context={.staged_voxel_scenery=true},
+      .primitives=primitives,.capacity=1024};
+  CHECK(ActionSceneEffectRender_Build(&frame,true,true,ActionEffectSource_ProjectPoint,&source,&particles));
+  CHECK(source.count&&!source.failed);const unsigned count=source.count;
+  for(unsigned i=0;i<count;++i) {
+    CHECK(primitives[i].meta[1]==7&&primitives[i].meta[2]==2);
+  }
+  memcpy(retained,primitives,count*sizeof(*primitives));source.count=0;source.context.staged_voxel_scenery=false;
+  CHECK(ActionSceneEffectRender_Build(&frame,true,true,ActionEffectSource_ProjectPoint,&source,&particles));
+  CHECK(source.count==count&&!memcmp(retained,primitives,count*sizeof(*primitives)));
 }
 
 static void TestAitosSideLavaLightingAndHeatMesh(void) {
@@ -2945,6 +2960,294 @@ static void TestTempleDustVolume(void) {
     CHECK(primitives[i].meta[0]==kActionSourceQuad && !((unsigned)primitives[i].origin[2]&64));
 }
 
+static void TestAuthoredMoteVolume(void) {
+  DioramaProjection projection=RakedApronProjection();projection.voxel_scenery=true;
+  projection.texture_x_origin=0;projection.texture_width=projection.texture_height=512;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1,.z_world=-.24f};
+  projection.bg1_high_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1};
+  const ActionEffectProjectionContext context={.diorama_projection=&projection,
+      .visible_width=512,.snes_height=512,.capture_height=512,.viewport={0,0,1280,720}};
+  static ActionSceneEffectFrame frame,before;
+  static ActionSceneEffectRenderBatch batch,volumetric,planar;
+  static ActionEffectSourcePrimitive primitives[512],retained[512];
+  for(unsigned family=0;family<5;++family) {
+    memset(&frame,0,sizeof(frame));frame.authored_count=1;
+    ActionEffectInstance *e=&frame.authored[0];
+    *e=(ActionEffectInstance){.kind=family==0?kActionEffect_AuthoredMotes:family==1?kActionEffect_AuthoredTorch:kActionEffect_AuthoredParticleArea,
+        .generation=77,.pulse_generation=77,.flags=kActionEffectFlag_Visible,
+        .world_x=256,.world_y=256,.projection_plane=kActionEffectProjectionPlane_Bg1,
+        .render_layer=kActionEffectRenderLayer_WorldOverlay,.particle_count=16,
+        .particle_lifetime=240,.pulse_ticks=91,.tuning={.active=1,.color=0xffd9ab,.intensity=1,.reach=1},
+        .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-48,-48,48,48}},
+        .particle_style={.active=1,.size_min=.5f,.size_max=1,.travel_x=12,.travel_y=-16,
+          .spread=1,.wander=8,.seed=3304,.color_end=0x826044},
+        .field_style={.pattern=family==2?kActionParticle_Dust:kActionParticle_Motes}};
+    if(family>=2)e->geometry.data.rect=(ActionEffectLocalRect){-192,-192,192,192};
+    if(family==4) {
+      e->kind=kActionEffect_AuthoredParticlePath;e->field_style.pattern=kActionParticle_Dust;
+      e->field_style.point_count=2;e->field_style.activity=1;
+      e->field_style.points[0].x=-32;e->field_style.points[0].y=-64;
+      e->field_style.points[1].x=32;e->field_style.points[1].y=64;
+    }
+    before=frame;
+    ActionEffectSourceBatch source={.context=context,.primitives=primitives,.capacity=512};
+    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+        ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&batch));
+    CHECK(source.count&&!source.failed);unsigned air=0;float first=-1;bool varied=false,moving=false;
+    for(unsigned i=0;i<source.count;++i)if((unsigned)primitives[i].origin[2]&64u) {
+      ++air;CHECK(primitives[i].meta[0]==kActionSourceParticle);
+      const float depth=primitives[i].points[5][3];CHECK(depth>=.12f&&depth<=.88f);
+      if(first<0)first=depth;else varied|=depth!=first;
+      moving|=primitives[i].points[1][0]!=primitives[i].points[0][0] ||
+          primitives[i].points[1][1]!=primitives[i].points[0][1];
+    }
+    CHECK(air>1&&varied&&moving);
+    const unsigned count=source.count;memcpy(retained,primitives,count*sizeof(*primitives));
+    /* Camera rotation and upload staging reuse identical world positions,
+     * ages, colors, motion tails and depth seeds. No random depth on redraw. */
+    source.count=0;source.context.diorama_projection=NULL;source.context.staged_voxel_scenery=true;
+    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+        ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&batch));
+    CHECK(source.count==count&&!memcmp(retained,primitives,count*sizeof(*primitives)));
+    source.count=0;source.context.staged_voxel_scenery=false;
+    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+        ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&batch));
+    for(unsigned i=0;i<source.count;++i)CHECK(!((unsigned)primitives[i].origin[2]&64u));
+    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+        ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,(void *)&context,&volumetric));
+    projection.voxel_scenery=false;
+    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+        ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,(void *)&context,&planar));
+    CHECK(volumetric.vertex_count&&planar.vertex_count&&!SceneBatchesEqual(&volumetric,&planar));
+    projection.voxel_scenery=true;
+    CHECK(!memcmp(&frame,&before,sizeof(frame)));
+  }
+}
+
+static void TestAuthoredFanVolume(void) {
+  DioramaProjection projection=RakedApronProjection();projection.voxel_scenery=true;
+  projection.texture_x_origin=0;projection.texture_width=projection.texture_height=512;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1,.z_world=-.24f};
+  projection.bg1_high_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1};
+  ActionEffectProjectionContext context={.diorama_projection=&projection,
+      .visible_width=512,.snes_height=512,.capture_height=512,.viewport={0,0,1280,720}};
+  static ActionSceneEffectFrame frame,before;
+  memset(&frame,0,sizeof(frame));frame.authored_count=1;
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredFan,.generation=3306,
+      .flags=kActionEffectFlag_Visible,.world_x=256,.world_y=128,
+      .particle_lifetime=720,
+      .projection_plane=kActionEffectProjectionPlane_Bg1,.render_layer=kActionEffectRenderLayer_Bg1Plane,
+      .tuning={.active=1,.color=0xffe8ae,.intensity=4,.reach=1,
+        .light_receivers_set=1,.light_receivers=7},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-128,0,128,256}},
+      .field_style={.strands=18,.fan=42,.softness=1}};
+  before=frame;
+  static ActionSceneEffectRenderBatch batch,volume,planar,receiver;
+  static ActionEffectSourcePrimitive primitives[512],retained[512];
+  ActionEffectSourceBatch source={.context=context,.primitives=primitives,.capacity=512};
+#define BUILD_FAN(target) CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false, \
+    ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&target))
+  BUILD_FAN(batch);const unsigned count=source.count;
+  CHECK(count==18*8+48);bool varied=false;const float first=primitives[0].points[5][3];
+  for(unsigned i=0;i<count;++i) {
+    CHECK(primitives[i].meta[0]==kActionSourceTriangle&&((unsigned)primitives[i].origin[2]&64u));
+    CHECK(primitives[i].points[5][3]>=.12f&&primitives[i].points[5][3]<=.88f);
+    varied|=primitives[i].points[5][3]!=first;
+  }
+  CHECK(varied);memcpy(retained,primitives,count*sizeof(*primitives));
+  source.count=0;source.context.diorama_projection=NULL;source.context.staged_voxel_scenery=true;
+  BUILD_FAN(batch);CHECK(source.count==count&&!memcmp(retained,primitives,count*sizeof(*primitives)));
+  source.count=0;source.context.staged_voxel_scenery=false;BUILD_FAN(batch);
+  CHECK(source.count==count);
+  for(unsigned i=0;i<count;++i) {
+    /* Only physical depth changes. No extra rays, opacity, color or work. */
+    CHECK(!((unsigned)primitives[i].origin[2]&64u));
+    retained[i].origin[2]=(float)((unsigned)retained[i].origin[2]&~64u);
+    retained[i].points[5][3]=0;
+  }
+  CHECK(!memcmp(retained,primitives,count*sizeof(*primitives)));
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&volume));
+  projection.voxel_scenery=false;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&planar));
+  CHECK(volume.vertex_count&&planar.vertex_count&&!SceneBatchesEqual(&volume,&planar));
+  /* Surface illumination retains its authored field in both modes. */
+  frame.light_receiver=kActionReceiver_Scenery;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&receiver));
+  projection.voxel_scenery=true;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&planar));
+  CHECK(SceneBatchesEqual(&receiver,&planar));
+  source.count=0;source.context=context;source.context.scenery_lighting_only=true;BUILD_FAN(batch);
+  CHECK(source.count==count);
+  for(unsigned i=0;i<source.count;++i)CHECK(!((unsigned)primitives[i].origin[2]&64u));
+  frame.light_receiver=0;CHECK(!memcmp(&frame,&before,sizeof(frame)));
+#undef BUILD_FAN
+}
+
+/* Native cloud augmentation must fill behind the front silhouette without
+ * changing its source artwork, alpha or OBJ priority. */
+static void TestForegroundCloudDepth(void) {
+  DioramaProjection projection=RakedApronProjection();projection.voxel_scenery=true;
+  projection.texture_x_origin=0;projection.texture_width=projection.texture_height=512;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1,.z_world=-.24f};
+  projection.bg1_high_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1};
+  ActionEffectProjectionContext context={.diorama_projection=&projection,
+      .visible_width=512,.snes_height=512,.capture_height=512,.viewport={0,0,1280,720}};
+  static ActionSceneEffectFrame frame,before;
+  memset(&frame,0,sizeof(frame));frame.authored_count=1;
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredCloud,.generation=3307,
+      .flags=kActionEffectFlag_Visible,.world_x=256,.world_y=256,
+      .particle_lifetime=2400,.pulse_ticks=320,
+      .projection_plane=kActionEffectProjectionPlane_Bg1High,.render_layer=kActionEffectRenderLayer_Bg1Mist,
+      .tuning={.active=1,.color=0xe3d0c4,.intensity=1.15f,.reach=1},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-240,-64,240,64}},
+      .particle_style={.size_min=.35f,.size_max=.85f,.seed=279,.color_end=0xb49a8e},
+      .field_style={.textured=1,.rolling=.8f,.volume=1,.strands=24,.amplitude=3,.drift=-34}};
+  before=frame;
+  static ActionSceneEffectRenderBatch batch,volume,planar;
+  static ActionEffectSourcePrimitive primitives[512],retained[512];
+  ActionEffectSourceBatch source={.context=context,.primitives=primitives,.capacity=512};
+#define BUILD_CLOUD() CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true, \
+    ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&batch))
+  BUILD_CLOUD();const unsigned count=source.count;
+  CHECK(count>0&&count<=24*2*2*4&&!source.failed);
+  CHECK(count%4==0);const unsigned face=count/4;
+  for(unsigned band=0;band<4;++band)for(unsigned i=0;i<face;++i) {
+    const ActionEffectSourcePrimitive *p=&primitives[band*face+i];
+    CHECK(p->meta[0]==kActionSourceTriangle);
+    CHECK(p->meta[1]==(band==3?kActionEffectProjectionPlane_Bg1High:kActionEffectProjectionPlane_Bg1));
+    CHECK(!!((unsigned)p->origin[2]&64u)==(band<3));
+    if(band<3)CHECK(fabsf(p->points[5][3]-(.4f+.2f*band))<.0001f);
+  }
+  memcpy(retained,primitives,count*sizeof(*primitives));
+  source.count=0;source.context.diorama_projection=NULL;source.context.staged_voxel_scenery=true;
+  BUILD_CLOUD();CHECK(source.count==count&&!memcmp(retained,primitives,count*sizeof(*primitives)));
+  /* Ordinary Diorama retains precisely the old front draw, including UVs,
+   * clipping, colors and alpha; volume affects only the added interior. */
+  source.count=0;source.context.staged_voxel_scenery=false;BUILD_CLOUD();
+  CHECK(source.count==face&&!memcmp(retained+face*3,primitives,face*sizeof(*primitives)));
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&volume));
+  projection.voxel_scenery=false;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&planar));
+  CHECK(volume.vertex_count==planar.vertex_count*4);
+  projection.voxel_scenery=true;source.context=context;
+  /* Background sky banks, non-volume banks and receiver passes never gain
+   * extra cloud layers. The bank remains immutable across all builds. */
+  e->projection_plane=kActionEffectProjectionPlane_Bg1;source.count=0;BUILD_CLOUD();CHECK(source.count==face);
+  *e=before.authored[0];e->field_style.volume=.5f;source.count=0;BUILD_CLOUD();
+  CHECK(source.count==count);
+  for(unsigned band=0;band<3;++band)for(unsigned i=0;i<face;++i)
+    CHECK(fabsf(primitives[band*face+i].points[5][3]-(.7f+.1f*band))<.0001f);
+  *e=before.authored[0];e->field_style.volume=0;source.count=0;BUILD_CLOUD();CHECK(source.count==face);
+  *e=before.authored[0];source.context.scenery_lighting_only=true;source.count=0;BUILD_CLOUD();
+  CHECK(source.count==face);
+  CHECK(!memcmp(&frame,&before,sizeof(frame)));
+  /* A lava opening cuts every physical depth, with the original UVs and
+   * clock on either side. No source triangle may cover its X interval. */
+  source.context=context;e->field_style.voxel_cloud_gap_count=2;
+  e->field_style.voxel_cloud_gaps[0].x0=210;e->field_style.voxel_cloud_gaps[0].x1=242;
+  e->field_style.voxel_cloud_gaps[1].x0=274;e->field_style.voxel_cloud_gaps[1].x1=306;
+  source.count=0;BUILD_CLOUD();CHECK(source.count>0&&!source.failed);
+  for(unsigned i=0;i<source.count;++i)for(unsigned g=0;g<2;++g) {
+    const float x0=e->field_style.voxel_cloud_gaps[g].x0-e->world_x;
+    const float x1=e->field_style.voxel_cloud_gaps[g].x1-e->world_x;
+    CHECK(primitives[i].clip[2]<=x0||primitives[i].clip[0]>=x1);
+  }
+  const unsigned gap_count=source.count;memcpy(retained,primitives,gap_count*sizeof(*primitives));
+  source.count=0;source.context.diorama_projection=NULL;source.context.staged_voxel_scenery=true;
+  BUILD_CLOUD();CHECK(source.count==gap_count&&!memcmp(retained,primitives,gap_count*sizeof(*primitives)));
+  projection.voxel_scenery=false;source.count=0;source.context=context;BUILD_CLOUD();
+  CHECK(source.count==face); /* Native 2D/Diorama is not cut by Voxel gaps. */
+  *e=before.authored[0];
+#undef BUILD_CLOUD
+}
+
+static void TestRearMistVolume(void) {
+  DioramaProjection projection=RakedApronProjection();projection.voxel_scenery=true;
+  projection.texture_x_origin=0;projection.texture_width=projection.texture_height=512;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1,.z_world=-.24f};
+  projection.bg1_high_plane=(DioramaPlaneProjection){.valid=true,.u1=1,.v1=1};
+  ActionEffectProjectionContext context={.diorama_projection=&projection,
+      .visible_width=512,.snes_height=512,.capture_height=512,.viewport={0,0,1280,720}};
+  static ActionSceneEffectFrame frame,before;memset(&frame,0,sizeof(frame));frame.authored_count=1;
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredCloud,.generation=3310,
+      .flags=kActionEffectFlag_Visible,.world_x=256,.world_y=256,
+      .particle_lifetime=840,.pulse_ticks=320,
+      .projection_plane=kActionEffectProjectionPlane_Bg1,.render_layer=kActionEffectRenderLayer_Bg2Alpha,
+      .tuning={.active=1,.color=0xdcecf1,.intensity=1.05f,.reach=1},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-240,-64,240,64}},
+      .particle_style={.size_min=.35f,.size_max=.85f,.seed=196,.color_end=0xa1bdc9},
+      .field_style={.textured=1,.rolling=.7f,.volume=1,.strands=12,.amplitude=7,.drift=24}};
+  before=frame;
+  static ActionSceneEffectRenderBatch batch,air,flat;
+  static ActionEffectSourcePrimitive primitives[256],retained[256];
+  ActionEffectSourceBatch source={.context=context,.primitives=primitives,.capacity=256};
+#define BUILD_REAR_MIST() CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true, \
+    ActionEffectSource_ProjectPoint,NULL,&source,&batch))
+  BUILD_REAR_MIST();const unsigned count=source.count;CHECK(count==12*4&&!source.failed);
+  bool varied=false;
+  for(unsigned i=0;i<count;++i) {
+    CHECK(primitives[i].meta[0]==kActionSourceTriangle&&((unsigned)primitives[i].origin[2]&64u));
+    const float depth=primitives[i].points[5][3];CHECK(depth>=.08f&&depth<=.6f);
+    if(i)CHECK(depth>=primitives[i-1].points[5][3]);
+    if(i%4)CHECK(depth==primitives[i-i%4].points[5][3]);
+    varied|=depth!=primitives[0].points[5][3];
+  }
+  CHECK(varied);memcpy(retained,primitives,count*sizeof(*primitives));
+  source.count=0;source.context.diorama_projection=NULL;source.context.staged_voxel_scenery=true;
+  BUILD_REAR_MIST();CHECK(source.count==count&&!memcmp(retained,primitives,count*sizeof(*primitives)));
+  source.count=0;source.context.staged_voxel_scenery=false;BUILD_REAR_MIST();CHECK(source.count==count);
+  /* Same masks, colours, alpha, source positions and count; only stable
+   * depth and back-to-front order change in voxel mode. */
+  for(unsigned i=0;i<count;++i) {
+    retained[i].origin[2]=(float)((unsigned)retained[i].origin[2]&~(64u|32u));retained[i].points[5][3]=0;
+    bool found=false;for(unsigned j=0;j<count;++j)found|=!memcmp(retained+i,primitives+j,sizeof(*primitives));
+    CHECK(found);
+  }
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      ActionEffectProjection_ProjectPoint,NULL,&context,&air));
+  projection.voxel_scenery=false;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      ActionEffectProjection_ProjectPoint,NULL,&context,&flat));
+  CHECK(air.vertex_count==flat.vertex_count&&air.vertex_count&&!SceneBatchesEqual(&air,&flat));
+  /* A near billow can enter before its rear sheet. Culling includes the
+   * complete depth envelope rather than clipping to the old capture edge. */
+  projection.voxel_scenery=true;
+  projection.bg1_high_plane.capture_offset=(ArRenderPointF){64,32};
+  ActionEffectLocalRect envelope;ActionEffectProjectionContext near_context;DioramaProjection near_projection;
+  CHECK(ActionEffectProjection_ViewBounds(&context,e,&envelope));
+  CHECK(ActionEffectProjection_VolumeContext(&context,.6f,&near_context,&near_projection));
+  float x0,y0,x1,y1;
+  CHECK(Diorama_PlaneCaptureBounds(&near_projection,&near_projection.bg1_plane,&x0,&y0,&x1,&y1));
+  const ArRenderPointF origin=ActionEffectProjection_CaptureOrigin(&context,e);
+  CHECK(envelope.x0<=x0-origin.x&&envelope.x1>=x1-origin.x);
+  CHECK(envelope.y0<=y0-origin.y&&envelope.y1>=y1-origin.y);
+  projection.voxel_scenery=true;source.context=context;source.context.scenery_lighting_only=true;
+  source.count=0;BUILD_REAR_MIST();CHECK(source.count==count);
+  for(unsigned i=0;i<count;++i)CHECK(!((unsigned)primitives[i].origin[2]&64u));
+  CHECK(!memcmp(&frame,&before,sizeof(frame)));
+#undef BUILD_REAR_MIST
+  /* Four sunlight directions occupy all three remaining point words. A
+   * volume depth must not overwrite the fourth sun's Z component or fade. */
+  const float directions[3][4]={{.1f,.2f,.3f,.4f},{.5f,.6f,.7f,.8f},{-.1f,-.2f,-.3f,-.4f}};
+  const ArRenderVertex2D corners[3]={{{0,0},{1,1,1,1},{0,0}},
+      {{1,0},{1,1,1,1},{0,0}},{{0,1},{1,1,1,1},{0,0}}};
+  const int triangle[3]={0,1,2};const ActionEffectLocalRect clip={-10,-10,10,10};
+  source.count=0;
+  CHECK(ActionEffectSource_RainbowTriangle(&source,e,corners,triangle,&clip,directions));
+  CHECK(ActionEffectSource_VolumeRange(&source,0,.3f));
+  CHECK(source.count==1&&primitives[0].extra[0]==1&&primitives[0].extra[1]==.3f);
+  CHECK(!memcmp(primitives[0].points+3,directions,sizeof(directions)));
+}
+
 static void TestVoxelContactPlanes(void) {
   DioramaProjection projection=RakedApronProjection();
   projection.texture_x_origin=0;projection.texture_width=4096;projection.texture_height=2048;
@@ -3040,6 +3343,30 @@ static void TestVoxelContactPlanes(void) {
       CHECK(actual.vertex_count>0 && SceneBatchesEqual(&actual,&expected));
       CHECK(authored->projection_plane==kActionEffectProjectionPlane_Bg1);
     }
+  }
+  /* Waterfall contact plumes use playfield placement on the rear BG1
+   * source. They must not inherit the walking-depth remap used by foreground
+   * impacts. CPU and retained/deferred generation share the same anchor. */
+  authored->kind=kActionEffect_AuthoredSpray;authored->field_style.debris=0;
+  authored->field_style.landing=0;authored->field_style.placement=1;
+  authored->render_layer=kActionEffectRenderLayer_Bg1Mist;
+  for(unsigned voxel=0;voxel<2;++voxel) {
+    projection.voxel_scenery=voxel;
+    ActionEffectProjectionContext context={.diorama_projection=&projection};
+    ActionEffectSourceBatch source={.context={.staged_voxel_scenery=voxel},
+        .primitives=primitives,.capacity=kActionSourceMaximumPrimitives};
+    CHECK(ActionSceneDecorationRender_Build(&frame,authored->render_layer,false,true,
+        ActionEffectSource_ProjectPoint,NULL,&source,&scratch));
+    CHECK(source.count&&!source.failed);
+    for(unsigned i=0;i<source.count;++i)CHECK(primitives[i].meta[1]==kActionEffectProjectionPlane_Bg1);
+    CHECK(ActionSceneDecorationRender_Build(&frame,authored->render_layer,false,true,
+        ActionEffectProjection_ProjectPoint,NULL,&context,&actual));
+    DioramaProjection reference=projection;reference.voxel_scenery=false;
+    context.diorama_projection=&reference;
+    CHECK(ActionSceneDecorationRender_Build(&frame,authored->render_layer,false,true,
+        ActionEffectProjection_ProjectPoint,NULL,&context,&expected));
+    CHECK(actual.vertex_count&&SceneBatchesEqual(&actual,&expected));
+    CHECK(authored->projection_plane==kActionEffectProjectionPlane_Bg1&&authored->field_style.placement==1);
   }
 }
 static void TestLandingParticleGeometry(void) {
@@ -5403,6 +5730,10 @@ int main(void) {
   TestLandingParticleGeometry();
   TestVoxelContactPlanes();
   TestTempleDustVolume();
+  TestAuthoredMoteVolume();
+  TestAuthoredFanVolume();
+  TestForegroundCloudDepth();
+  TestRearMistVolume();
   TestCaveEnvironmentGeometry();
   TestCaveWaterUsesHighPlane();
   TestCaveAmbientScroll();

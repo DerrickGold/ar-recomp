@@ -161,6 +161,8 @@ static void FlatCapture(EditorRoomScene *scene, const ActionSceneSnapshot *asset
                         int x, int y, uint32_t clock, int extra) {
   EditorRoomCamera camera;
   assert(EditorRoomScene_RenderFlat(scene, x, y, clock, extra, &camera));
+  assert(camera.minimum_x == camera.travel.minimum && camera.maximum_x == camera.travel.maximum);
+  assert(camera.x >= camera.minimum_x && camera.x <= camera.maximum_x);
   const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(scene);
   assert(surface->width == 256 + 2 * extra && surface->height == 224);
   assert(!surface->background_view && !surface->native_pages[0] && !surface->native_pages[1]);

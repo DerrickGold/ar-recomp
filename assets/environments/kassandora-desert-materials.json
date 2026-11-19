@@ -85,18 +85,19 @@
           2,
           83
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "041cb0549aef3647",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -113,6 +114,12 @@
           2,
           191
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -247,13 +254,13 @@
     {
       "key": "07db3e46f55b8d8e",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -270,6 +277,12 @@
           2,
           194
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -503,13 +516,13 @@
     {
       "key": "0fade70c301aefa9",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -541,6 +554,12 @@
           2,
           195
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -655,7 +674,8 @@
           2,
           162
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "16db7a3877fa50ca",
@@ -698,7 +718,8 @@
           2,
           75
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "174ecbdc5b7ba29f",
@@ -984,7 +1005,8 @@
           2,
           66
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "1fbac04e39357219",
@@ -1037,7 +1059,7 @@
         1,
         1
       ],
-      "flags": 0,
+      "flags": 4096,
       "role": "solid_rock_island",
       "origins": [
         [
@@ -1212,18 +1234,19 @@
           2,
           156
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "25c5abc150b458a9",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -1240,6 +1263,12 @@
           2,
           202
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -1326,7 +1355,8 @@
           2,
           137
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "2b405abd0f2d985c",
@@ -1336,7 +1366,7 @@
         1,
         1
       ],
-      "flags": 0,
+      "flags": 4096,
       "role": "solid_rock_island",
       "origins": [
         [
@@ -1460,13 +1490,13 @@
     {
       "key": "2f95c0d53ad34dda",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -1483,6 +1513,12 @@
           2,
           148
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -1526,18 +1562,19 @@
           2,
           161
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "32359145fb5aa7e6",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -1554,6 +1591,12 @@
           2,
           147
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -1564,7 +1607,7 @@
         1,
         1
       ],
-      "flags": 0,
+      "flags": 4096,
       "role": "solid_rock_island",
       "origins": [
         [
@@ -1587,13 +1630,13 @@
     {
       "key": "36b3b0276448a3ba",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -1610,6 +1653,12 @@
           2,
           190
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -1638,7 +1687,8 @@
           2,
           197
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "37669e691e162fcf",
@@ -1699,13 +1749,13 @@
     {
       "key": "3953809824cffdc6",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -1722,6 +1772,12 @@
           2,
           199
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -1793,7 +1849,8 @@
           2,
           65
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "3ba1a800190f6872",
@@ -1864,7 +1921,8 @@
           2,
           174
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "3dce4f33d7e43685",
@@ -1968,13 +2026,13 @@
     {
       "key": "400873f417835cc9",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -1991,6 +2049,12 @@
           2,
           166
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -2075,7 +2139,8 @@
           2,
           175
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "4255ddcad2a33904",
@@ -2118,7 +2183,8 @@
           2,
           91
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "4423fc4d122cc340",
@@ -2174,7 +2240,8 @@
           2,
           189
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "4523a88bdfb97a53",
@@ -2222,13 +2289,13 @@
     {
       "key": "457f3e153dfee10b",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -2245,6 +2312,12 @@
           2,
           193
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -2392,13 +2465,13 @@
     {
       "key": "481bf7bd0f3808f1",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -2415,6 +2488,12 @@
           2,
           140
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -2491,13 +2570,13 @@
     {
       "key": "4d56045774d8f1c3",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -2514,6 +2593,12 @@
           2,
           149
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -2542,7 +2627,8 @@
           2,
           136
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "4d7babb3d8036ef2",
@@ -2641,7 +2727,8 @@
           2,
           206
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "503acf3bd3c24bd6",
@@ -2783,7 +2870,8 @@
           2,
           207
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "54514daec1abcef0",
@@ -2794,7 +2882,7 @@
         1
       ],
       "flags": 0,
-      "role": "structural_rock_support",
+      "role": "structural_rock_support_with_sand_contact; only rock indices9..15 follow the recessed shaft when grounded, while the native sand fringe stays at the walking front",
       "origins": [
         [
           1,
@@ -2826,6 +2914,12 @@
           2,
           187
         ]
+      ],
+      "column_recess_colors": [
+        65024,
+        65024,
+        65024,
+        65024
       ]
     },
     {
@@ -3269,7 +3363,8 @@
           2,
           164
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "66fed7d411ab3117",
@@ -3297,7 +3392,8 @@
           2,
           163
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "67ab27cb0a431656",
@@ -3528,13 +3624,13 @@
     {
       "key": "6d83890a54052222",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -3551,18 +3647,24 @@
           2,
           201
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
       "key": "6e6735341b56b709",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -3579,6 +3681,12 @@
           2,
           157
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -3589,7 +3697,7 @@
         1,
         1
       ],
-      "flags": 0,
+      "flags": 4096,
       "role": "solid_rock_island",
       "origins": [
         [
@@ -3807,7 +3915,8 @@
           2,
           64
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "76e084da933c1eaa",
@@ -3850,7 +3959,8 @@
           2,
           72
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "7760411e0752ecd5",
@@ -3878,18 +3988,19 @@
           2,
           155
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "78e9484d626e0def",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -3906,6 +4017,12 @@
           2,
           146
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -4038,13 +4155,13 @@
     {
       "key": "7dded37dcd0dab8f",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -4061,6 +4178,12 @@
           2,
           203
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -4309,13 +4432,13 @@
     {
       "key": "8d287b8a7b19e41d",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           1,
@@ -4347,6 +4470,12 @@
           2,
           144
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -4565,13 +4694,13 @@
     {
       "key": "9b241fc923ced18f",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           1,
@@ -4603,6 +4732,12 @@
           2,
           129
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -4890,13 +5025,13 @@
     {
       "key": "a46706312930cfc2",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           1,
@@ -4928,6 +5063,12 @@
           2,
           130
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -5080,13 +5221,13 @@
     {
       "key": "ad261ec63a3356c5",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -5103,6 +5244,12 @@
           2,
           154
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -5237,13 +5384,13 @@
     {
       "key": "b36b54c1eb17efd5",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           1,
@@ -5290,6 +5437,12 @@
           2,
           200
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -5301,7 +5454,7 @@
         1
       ],
       "flags": 0,
-      "role": "structural_rock_support",
+      "role": "structural_rock_support_with_sand_contact; only rock indices9..15 follow the recessed shaft when grounded, while the native sand fringe stays at the walking front",
       "origins": [
         [
           1,
@@ -5333,6 +5486,12 @@
           2,
           186
         ]
+      ],
+      "column_recess_colors": [
+        65024,
+        65024,
+        65024,
+        65024
       ]
     },
     {
@@ -5366,13 +5525,13 @@
     {
       "key": "b673c8cfce9d0d77",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -5389,6 +5548,12 @@
           2,
           198
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -5432,18 +5597,19 @@
           2,
           90
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "b8e2fa45ddc64f45",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -5460,6 +5626,12 @@
           2,
           205
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -5508,13 +5680,13 @@
     {
       "key": "bc75598d7a4d90f3",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -5531,6 +5703,12 @@
           2,
           131
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -5587,7 +5765,8 @@
           2,
           215
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "bd9d732d4ca569ae",
@@ -5762,13 +5941,13 @@
     {
       "key": "c331773356cd2a72",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -5785,6 +5964,12 @@
           2,
           165
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -6020,13 +6205,13 @@
     {
       "key": "cf402ceb292013c3",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -6043,6 +6228,12 @@
           2,
           192
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
@@ -6099,7 +6290,8 @@
           2,
           214
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "d327e3e6207cffc2",
@@ -6127,7 +6319,8 @@
           2,
           183
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "d3283d7ea6236d75",
@@ -6454,7 +6647,8 @@
           2,
           160
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "e30b5e81fa0c8c52",
@@ -6482,7 +6676,8 @@
           2,
           182
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "e5f5781f062ceea2",
@@ -6525,7 +6720,8 @@
           2,
           74
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "e6361d7c582a370d",
@@ -6758,7 +6954,8 @@
           2,
           73
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "ea9b3a995ae1b60f",
@@ -6801,7 +6998,8 @@
           2,
           82
         ]
-      ]
+      ],
+      "column_shadow": true
     },
     {
       "key": "ebe811fcc0e07436",
@@ -6829,7 +7027,8 @@
           2,
           196
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "ec03ee03986a5fa5",
@@ -6905,13 +7104,13 @@
     {
       "key": "f096195dfda022f9",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -6928,18 +7127,24 @@
           2,
           145
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {
       "key": "f2057a6c8596dd14",
       "kinds": [
-        7,
-        7,
-        7,
-        7
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 0,
-      "role": "recessed_ruin_wall",
+      "flags": 32768,
+      "role": "shallow_ruin_wall; stone relief stays behind actors and native index15 door interiors remain on the rear plane",
       "origins": [
         [
           2,
@@ -6956,6 +7161,12 @@
           2,
           139
         ]
+      ],
+      "rear_colors": [
+        32768,
+        32768,
+        32768,
+        32768
       ]
     },
     {

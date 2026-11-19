@@ -165,12 +165,19 @@ static const VoxelContourSurfaceProfile kTombContourSurfaces[] = {
   {UINT64_C(0xf0bf245766861e4e),0x0038,1},
 };
 static const VoxelTopSurfaceProfile kTombTopSurfaces[] = {
+  {UINT64_C(0x1d4668d96944066c),0x0020,1024,0},
+  {UINT64_C(0x2edca4c3e8ba37c1),0x0018,1024,0},
   {UINT64_C(0x380c2c4558ffce16),0x0020,4,0},
+  {UINT64_C(0x489561c132e0bcc3),0x0030,1024,0},
   {UINT64_C(0x529b74c0925378be),0x0020,4,0},
+  {UINT64_C(0x611f73fb9b3a3c69),0x0020,1024,0},
+  {UINT64_C(0x6335f52fc1e18a71),0x0030,1024,0},
   {UINT64_C(0x812b2717bca9a4be),0x0078,3,0},
+  {UINT64_C(0x906301e691dbcc13),0x0020,1024,0},
   {UINT64_C(0x90ea2b42340c6007),0x0030,4,0},
   {UINT64_C(0xa2784924f1ee3977),0x0018,4,0},
   {UINT64_C(0xa5d6fa6ee48d8a14),0x0030,4,0},
   {UINT64_C(0xad3e241d2d498981),0x0078,3,0},
+  {UINT64_C(0xcc4d78835aef5295),0x0030,1024,0},
   {UINT64_C(0xf0bf245766861e4e),0x0038,4,0},
 };

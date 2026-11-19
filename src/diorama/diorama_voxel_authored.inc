@@ -509,14 +509,14 @@ static bool DrawVoxelNativeTransformedFront(ArRenderDevice *device,const Diorama
       continue;
     }
     float ys[16];unsigned ny=0;
-    if(curve)ny=VoxelTrunkCuts(curve,a->y+y,a->y+y+8,0,true,ys);
-    else if(mask){for(unsigned row=0;row<=8;++row)ys[ny++]=a->y+y+row;}
+    if(mask){for(unsigned row=0;row<=8;++row)ys[ny++]=a->y+y+row;}
+    else if(curve)ny=VoxelTrunkCuts(curve,a->y+y,a->y+y+8,0,true,ys);
     else {ys[ny++]=a->y+y;ys[ny++]=a->y+y+8;}
     const unsigned columns=mask?8:1;
     for(unsigned row=0;row+1<ny;++row)for(unsigned col=0;col<columns;++col) {
       const float x0=a->x+x+col*8/columns,x1=a->x+x+(col+1)*8/columns;
       float depths[2];
-      for(unsigned end=0;end<2;++end)depths[end]=curve?
+      for(unsigned end=0;end<2;++end)depths[end]=mask && !(mask[row]&(1u<<(7-col)))?0:curve?
           (column?ActionVoxel_ColumnFrontDepth(geometry,curve,ys[row+end]):ActionVoxel_TrunkFrontDepth(geometry,curve,ys[row+end])):
           mask?((mask[row]&(1u<<(7-col)))?ActionVoxel_SceneryRecess(geometry):0):ActionVoxel_FrontRecess(geometry,tx,ty);
       const float xy[]={x0,ys[row],x1,ys[row],x1,ys[row+1],x0,ys[row+1]};

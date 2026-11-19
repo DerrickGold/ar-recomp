@@ -1107,6 +1107,8 @@ void PresentActionEffects_PrepareSourcePackets(const FrameSlot *slot, const Fram
   /* Prepare only passes consumed by the previous presentation of this room.
    * Particle birth cells still use the current full projection. */
   if (s_source_group != slot->diorama_map_group || s_source_room != slot->diorama_map_number) return;
+  if(s_source_slot!=slot || s_source_timestamp!=slot->timestamp_ns)
+    PresentActionEffects_InvalidateSourcePackets();
   s_source_slot = slot;
   s_source_timestamp = slot->timestamp_ns;
   AdoptPreparedPackets(owned, slot);

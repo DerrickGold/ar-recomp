@@ -1101,6 +1101,8 @@ bool EditorRoomScene_RenderFlat(EditorRoomScene *r, int x, int y, uint32_t clock
   int before, after;
   DioramaCameraPolicy_HorizontalMargins(&plan, NULL, extra_x, &before, &after);
   if (!ActionCameraAxisBounds_Resolve(width, 256, before, after, &camera.travel)) return false;
+  camera.minimum_x = camera.travel.minimum;
+  camera.maximum_x = camera.travel.maximum;
   camera.x = ActionCameraAxisBounds_Clamp(&camera.travel, camera.x);
   request.camera_x = camera.x;
   if (!ActionRoomScene_BuildFrameState(&r->assets.scene, &request, &r->frame) ||

@@ -31,10 +31,14 @@ layout(std430,set=1,binding=0) writeonly buffer Vertices { vec4 values[]; } vert
 #undef RAINBOW_EXP
 #undef RAINBOW_SQRT
 #undef RAINBOW_MAX
+bool local_volume_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen);
 vec4 rainbow_color(Primitive p,int corner) {
     vec2 pixel;
-    if(!project_effect(int(p.meta.y),p.origin.xy+p.points[corner].xy,p.origin.y,
-        (uint(p.origin.z)&2u)!=0u,pixel))return vec4(0);
+    bool visible=(uint(p.origin.z)&64u)!=0u?
+        local_volume_point(p,p.clip,p.points[corner].xy,pixel):
+        project_effect(int(p.meta.y),p.origin.xy+p.points[corner].xy,p.origin.y,
+            (uint(p.origin.z)&2u)!=0u,pixel);
+    if(!visible)return vec4(0);
     vec2 ndc=(pixel-settings.viewport.xy)/settings.viewport.zw*2-1;
     vec3 ray=RainbowViewDirection(ndc.x,-ndc.y,
         vec3(settings.matrix[0][0],settings.matrix[1][0],settings.matrix[2][0]),
@@ -131,24 +135,26 @@ bool local_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
     return local_source_visible(p,bounds,point) &&
         project_effect(int(p.meta.y),p.origin.xy+point,p.origin.y,(uint(p.origin.z)&2u)!=0u,screen);
 }
-bool local_particle_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
+bool local_volume_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
     if((uint(p.origin.z)&64u)==0u)return local_point(p,bounds,point,screen);
     if(!local_source_visible(p,bounds,point))return false;
     // Interpolate physical mappings before perspective division, matching
     // the CPU reference. Packet depth is stable across camera movement.
     if(settings.planes[1].offset.w==0 || settings.planes[3].offset.w==0)return false;
-    float depth=p.points[5].w;
-    vec4 uv=mix(settings.planes[1].uv,settings.planes[3].uv,depth);
-    vec4 shape=mix(settings.planes[1].shape,settings.planes[3].shape,depth);
-    vec2 source=p.origin.xy+point+effect_motion(1)+
-        mix(settings.planes[1].offset.xy,settings.planes[3].offset.xy,depth);
-    vec2 st=((source+vec2(settings.capture.z,0))/settings.capture.xy-uv.xy)/(uv.zw-uv.xy);
+    float depth=p.meta.x==10u?p.extra.y:p.points[5].w;
+    precise vec4 uv=settings.planes[1].uv+(settings.planes[3].uv-settings.planes[1].uv)*depth;
+    precise vec4 shape=settings.planes[1].shape+(settings.planes[3].shape-settings.planes[1].shape)*depth;
+    precise vec2 offset=settings.planes[1].offset.xy+
+        (settings.planes[3].offset.xy-settings.planes[1].offset.xy)*depth;
+    precise vec2 source=p.origin.xy+point+effect_motion(1)+offset;
+    precise vec2 st=((source+vec2(settings.capture.z,0))/settings.capture.xy-uv.xy)/(uv.zw-uv.xy);
     float t=clamp(st.y,0,1);
-    vec4 clip=settings.matrix[0]*((st.x-.5)*settings.capture.w)+
-        settings.matrix[1]*((.5-st.y)*settings.geometry.x+shape.w)+
-        settings.matrix[2]*(shape.x+shape.y*t+shape.z*t*t)+settings.matrix[3];
+    precise float wx=(st.x-.5)*settings.capture.w;
+    precise float wy=(.5-st.y)*settings.geometry.x+shape.w;
+    precise float z=shape.x+shape.y*t+shape.z*t*t;
+    precise vec4 clip=settings.matrix[0]*wx+settings.matrix[1]*wy+settings.matrix[2]*z+settings.matrix[3];
     if(clip.w<=.0001)return false;
-    screen=settings.viewport.xy+vec2(clip.x/clip.w*.5+.5,.5-clip.y/clip.w*.5)*settings.viewport.zw;
+    screen=settings.viewport.xy+vec2(clip.x/clip.w*.5+.5,1-(clip.y/clip.w*.5+.5))*settings.viewport.zw;
     return true;
 }
 bool local_scale(Primitive p, vec4 bounds, vec2 local, out vec2 point, out float scale) {
@@ -208,10 +214,18 @@ void main() {
         }
         if(n<3||n>7)return;
         vec2 screen[8];
-        for(int j=0;j<n;j++)if(!project_effect(plane,p.origin.xy+a[j].point,p.origin.y,(uint(p.origin.z)&2u)!=0u,screen[j]))return;
+        for(int j=0;j<n;j++) {
+            bool projected=(uint(p.origin.z)&64u)!=0u?
+                local_volume_point(p,bounds,a[j].point,screen[j]):
+                project_effect(plane,p.origin.xy+a[j].point,p.origin.y,(uint(p.origin.z)&2u)!=0u,screen[j]);
+            if(!projected)return;
+        }
         if(p.meta.w!=0u&&settings.clock.z>0) {
             vec2 light;
-            if(project_effect(plane,p.origin.xy+p.extra.xy,p.origin.y,(uint(p.origin.z)&2u)!=0u,light))for(int j=0;j<n;j++) {
+            bool projected=(uint(p.origin.z)&64u)!=0u?
+                local_volume_point(p,bounds,p.extra.xy,light):
+                project_effect(plane,p.origin.xy+p.extra.xy,p.origin.y,(uint(p.origin.z)&2u)!=0u,light);
+            if(projected)for(int j=0;j<n;j++) {
                 float visibility=shadow_visibility(light,screen[j],p.extra.z);
                 if(p.meta.w==1u)a[j].color.rgb*=visibility;
                 else a[j].color.a*=visibility;
@@ -226,7 +240,7 @@ void main() {
         vec2 local[4]=vec2[4](p.points[0].xy,p.points[0].xy+vec2(1,0),p.points[0].xy+vec2(0,1),p.points[1].xy);
         vec2 screen[4];
         for(int j=0;j<4;j++) {
-            if(!local_particle_point(p,bounds,local[j],screen[j]))return;
+            if(!local_volume_point(p,bounds,local[j],screen[j]))return;
         }
         vec2 sizes=vec2(length(screen[1]-screen[0]),length(screen[2]-screen[0]));
         if(any(lessThanEqual(sizes,vec2(0))))return;

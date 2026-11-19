@@ -186,8 +186,12 @@ static bool AppendAuthoredEnvironmentBase(ActionEffectGeometryWriter *writer,
       /* Motes become visible inside the light pool and fade out toward its
        * edge. They share the torch's marker and never consume actor slots. */
       if(torch_motes)c.a*=fmaxf(0,1-4*x*x/(width*width)-4*y*y/(height*height));
-      if (!AppendSceneParticle(writer,&motion,x,y,x-style.travel_x*.003f,y-style.travel_y*.003f,
-          size,fmaxf(.6f,size*.8f),c,project,context)) return false;
+      const float px=x-style.travel_x*.003f,py=y-style.travel_y*.003f;
+      const bool ok=effect->kind==kActionEffect_AuthoredFlame?
+          AppendSceneParticle(writer,&motion,x,y,px,py,size,fmaxf(.6f,size*.8f),c,project,context):
+          AppendSceneVolumeParticle(writer,&motion,x,y,px,py,size,fmaxf(.6f,size*.8f),
+              .12f+.76f*HashUnit(seed^0xD7u),c,project,context);
+      if(!ok)return false;
     }
     return true;
   }

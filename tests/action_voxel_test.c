@@ -945,6 +945,8 @@ static unsigned CaveFixtures(const char *directory) {
   }
   return 3;
 }
+#include "action_voxel_temple_gates.inc"
+#include "action_voxel_temple_carvings.inc"
 static unsigned TempleFixtures(const char *directory) {
   static ActionSceneSnapshot fixture;
   static ActionRoomScene variant;
@@ -961,6 +963,8 @@ static unsigned TempleFixtures(const char *directory) {
     assert(ActionVoxel_Profile(a)==(room==3?kActionVoxelProfile_FillmoreTemple:kActionVoxelProfile_FillmoreTower));
     assert(ActionVoxel_HasCutouts(a));
     FillmoreFixtureRearCoverage(source,a);
+    TempleGateChecks(source,a,b,settings);
+    TempleCarvingChecks(source,a,b,settings,region);
     variant=*source;Renumber(&variant);
     assert(ActionVoxel_Build(b,&variant,NULL,settings));SameGeometry(a,b);
     unsigned width=ActionRoomScene_TileWidth(source,1),height=ActionRoomScene_TileHeight(source,1),recessed=0;
@@ -1594,6 +1598,7 @@ static unsigned MountainFixtures(const char *directory) {
     variant=*source;memset(variant.palette,0,sizeof(variant.palette));
     assert(ActionVoxel_Build(b,&variant,NULL,settings));SameGeometry(a,b);
     DesertMaterial(a,source,0x08,kVoxelSolid);
+    /* Mixed ramp walls retain one rear plane, including their flat landings. */
     DesertMaterial(a,source,0x0a,kVoxelRearOnly);
     unsigned count,soft=0;const VoxelEdge *edges=ActionVoxel_Edges(a,&count);
     assert(count && count<kVoxelMaxEdges && !ActionVoxel_HasCutouts(a));
@@ -1602,7 +1607,7 @@ static unsigned MountainFixtures(const char *directory) {
     unsigned liquids;const VoxelWaterSurface *water=ActionVoxel_WaterSurfaces(a,&liquids);
     if(room==1) {
       DesertMaterial(a,source,0xd0,kVoxelRearOnly);
-      DesertMaterial(a,source,0xd7,kVoxelRearOnly);
+      DesertMaterial(a,source,0xd7,kVoxelFoliage);
       assert(liquids);unsigned width=0,expected=0;
       for(size_t i=0;i<source->bg[0].map_size;++i)expected+=source->bg[0].map[i]==0xdf?16:0;
       for(unsigned i=0;i<liquids;++i) {
@@ -1621,7 +1626,9 @@ static unsigned MountainFixtures(const char *directory) {
       }
       const ActionRoomSceneFrameState frame={.brightness=15};
       assert(foam && rock && ActionVoxel_Split(a,tx*8,ty*8,16,16,16,&frame,low,16,rear,front));
-      assert(!memcmp(front,low,sizeof(low)) && !memcmp(rear,low,sizeof(low)));
+      assert(!memcmp(rear,low,sizeof(low)));
+      for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)
+        assert(front[y*16+x]==(FixturePixel(source,tx*8+x,ty*8+y)==7?0:low[y*16+x]));
       unsigned island_edges=0;
       for(unsigned i=0;i<count;++i) {
         const VoxelEdge *e=&edges[i];uint8_t id;uint16_t word;
@@ -1639,6 +1646,8 @@ static unsigned MountainFixtures(const char *directory) {
   }
   return 9;
 }
+#include "action_voxel_cavern_heads.inc"
+#include "action_voxel_door_jambs.inc"
 static unsigned CavernFixtures(const char *directory) {
   static ActionSceneSnapshot fixture;
   static ActionRoomScene variant,reference;
@@ -1669,6 +1678,7 @@ static unsigned CavernFixtures(const char *directory) {
     const VoxelGate *gate=ActionVoxel_Gates(a,&gates);
     assert(room==4?!gates:gates>0);
     for(unsigned i=0;i<gates;++i)assert(gate[i].centered && gate[i].width && gate[i].width<=8);
+    RearGateJambChecks(s,a,0x71,0x72);
     variant=*s;
     memcpy(variant.bg[0].metatiles+0x71*8,s->bg[0].metatiles+0x25*8,8);
     memcpy(variant.bg[0].metatiles+0x72*8,s->bg[0].metatiles+0x26*8,8);
@@ -1699,6 +1709,7 @@ static unsigned CavernFixtures(const char *directory) {
       reference=*s;reference.characters[offset+2*bytes+2*32]^=0xff;
       assert(!ActionVoxel_AnimationIsPresentationOnly(s,&reference,NULL,NULL,0));
     }
+    CavernHeadChecks(s,a,b,settings,region);
     variant=*s;memset(variant.characters,0,sizeof(variant.characters));
     assert(ActionVoxel_Build(b,&variant,NULL,settings) && !ActionVoxel_Active(b,4,room));
     printf("cavern room %u terrain %u: %u contours, %u molten surfaces, %u grilles\n",room,region,edges,pools,gates);
@@ -1759,9 +1770,11 @@ static unsigned JungleFixtures(const char *directory) {
     assert(ActionVoxel_Build(b,&variant,NULL,settings));unsigned closed,opened;
     const VoxelGate *gates=ActionVoxel_Gates(b,&closed);assert(closed);
     for(unsigned i=0;i<closed;++i)assert(gates[i].centered && gates[i].width<=8);
+    RearGateJambChecks(&variant,b,0x29,0x31);
     for(size_t i=0;i<variant.bg[0].map_size;++i)
       if(variant.bg[0].map[i]==0x29 || variant.bg[0].map[i]==0x31)++variant.bg[0].map[i];
     assert(ActionVoxel_Build(b,&variant,NULL,settings));ActionVoxel_Gates(b,&opened);assert(!opened);
+    assert(RearGateJambChecks(&variant,b,0x2a,0x32));
     variant=*s;memset(variant.characters,0,sizeof(variant.characters));
     assert(ActionVoxel_Build(b,&variant,NULL,settings) && !ActionVoxel_Active(b,5,room));
     printf("jungle room %u terrain %u: %u contours (%u rear), %u shorelines, %u submerged cells\n",room,region,edges,rear,pools,submerged);
@@ -1848,6 +1861,8 @@ static unsigned MarahnaTempleFixtures(const char *directory) {
 #include "action_voxel_jungle_course.inc"
 #include "action_voxel_bamboo_backing.inc"
 #include "action_voxel_mountain_slopes.inc"
+#include "action_voxel_mountain_infill.inc"
+#include "action_voxel_waterfall_foam.inc"
 #include "action_voxel_regional_spikes.inc"
 #include "action_trunk_side_fixtures.inc"
 #include "action_trunk_detail_backing.inc"
@@ -1855,6 +1870,7 @@ static unsigned MarahnaTempleFixtures(const char *directory) {
 #include "action_voxel_aitos_cliff_foot.inc"
 #include "action_voxel_jungle_exit_backing.inc"
 #include "action_voxel_tomb_caps.inc"
+#include "action_voxel_tomb_corners.inc"
 #include "action_voxel_castle_terminal_matte.inc"
 #include "action_voxel_castle_purple_band.inc"
 #include "action_voxel_castle_backing.inc"
@@ -1887,10 +1903,12 @@ static unsigned MarahnaTempleFixtures(const char *directory) {
 #include "action_voxel_desert_audit_joins.inc"
 #include "action_voxel_snow_cap_phase.inc"
 #include "action_voxel_snow_closing_risers.inc"
+#include "action_voxel_castle_water.inc"
 int main(int argc,char **argv) {
   if(argc>1 && !strcmp(argv[1],"--surface-inventory"))return SurfaceFixtureInventory(argc,argv);
   SummitCrestFixtures(getenv("AR_VOXEL_SUMMIT_CREST_FIXTURES"));
   Lifecycle();
+  CastleWaterFixtures(getenv("AR_VOXEL_CASTLE_WATER_FIXTURES"));
   TrunkGuardFixtures();
   JungleWaterColorFixtures(getenv("AR_VOXEL_JUNGLE_WATER_FIXTURES"));
   JungleTerminalFixtures(getenv("AR_VOXEL_JUNGLE_TERMINAL_FIXTURES"));
@@ -1919,6 +1937,7 @@ int main(int argc,char **argv) {
   if(getenv("AR_SAND_TRANSITION_SCENES")) SandTransitionFixtures();
   if(getenv("AR_DESERT_PILLAR_SCENES")) DesertPillarFixtures();
   DesertAuditJoinFixtures(getenv("AR_VOXEL_DESERT_AUDIT_FIXTURES"));
+  SurfaceMirroredTopFixtures(getenv("AR_VOXEL_MIRROR_FIXTURES"));
   SnowCapPhaseFixtures(getenv("AR_VOXEL_SNOW_CAP_PHASE_FIXTURES"));
   SnowClosingRiserFixtures(getenv("AR_VOXEL_SNOW_CLOSING_RISER_FIXTURES"));
   SnowTrunkFixtures(getenv("AR_VOXEL_SNOW_TRUNK_FIXTURES"));
@@ -1928,6 +1947,8 @@ int main(int argc,char **argv) {
   JungleCourseFixtures(getenv("AR_VOXEL_JUNGLE_COURSE_FIXTURES"));
   BambooBackingFixtures(getenv("AR_VOXEL_BAMBOO_FIXTURES"));
   MountainSlopeFixtures(getenv("AR_VOXEL_MOUNTAIN_SLOPE_FIXTURES"));
+  MountainCliffInfillFixtures(getenv("AR_VOXEL_MOUNTAIN_INFILL_FIXTURES"));
+  WaterfallFoamFixtures(getenv("AR_VOXEL_WATERFALL_FOAM_FIXTURES"));
   RegionalSpikeFixtures(getenv("AR_VOXEL_REGIONAL_SPIKE_FIXTURES"));
   TrunkSideFixtures(getenv("AR_TRUNK_SIDE_FIXTURES"));
   TrunkDetailBackingFixtures(getenv("AR_TRUNK_SIDE_FIXTURES"));
@@ -1935,6 +1956,7 @@ int main(int argc,char **argv) {
   AitosCliffFootFixtures(getenv("AR_VOXEL_AITOS_CLIFF_FOOT_FIXTURES"));
   JungleExitBackingFixtures(getenv("AR_VOXEL_JUNGLE_EXIT_BACKING_FIXTURES"));
   TombCapFixtures(getenv("AR_VOXEL_TOMB_CAP_FIXTURES"));
+  TombCornerFixtures(getenv("AR_VOXEL_TOMB_CORNER_FIXTURES"));
   CastleTerminalMatteFixtures(getenv("AR_VOXEL_CASTLE_TERMINAL_MATTE_FIXTURES"));
   CastlePurpleBandFixtures(getenv("AR_VOXEL_CASTLE_PURPLE_BAND_FIXTURES"));
   CastleBackingFixtures(getenv("AR_VOXEL_CASTLE_BACKING_FIXTURES"));
@@ -1959,7 +1981,8 @@ int main(int argc,char **argv) {
   const char *forest_directory=argc>2?argv[2]:getenv("AR_VOXEL_FOREST_FIXTURES");
   const unsigned forest=forest_directory?ForestFixtures(forest_directory):0;
   const unsigned caves=argc>2?CaveFixtures(argv[2]):0;
-  const unsigned temples=argc>2?TempleFixtures(argv[2]):0;
+  const char *temple_directory=argc>2?argv[2]:getenv("AR_VOXEL_TEMPLE_FIXTURES");
+  const unsigned temples=temple_directory?TempleFixtures(temple_directory):0;
   const char *temple_audit_directory=argc>2?argv[2]:getenv("AR_VOXEL_TEMPLE_AUDIT_FIXTURES");
   if(temple_audit_directory)TempleAuditFixtures(temple_audit_directory);
   const unsigned marsh=argc>3?MarshFixtures(argv[3]):0;
@@ -1967,9 +1990,12 @@ int main(int argc,char **argv) {
   const char *desert_directory=argc>4?argv[4]:getenv("AR_VOXEL_DESERT_FIXTURES");
   const unsigned desert=desert_directory?DesertFixtures(desert_directory):0;
   const unsigned tomb=argc>5?TombFixtures(argv[5]):0;
-  const unsigned mountain=argc>6?MountainFixtures(argv[6]):0;
-  const unsigned cavern=argc>7?CavernFixtures(argv[7]):0;
-  const unsigned jungle=argc>8?JungleFixtures(argv[8]):0;
+  const char *mountain_directory=argc>6?argv[6]:getenv("AR_VOXEL_MOUNTAIN_FIXTURES");
+  const unsigned mountain=mountain_directory?MountainFixtures(mountain_directory):0;
+  const char *cavern_directory=argc>7?argv[7]:getenv("AR_VOXEL_CAVERN_FIXTURES");
+  const unsigned cavern=cavern_directory?CavernFixtures(cavern_directory):0;
+  const char *jungle_directory=argc>8?argv[8]:getenv("AR_VOXEL_JUNGLE_FIXTURES");
+  const unsigned jungle=jungle_directory?JungleFixtures(jungle_directory):0;
   const unsigned marahna_temple=argc>9?MarahnaTempleFixtures(argv[9]):0;
   const char *northwall_directory=getenv("AR_VOXEL_NORTHWALL_FIXTURES");
   const unsigned northwall=northwall_directory?NorthwallFixtures(northwall_directory):0;

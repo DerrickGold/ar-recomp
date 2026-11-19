@@ -1582,7 +1582,7 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
   source->have_video_profile = true;
   bool changed = layout_changed;
   const bool jungle_water_color=ActionVoxel_ProfileForRoom(group,room)==kActionVoxelProfile_MarahnaJungle;
-  const bool water_source=ActionVoxel_BackgroundWater(ActionVoxel_ProfileForRoom(group,room)) || jungle_water_color;
+  const bool water_source=ActionVoxel_BackgroundWater(ActionVoxel_ProfileForRoom(group,room),room) || jungle_water_color;
   if (water_source) {
     /* Pool topology and the Jungle's reviewed solid-water color donor follow
      * live BG2 source ownership. Native animation remains captured artwork;
@@ -1620,8 +1620,8 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
       source->video_profile[4] = (source->video_profile[4]&~2u)|high;
     }
   }
-  /* BG2 animation must not rebuild the castle. Capture only character slots
-   * referenced by BG1 definitions or authored terrain, with bounds checks. */
+  /* Unrelated BG2 animation must not rebuild the castle. Capture only source
+   * slots referenced by terrain, reviewed water or authored art. */
   uint64_t key = UINT64_C(14695981039346656037);
   const unsigned terrain_layers = water_source ? 2 : 1;
   if (terrain) for (unsigned layer = 0; layer < terrain_layers; ++layer) {
@@ -1682,11 +1682,10 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
     used[at/32] = true;
   for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; i += 2)
     used[bg->metatiles[i + 1]] = true;
-  /* The Jungle color donor lives in BG2's static CHR bank, outside the native
-   * animated wave window. Track its actual source addresses, including legal
-   * renumbering, so changing/removing that art invalidates the compiled tone.
-   * Other profiles keep their previous source dependency set. */
-  if (jungle_water_color && ActionRoomScene_HasBackground(source,2))
+  /* Pool geometry and the Jungle color donor depend on actual BG2 artwork.
+   * Track those slots, including edited/renumbered donors. The castle moat's
+   * source is static, outside the cached chain-animation window. */
+  if (water_source && ActionRoomScene_HasBackground(source,2))
     for (unsigned i=0;i<kActionRoomSceneMetatileBytes;i+=2) {
       const uint8_t *d=source->bg[1].metatiles+i;
       const unsigned word=ActionBg_ComposeTilemapWord((d[0]<<8)|d[1],
@@ -1694,7 +1693,7 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
       const unsigned ch=word&1023;
       if (ch<sizeof(used)/sizeof(*used)) used[ch]=true;
     }
-  if (terrain) for(unsigned layer=0;layer<(jungle_water_color?2u:1u);++layer)
+  if (terrain) for(unsigned layer=0;layer<(water_source?2u:1u);++layer)
     for (size_t i = 0; i < terrain->stamp_layers[layer].count; ++i)
     for (unsigned q = 0; q < 4; ++q) {
       const unsigned character = terrain->stamp_layers[layer].cells[i].words[q] & 1023;

@@ -325,15 +325,30 @@ bool ActionEffectSource_Particle(ActionEffectSourceBatch *b, const ActionEffectI
   return true;
 }
 
+bool ActionEffectSource_VolumeRange(ActionEffectSourceBatch *b,unsigned first,float depth) {
+  if(!b || first>b->count || !isfinite(depth) || depth<0 || depth>1)return false;
+  for(unsigned i=first;i<b->count;++i) {
+    const ActionEffectSourcePrimitive *p=&b->primitives[i];
+    if(p->meta[1]!=kActionEffectProjectionPlane_Bg1 ||
+        (p->meta[0]!=kActionSourceParticle && p->meta[0]!=kActionSourceTriangle &&
+         p->meta[0]!=kActionSourceLitTriangle && p->meta[0]!=kActionSourceRainbowTriangle))return false;
+  }
+  for(unsigned i=first;i<b->count;++i) {
+    ActionEffectSourcePrimitive *p=&b->primitives[i];
+    p->origin[2]=(float)((unsigned)p->origin[2]|64u);
+    if(p->meta[0]==kActionSourceRainbowTriangle)p->extra[1]=depth;
+    else p->points[5][3]=depth;
+  }
+  return true;
+}
+
 bool ActionEffectSource_VolumeParticle(ActionEffectSourceBatch *b, const ActionEffectInstance *e,
-    float x, float y, float width, float height, float depth, ArRenderColorF color) {
+    float x, float y, float previous_x, float previous_y,
+    float width, float height, float depth, ArRenderColorF color) {
   if (!isfinite(depth) || depth < 0 || depth > 1 || e->projection_plane != kActionEffectProjectionPlane_Bg1)
     return false;
-  if (!ActionEffectSource_Particle(b,e,x,y,x,y,width,height,color)) return false;
-  ActionEffectSourcePrimitive *p = &b->primitives[b->count-1];
-  p->origin[2] = (float)((unsigned)p->origin[2] | 64u);
-  p->points[5][3] = depth;
-  return true;
+  if (!ActionEffectSource_Particle(b,e,x,y,previous_x,previous_y,width,height,color)) return false;
+  return ActionEffectSource_VolumeRange(b,b->count-1,depth);
 }
 
 bool ActionEffectSource_RainbowTriangle(ActionEffectSourceBatch *b,const ActionEffectInstance *e,

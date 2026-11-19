@@ -42,6 +42,7 @@ int RoomPreview_Set3DMode(int mode);
 int RoomPreview_SetInspection(int mode);
 const char *RoomPreview_SceneryError(void);
 int RoomPreview_SetView(float distance, float yaw, float pitch, int aspect_mode, int dynamic_camera);
+int RoomPreview_SetCameraPan(float x,float y);
 /* Five floats per opening in DioramaPreview_Input(): centre, width, power,
  * edge offset and reach, all relative to the authored region. */
 unsigned RoomPreview_CloudOpenings(uint32_t seed, unsigned count);
@@ -50,6 +51,8 @@ unsigned RoomPreview_Measure(int x, int y, uint32_t frame, int extra, int vertic
 int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     int width, int height, float distance, float yaw, float pitch, int skybox, int pixel_aspect);
 /* Native baseline for release comparisons. Output aspect determines horizontal
- * coverage; no Diorama projection, skybox, authored tile edits or effects. */
+ * coverage; no Diorama projection, skybox, authored tile edits or effects.
+ * SetCameraPan translates the presentation in native pixels. On success the
+ * input buffer contains the same 16-float camera/viewport layout as Measure. */
 int RoomPreview_RenderFlat(int x, int y, uint32_t frame, int width, int height, int pixel_aspect);
 #endif

@@ -100,7 +100,8 @@
           2,
           148
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "01ae21e9385a2171",
@@ -1282,7 +1283,8 @@
           2,
           147
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "20286ef280d9b03d",
@@ -3882,7 +3884,8 @@
           2,
           183
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "5eebab47915cca8f",
@@ -3998,7 +4001,8 @@
           2,
           20
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "5fc02d28d1a92624",
@@ -4523,10 +4527,10 @@
     {
       "key": "6d91104cce868b61",
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        7,
+        7,
+        7,
+        7
       ],
       "flags": 32776,
       "role": "rear_masonry",
@@ -4576,7 +4580,8 @@
           2,
           42
         ]
-      ]
+      ],
+      "review": "The opened grille retains the same low-priority rear stone jamb as the closed variant. Opening must not create a forward post or a second masonry copy."
     },
     {
       "key": "6d981a5ef24e4cad",
@@ -5652,10 +5657,10 @@
     {
       "key": "9621c69c6661e812",
       "kinds": [
-        4,
-        4,
-        4,
-        4
+        7,
+        7,
+        7,
+        7
       ],
       "flags": 32776,
       "role": "rear_masonry",
@@ -5705,7 +5710,8 @@
           2,
           50
         ]
-      ]
+      ],
+      "review": "The opened grille retains the same low-priority rear stone jamb as the closed variant. Opening must not create a forward post or a second masonry copy."
     },
     {
       "key": "96a8e7601178a6df",
@@ -6107,7 +6113,8 @@
           2,
           146
         ]
-      ]
+      ],
+      "top_surface": "own8_mirror_depth"
     },
     {
       "key": "a91888b78851f6d4",
@@ -6229,9 +6236,9 @@
       "key": "ab1bd04bc0071da7",
       "kinds": [
         7,
-        4,
         7,
-        4
+        7,
+        7
       ],
       "flags": 8,
       "role": "closed_grille",
@@ -6287,15 +6294,16 @@
         0,
         21504,
         0
-      ]
+      ],
+      "review": "Keep the noncolliding low-priority stone jamb beside the grille on the rear wall. Only native grille ink belongs to the independent gate mesh; do not duplicate the stone as forward relief."
     },
     {
       "key": "addc40fe24e8c5a5",
       "kinds": [
         7,
-        4,
         7,
-        4
+        7,
+        7
       ],
       "flags": 8,
       "role": "closed_grille",
@@ -6351,7 +6359,8 @@
         0,
         21504,
         0
-      ]
+      ],
+      "review": "Keep the noncolliding low-priority stone jamb beside the grille on the rear wall. Only native grille ink belongs to the independent gate mesh; do not duplicate the stone as forward relief."
     },
     {
       "key": "b0097d9a36833fc4",

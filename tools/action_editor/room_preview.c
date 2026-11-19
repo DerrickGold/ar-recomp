@@ -103,6 +103,7 @@ static uint32_t s_storage[7][640 * 352];
 static bool s_extended_terrain;
 static bool s_reuse_terrain_across_scroll = true;
 static bool s_free_camera_fit;
+static ArRenderPointF s_camera_pan;
 static bool s_observe_voxel_faces = true;
 static struct {
   DioramaVoxelTerrainCapture capture;
@@ -256,6 +257,10 @@ int RoomPreview_SetView(float distance, float yaw, float pitch, int aspect_mode,
   s_dynamic_camera = dynamic_camera != 0;
   return 1;
 }
+int RoomPreview_SetCameraPan(float x,float y) {
+  if(!isfinite(x)||!isfinite(y)||fabsf(x)>1024||fabsf(y)>1024)return 0;
+  s_camera_pan=(ArRenderPointF){x,y};return 1;
+}
 static DioramaView PreviewView(int width, int height, int pixels,
     float zoom, float yaw, float pitch) {
   ActRaiserAutoCanvas canvas = {0};
@@ -263,7 +268,7 @@ static DioramaView PreviewView(int width, int height, int pixels,
   else if (s_aspect_mode != 0) canvas.extra_columns = DisplayGeometry_CalculateHorizontal(
       224, s_aspect_mode == 3 ? 16 : width, s_aspect_mode == 3 ? 9 : height,
       pixels == kPixelAspect_Crt43, false).display_extra;
-  DioramaView view = {.camera = s_baseline, .distance_scale = zoom,
+  DioramaView view = {.camera = s_baseline, .camera_pan=s_camera_pan, .distance_scale = zoom,
     .camera_framing_weight = s_dynamic_camera ? 1 : 0,
     .fit_free_camera = s_free_camera_fit && !s_dynamic_camera,
     .pixel_aspect = pixels, .ignore_aspect_ratio = s_aspect_mode == 3,
@@ -995,7 +1000,8 @@ int RoomPreview_RenderFlat(int x, int y, uint32_t frame, int width, int height, 
   s_uploads = 0; s_effect_vertices = 0;
   const int extra = DisplayGeometry_CalculateHorizontal(224, width, height,
       pixels == kPixelAspect_Crt43, false).render_extra;
-  if (!EditorRoomScene_RenderFlat(s_room, x, y, frame, extra, NULL)) return 0;
+  EditorRoomCamera camera;
+  if (!EditorRoomScene_RenderFlat(s_room, x, y, frame, extra, &camera)) return 0;
   const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(s_room);
   ArRenderDevice *device = DioramaPreview_Device();
   if (!ArRenderTexture_IsValid(s_flat)) {
@@ -1011,8 +1017,17 @@ int RoomPreview_RenderFlat(int x, int y, uint32_t frame, int width, int height, 
   const ArRenderRectI viewport = ArPresentationLayout_ResolveViewport(
       width, height, false, pixels == kPixelAspect_Crt43, surface->width, 224);
   const ArRenderRectF source = {64, 0, surface->width, 224};
-  const ArRenderRectF destination = {viewport.x, viewport.y, viewport.w, viewport.h};
-  return ArRenderDevice_DrawTexture(device, s_flat, &source, &destination);
+  const ArRenderRectF destination = {
+    viewport.x + (s_camera_pan.x + camera.x - x)*viewport.w/surface->width,
+    viewport.y + (s_camera_pan.y + camera.y - y)*viewport.h/224,
+    viewport.w, viewport.h};
+  if (!ArRenderDevice_DrawTexture(device, s_flat, &source, &destination)) return 0;
+  /* Same metadata layout as Measure; report the actual flat capture rather
+   * than substituting the independently framed 3D camera's scroll interval. */
+  const float info[] = {camera.x, camera.y, camera.minimum_x, camera.maximum_x, camera.maximum_y,
+    0,0,0,0,0,surface->width,224,viewport.x,viewport.y,viewport.w,viewport.h};
+  memcpy(DioramaPreview_Input(), info, sizeof(info));
+  return 1;
 }
 
 int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,

@@ -208,3 +208,22 @@ static const VoxelMaterialProfile kMarahnaTempleMaterials[] = {
   {UINT64_C(0xfd71a54bc2934409),0x01e0,{1,1,1,1},4,{0,0,0,0},{0,0,0,0},{0,0,0,0}},
   {UINT64_C(0xfe1ec7eeee135d6d),0x01c0,{4,4,4,4},32776,{8192,8192,8192,8192},{0,0,0,0},{0,0,0,0}},
 };
+static const VoxelTopSurfaceProfile kMarahnaTempleTopSurfaces[] = {
+  {UINT64_C(0x192fa5f7bfd4f195),0x00c0,1024,0},
+  {UINT64_C(0x3f6997d9901efc56),0x00f0,1024,0},
+  {UINT64_C(0x443bd3947f34ff43),0x01f0,1024,0},
+  {UINT64_C(0x4b1d3d534398e457),0x00f0,1024,0},
+  {UINT64_C(0x4e4ff827adb6b75b),0x01f0,1024,0},
+  {UINT64_C(0x53d230a09e11937b),0x01f0,1024,0},
+  {UINT64_C(0x59d6b1ada6435c5f),0x00f0,1024,0},
+  {UINT64_C(0x63f904868040b80f),0x01f0,1024,0},
+  {UINT64_C(0x73ee3e84156de24d),0x00f0,1024,0},
+  {UINT64_C(0x75a221075a78aca9),0x01f0,1024,0},
+  {UINT64_C(0x82fc5fbbbd869ee7),0x01f0,1024,0},
+  {UINT64_C(0x9c6de6ddbebb3311),0x00f0,1024,0},
+  {UINT64_C(0xae988335b423b7ed),0x00f0,1024,0},
+  {UINT64_C(0xbdd0e63b56b3f949),0x00c0,1024,0},
+  {UINT64_C(0xbed1455aaad86af1),0x01e0,1024,0},
+  {UINT64_C(0xef0b9ebebd258322),0x00f0,1024,0},
+  {UINT64_C(0xfd71a54bc2934409),0x01e0,1024,0},
+};

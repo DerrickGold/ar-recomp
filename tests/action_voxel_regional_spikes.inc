@@ -112,7 +112,7 @@ static unsigned RegionalSpikeCells(const RegionalSpikeFixture *spec,
         const bool cut=(cutouts[py]&(1u<<(15-px)))!=0;
         const unsigned expected=p && !cut ?
             ((spec->group==1 && (matte[py]&(1u<<(15-px)))) ||
-             (spec->group==6 && spec->kind==kVoxelFoliage && p==1)?kVoxelRearOnly:spec->kind) : 0;
+             ((spec->group==2 || spec->group==6) && spec->kind==kVoxelFoliage && p==1)?kVoxelRearOnly:spec->kind) : 0;
         if((m&kVoxelKindMask)!=expected)
           fprintf(stderr,"regional spike %02u/%02u terrain%u cell%d,%d pixel%u,%u: role%u expected%u nativecollision%u\n",
               spec->group,spec->room,region,tx/2,ty/2,px,py,m&kVoxelKindMask,expected,RegionalSpikeCollision(s,id));
@@ -123,7 +123,7 @@ static unsigned RegionalSpikeCells(const RegionalSpikeFixture *spec,
         assert(!!(m&kVoxelColliding)==(p && !cut && region==2 && spec->eu_collision));
         assert(!(m&kVoxelTexturedTop));
         assert(front[at]==(expected && expected!=kVoxelRearOnly?native[at]:0));
-        if(spec->group==1)assert(rear[at]==(expected==kVoxelRearOnly?native[at]:UINT32_C(0xff000000)));
+        if(spec->group==1 || spec->group==2)assert(rear[at]==(expected==kVoxelRearOnly?native[at]:UINT32_C(0xff000000)));
         else {
           assert(rear[at]==(expected==kVoxelFoliage?0:native[at]));
           assert(!(front[at] && rear[at]));
@@ -238,6 +238,10 @@ static void RegionalSpikeFixtures(const char *directory) {
     {1,2,0x18,kVoxelFoliage,kVoxelSemantic_Hazard,{20,20,20},0},
     {1,2,0x19,kVoxelFoliage,kVoxelSemantic_Hazard,{9,9,9},0},
     {1,2,0x20,kVoxelFoliage,kVoxelSemantic_Hazard,{20,20,20},15},
+    {2,3,0x45,kVoxelFoliage,kVoxelSemantic_Hazard,{9,9,9},15},
+    {2,3,0x46,kVoxelFoliage,kVoxelSemantic_Hazard,{2,2,2},0},
+    {2,3,0x4d,kVoxelFoliage,kVoxelSemantic_Hazard,{9,9,9},0},
+    {2,3,0x4e,kVoxelFoliage,kVoxelSemantic_Hazard,{2,2,2},15},
     {6,2,0x3f,kVoxelFoliage,kVoxelSemantic_Hazard,{17,44,17},15},
     {6,3,0x3f,kVoxelFoliage,kVoxelSemantic_Hazard,{14,14,14},15}
   };
@@ -279,5 +283,5 @@ static void RegionalSpikeFixtures(const char *directory) {
     }
     ActionVoxel_Release(us);ActionVoxel_Release(base);ActionVoxel_Release(other);
   }
-  assert(european_cells==20+17+14);
+  assert(european_cells==20+9+2+17+14);
 }

@@ -491,18 +491,8 @@ static bool TempleDustGrain(ActionEffectGeometryWriter *writer, const ActionEffe
   const bool voxel = context && (context->diorama_projection ?
       context->diorama_projection->voxel_scenery : context->staged_voxel_scenery);
   if (voxel) {
-    if (writer->source) {
-      const bool ok=ActionEffectSource_VolumeParticle(writer->source,effect,
-          x-effect->world_x,y-effect->world_y,radius,radius*aspect,depth,color);
-      writer->vertex_count=(int)writer->source->count;
-      return ok;
-    }
-    ActionEffectProjectionContext volume;
-    DioramaProjection projection;
-    if (ActionEffectProjection_VolumeContext(context,depth,&volume,&projection))
-      return AppendSceneParticle(writer,effect,x-effect->world_x,y-effect->world_y,
-          x-effect->world_x,y-effect->world_y,radius,radius*aspect,color,project_point,&volume);
-    return true;
+    return AppendSceneVolumeParticle(writer,effect,x-effect->world_x,y-effect->world_y,
+        x-effect->world_x,y-effect->world_y,radius,radius*aspect,depth,color,project_point,userdata);
   }
   const ArRenderPointF points[]={{x-radius,y},{x,y-radius*aspect},{x+radius,y},{x,y+radius*aspect}};
   return CaveQuad(writer,effect,points,color,project_point,userdata);

@@ -1407,7 +1407,7 @@ static void CheckStagedSourceParity(ArRenderDevice *device, const DioramaProject
   PresentActionEffects_InvalidateSourcePackets();
   const uint64_t reference = DrawStagingFixture(device, projection);
   ++frame.timestamp_ns;
-  PresentActionEffects_PrepareSourcePackets(&frame);
+  PresentActionEffects_PrepareSourcePackets(&frame,&frame);
   assert(DrawStagingFixture(device, projection) == reference);
   frame.diorama_active = active;
   frame.action_effect_lighting = lighting;
@@ -1456,7 +1456,7 @@ static void SourcePacketCaptureLifetime(void) {
   frame.diorama_active = true;
   e->world_x += 17;
   ++frame.timestamp_ns;
-  PresentActionEffects_PrepareSourcePackets(&frame);
+  PresentActionEffects_PrepareSourcePackets(&frame,&frame);
   e->world_x += 31; /* Detect an accidental lazy rebuild during draw. */
   PresentActionEffects_DrawWithSource(&device, &frame, viewport, &next_band, InspectSourcePacket);
   assert(source_submissions == 5 && source_hash == edited_hash);
@@ -1607,7 +1607,7 @@ static void GroundCoverSourceOwnership(void) {
   DRAW_COVER_PACKET();assert(source_revision==one_revision&&source_hash==one_hash);
   /* Eager staging retains ownership without a camera. Mutating an unclaimed
    * bank afterwards detects an unwanted second build on the draw deadline. */
-  ++frame.timestamp_ns;PresentActionEffects_PrepareSourcePackets(&frame);
+  ++frame.timestamp_ns;PresentActionEffects_PrepareSourcePackets(&frame,&frame);
   frame.action_scene_effects.authored[0].world_x+=17;
   DRAW_COVER_PACKET();assert(source_count*2==both&&source_hash==one_hash);
   projection.voxel_ground_cover_claims[0]=1;
@@ -1654,7 +1654,7 @@ static void GroundCoverLipSourceOwnership(void) {
   DRAW_LIP_PACKET();assert(source_count==all/3&&source_revision==one_revision&&source_hash==one_hash);
   /* Both claim words must survive camera-free eager staging. A later source
    * mutation detects an unwanted rebuild at the presentation deadline. */
-  ++frame.timestamp_ns;PresentActionEffects_PrepareSourcePackets(&frame);
+  ++frame.timestamp_ns;PresentActionEffects_PrepareSourcePackets(&frame,&frame);
   frame.action_scene_effects.authored[1].world_x+=17;
   DRAW_LIP_PACKET();assert(source_count==all/3&&source_hash==one_hash);
   const uint64_t staged_revision=source_revision;

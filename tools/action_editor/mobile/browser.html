@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#121720">
+<title>ActRaiser · Level Audit</title>
+<style>
+:root{color-scheme:dark;font:15px system-ui,sans-serif;background:#10141b;color:#eff3fa;--line:#354153;--accent:#a8d1ff}
+*{box-sizing:border-box}html,body{position:fixed;inset:0;margin:0;overflow:hidden;overscroll-behavior:none}
+button,input,select,textarea{font:inherit}button,select{min-height:44px;border:1px solid var(--line);border-radius:10px;background:#222c3a;color:inherit;padding:8px 12px}
+button{touch-action:manipulation}button:disabled{opacity:.45}button[aria-pressed=true],button.primary{background:#b0d2fa;color:#102239;border-color:transparent}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #b0d2fa;outline-offset:2px}
+#app{position:fixed;inset:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;height:var(--app-height,100dvh);padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+header,footer{background:#171e28;padding:8px;z-index:2}header{border-bottom:1px solid var(--line)}footer{border-top:1px solid var(--line)}
+.row{display:flex;align-items:center;gap:6px}.row>*{min-width:0}.grow{flex:1}.title{font-size:13px;font-weight:650;color:#c6d3e5}.brand{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 4px 6px}
+#room{flex:1;width:100%}#region{max-width:105px}#status{font-size:12px;color:#b5c3d5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:65vw}#status.error{color:#ffaca6}
+main{position:relative;min-height:0;overflow:hidden;background:#090d14;isolation:isolate}#view{display:block;width:100%;height:100%;object-fit:contain;touch-action:none;user-select:none;-webkit-user-select:none}
+#location{position:absolute;left:10px;top:10px;pointer-events:none;background:#111a29cf;padding:6px 10px;border-radius:8px;font-size:12px;max-width:calc(100% - 20px)}
+#hint{position:absolute;bottom:10px;left:10px;right:10px;text-align:center;pointer-events:none;font-size:12px;color:#d6e0ee;text-shadow:0 1px 4px #000}
+footer .row{justify-content:space-between}footer button{flex:1;padding:8px 5px}#reportButton{flex:1.3}
+dialog{position:fixed;left:calc(var(--visual-left,0px) + var(--visual-width,100vw)/2);top:calc(var(--visual-top,0px) + var(--app-height,100dvh)/2);transform:translate(-50%,-50%);margin:0;width:min(calc(var(--visual-width,100vw) - 20px),560px);max-height:calc(var(--app-height,100dvh) - 20px);padding:0;border:1px solid #46556c;border-radius:16px;background:#192230;color:inherit;overflow:auto;overscroll-behavior:contain}
+dialog::backdrop{background:#050a12b8}dialog header{position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;gap:8px}dialog h2{font-size:18px;margin:8px}
+.content{padding:14px;display:grid;gap:14px}.field{display:grid;gap:6px}.field input[type=range]{width:100%;min-height:36px;margin:0;touch-action:pan-y}
+input[type=number],textarea{min-height:44px;padding:10px;border:1px solid #4a5a70;border-radius:8px;background:#0f1723;color:inherit;min-width:0;width:100%;font-size:16px}
+textarea{resize:vertical;min-height:100px}label{color:#d4dfef;font-size:14px}.small{font-size:12px;color:#b3c3d8;margin:0;line-height:1.5}.wrap{flex-wrap:wrap}.wrap button{flex:1}
+#reportImage{display:block;width:100%;height:auto;border-radius:8px;background:#080c12}#reportText{font:12px ui-monospace,monospace;min-height:130px}#reportStatus{white-space:normal}
+#reportDialog[open]{display:flex;flex-direction:column;overflow:hidden;top:calc(var(--visual-top,0px) + 10px);transform:translateX(-50%)}#reportDialog header{flex-shrink:0}#reportDialog .content{min-height:0;overflow:auto;overscroll-behavior:contain;scroll-padding:12px}
+#notes{height:110px;min-height:64px;max-height:max(64px,calc(var(--app-height,100dvh) - 112px))}.editing-report #reportImage{max-height:80px;object-fit:contain}
+.check{display:flex;align-items:center;gap:10px;min-height:44px}.check input{width:22px;height:22px}#buildLabel{overflow-wrap:anywhere}
+@media(max-height:480px){.brand{display:none}header,footer{padding:5px}footer button,header button,header select{min-height:42px}#hint{bottom:5px}}
+</style></head><body>
+<div id="app">
+<header aria-label="Level browser toolbar">
+ <div class="brand"><span class="title">ACTRAISER · LEVEL AUDIT</span><span id="status" role="status">Loading renderer…</span></div>
+ <div class="row"><button id="previous" aria-label="Previous room">‹</button><select id="room" aria-label="Room"></select><button id="next" aria-label="Next room">›</button><select id="region" aria-label="Terrain region"></select></div>
+</header>
+<main id="stage"><canvas id="view" aria-label="3D level. One finger pans; two fingers orbit and pinch to zoom. Double-tap resets angle and zoom." tabindex="0"></canvas><div id="location"></div><div id="hint">1 finger: pan · 2 fingers: orbit / pinch · Double-tap: reset</div></main>
+<footer aria-label="Audit controls"><div class="row">
+ <button id="reset">Reset view</button><button id="navigate">Location</button><button id="options">View</button><button id="reportButton" class="primary" disabled>Report</button>
+</div></footer>
+</div>
+<dialog id="navigation"><header><h2>Explore the room</h2><button data-close="navigation" aria-label="Close location controls">Done</button></header><div class="content">
+ <label class="field">Horizontal position <input id="positionX" type="range" min="0" max="0" step="1"><input id="numberX" type="number" min="0" step="1" aria-label="Camera X"></label>
+ <label class="field">Vertical position <input id="positionY" type="range" min="0" max="0" step="1"><input id="numberY" type="number" min="0" step="1" aria-label="Camera Y"></label>
+ <div class="row wrap"><button data-jump="start">Start</button><button data-jump="middle">Middle</button><button data-jump="end">End</button></div>
+ <p class="small">Pan beyond the usual scroll stops to center and zoom into any level edge. Positions use native map pixels; capture coordinates and inspection offsets are recorded in reports. Terrain and environmental effects are shown; live enemies are not simulated.</p>
+</div></dialog>
+<dialog id="settings"><header><h2>View &amp; camera</h2><button data-close="settings" aria-label="Close view controls">Done</button></header><div class="content">
+ <div class="row wrap"><button data-angle="front">Front</button><button data-angle="left">Left</button><button data-angle="right">Right</button><button data-angle="above">Above</button><button data-angle="below">Below</button></div>
+ <label class="field">Zoom distance <input id="zoom" type="range" min="0.5" max="2.5" step="0.01" value="1"></label>
+ <label class="field">Horizontal angle <input id="yaw" type="range" min="-0.7" max="0.7" step="0.01" value="0"></label>
+ <label class="field">Vertical angle <input id="pitch" type="range" min="-0.7" max="0.7" step="0.01" value="0.15"></label>
+ <div class="row"><button id="resetCamera" class="grow">Reset camera</button><button id="original" aria-pressed="false" class="grow">Original 2D</button></div>
+ <label class="check"><input id="effects" type="checkbox" checked>Environmental effects</label>
+ <label class="check"><input id="animate" type="checkbox">Animate (uses more battery)</label>
+ <label class="field">Animation frame <input id="frame" type="number" min="0" max="4294967295" step="1" value="320"></label>
+ <p class="small">One finger pans. Two fingers orbit and pinch to zoom. Double-tap or Reset view restores the angle and zoom without moving your level position. In Original 2D, dragging pans with either one or two fingers. With a mouse, drag to orbit; Shift-drag or middle/right-drag pans, and the wheel zooms.</p>
+ <p class="small">Report → tap an issue to pin it, or capture the whole view. Notes and camera metadata travel with your export.</p>
+ <p class="small" id="buildLabel"></p><p id="settingsStatus" class="small" role="status"></p>
+</div></dialog>
+<dialog id="reportDialog"><header><h2>Report an issue</h2><button data-close="reportDialog" aria-label="Close report">Done</button></header><div class="content">
+ <img id="reportImage" alt="Captured level view with audit coordinates and optional issue marker">
+ <label class="field">Issue type <select id="category"><option>Geometry / depth</option><option>Missing backing / gap</option><option>Face artwork / seam</option><option>Priority / overlap</option><option>Effects / lighting</option><option>Other</option></select></label>
+ <label class="field">What looks wrong? <textarea id="notes" placeholder="Describe what you see and what you expected."></textarea></label>
+ <div class="row wrap"><button id="share" class="primary" disabled>Share</button><button id="saveImage" disabled>Save image</button><button id="saveReport" disabled>Save report</button></div>
+ <p id="reportStatus" class="small" role="status"></p>
+ <details><summary>Report text / copy fallback</summary><textarea id="reportText" readonly aria-label="Copyable audit report"></textarea><button id="copyReport">Copy report</button></details>
+ <p class="small">Nothing is sent automatically. Share the image and report back in this chat. If file sharing is unavailable, save the image and copy the report text.</p>
+</div></dialog>
+<!-- BUNDLE -->
+<!-- SCRIPTS -->
+</body></html>

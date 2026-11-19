@@ -22,7 +22,8 @@ static void AuditMaterialJson(const ActionRoomScene *s,const CastleMaterial *m) 
       m->kind[0],m->kind[1],m->kind[2],m->kind[3],m->collision,m->flags,m->top_surface,m->top_family,
       m->native_surface_family,m->native_surface_faces,m->native_surface_flip,m->contour_surface);
   for(unsigned i=0;i<16;++i)printf("%s%u",i?",":"",m->rear_rows[i]);
-  printf("],\"cutouts\":[");for(unsigned i=0;i<16;++i)printf("%s%u",i?",":"",m->cutouts[i]);
+  printf("],\"column_recess_colors\":[");for(unsigned i=0;i<4;++i)printf("%s%u",i?",":"",m->column_recess_colors[i]);
+  printf("],\"column_shadow\":%s,\"cutouts\":[",m->column_shadow?"true":"false");for(unsigned i=0;i<16;++i)printf("%s%u",i?",":"",m->cutouts[i]);
   printf("],\"pixels_hex\":\"");
   uint16_t colors[256];
   for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x) {
@@ -138,8 +139,8 @@ static void AuditSpecialized(const ActionRoomScene *s,const ActionVoxelGeometry 
   printf("],\"column_curves\":[");for(unsigned i=0;i<g->column_curve_count;++i)printf("%s[%d,%d]",i?",":"",g->column_curves[i].top_y,g->column_curves[i].base_y);printf("]");
   printf(",\"column_contacts\":[");for(unsigned i=0;i<g->column_curve_count;++i) {
     const VoxelTrunkCurve *curve=g->column_curves+i;
-    printf("%s{\"owner\":%u,\"linear\":%s,\"contact_x\":%d,\"contact\":[",i?",":"",i+1,
-        curve->linear?"true":"false",curve->contact_x);
+    printf("%s{\"owner\":%u,\"linear\":%s,\"ease_out\":%s,\"foreground\":%s,\"contact_x\":%d,\"contact\":[",i?",":"",i+1,
+        curve->linear?"true":"false",curve->ease_out?"true":"false",curve->foreground?"true":"false",curve->contact_x);
     for(unsigned j=0;j<curve->contact_count && j<8;++j)printf("%s%d",j?",":"",curve->contact[j]);
     printf("]}");
   }printf("]");
