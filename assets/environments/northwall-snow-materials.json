@@ -449,6 +449,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -489,6 +490,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -528,7 +530,7 @@
         1,
         1
       ],
-      "flags": 4,
+      "flags": 262148,
       "role": "solid_tree_boundary",
       "origins": [
         [
@@ -624,7 +626,8 @@
         2,
         3
       ],
-      "native_slope": true
+      "native_slope": true,
+      "canopy_slope": true
     },
     {
       "key": "0fcfe07a0d497eeb",
@@ -733,7 +736,7 @@
         4,
         4
       ],
-      "flags": 32776,
+      "flags": 294920,
       "role": "rear_tree_bark",
       "origins": [
         [
@@ -773,7 +776,7 @@
         1,
         1
       ],
-      "flags": 4,
+      "flags": 262148,
       "role": "solid_tree_boundary",
       "origins": [
         [
@@ -907,6 +910,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -1120,6 +1124,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -1448,6 +1453,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -1522,6 +1528,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -1928,7 +1935,8 @@
         2,
         3
       ],
-      "native_slope": true
+      "native_slope": true,
+      "canopy_slope": true
     },
     {
       "key": "3d0a549ada2e26d6",
@@ -2113,6 +2121,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -2183,7 +2192,7 @@
         1,
         1
       ],
-      "flags": 4,
+      "flags": 262148,
       "role": "solid_tree_boundary",
       "origins": [
         [
@@ -2453,6 +2462,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -2517,7 +2527,8 @@
         2,
         3
       ],
-      "native_slope": true
+      "native_slope": true,
+      "canopy_slope": true
     },
     {
       "key": "50c04f18f29f0723",
@@ -2552,7 +2563,8 @@
         2,
         3
       ],
-      "native_slope": true
+      "native_slope": true,
+      "canopy_slope": true
     },
     {
       "key": "50c9cee4a7c7b5d7",
@@ -2562,8 +2574,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip",
+      "flags": 49160,
+      "role": "recessed_noncolliding_snow_lip",
       "origins": [
         [
           5,
@@ -2667,6 +2679,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -2945,6 +2958,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -3040,7 +3054,8 @@
         2,
         3
       ],
-      "native_slope": true
+      "native_slope": true,
+      "canopy_slope": true
     },
     {
       "key": "670d1803ad0d806e",
@@ -3418,6 +3433,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -3524,6 +3540,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -3604,6 +3621,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -3674,7 +3692,7 @@
         1,
         1
       ],
-      "flags": 4,
+      "flags": 262148,
       "role": "noncolliding_tree_boundary",
       "origins": [
         [
@@ -3829,13 +3847,13 @@
     {
       "key": "89f36184a92bfbfe",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 20484,
-      "role": "continuous_snow_bank",
+      "flags": 49164,
+      "role": "recessed_noncolliding_snow",
       "origins": [
         [
           5,
@@ -3937,6 +3955,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -4118,6 +4137,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -4263,6 +4283,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -4400,6 +4421,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -4638,7 +4660,7 @@
         1,
         1
       ],
-      "flags": 4,
+      "flags": 262148,
       "role": "solid_tree_boundary",
       "origins": [
         [
@@ -4940,13 +4962,13 @@
     {
       "key": "b4528d45dd2c5c2e",
       "kinds": [
-        1,
-        1,
-        1,
-        1
+        4,
+        4,
+        4,
+        4
       ],
-      "flags": 20484,
-      "role": "continuous_snow_bank",
+      "flags": 49164,
+      "role": "recessed_noncolliding_snow",
       "origins": [
         [
           5,
@@ -5259,6 +5281,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -5439,6 +5462,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -5478,8 +5502,8 @@
         4,
         4
       ],
-      "flags": 16392,
-      "role": "snow_bank_lip",
+      "flags": 49160,
+      "role": "recessed_noncolliding_snow_lip",
       "origins": [
         [
           5,
@@ -6245,7 +6269,7 @@
         4,
         4
       ],
-      "flags": 32776,
+      "flags": 294920,
       "role": "rear_tree_bark",
       "origins": [
         [
@@ -6369,6 +6393,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [
@@ -6440,6 +6465,7 @@
         4
       ],
       "flags": 32776,
+      "leaf_canopy": true,
       "role": "rear_snowy_canopy",
       "origins": [
         [

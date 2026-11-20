@@ -3,7 +3,9 @@
 #include "action/action_effect_members.h"
 #include "diorama_voxel_cull.h"
 
-enum { kWetSurfaceMaxQuads = 1024 };
+/* A zoomed-out Northwall room has over 1,000 reviewed ice cap strips. Reserve
+ * room for their three-part finish and sparse glints without changing draws. */
+enum { kWetSurfaceMaxQuads = 4096 };
 
 typedef struct WetSurfacePatch {
   float x, y, half_width, depth, spill, phase;

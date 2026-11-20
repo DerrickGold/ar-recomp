@@ -1,3 +1,4 @@
+#include "render/cloud_motion.h"
 #include "action/action_effect_recipes.h"
 #include "action/action_floor_support.h"
 #include "action/action_light_kinds.h"
@@ -169,6 +170,28 @@ static void TestDocumentCapacity(void) {
   assert(!ActionEffectRecipes_Parse(&table, text, sizeof(text), &line));
   assert(!memcmp(&table, &before, sizeof(table)));
 }
+/* Check the moving, feathered bank as well as its authoring rectangle: a
+ * wide rectangle alone can still leave either end or gaps between curls bare. */
+static void TempleSpikeMistCoverage(const ActionEffectInstance *e) {
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const ActionEffectFieldStyle *s=&e->field_style;
+  CloudBankMotion motion={.x=e->world_x+r->x0,.y=e->world_y+r->y0,
+    .width=r->x1-r->x0,.height=r->y1-r->y0,.drift=s->drift,.amplitude=s->amplitude,
+    .rolling=s->rolling,.intensity=e->tuning.intensity,.strands=s->strands};
+  for(unsigned tick=0;tick<e->particle_lifetime;++tick) {
+    motion.phase=tick*6.2831853f/e->particle_lifetime;
+    motion.wind_phase=sinf(motion.phase);
+    CloudBankPatch patches[24][2];assert(s->strands<=24);
+    for(unsigned i=0;i<s->strands;++i)
+      CloudMotion_Bank(&motion,i,e->particle_style.seed^(i+1)*0x9e3779b9u,patches[i]);
+    for(int x=448;x<=656;x+=8) {
+      bool covered=false;
+      for(unsigned i=0;i<s->strands;++i)
+        if(fabsf(x-patches[i][0].x)<=patches[i][0].rx*.75f)covered=true;
+      assert(covered); /* Ignore the outer quarter where each mask fades away. */
+    }
+  }
+}
 static void TestBundledDocument(const char *path) {
   FILE *file = fopen(path, "rb"); assert(file);
   char *text = malloc(kActionEffectRecipeMaxBytes + 1); assert(text);
@@ -179,6 +202,38 @@ static void TestBundledDocument(const char *path) {
   if (!ok) fprintf(stderr, "%s:%u: %s\n", path, error.line, error.message);
   assert(ok);
   printf("Bundled effects: %u records, %zu bytes, all room budgets valid.\n", table.count, size);
+  /* Full shipped temple floor-mist catalog: all rooms and regional profiles
+   * must keep their banks behind native foreground pillars. */
+  unsigned temple_banks=0;
+  const unsigned expected[]={2,2,7,7,1};
+  for(unsigned room=4;room<=8;++room)for(unsigned region=0;region<3;++region) {
+    static ActionSceneEffectFrame frame;
+    ActionEffectRecipes_Apply(&table,5,room,region,320,NULL,&frame);
+    unsigned banks=0;
+    for(unsigned i=0;i<frame.authored_count;++i) {
+      const ActionEffectInstance *e=&frame.authored[i];
+      if(e->kind!=kActionEffect_AuthoredCloud)continue;
+      ++banks;
+      assert(e->field_style.placement==1 && e->field_style.rolling>0 && !e->field_style.point_count);
+      assert(e->projection_plane==kActionEffectProjectionPlane_Bg1);
+      assert(e->render_layer==kActionEffectRenderLayer_Bg1Mist);
+      if(room==5 && e->world_x>448) {
+        /* The lower hall's native spike run spans x448..656. Keep the
+         * feathered ends beyond both banks and retain overlapping curls. */
+        const ActionEffectLocalRect *r=&e->geometry.data.rect;
+        assert(e->world_x+r->x0<448 && e->world_x+r->x1>656);
+        TempleSpikeMistCoverage(e);
+        assert(e->field_style.voxel_depth==1);
+        /* Rest the feathered base on the y432 floor, leaving the y400
+         * spike tips above the bank. */
+        assert(fabsf(e->world_y+r->y1-432)<=2);
+        assert(e->world_y+r->y0>=404);
+        assert((r->x1-r->x0)/e->field_style.strands<=64);
+      }
+    }
+    assert(banks==expected[room-4]);temple_banks+=banks;
+  }
+  assert(temple_banks==57);
   free(text);
 }
 static void TestMoteParameters(void) {
@@ -505,6 +560,15 @@ static void TestFieldsAndReceivers(void) {
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nwake=.5\ncanopy-response=.8\n"));
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nvolume=.9\nanchor=bg2-point\n"));
   assert(table.records[0].field_style.volume==.9f);
+  assert(Parse("[effects]\nversion=1\n[emitter:05:05:0:cloud-bank:1]\ntextured=1\nrolling=.8\nplacement=playfield\nvoxel-depth=1\n"));
+  assert(table.records[0].field_style.voxel_depth==1);
+  {
+    char budget[2048]="[effects]\nversion=1\n";
+    for(unsigned i=0;i<4;++i) {
+      char bank[256];snprintf(bank,sizeof(bank),"[emitter:05:05:0:cloud-bank:%x]\ntextured=1\nrolling=.8\nplacement=playfield\nvoxel-depth=1\nstrands=24\n",i);
+      strcat(budget,bank);assert(Parse(budget)==(i<3)); /* Reserve all depth slices before culling. */
+    }
+  }
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nrainbow=.6\n"));
   assert(table.records[0].field_style.rainbow==.6f);
   assert(table.records[0].field_style.sparkle==0);
@@ -571,6 +635,13 @@ static void TestFieldsAndReceivers(void) {
     "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nvolume=nan\n",
     "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nvolume=1\nvolume=.5\n",
     "[emitter:01:02:0:motes:1]\nvolume=1\n",
+    "[emitter:05:05:0:cloud-bank:1]\ntextured=1\nrolling=.8\nplacement=playfield\nvoxel-depth=nan\n",
+    "[emitter:05:05:0:cloud-bank:1]\ntextured=1\nrolling=.8\nplacement=playfield\nvoxel-depth=-.1\n",
+    "[emitter:05:05:0:cloud-bank:1]\ntextured=1\nrolling=.8\nplacement=playfield\nvoxel-depth=1.1\n",
+    "[emitter:05:05:0:cloud-bank:1]\ntextured=1\nrolling=.8\nplacement=playfield\nvoxel-depth=1\nvoxel-depth=.5\n",
+    "[emitter:05:05:0:cloud-bank:1]\ntextured=1\nrolling=.8\nplacement=playfield\nvoxel-depth=1\nanchor=bg2-point\n",
+    "[emitter:05:05:0:cloud-bank:1]\ntextured=1\nrolling=.8\nplacement=playfield\nvoxel-depth=1\nplume=1\n",
+    "[emitter:05:05:0:cloud-bank:1]\ntextured=1\nrolling=.8\nvoxel-depth=1\n",
     "[emitter:01:02:0:cloud-bank:1]\nrolling=.8\n",
     "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nwake=.8\n",
     "[emitter:01:02:0:cloud-bank:1]\ntextured=1\nrolling=.8\nwake=1\nanchor=bg2-point\n",

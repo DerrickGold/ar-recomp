@@ -90,6 +90,10 @@ static const int32_t *VoxelQuadIndices(void) {
 static unsigned VoxelTrunkCuts(const VoxelTrunkCurve *curve,float top,float bottom,
     float world_y,bool include_rows,float *cuts) {
   unsigned count=0;cuts[count++]=top;
+  if(curve->native_lip) {
+    for(float y=(floorf((top+world_y)/4)+1)*4-world_y;y<bottom;y+=4)cuts[count++]=y;
+    cuts[count++]=bottom;return count;
+  }
   if(include_rows)
     for(float y=(floorf((top+world_y)/8)+1)*8-world_y;y<bottom;y+=8)
       cuts[count++]=y;
@@ -661,10 +665,10 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     return false;
   const bool high_priority =
       pass != kVoxelEdgeNative || layer->description->plane == kDioramaPlane_Bg1Hi;
-  const float rear_offset = rear ? ActionVoxel_RearFaceDepth(layer->voxel_geometry) : 0;
+  const float rear_focus = rear ? ActionVoxel_RearFaceDepth(layer->voxel_geometry) : 0;
   const float blur =
       (rear || rear_grass) && DofBlurEnabled(device, g->options)
-          ? DofRadiusForLayer(.5f - (rear_grass ? depth : rear_offset)) : 0;
+          ? DofRadiusForLayer(.5f - (rear_grass ? depth : rear_focus)) : 0;
   int count = 0;
   bool cap_palette_checked = false, cap_palette_ready = false;
   GroundCoverBeginBatch();
@@ -827,6 +831,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     const VoxelRearTrim *rear_trims = ActionVoxel_RearTrims(layer->voxel_geometry, &n);
     for (unsigned i = 0; i < n; ++i) {
       const VoxelRearTrim p = rear_trims[i];
+      const float rear_offset=ActionVoxel_RearTrimRecess(castle,p.thin!=0);
       const float x0 = fmaxf(0, p.x - ox), y0 = fmaxf(0, p.y - oy);
       const float x1 = fminf(capture->width, p.x + p.width - ox),
                   y1 = fminf(capture->height, p.y + 16 - oy);
@@ -905,6 +910,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     }
     const unsigned edge_index = indices[i];
     VoxelEdge e = edges[edge_index];
+    const float rear_offset=rear?ActionVoxel_RearTrimRecess(castle,e.thin_trim!=0):0;
     if (e.high_priority != high_priority) continue;
     const VoxelAuthoredCell *transformed=native_transforms?NativeTransformCell(castle,e.x,e.y):NULL;
     const unsigned face_mask[]={kDioramaVoxelFaceMask_Top,kDioramaVoxelFaceMask_Right,kDioramaVoxelFaceMask_Bottom,kDioramaVoxelFaceMask_Left};
@@ -947,9 +953,13 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     VoxelEdgeSpan span;
     if(transformed) {
       bool any=false;
-      for(unsigned sample=0;sample<3;++sample) {
-        VoxelEdgeSpan part;const float y=e.y+(e.side==2)+((e.side&1)?e.length*sample*.5f:0);
-        if(!TransformedNativeEdgeSpan(castle,&e,transformed,pass,far_depth,y,&part))continue;
+      const unsigned samples=column_curve && column_curve->native_lip && !(e.side&1)?(e.length+1)/2+1:3;
+      for(unsigned sample=0;sample<samples;++sample) {
+        const float fraction=samples>1?(float)sample/(samples-1):0;
+        VoxelEdge point=e;
+        if(column_curve && (column_curve->round_width || column_curve->native_lip) && !(e.side&1))point.x+=(short)lroundf(e.length*fraction);
+        VoxelEdgeSpan part;const float y=e.y+(e.side==2)+((e.side&1)?e.length*fraction:0);
+        if(!TransformedNativeEdgeSpan(castle,&point,transformed,pass,far_depth,y,&part))continue;
         if(!any)span=part;else {span.near_depth=fminf(span.near_depth,part.near_depth);span.far_depth=fmaxf(span.far_depth,part.far_depth);}any=true;
       }
       if(!any)continue;
@@ -1068,8 +1078,11 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
           ycuts[at]=y;++ycount;
         }
     }
-    const int first_x = sampled_top ? (int)floorf((x0 + ox) / tile_width) : 0;
-    const int last_x = sampled_top ? (int)ceilf((x1 + ox) / tile_width) : 1;
+    const bool rounded_top=column_curve && (column_curve->round_width || column_curve->native_lip) && !(e.side&1);
+    const bool split_x=sampled_top || rounded_top;
+    const float split_width=rounded_top?(column_curve->native_lip?2:4):tile_width;
+    const int first_x = split_x ? (int)floorf((x0 + ox) / split_width) : 0;
+    const int last_x = split_x ? (int)ceilf((x1 + ox) / split_width) : 1;
     const int first_z = sampled_top ? (int)floorf(span.near_depth / tile_depth) : 0;
     const int last_z = sampled_top ? (int)ceilf(span.far_depth / tile_depth) : 1;
     const float contact=fmaxf(0,layer->voxel_recess-.01f);
@@ -1078,16 +1091,16 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     for (unsigned iy = 0; iy + 1 < ycount; ++iy)
     for (int iz = first_z; iz < last_z; ++iz)
     for (int ix = first_x; ix < last_x; ++ix) {
-    const float tile_x0 = ix * tile_width - ox, tile_z0 = iz * tile_depth;
-    x0 = sampled_top ? fmaxf(clipped_x0, tile_x0) : clipped_x0;
-    x1 = sampled_top ? fminf(clipped_x1, tile_x0 + tile_width) : clipped_x1;
+    const float tile_x0 = ix * split_width - ox, tile_z0 = iz * tile_depth;
+    x0 = split_x ? fmaxf(clipped_x0, tile_x0) : clipped_x0;
+    x1 = split_x ? fminf(clipped_x1, tile_x0 + split_width) : clipped_x1;
     const float band_top = curved_side ? ycuts[iy] : 0;
     const float band_bottom = curved_side ? ycuts[iy+1] : 0;
     y0 = curved_side ? (clipped_y0<clipped_y1?band_top:band_bottom) : clipped_y0;
     y1 = curved_side ? (clipped_y0<clipped_y1?band_bottom:band_top) : clipped_y1;
     const float face_near = sampled_top ? fmaxf(span.near_depth, tile_z0) : span.near_depth;
     const float face_far = sampled_top ? fminf(span.far_depth, tile_z0 + tile_depth) : span.far_depth;
-    if (face_far <= face_near || (sampled_top && x1 <= x0)) continue;
+    if (face_far <= face_near || (split_x && x1 <= x0)) continue;
     const bool owned_top=sampled_top && e.top_owned_art;
     VoxelSide next = {.owned_source=owned_top || sampled_surface || transformed,
         .solid_color=room_cap ? kVoxelRoomCap_Flat : 0};float observer_xy[8];
@@ -1109,6 +1122,8 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
     const bool fog_top=e.side==0 && e.colliding && GroundFogMayTouch(x0+ox,x1+ox,y0+oy,y1+oy);
     const bool wet_top=e.side==0 && !e.near_rank && pass==kVoxelEdgeNative &&
         WetSurfaceMayTouch(x0+ox,x1+ox,y0+oy,y1+oy,false);
+    const bool ice_top=e.side==0 && e.surface_finish==kVoxelSurfaceFinishIce &&
+        (s_ice_surface.sheen || s_ice_surface.glints);
     DioramaGroundCoverCap cover={.from={x0+ox,y0+oy},.to={x1+ox,y1+oy},
         .actor_z=ActionVoxel_PlayRecess(castle),.contact_radius=6*g->aspect_x/(du*SR_PPU_SURFACE_MAX_WIDTH)};
     if(e.soft_surface&&e.far_rank==2&&ActionVoxel_Profile(castle)==kActionVoxelProfile_NorthwallSnow)
@@ -1133,8 +1148,10 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
          * covered endpoint collapses to one depth; the opposite triangle can
          * still close an emerging side at the cap or a neighbouring shaft. */
         VoxelEdgeSpan actual={face_near,face_near};
-        const bool exists=transformed?TransformedNativeEdgeSpan(castle,&e,transformed,pass,far_depth,native_y+oy,&actual):
-            ActionVoxel_ResolveEdgeSpanAtY(castle,&e,pass,near_depth,far_depth,native_y+oy,&actual);
+        VoxelEdge point_edge=e;
+        if(column_curve && (column_curve->round_width || column_curve->native_lip) && !(e.side&1))point_edge.x=(short)lroundf(x+ox);
+        const bool exists=transformed?TransformedNativeEdgeSpan(castle,&point_edge,transformed,pass,far_depth,native_y+oy,&actual):
+            ActionVoxel_ResolveEdgeSpanAtY(castle,&point_edge,pass,near_depth,far_depth,native_y+oy,&actual);
         if(!exists)
           actual.near_depth=actual.far_depth=fminf(face_far,fmaxf(face_near,actual.near_depth));
         else if(transformed) {
@@ -1170,8 +1187,9 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       if(transformed)ActionVoxel_TransformPoint(&transformed->transform,px,py,z,&px,&py,&z);
       next.heat_world_xy[j]=(ArRenderPointF){px,py};
       next.heat_finite=transformed && !sampled_surface && !owned_top;
-      if(cover_top || fog_top || wet_top) {
+      if(cover_top || fog_top || wet_top || ice_top) {
         VoxelEdge raw=e;raw.high_priority=false;raw.colliding=false;VoxelEdgeSpan full;
+        if(column_curve && (column_curve->round_width || column_curve->native_lip) && !(e.side&1))raw.x=(short)lroundf(x+ox);
         if(!ActionVoxel_ResolveEdgeSpanAtY(castle,&raw,kVoxelEdgeNative,-INFINITY,INFINITY,native_y+oy,&full))return false;
         const float full_local_z=back?full.far_depth:full.near_depth;
         float full_z=rear_offset+full_local_z;
@@ -1342,6 +1360,7 @@ static bool DrawVoxelGeometry(ArRenderDevice *device, const DioramaCapture *capt
       if(cover_top&&!GatherVoxelGroundCover(capture,g,layer,&cover,0,&count))return false;
       continue;
     }
+    if (ice_top) IceSurfaceGather(capture, g, &cover);
     const int pick_kind=e.side==0?kDioramaVoxelFace_Top:
         e.side==2?kDioramaVoxelFace_Bottom:kDioramaVoxelFace_Side;
     ObserveVoxelFace(g,layer,&next,observer_xy,pick_kind,
@@ -1701,11 +1720,13 @@ static bool VoxelSourceQuad(const DioramaViewGeometry *g,const DioramaLayerDraw 
 }
 static bool VoxelCurveQuad(const DioramaViewGeometry *g,const DioramaLayerDraw *layer,
     const VoxelTrunkCurve *curve,float x0,float y0,float x1,float y1,float world_y0,
-    bool column,VoxelSide *face) {
+    float world_x0,bool column,VoxelSide *face) {
   *face=(VoxelSide){0};
   for(unsigned j=0;j<4;++j) {
     const float x=j==1||j==2?x1:x0,y=j>=2?y1:y0;
-    const float z=column?ActionVoxel_ColumnFrontDepth(layer->voxel_geometry,curve,y+world_y0):
+    VoxelTrunkCurve section;const VoxelTrunkCurve *vertex_curve=curve;
+    if(column && (curve->round_width || curve->native_lip)){ActionVoxel_ColumnSection(curve,x+world_x0,&section);vertex_curve=&section;}
+    const float z=column?ActionVoxel_ColumnFrontDepth(layer->voxel_geometry,vertex_curve,y+world_y0):
         ActionVoxel_TrunkFrontDepth(layer->voxel_geometry,curve,y+world_y0);
     const float u=x/SR_PPU_SURFACE_MAX_WIDTH,v=y/SR_PPU_SURFACE_MAX_HEIGHT;
     const float scale=1+z/fmaxf(1,g->camera.distance);
@@ -1797,18 +1818,18 @@ static VoxelFrontMesh s_voxel_front_meshes[kVoxelFrontMeshSlots];
 static uint64_t s_voxel_front_mesh_use;
 
 static bool ProjectVoxelFrontQuad(const DioramaViewGeometry *g,const DioramaLayerDraw *layer,
-    const VoxelFrontQuad *quad,int oy,VoxelSide *face) {
-  return quad->curved?VoxelCurveQuad(g,layer,&quad->curve,quad->x0,quad->y0,quad->x1,quad->y1,oy,quad->column,face):
+    const VoxelFrontQuad *quad,int ox,int oy,VoxelSide *face) {
+  return quad->curved?VoxelCurveQuad(g,layer,&quad->curve,quad->x0,quad->y0,quad->x1,quad->y1,oy,ox,quad->column,face):
       VoxelSourceQuad(g,layer,quad->x0,quad->y0,quad->x1,quad->y1,quad->depth,quad->depth,false,false,0,0,1,face);
 }
 
 static bool CacheVoxelFrontQuad(VoxelFrontMesh *mesh,const DioramaViewGeometry *g,
-    const DioramaLayerDraw *layer,const VoxelFrontQuad *quad,int oy,VoxelSide *face) {
+    const DioramaLayerDraw *layer,const VoxelFrontQuad *quad,int ox,int oy,VoxelSide *face) {
   if(mesh && mesh->complete) {
     if(mesh->count<kVoxelFrontMeshQuads)mesh->quads[mesh->count++]=*quad;
     else mesh->complete=false;
   }
-  return ProjectVoxelFrontQuad(g,layer,quad,oy,face);
+  return ProjectVoxelFrontQuad(g,layer,quad,ox,oy,face);
 }
 
 /* Keep material relief on its compiled depth (forest contact or temple
@@ -1818,7 +1839,7 @@ static bool CacheVoxelFrontQuad(VoxelFrontMesh *mesh,const DioramaViewGeometry *
 static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const DioramaViewGeometry *g,
     const DioramaLayerDraw *layer) {
   _Static_assert((SR_PPU_SURFACE_MAX_WIDTH/8+1)*(SR_PPU_SURFACE_MAX_HEIGHT/8+1)+
-                 kVoxelMaxPixelRecessCells*63<=kVoxelMaxVisibleFaces,
+                 kVoxelMaxPixelRecessExtraFaces<=kVoxelMaxVisibleFaces,
                  "cell partitions plus bounded pixel masks fit the shared face budget");
   const int ox=capture->bg1_camera_x-(capture->width-256)/2-capture->obj_apron;
   const int oy=capture->camera_y-capture->authentic_y0+1;
@@ -1840,7 +1861,7 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
           candidate->left==left && candidate->top==top && candidate->right==right && candidate->bottom==bottom) {
         candidate->last_use=++s_voxel_front_mesh_use;
         for(unsigned q=0;q<candidate->count;++q)
-          if(ProjectVoxelFrontQuad(g,layer,&candidate->quads[q],oy,&s_voxel_sides[count]))++count;
+          if(ProjectVoxelFrontQuad(g,layer,&candidate->quads[q],ox,oy,&s_voxel_sides[count]))++count;
         return count;
       }
       if(!mesh || candidate->last_use<mesh->last_use)mesh=candidate;
@@ -1930,13 +1951,13 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
             if(count==kVoxelMaxVisibleFaces)return 0;
             const VoxelFrontQuad quad={.x0=x0,.y0=cuts[i],.x1=x1,.y1=cuts[i+1],
                 .curve=*curve,.curved=true,.column=true};
-            if(CacheVoxelFrontQuad(mesh,g,layer,&quad,oy,&s_voxel_sides[count]))++count;
+            if(CacheVoxelFrontQuad(mesh,g,layer,&quad,ox,oy,&s_voxel_sides[count]))++count;
           }
           continue;
         }
         const float depth=depths[plane];
         const VoxelFrontQuad quad={.x0=x0,.y0=y0,.x1=x1,.y1=y1,.depth=depth};
-        if(CacheVoxelFrontQuad(mesh,g,layer,&quad,oy,
+        if(CacheVoxelFrontQuad(mesh,g,layer,&quad,ox,oy,
             &s_voxel_sides[count]))++count;
       }
       cells[y*nx+x]|=2;
@@ -1962,20 +1983,22 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
       /* Native ramps keep each two-pixel contact and its short front lip.
        * An eight-pixel quad would interpolate the taper across walking
        * pixels. World-anchored sections also match the contour closures. */
-      const bool ramp=(tag&8) && curve->contact_count;
-      const int first=ramp?(int)floorf((x0+ox)/2):0;
-      const int last=ramp?(int)ceilf((x1+ox)/2):1;
+      const bool ramp=(tag&8) && (curve->contact_count || curve->round_width);
+      const int section_width=curve->round_width?4:2;
+      const int first=ramp?(int)floorf((x0+ox)/section_width):0;
+      const int last=ramp?(int)ceilf((x1+ox)/section_width):1;
       for(int column=first;column<last;++column) {
-        const float sx0=ramp?fmaxf(x0,column*2-ox):x0;
-        const float sx1=ramp?fminf(x1,column*2+2-ox):x1;
+        const float sx0=ramp?fmaxf(x0,column*section_width-ox):x0;
+        const float sx1=ramp?fminf(x1,column*section_width+section_width-ox):x1;
         VoxelTrunkCurve section;
-        ActionVoxel_ColumnSection(curve,(sx0+sx1)*.5f+ox,&section);
+        if(curve->round_width || curve->native_lip)section=*curve;
+        else ActionVoxel_ColumnSection(curve,(sx0+sx1)*.5f+ox,&section);
         float cuts[4];const unsigned n=VoxelTrunkCuts(&section,y0,y1,oy,false,cuts);
         for(unsigned i=0;i+1<n;++i) {
           if(count==kVoxelMaxVisibleFaces)return 0;
           const VoxelFrontQuad quad={.x0=sx0,.y0=cuts[i],.x1=sx1,.y1=cuts[i+1],
               .curve=section,.curved=true,.column=(tag&8)!=0};
-          if(CacheVoxelFrontQuad(mesh,g,layer,&quad,oy,&s_voxel_sides[count]))++count;
+          if(CacheVoxelFrontQuad(mesh,g,layer,&quad,ox,oy,&s_voxel_sides[count]))++count;
         }
       }
       continue;
@@ -1983,7 +2006,7 @@ static unsigned BuildVoxelFrontFaces(const DioramaCapture *capture,const Diorama
     if(count==kVoxelMaxVisibleFaces)return 0;
     const float depth=ActionVoxel_FrontRecess(layer->voxel_geometry,tx0+x,ty0+y);
     const VoxelFrontQuad quad={.x0=x0,.y0=y0,.x1=x1,.y1=y1,.depth=depth};
-    if(CacheVoxelFrontQuad(mesh,g,layer,&quad,oy,
+    if(CacheVoxelFrontQuad(mesh,g,layer,&quad,ox,oy,
         &s_voxel_sides[count]))++count;
   }
   if(mesh && mesh->complete)mesh->revision=ActionVoxel_Revision(layer->voxel_geometry);

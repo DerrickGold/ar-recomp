@@ -15,15 +15,18 @@ static int last_mode, last_finish, last_filter, last_blend;
 static int current_effect=-1, submitted_effect=-1;
 static const void *last_vertices, *last_indices;
 static const float *last_depths, *last_w;
+static const ArRenderPointF *last_heat;
 static int WebDepthBegin(void) { ++begins; return begin_ok; }
 static int WebDepthClear(void) { ++clears; return clear_ok; }
 static int WebDepthFinish(int success) { ++finishes; last_finish=success; return finish_ok; }
 static int WebDepthGeometry(int texture,const void *vertices,int nv,const void *indices,
-    int ni,int blend,int u,int v,int filter,const float *depths,const float *w,int mode) {
+    int ni,int blend,int u,int v,int filter,const float *depths,const float *w,int mode,
+    const ArRenderPointF *heat) {
   assert(texture==7 && nv==3 && ni==3 && u==0 && v==0);
   ++draws; last_mode=mode; last_filter=filter; last_blend=blend;
   submitted_effect=current_effect;
   last_vertices=vertices; last_indices=indices; last_depths=depths; last_w=w;
+  last_heat=heat;
   return draw_ok;
 }
 bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *device,
@@ -71,6 +74,11 @@ int main(void) {
   assert(sink->submit(sink->userdata,&s_device,&draw));
   assert(last_mode==kDioramaDepth_Write && last_filter==-1 && last_blend==kArRenderBlendMode_Alpha);
   assert(last_vertices==vertices && last_indices==indices && last_depths==depths && last_w==w);
+  assert(!last_heat);
+  const ArRenderPointF heat[]={{20,40},{24,40},{24,48}};
+  draw.heat_world_xy=heat;
+  assert(sink->submit(sink->userdata,&s_device,&draw)&&last_heat==heat);
+  draw.heat_world_xy=NULL;
   assert(!binds && !unbinds && current_effect==-1 && submitted_effect==-1);
   /* Native meshes can enter with a caller-bound rim/DOF material. Depth
    * visibility must preserve that material during and after the draw. */

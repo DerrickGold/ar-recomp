@@ -396,6 +396,7 @@ typedef struct ActionEffectFieldStyle {
   uint8_t opening; /* Fan is an authored enclosure aperture: light, frost and wind share it. */
   float rolling, wake, canopy_response; /* Textured floor mist: billows, body wakes, canopy scattering. */
   float volume; /* Rolling clouds: rounded, internally shaded billows; zero preserves wispy mist. */
+  float voxel_depth; /* Free playfield mist: floor-depth fraction; zero retains its narrow air band. */
   uint8_t voxel_cloud_gap_count;
   /* Ordered BG1 world-X openings. Native cloud augmentation leaves these
    * columns clear through its entire depth, including its front overlay. */

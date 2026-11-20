@@ -205,6 +205,20 @@ The blue columns in the tower and its Death Heim rematch project slightly ahead
 of their arches while keeping their original rear attachment and native
 priority. These reviewed material defaults also follow matching tile stamps;
 explicit depth edits continue to take precedence.
+Northwall's entrance trunk rounds its exposed bark edge into the shallow rear
+outline over two body tiles. The return follows reviewed bark artwork, including
+mirrored stamps and noncolliding body rows. Explicit depth edits override it;
+the native artwork, collision and original 2D presentation remain intact.
+Snow over the rear leaf canopy also has a smooth underside return. Shared
+fringe samples keep neighboring tiles continuous; explicit depth and pixel
+edits stay local. Leaf artwork above approach ramps keeps its rear plane so
+the native walking caps retain their full depth.
+Thin and sloping snow ends use a shorter return below their native walking
+top. The native fixture audit inventories all 38 snow/leaf joins, including
+the level-top corners and partial leaf tiles.
+The coating also continues onto the two touching terminal snow caps, which
+have sky below them rather than a leaf tile. Native cap artwork and alpha
+remain unchanged, and depth edits stay local to the edited cell.
 The choice is cached with room geometry, independent of the camera. Explicit
 face artwork takes precedence; **Auto** restores this policy.
 Changing a numeric field sets it for every selected tile; dragging the depth
@@ -425,8 +439,18 @@ Apply, reset, undo/redo and project save/load use the same shared renderer in
 the editor and game. Assets derive from the loaded ROM and chosen terrain.
 Game scenery files load when the session starts; restart after exporting art edits.
 
-In Voxel mode, the outer snow passages in `06:06–07` retain their native front
-contact plane and extend behind it. Their depth opens over two native cells at
+In Voxel mode, the outer snow passages in `06:06–07` retain a four-pixel lip at
+native standing contacts, then return smoothly over four pixels into recessed
+wall bodies near tunnel openings. One-way shelves keep their lip even beneath
+a solid bank; an internal cap closes that depth step. Only the opening rim
+recedes, returning smoothly to the bank's full thickness farther away. Native
+opaque, noncolliding black interiors and reviewed decorated hollows identify
+openings; foliage, sky and dark art details do not. Their total depth is limited
+to `0.08` world units. Tiny scallops in an icy standing crown do not cut cracks
+through its depth cap; their original source pixels remain unchanged. The bark
+rim is half as thick and rounded back at both edges, with its inner edge still
+joined to the enclosure and its frost and focus following the new front.
+Source faces and caps share the same two-pixel facets. Side-passage depth opens over two native cells at
 the central shaft, so the established curved enclosure stays intact. Reviewed
 snow and bark families own the generated caps; short snow-ramp risers share the
 snow cap texture. Tall snowbank sides follow the pale native outline and retain
@@ -438,6 +462,18 @@ artwork. The ordinary Diorama and Off modes retain their existing paths.
 These dedicated-room contracts live in
 `assets/environments/northwall-tree-side-materials.json`; regenerate with
 `python3 tools/generate_trunk_side_materials.py` and verify with `--check`.
+In Voxel mode, the decorative central shaft also sits behind the player,
+aligned with the backs of the branch platforms. Native collision quarters
+stay at the original walking depth and receive connecting caps. The primary
+capture and supplemental strips share that geometry; stamps and pixel erasures
+rebuild it from the edited source. Complete opaque shelf outlines, including
+pale frost, own their caps. These rooms use shared depth in Voxel mode, and
+perspective-correct source coordinates keep the artwork attached during orbit.
+The ordinary Diorama enclosure is unchanged.
+The side halls' noncolliding snow divots and bark hollows keep both their crowns and hanging
+lips on the rear plane. Matching entrances share the outdoor snow policy; the
+side-material generator checks their agreement. Native transparency and
+neighboring collision surfaces remain independent.
 The optional regional regression uses exported `0606.arscene` and `0607.arscene`
 under each `0`, `1`, and `2` terrain directory:
 
@@ -694,6 +730,14 @@ player and enemy receivers. Diffusion changes only the visible glow, while
 `illumination` controls received light independently. Turning off all receiver
 flags can leave a purely atmospheric glow. The existing light and decoration
 batches handle both, without a new shader, texture or particle simulation.
+
+In Voxel 3D, reviewed blue-ice walking tops in Northwall `06:02–04` also receive
+a translucent gloss band and sparse animated surface glints. The finish follows
+the actual cap depth and slopes; it does not replace native artwork or reflect
+scene objects. Lighting controls the gloss, particles additionally control the
+glints, and Effects disables both. Glints use the captured game-frame clock, so
+scrubbing or pausing the audit browser gives a repeatable view. The original 2D
+presentation and cave-stone faces keep their native appearance.
 
 Northwall's caves `06:02–04` use these lights on the larger distant ice clusters:
 27, 36 and 11 sources per terrain, respectively. Although the clusters look like
@@ -1620,6 +1664,10 @@ nearby firefly light through its existing canopy-response control. No particle
 simulation, per-insect draw, dynamic texture upload or additional light pass is used.
 The Add effect modal includes **Will-o’-wisps**, **Luminous moss patches** and
 **Occasional vine dew** presets; all remain ordinary copyable emitter records.
+In Voxel mode, moving insects and wisps occupy stable depths through the BG1
+air volume. Each head, historical tail and visible halo share one depth. Moss
+stays attached to its authored plane; material and actor receiver sampling stay
+on the world field. This reuses the existing quads and passes.
 Marahna uses one or two jade wisps per room, near the walking route, with warmer
 golden fireflies and small moss patches on selected roots and damp stones.
 
@@ -1668,19 +1716,21 @@ their density or shading. All lobes stay inside the saved region as it is resize
 BG1 and BG2 anchors, copy/paste, reset and project ZIP export use the same controls.
 The Aitos sky uses BG2 fixed-point anchoring so raster bands cannot bend a cloud.
 
-In Voxel mode, rear BG1 rolling banks distribute their existing billows through
-a shallow air volume. The volume control scales that depth; each body/crest pair
-shares a stable position, with its sparkles following the same billow. The
-rainbow scatters inside the bank. Culling includes the full depth envelope.
-This reuses the existing masks, billow count and geometry budget; 2D rendering
-retains the saved planar presentation.
-
-In Voxel mode, rear BG1 rolling banks distribute their existing billows through
-a shallow physical volume. Each shaded body and bright crest share a stable
-depth, with droplets following their billow and rainbow scattering inside the
-bank. Volume controls the depth spread. Culling includes both depth endpoints;
-the bank keeps the same mask count and opacity, with no additional draw pass.
-The ordinary 2D/Diorama bank keeps its existing planar geometry.
+In Voxel mode, free textured BG1 mist banks distribute their existing billows
+through the room's air, including rolling mist with `volume=0` and still haze.
+Depth is stable per billow; paired bodies and crests stay together. A positive
+volume control narrows the depth spread toward the authored rear/foreground
+placement. Sparkles follow their billow and rainbows scatter inside the bank.
+Playfield banks default to the middle 40–60% of the floor depth. **Voxel mist
+depth** (`voxel-depth`, 0–1) on free, textured, rolling BG1 playfield banks
+sets a wider or narrower centred span; 1 covers the whole floor thickness.
+Positive values use three depth slices with divided optical density, keeping
+straight-on opacity consistent. The recipe budget reserves every slice and
+its sparkles. This is independent of Cloud volume and affects only Voxel mode.
+The playfield pass follows the completed walking surface and precedes actors
+and high-priority scenery in every voxel profile. Culling includes both depth
+endpoints. Masks and 2D/Diorama presentation are preserved. Ground paths, vents
+and native high clouds keep their existing surface or dedicated interior treatment.
 
 Eight density/lighting pairs are baked from small 3D cloud volumes at startup.
 They use the same two masked quads per lobe and alpha batch as rolling mist;

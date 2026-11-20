@@ -116,17 +116,21 @@ for manifest, symbol, suffix in TABLES:
             raise ValueError(f'{manifest}: complete rear matte requires opaque rear backing for {record["key"]}')
         portal_jamb = record.get('portal_jamb', False)
         if type(portal_jamb) is not bool or (portal_jamb and
-                any(kind not in (1, 2, 4) for kind in record['kinds'])):
+                any(kind not in (1, 2, 4, 5) for kind in record['kinds'])):
             raise ValueError(f'{manifest}: invalid portal jamb for {record["key"]}')
         door_closure = record.get('door_closure', False)
         if type(door_closure) is not bool or (door_closure and record['kinds'] != [1, 1, 1, 1]):
             raise ValueError(f'{manifest}: invalid solid door closure for {record["key"]}')
         column_shadow = record.get('column_shadow', False)
+        leaf_canopy = record.get('leaf_canopy', False)
+        if type(leaf_canopy) is not bool or (leaf_canopy and
+                (suffix != 'snow' or record['kinds'] != [4, 4, 4, 4] or record['flags'] != 32776)):
+            raise ValueError(f'{manifest}: leaf canopy requires reviewed rear foliage for {record["key"]}')
         if type(column_shadow) is not bool or (column_shadow and
                 (suffix != 'desert' or record['kinds'] != [1, 1, 1, 1] or record['flags'] != 0)):
             raise ValueError(f'{manifest}: invalid shadowed column underside for {record["key"]}')
         key = (int(record["key"], 16), tuple(record["kinds"]), record["flags"], rear_colors,
-               gate_colors, face_colors, rear_fold, complete_matte, portal_jamb, door_closure, column_colors, column_shadow)
+               gate_colors, face_colors, rear_fold, complete_matte, portal_jamb, door_closure, column_colors, column_shadow, leaf_canopy)
         record_rooms = 0
         for room, terrain, metatile in record["origins"]:
             record_rooms |= 1 << room
@@ -161,6 +165,9 @@ for manifest, symbol, suffix in TABLES:
             donor_key = int(record['key'], 16)
             rear_donor_profiles[donor_key] = rear_donor_profiles.get(donor_key, 0) | record_rooms
         native_slope = record.get('native_slope', False)
+        canopy_slope = record.get('canopy_slope', False)
+        if type(canopy_slope) is not bool or (canopy_slope and (suffix != 'snow' or not native_slope)):
+            raise ValueError(f'{manifest}: canopy slope requires reviewed snow terrain for {record["key"]}')
         native_foot = record.get('native_slope_foot', False)
         native_support = record.get('native_slope_support', False)
         if (any(type(value) is not bool for value in (native_slope, native_foot, native_support)) or
@@ -173,7 +180,7 @@ for manifest, symbol, suffix in TABLES:
                 any(kind != expected_kind for kind in record['kinds']) or
                 (native_foot and suffix == 'snow' and not record['flags'] & 32768)):
                 raise ValueError(f'{manifest}: native slope requires reviewed terrain for {record["key"]}')
-            contour_key = (int(record['key'], 16), 1 if native_slope else 2 if native_foot else 3)
+            contour_key = (int(record['key'], 16), 4 if canopy_slope else 1 if native_slope else 2 if native_foot else 3)
             contour_profiles[contour_key] = contour_profiles.get(contour_key, 0) | record_rooms
         if 'opaque_rear_ink' in record:
             ink = record['opaque_rear_ink']
@@ -250,7 +257,7 @@ for manifest, symbol, suffix in TABLES:
                 raise ValueError(f'{manifest}: conflicting top surface policies for {key:016x}')
     lines = [f"/* Generated reviewed artwork roles. See assets/environments/{manifest}. */",
              f"static const VoxelMaterialProfile k{symbol}Materials[] = {{"]
-    for (key, kinds, flags, rear_colors, gate_colors, face_colors, rear_fold, complete_matte, portal_jamb, door_closure, column_colors, column_shadow), rooms in sorted(profiles.items()):
+    for (key, kinds, flags, rear_colors, gate_colors, face_colors, rear_fold, complete_matte, portal_jamb, door_closure, column_colors, column_shadow, leaf_canopy), rooms in sorted(profiles.items()):
         gate_text = ",{%s}" % ",".join(map(str, gate_colors))
         face_text = ",{%s}" % ",".join(map(str, face_colors))
         # Keep compact profiles: bits24..27 carry an explicitly reviewed band
@@ -265,6 +272,8 @@ for manifest, symbol, suffix in TABLES:
             matte_text += ',.column_recess_colors={%s}' % ','.join(map(str, column_colors))
         if column_shadow:
             matte_text += ',.column_shadow=true'
+        if leaf_canopy:
+            matte_text += ',.leaf_canopy=true'
         lines.append("  {UINT64_C(0x%016x),0x%04x,{%s},%d,{%s}%s%s%s}," %
                      (key, rooms, ",".join(map(str, kinds)), flags, ",".join(map(str, rear_colors)),
                       gate_text, face_text, matte_text))

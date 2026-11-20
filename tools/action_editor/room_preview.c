@@ -1164,9 +1164,9 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     }
   }
   DioramaAstralRift_Attach(s_effects_enabled, DioramaPreview_Device(), &scene);
-  /* Match production's ActionVoxel contract. The specialized curved-tree
-   * enclosure keeps its established multi-plane visibility policy. */
-  if (EditorRoomScene_3DMode(s_room)==kAction3D_Voxel && scene.voxel_geometry) {
+  /* Match production, including the curved tree's intersecting platforms. */
+  if (EditorRoomScene_3DMode(s_room)==kAction3D_Voxel &&
+      (scene.voxel_geometry||(scene.trunk&&scene.trunk_settings.enabled))) {
 #ifdef __EMSCRIPTEN__
     scene.depth_sink=DioramaPreview_DepthBegin();
 #else

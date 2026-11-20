@@ -2,7 +2,9 @@
 #define AR_ACTION_VOXEL_INTERNAL_H
 #include "action/action_voxel.h"
 #include <stdatomic.h>
-enum { kVoxelPassLists = 4, kVoxelMaxRearFills = 512, kVoxelMaxLintelReturns = 32 };
+/* Northwall's climbing cave includes over650 native void cells in addition to
+ * its sparse architecture repairs. Capacity is allocated only when used. */
+enum { kVoxelPassLists = 4, kVoxelMaxRearFills = 1024, kVoxelMaxLintelReturns = 32 };
 typedef struct VoxelRearFill {
   short x, y;
   bool preserve_existing, replace_front; /* Reviewed baked shadows may need both native split images repaired. */
@@ -33,8 +35,8 @@ struct ActionVoxelGeometry {
   unsigned char *thin_trim_cells; /* Reviewed foreground timber uses a shallow depth per 8px cell. */
   unsigned char *raised_scenery_cells; /* Reviewed rear architecture projects slightly beyond adjacent trim. */
   unsigned char *pixel_recess_cells; /* One-based sparse mask owner per 8px cell. */
-  uint8_t pixel_recess_rows[kVoxelMaxPixelRecessCells][8];
-  unsigned pixel_recess_mask_count, pixel_recess_cell_count;
+  uint8_t pixel_recess_rows[kVoxelMaxPixelRecessMasks][8];
+  unsigned pixel_recess_mask_count, pixel_recess_cell_count, pixel_recess_extra_faces;
   unsigned char *trunk_cells; /* One-based curve owner per 8px cell, including empty filter halo. */
   VoxelTrunkCurve trunk_curves[kVoxelMaxTrunkCurves];
   unsigned trunk_curve_count;

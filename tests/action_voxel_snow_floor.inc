@@ -44,7 +44,7 @@ static uint16_t SnowFloorFoot(const ActionRoomScene *s,int x,int y,unsigned id) 
 }
 static void SnowFloorSlopes(const ActionRoomScene *s,const ActionVoxelGeometry *g,
     const uint8_t *tops,unsigned region) {
-  unsigned cells=0,ascending=0,descending=0,contacts=0,rear_pixels=0,outline_offsets=0;
+  unsigned cells=0,ascending=0,descending=0,contacts=0,upper_pixels=0,outline_offsets=0,rim_pixels=0;
   const ActionRoomSceneFrameState frame={.brightness=15};
   for(unsigned y=0;y<ActionRoomScene_TileHeight(s,1)/2;++y)
     for(unsigned x=0;x<ActionRoomScene_TileWidth(s,1)/2;++x) {
@@ -53,6 +53,7 @@ static void SnowFloorSlopes(const ActionRoomScene *s,const ActionVoxelGeometry *
       const unsigned collision=SnowFloorCollision(s,x,y),left=SnowFloorCollision(s,(int)x-1,y),
           right=SnowFloorCollision(s,x+1,y);
       ++cells;ascending+=collision==6;descending+=collision==9;
+      const bool rim=id!=0x2a && id!=0x2b && id!=0x34 && id!=0x35;
       uint32_t native[256],rear[256],front[256];
       for(unsigned py=0;py<16;++py)for(unsigned px=0;px<16;++px)
         native[py*16+px]=ForestNativeColor(s,x*16+px,y*16+py,&frame);
@@ -63,15 +64,21 @@ static void SnowFloorSlopes(const ActionRoomScene *s,const ActionVoxelGeometry *
           const size_t at=(y*16+py-g->origin_y)*g->width+x*16+px-g->origin_x;
           const unsigned m=g->front[at];
           if(m) {
-            assert((m&kVoxelKindMask)==(py<contact?kVoxelRearOnly:kVoxelSolid));
+            assert((m&kVoxelKindMask)==(py<contact?(rim?kVoxelForeground:kVoxelRearOnly):kVoxelSolid));
+            if(rim) {
+              const uint8_t *mask=ActionVoxel_PixelRecessRows(g,(x*16+px)/8,(y*16+py)/8);
+              const bool recessed=mask?!!(mask[py&7]&(1u<<(7-(px&7)))):
+                  ActionVoxel_FrontRecess(g,(x*16+px)/8,(y*16+py)/8)>.149f;
+              assert(recessed==(py<contact));rim_pixels+=recessed;
+            }
             assert(!!(m&kVoxelColliding)==!!(collision&(1u<<((py/8)*2+px/8))));
             assert(!(m&kVoxelHighPriority));
           }
           /* The former half-cell shelves must contribute no walking cap. */
           if(py<contact)assert(!tops[at]);
-          assert(rear[py*16+px]==native[py*16+px]);
-          assert(front[py*16+px]==(py<contact?0:native[py*16+px]));
-          rear_pixels+=py<contact;
+          assert(rear[py*16+px]==(rim&&py<contact?0:native[py*16+px]));
+          assert(front[py*16+px]==(py<contact&&!rim?0:native[py*16+px]));
+          upper_pixels+=py<contact;
         }
         unsigned surface_y=contact;
         if(contact<16 && !(native[contact*16+px]>>24)) {
@@ -83,19 +90,30 @@ static void SnowFloorSlopes(const ActionRoomScene *s,const ActionVoxelGeometry *
           assert(!g->front[hole] && !tops[hole]);
           assert(FixturePixel(s,x*16+px,y*16+contact+1));
           ++surface_y;++outline_offsets;
+          /* The first opaque endpoint must finish on its parent rock's
+           * tapered depth, not restart a full-width floor needle. */
+          const VoxelTrunkCurve *parent=ActionVoxel_ColumnCurveForCell(g,
+              (x*16+px)/8,(y*16+contact)/8);
+          const VoxelTrunkCurve *foot=ActionVoxel_ColumnCurveForCell(g,
+              (x*16+px)/8,(y*16+surface_y)/8);
+          assert(parent && foot==parent && parent->base_y==y*16+surface_y);
+          assert(!ActionVoxel_PixelRecessRows(g,(x*16+px)/8,(y*16+surface_y)/8));
+          assert(fabsf(ActionVoxel_ColumnFrontDepth(g,foot,y*16+surface_y)-
+              ActionVoxel_SceneryRecess(g))<.000001f);
         }
         const size_t at=(y*16+surface_y-g->origin_y)*g->width+x*16+px-g->origin_x;
         const VoxelTrunkCurve *rock=ActionVoxel_ColumnCurveForCell(g,(x*16+px)/8,(y*16+surface_y)/8);
-        const unsigned cap=rock?1:2;
+        const bool rim_above=rim && surface_y>0 && (native[(surface_y-1)*16+px]>>24);
+        const unsigned cap=rock||rim_above?1:2;
         if((g->front[at]&kVoxelKindMask)!=kVoxelSolid || !(tops[at]&cap))
           fprintf(stderr,"snow contact region%u cell%u,%u id%02x collision%u left%u right%u pixel%u,%u role%u top%u\n",
               region,x,y,id,collision,left,right,px,surface_y,g->front[at]&kVoxelKindMask,tops[at]);
         assert((g->front[at]&kVoxelKindMask)==kVoxelSolid && (tops[at]&cap));++contacts;
       }
     }
-  assert(cells==58 && ascending==22 && descending==36 && contacts==928 && outline_offsets==2);
-  printf("Northwall native ramps terrain%u: %u cells (%u ascending/%u descending), %u exact contact caps + %u preserved one-pixel native outline offsets, %u rear source pixels; no raised artwork shelves\n",
-      region,cells,ascending,descending,contacts-outline_offsets,outline_offsets,rear_pixels);
+  assert(cells==58 && ascending==22 && descending==36 && contacts==928 && outline_offsets==2 && rim_pixels>0);
+  printf("Northwall native ramps terrain%u: %u cells (%u ascending/%u descending), %u exact contact caps + %u preserved one-pixel native outline offsets, %u upper source pixels; continuous rear rims, no raised walking shelves\n",
+      region,cells,ascending,descending,contacts-outline_offsets,outline_offsets,upper_pixels);
 }
 /* Snow decoration above the bank belongs against its rear. Native solid
  * contacts expose a floor in front of it; decoration above spikes does not
@@ -122,6 +140,13 @@ static void SnowFloorFixtures(const char *directory) {
     ActionVoxelGeometry *base=ActionVoxel_Create(),*edited=ActionVoxel_Create();assert(base&&edited);
     const ActionVoxelSettings settings=ActionVoxel_SettingsForRoom(6,1);
     assert(ActionVoxel_Build(base,s,NULL,settings));assert(base->mixed_scenery);
+    /* Repeated simple slope masks must fit without raising the native
+     * front mesh budget or limiting the whole level to 64 split cells. */
+    assert(base->pixel_recess_cell_count>64 &&
+        base->pixel_recess_mask_count<=kVoxelMaxPixelRecessMasks &&
+        base->pixel_recess_extra_faces<=kVoxelMaxPixelRecessExtraFaces);
+    printf("Northwall mixed-depth budget terrain%u: %u cells, %u shared masks, %u extra front partitions\n",
+        region,base->pixel_recess_cell_count,base->pixel_recess_mask_count,base->pixel_recess_extra_faces);
     const size_t area=(size_t)base->width*base->height;
     uint8_t *top=calloc(area,1);assert(top);
     unsigned edge_count;const VoxelEdge *edges=ActionVoxel_Edges(base,&edge_count);

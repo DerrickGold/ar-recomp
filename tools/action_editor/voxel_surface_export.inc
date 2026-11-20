@@ -127,7 +127,7 @@ static void AuditSpecialized(const ActionRoomScene *s,const ActionVoxelGeometry 
   printf("],\"water\":[");for(unsigned i=0;i<g->water_surface_count;++i){const VoxelWaterSurface *p=g->water_surfaces+i;printf("%s{\"x\":%d,\"y\":%d,\"width\":%d,\"priority\":%u,\"background\":%u,\"sample_y\":%u,\"sample_height\":%u,\"opaque\":%u,\"uniform_color\":[%u,%u]}",i?",":"",p->x,p->y,p->width,p->high_priority,p->background,p->sample_y,p->sample_height,p->opaque,p->uniform_color[0],p->uniform_color[1]);}
   printf("],\"waterfalls\":[");for(unsigned i=0;i<g->waterfall_count;++i){const VoxelWaterfall *p=g->waterfalls+i;printf("%s[%d,%d,%d,%d,%u]",i?",":"",p->x,p->y,p->width,p->height,p->high_priority);}
   printf("],\"gates\":[");for(unsigned i=0;i<g->gate_count;++i){const VoxelGate *p=g->gates+i;printf("%s[%d,%d,%d,%u,%u,%u,%u,%u]",i?",":"",p->x,p->y,p->height,p->high_priority,p->to_right,p->width,p->centered,p->solid_face);}
-  printf("],\"rear_trims\":[");for(unsigned i=0;i<g->rear_trim_count;++i){const VoxelRearTrim *p=g->rear_trims+i;printf("%s[%d,%d,%d]",i?",":"",p->x,p->y,p->width);}
+  printf("],\"rear_trims\":[");for(unsigned i=0;i<g->rear_trim_count;++i){const VoxelRearTrim *p=g->rear_trims+i;printf("%s[%d,%d,%d,%.6g]",i?",":"",p->x,p->y,p->width,ActionVoxel_RearTrimRecess(g,p->thin!=0));}
   printf("],\"lintel_returns\":[");
   for(unsigned i=0;i<g->lintel_return_count;++i) {
     const VoxelLintelReturn *lip=&g->lintel_returns[i];
@@ -141,7 +141,9 @@ static void AuditSpecialized(const ActionRoomScene *s,const ActionVoxelGeometry 
     const VoxelTrunkCurve *curve=g->column_curves+i;
     printf("%s{\"owner\":%u,\"linear\":%s,\"ease_out\":%s,\"foreground\":%s,\"contact_x\":%d,\"contact\":[",i?",":"",i+1,
         curve->linear?"true":"false",curve->ease_out?"true":"false",curve->foreground?"true":"false",curve->contact_x);
-    for(unsigned j=0;j<curve->contact_count && j<8;++j)printf("%s%d",j?",":"",curve->contact[j]);
+    for(unsigned j=0;j<curve->contact_count && j<9;++j)printf("%s%d",j?",":"",curve->contact[j]);
+    printf("],\"round_x\":%d,\"round_width\":%d,\"native_lip\":%s,\"canopy_top\":[",curve->round_x,curve->round_width,curve->native_lip?"true":"false");
+    if(curve->native_lip)for(unsigned j=0;j<9;++j)printf("%s%d",j?",":"",curve->canopy_top[j]);
     printf("]}");
   }printf("]");
   const bool hollow=DioramaTrunk_Room(s->group,s->map);

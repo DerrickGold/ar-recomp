@@ -41,17 +41,17 @@ static void TrunkDetailBackingFixtures(const char *directory) {
         assert(output_pixels[0]==0&&output_pixels[1]==0&&output_pixels[2]==color);
       }
     assert(black&&colored&&black+colored==2560);
-    /* Preserve the genuine opening beside the lower-left decoration, including
-     * its native blue structural frame. Black recess pixels stay on the rear
-     * plane, transparent pixels stay absent, and neither becomes a cap. */
+    /* The complete noncolliding hollow beside the lower-left decoration is
+     * recessed, including its blue frame. Preserve every native opaque pixel
+     * on that rear plane and leave the transparent mouth open. */
     unsigned frame=0,recess=0,clear=0;
     for(unsigned y=864;y<896;++y)for(unsigned x=128;x<160;++x) {
       uint16_t word;uint8_t id;unsigned ink;
       assert(TrunkTestSample(s,NULL,x,y,&word,&ink,&id));
       assert(((word>>10)&7)==4&&!(word&0x2000));
       assert(ink==0||ink==1||(ink>=9&&ink<=13));
-      assert(ActionTrunk_SideSolid(base,x,y,kActionTrunkSideSolid)==(ink>=9));
-      assert(ActionTrunk_SideSolid(base,x,y,kActionTrunkSideRear)==(ink==1));
+      assert(!ActionTrunk_SideSolid(base,x,y,kActionTrunkSideSolid));
+      assert(ActionTrunk_SideSolid(base,x,y,kActionTrunkSideRear)==(ink!=0));
       assert(!ActionTrunk_SideSolid(base,x,y,kActionTrunkSidePriority));
       assert(!ActionTrunk_SideSolid(base,x,y,kActionTrunkSideSnow));
       assert(!ActionTrunk_SideSolid(base,x,y,kActionTrunkSideSnowFace));

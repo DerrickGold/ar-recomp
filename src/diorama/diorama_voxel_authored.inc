@@ -491,16 +491,21 @@ static bool DrawVoxelNativeTransformedFront(ArRenderDevice *device,const Diorama
     const VoxelTrunkCurve *curve=ActionVoxel_TrunkCurveForCell(geometry,tx,ty);
     const bool column=!curve && ActionVoxel_ColumnCurveForCell(geometry,tx,ty);
     if(column)curve=ActionVoxel_ColumnCurveForCell(geometry,tx,ty);
-    if(column && curve->contact_count) {
+    if(column && (curve->contact_count || curve->round_width)) {
       for(unsigned col=0;col<4;++col) {
         const float x0=a->x+x+col*2,x1=x0+2;
-        VoxelTrunkCurve section;ActionVoxel_ColumnSection(curve,x0+1,&section);
+        VoxelTrunkCurve section;
+        if(curve->native_lip)section=*curve;else ActionVoxel_ColumnSection(curve,x0+1,&section);
         float ys[4];const unsigned ny=VoxelTrunkCuts(&section,a->y+y,a->y+y+8,0,false,ys);
         for(unsigned row=0;row+1<ny;++row) {
           const float z0=ActionVoxel_ColumnFrontDepth(geometry,&section,ys[row]);
           const float z1=ActionVoxel_ColumnFrontDepth(geometry,&section,ys[row+1]);
           const float xy[]={x0,ys[row],x1,ys[row],x1,ys[row+1],x0,ys[row+1]};
-          const float z[]={z0,z0,z1,z1};
+          float z[]={z0,z0,z1,z1};
+          if(curve->round_width || curve->native_lip)for(unsigned v=0;v<4;++v) {
+            VoxelTrunkCurve vertex;ActionVoxel_ColumnSection(curve,xy[v*2],&vertex);
+            z[v]=ActionVoxel_ColumnFrontDepth(geometry,&vertex,xy[v*2+1]);
+          }
           const float uv[]={x0-a->x,ys[row]-a->y,x1-a->x,ys[row]-a->y,
               x1-a->x,ys[row+1]-a->y,x0-a->x,ys[row+1]-a->y};
           if(!AddVoxelAuthoredFace(device,capture,g,layer,a,0,kDioramaVoxelFace_Front,high,xy,z,uv,count))return false;

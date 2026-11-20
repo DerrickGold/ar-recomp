@@ -126,6 +126,8 @@ typedef struct Recorder {
   unsigned depth_draws, depth_vertices, depth_actor_vertices;
   const ActionTrunkAssets *trunk;
   unsigned depth_trunk_vertices;
+  unsigned depth_rim_vertices;
+  bool trunk_voxel;
   bool fail_depth;
   ArRenderTexture fold_front_texture, fold_rear_texture;
   ArRenderVertex2D fold_vertices[16];
@@ -860,6 +862,11 @@ static float PlaneDepth(const DioramaProjection *p,float world_z,ArRenderPointF 
   const double wx=(u*d-b*v)/det,wy=(a*v-u*c)/det;
   return (float)(.5+.5*(m[2]*wx+m[6]*wy+m[10]*z+m[14])/(m[3]*wx+m[7]*wy+m[11]*z+m[15]));
 }
+static float TrunkRimExpectedFront(float x) {
+  const float center=x<512?336:688,left=floorf(x/2)*2,t=(x-left)/2;
+  const float q0=(left-center)/16,q1=(left+2-center)/16;
+  return -.24f+.12f*((1-t)*sqrtf(fmaxf(0,1-q0*q0))+t*sqrtf(fmaxf(0,1-q1*q1)));
+}
 /* Independent camera-ray recovery: the two front corners must still lie on
  * actual native pixel endpoints at the actor plane, regardless of orbit or
  * capture origin. The rear corners then use that same world-space endpoint. */
@@ -877,9 +884,9 @@ static ArRenderPointF TrunkSideNativePoint(const Recorder *r,ArRenderPointF poin
   assert(fabsf(nx-roundf(nx))<.004f && fabsf(ny-roundf(ny))<.004f);
   return (ArRenderPointF){roundf(nx),roundf(ny)};
 }
-static float TrunkSideExpectedSpan(float x) {
+static float TrunkSideExpectedSpan(float x,bool voxel) {
   const float distance=x<320?320-x:x>704?x-704:0;
-  return .18f*fminf(1,distance/32.f);
+  return (voxel?.08f:.18f)*fminf(1,distance/32.f);
 }
 static void CheckTrunkSideCaps(Recorder *r,const ArRenderVertex2D *vertices,int count,const float *depths) {
   assert(count>0 && count%4==0);
@@ -923,7 +930,7 @@ static void CheckTrunkSideCaps(Recorder *r,const ArRenderVertex2D *vertices,int 
         fabsf(v[3].color.r-v[1].color.r*.86f)<.000001f);
     for(unsigned j=0;j<4;++j) {
       const ArRenderPointF native=(j==1||j==2)?b:a;
-      const float span=TrunkSideExpectedSpan(native.x),z=-.24f-(j>=2?span:0);
+      const float span=TrunkSideExpectedSpan(native.x,r->trunk_voxel),z=-.24f-(j>=2?span:0);
       const float ox=r->capture->bg1_camera_x-(r->capture->width-256)*.5f;
       const float oy=r->capture->camera_y-r->capture->authentic_y0+1;
       Scene3DClipPoint clip;
@@ -935,15 +942,16 @@ static void CheckTrunkSideCaps(Recorder *r,const ArRenderVertex2D *vertices,int 
       assert(fabsf(v[j].position.x-sx)<.003f && fabsf(v[j].position.y-sy)<.003f);
       if(depths)assert(fabsf(depths[first+j]-(clip.z/clip.w*.5f+.5f))<.000002f);
       const float along=(side&1)?native.y-y:native.x-x;
-      const float across=j>=2?span/.18f:0;
+      const float width=r->trunk_voxel?.08f:.18f;
+      const float across=j>=2?span/width:0;
       const float u=snow_riser?((x&31)+native.x-x)/32.f:
           (side&1)?(.5f+31*across)/32.f:((x&31)+along)/32.f;
       const float vv=(side&1)&&!snow_riser?(snow?.5f:0)+fminf(31.5f,(y&31)+along+.5f)/64.f:
           (snow?.5f:0)+(.5f+31*across)/64.f;
       assert(fabsf(v[j].tex_coord.x-u)<.000001f && fabsf(v[j].tex_coord.y-vv)<.000001f);
       if(!depths && j>=2) {
-        if(span>0 && span<.1799f)++probe->taper_vertices;
-        if(span>=.1799f)++probe->full_vertices;
+        if(span>0 && span<width-.0001f)++probe->taper_vertices;
+        if(span>=width-.0001f)++probe->full_vertices;
       }
     }
   }
@@ -987,7 +995,7 @@ static bool DepthGeometry(void *context,ArRenderDevice *device,const DioramaDept
   const int priority=DioramaPlaneObjectPriority(draw->plane);
   if(draw->native_actor)assert(priority>=0 && draw->texture.value!=r->prop_texture.value && !draw->clip_w);
   if(draw->clip_w) {
-    assert(!draw->native_actor && draw->vertex_count%4==0);
+    assert(!draw->native_actor);
     for(int i=0;i<draw->vertex_count;++i)assert(isfinite(draw->clip_w[i]) && draw->clip_w[i]>0);
     if(r->perspective_capture) {
       assert(r->perspective_count+draw->vertex_count<=32);
@@ -1019,11 +1027,35 @@ static bool DepthGeometry(void *context,ArRenderDevice *device,const DioramaDept
       const DioramaTrunkSettings settings=DioramaTrunk_Default();
       const float q=(x-512)/160;
       const bool side=r->trunk->side_width && (x<=320 || x>=704);
-      const float world_z=side?-settings.recess-TrunkSideExpectedSpan(x):
-          -settings.recess-settings.depth*fmaxf(0,1-q*q);
+      /* Authored exposure cuts can add vertices inside the native 8-pixel
+       * facets. Their exact surface is the chord between those endpoints. */
+      const float left=floorf(x/8)*8,right=left+8,t=(x-left)/8;
+      const float q0=(left-512)/160,q1=(right-512)/160;
+      const float relief=r->trunk->column_geometry
+          ?(1-t)*fmaxf(0,1-q0*q0)+t*fmaxf(0,1-q1*q1):fmaxf(0,1-q*q);
+      const float world_z=side?-settings.recess-TrunkSideExpectedSpan(x,r->trunk_voxel):
+          -settings.recess-settings.depth*relief;
       assert(fabsf(z-PlaneDepth(r->projection,world_z,draw->vertices[i].position))<.000002f);
       ++r->depth_trunk_vertices;
       if(side && r->trunk_side)++r->trunk_side->far_vertices;
+    }
+    if(r->trunk&&r->trunk_voxel&&draw->plane==kDioramaPlane_Bg1Hi) {
+      assert(draw->lighting&&draw->lighting->blur_radius==0);
+      const ArRenderVertex2D *vertex=draw->vertices+i;
+      const bool bark=r->textures[draw->texture.value].width==32&&r->textures[draw->texture.value].height==32;
+      if(bark) {
+        const float near=PlaneDepth(r->projection,-.12f,vertex->position),far=PlaneDepth(r->projection,-.24f,vertex->position);
+        assert(z>=fminf(near,far)-.000002f&&z<=fmaxf(near,far)+.000002f);
+        ++r->depth_rim_vertices;
+      } else if(r->textures[draw->texture.value].width!=32) {
+        const ArRenderRectF uv=draw->lighting->attributes_uv;
+        const float x=r->capture->bg1_camera_x-(r->capture->width-256)*.5f+
+            (uv.x+vertex->tex_coord.x*uv.w)*SR_PPU_SURFACE_MAX_WIDTH;
+        const float expected=x<319.999f||x>704.001f?-.24f:TrunkRimExpectedFront(x);
+        const bool seam=fabsf(x-320)<.001f||fabsf(x-704)<.001f;
+        assert(fabsf(z-PlaneDepth(r->projection,expected,vertex->position))<.000002f||
+            (seam&&fabsf(z-PlaneDepth(r->projection,-.24f,vertex->position))<.000002f));
+      }
     }
     if(r->trunk_side && draw->plane==kDioramaPlane_Bg1Hi &&
         draw->texture.value!=r->trunk_side->material.value &&
@@ -2410,7 +2442,8 @@ static unsigned TrunkDepthFixture(unsigned scenario) {
   for(int i=0;i<kDioramaPlane_Count;++i)Destroy(&r,textures[i]);
   assert(!r.live);return s_count;
 }
-static unsigned TrunkSideFixture(unsigned scenario) {
+static unsigned TrunkSideFixture(unsigned variant) {
+  const bool voxel=variant>=8;const unsigned scenario=variant%8;
   s_count=0;
   const bool right=!!(scenario&1),positive_yaw=!!(scenario&2),shared_depth=scenario<4;
   static ActionTrunkAssets trunk;memset(&trunk,0,sizeof(trunk));
@@ -2440,7 +2473,7 @@ static unsigned TrunkSideFixture(unsigned scenario) {
   for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)
     trunk.side_snow[y*16+x]=0xffa00000u|(y<<8)|x;
   TrunkSideProbe probe={.snow_start=start};
-  Recorder r={.width=960,.height=600,.bound_effect=-1,.shaders=true,.trunk=&trunk,.trunk_side=&probe};
+  Recorder r={.width=960,.height=600,.bound_effect=-1,.shaders=true,.trunk=&trunk,.trunk_side=&probe,.trunk_voxel=voxel};
   ArRenderDevice device;
   assert(ArRenderDevice_Init(&device,&kOps,&r,(ArRenderCapabilities){.flags=UINT64_MAX,
       .maximum_texture_width=8192,.maximum_texture_height=8192,
@@ -2458,7 +2491,7 @@ static unsigned TrunkSideFixture(unsigned scenario) {
   const DioramaRenderOptions options={.visible_planes=(1u<<kDioramaPlane_Count)-1};
   const DioramaDepthSink sink={.submit=DepthGeometry,.userdata=&r};
   const DioramaScene scene={.render=&options,.map_group=6,.map_number=6,
-      .trunk=&trunk,.trunk_settings=DioramaTrunk_Default(),.depth_sink=shared_depth?&sink:NULL};
+      .trunk=&trunk,.trunk_settings=DioramaTrunk_Default(),.voxel_mode=voxel,.depth_sink=shared_depth?&sink:NULL};
   DioramaProjection projection;r.projection=&projection;r.capture=&capture;
   for(unsigned frame=0;frame<5;++frame) {
     if(frame==2) {capture.bg1_camera_x+=7;capture.camera_y+=11;view.camera.tilt_y*=.8f;}
@@ -2727,10 +2760,21 @@ static unsigned SkyBatchFixture(unsigned scenario) {
 #include "diorama_voxel_clipped_cover.inc"
 #include "diorama_ramp_taper.inc"
 #include "diorama_masked_column.inc"
-unsigned DioramaFixture_Count(void) { return 680; }
+#include "diorama_voxel_playfield_effects.inc"
+#include "diorama_ice_finish.inc"
+#include "diorama_rounded_trunk.inc"
+#include "diorama_trunk_column.inc"
+#include "diorama_trunk_clearance.inc"
+unsigned DioramaFixture_Count(void) { return 700+kActionVoxelProfile_DeathHeim; }
 const float *DioramaFixture_Trace(void) { return s_trace; }
 unsigned DioramaFixture_Run(unsigned scenario) {
   assert(scenario < DioramaFixture_Count());
+  if(scenario>=698+kActionVoxelProfile_DeathHeim)return TrunkClearanceFixture(scenario-698-kActionVoxelProfile_DeathHeim);
+  if(scenario>=690+kActionVoxelProfile_DeathHeim)return TrunkSideFixture(8+scenario-690-kActionVoxelProfile_DeathHeim);
+  if(scenario>=686+kActionVoxelProfile_DeathHeim)return TrunkColumnFixture(scenario-686-kActionVoxelProfile_DeathHeim);
+  if(scenario>=682+kActionVoxelProfile_DeathHeim)return RoundedTrunkFixture(scenario-682-kActionVoxelProfile_DeathHeim);
+  if(scenario>=680+kActionVoxelProfile_DeathHeim)return IceFinishFixture(scenario-680-kActionVoxelProfile_DeathHeim);
+  if(scenario>=680)return PlayfieldEffectFixture(scenario-679);
   if(scenario>=672){s_depth_fixture=scenario>=676;return NativeProfileTransformFixture((scenario-672)%4);}
   if(scenario>=670)return MaskedColumnFixture(scenario-670);
   if(scenario>=662)return GroundFogFixture(scenario-662);

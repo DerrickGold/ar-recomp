@@ -259,6 +259,7 @@ enum { kVoxelContourSkinNone, kVoxelContourSkinTop, kVoxelContourSkinBottom,
        kVoxelContourSkinSnowCrest, kVoxelContourSkinSnowBody };
 enum { kVoxelSurfaceTextureNone=0, kVoxelSurfaceTexturePatch=1,
        kVoxelSurfaceTextureNativeInward=2, kVoxelSurfaceTextureLiveInward=3 };
+enum { kVoxelSurfaceFinishNone, kVoxelSurfaceFinishIce };
 typedef struct VoxelEdge {
   short x, y, length;
   unsigned char side, near_rank, far_rank, high_priority, rear_trim, colliding, textured_top;
@@ -284,6 +285,7 @@ typedef struct VoxelEdge {
   unsigned char surface_native_x; /* Reviewed band keeps source pixel boundaries, including native cutout columns. */
   uint16_t top_owned_art; /* One-based immutable donor; zero samples capture. */
   unsigned char surface_top_material; /* Tiny soft riser shares its reviewed cap's world-X/depth art. */
+  unsigned char surface_finish; /* Reviewed material finish; appearance only, independent of cap UVs. */
   unsigned char contour_skin; /* Reviewed hard diagonal: top/bottom material and its short closing risers. */
   unsigned char snow_closing_riser[2]; /* Native supported Snow step below left/right cap endpoint,1..2px; effect metadata only. */
   uint16_t source_owned_art[2]; /* One-based front/rear native source patches. */
@@ -294,18 +296,25 @@ typedef struct VoxelEdge {
   unsigned char column_curve, neighbor_column_curve;
   uint16_t room_edge_color; /* Opaque RGB555 for a room boundary cap, zero for ordinary edges. */
 } VoxelEdge;
-/* A lower tree shaft bends from its unchanged branch contact at top_y to the
- * rear vegetation at base_y. Query the owning cell once, then evaluate that
- * same curve for every vertex, including vertices on a neighbouring cell. */
+/* Vertical shafts bend between top_y/base_y; signed round_width instead
+ * describes a horizontal bark return. Query the owning cell once and resolve
+ * its section at every vertex, including vertices on a neighbouring cell. */
 typedef struct VoxelTrunkCurve {
   short top_y, base_y;
   /* A native ramp keeps its2px collision columns. Resolve one column before
-   * evaluating its4px front lip and12px linear return to the rear plane. */
-  short contact_x, contact[8];
+   * evaluating its4px front lip and12px linear return to the rear plane.
+   * A canopy uses nine shared boundary knots for a coating up to32px tall,
+   * shortened below exposed native walking contacts. */
+  short contact_x, contact[9];
+  short canopy_top[9]; /* Shared start knots, clamped below native walking contacts. */
   unsigned char contact_count, linear;
   /* A sharp lip eases into a shallow shaft instead of rounding both ends. */
   unsigned char ease_out;
   unsigned char foreground; /* Keep a native foreground shaft ahead of actors. */
+  short round_x, round_width; /* Signed world-X return from a bark edge toward its full-depth center. */
+  float round_weight; /* Resolved cross-section, normalized to scenery recession. */
+  unsigned char native_lip; /* Keep a snow overhang's native front before returning into rear foliage. */
+  float section_offset, section_height; /* World Y origin/height of a continuous canopy section. */
 } VoxelTrunkCurve;
 const VoxelTrunkCurve *ActionVoxel_TrunkCurveForCell(const ActionVoxelGeometry *c,int tile_x,int tile_y);
 const VoxelTrunkCurve *ActionVoxel_TrunkCurveForEdge(const ActionVoxelGeometry *c,const VoxelEdge *edge);
@@ -347,8 +356,11 @@ bool ActionVoxel_ResolveEdgeSpan(const ActionVoxelGeometry *c, const VoxelEdge *
 float ActionVoxel_EdgeRecess(const ActionVoxelGeometry *c, const VoxelEdge *edge);
 typedef struct VoxelRearTrim {
   short x, y, width;
+  uint16_t thin; /* Same shallow thickness as the source foreground post. */
 } VoxelRearTrim;
 const VoxelRearTrim *ActionVoxel_RearTrims(const ActionVoxelGeometry *c, unsigned *count);
+/* Rear copies grow forward from the wall, independently of the front copy. */
+float ActionVoxel_RearTrimRecess(const ActionVoxelGeometry *c, bool thin);
 /* One continuous native iron strip. Its transparent art supplies the side
  * panel; the adjoining marble is never part of this surface. */
 typedef struct VoxelGate {
@@ -412,8 +424,8 @@ float ActionVoxel_FrontRecess(const ActionVoxelGeometry *c, int tile_x, int tile
 /* Reviewed low-priority wood sharing a water character. Bit 7 is the left
  * pixel; selected native pixels use SceneryRecess and all others stay at 0.
  * Borrowed immutable rows, or NULL. High-priority artwork never has a mask.
- * The room-wide bound also limits the front mesh's added pixel partitions. */
-enum { kVoxelMaxPixelRecessCells = 64 };
+ * Shared masks and the room-wide added face count are separately bounded. */
+enum { kVoxelMaxPixelRecessMasks = 64, kVoxelMaxPixelRecessExtraFaces = 64*63 };
 const uint8_t *ActionVoxel_PixelRecessRows(const ActionVoxelGeometry *c, int tile_x, int tile_y);
 void ActionVoxel_GateInkRows(const ActionVoxelGeometry *c, int tile_x, int tile_y,
     bool high_priority, uint8_t rows[8]);

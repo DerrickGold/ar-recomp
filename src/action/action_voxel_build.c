@@ -14,6 +14,7 @@ typedef struct VoxelMaterialProfile {
   uint16_t gate_colors[4];
   uint16_t face_colors[4]; /* Native face-only ink; PixelRecess instead selects rear-mounted ink. */
   bool complete_rear_matte;
+  bool leaf_canopy;
   bool portal_jamb;
   bool door_closure;
   uint16_t column_recess_colors[4]; /* Rock ink within mixed grounded support art. */
@@ -123,8 +124,9 @@ typedef struct CastleMaterial {
   uint8_t top_family, contour_surface;
   uint8_t native_surface_faces,native_surface_family,native_surface_side_limit,native_surface_flip;
   uint8_t native_ice_tip_source,native_ice_tip_flip;
-  bool native_slope, native_slope_foot, native_slope_support;
+  bool native_slope, native_slope_foot, native_slope_support, canopy_slope;
   bool rear_backing_donor;
+  bool leaf_canopy;
   bool complete_rear_matte;
   bool portal_jamb;
   bool door_closure;
@@ -535,43 +537,92 @@ static bool MaterialTransparent(const CastleMaterial *m, const DioramaPixelEdit 
       (!(m->flags&kVoxelRearMatteMaterial) && (m->cutouts[y] & bit) &&
        !(edit && (edit->black[y] & bit)));
 }
+/* Match the native front renderer's greedy rectangle partition. A slope
+ * usually needs only a few strips; charge those instead of reserving the
+ * worst-case 63 extra faces for every reused eight-byte mask. */
+static unsigned PixelRecessExtraFaces(const uint8_t rows[8]) {
+  uint8_t visited[8]={0};unsigned faces=0;
+  for(unsigned y=0;y<8;++y)for(unsigned x=0;x<8;++x) {
+    if(visited[y]&(1u<<(7-x)))continue;
+    const bool rear=(rows[y]&(1u<<(7-x)))!=0;
+    const unsigned row=rear?rows[y]:~rows[y];
+    unsigned ex=x+1,ey=y+1;
+    while(ex<8 && ((row&~visited[y])&(1u<<(7-ex))))++ex;
+    const unsigned bits=((1u<<(ex-x))-1)<<(8-ex);
+    while(ey<8 && !(visited[ey]&bits) &&
+        (((rear?rows[ey]:~rows[ey])&bits)==bits))++ey;
+    for(unsigned yy=y;yy<ey;++yy)visited[yy]|=bits;
+    ++faces;
+  }
+  return faces-1;
+}
+static bool PixelRecessBudget(ActionVoxelGeometry *c) {
+  c->pixel_recess_extra_faces=0;
+  const int width=c->width/8,height=c->height/8;
+  for(int y=0;c->pixel_recess_cells && y<height;++y)for(int x=0;x<width;++x) {
+    const size_t at=(size_t)y*width+x;
+    const unsigned owner=c->pixel_recess_cells[at];
+    if(!owner)continue;
+    unsigned faces=PixelRecessExtraFaces(c->pixel_recess_rows[owner-1])+1;
+    /* Gate ink can add a third plane. Curved characters can split each
+     * rectangle at the two interior curve knots. Evaluate after all native
+     * curve owners have been compiled, including later desert supports. */
+    for(unsigned py=0;py<8 && faces<64;++py)for(unsigned px=0;px<8;++px)
+      if((c->front[(size_t)(y*8+py)*c->width+x*8+px]&kVoxelKindMask)==kVoxelGate)faces=64;
+    if((c->column_cells && c->column_cells[at]) || (c->trunk_cells && c->trunk_cells[at]))faces*=3;
+    c->pixel_recess_extra_faces+=faces-1;
+    if(c->pixel_recess_extra_faces>kVoxelMaxPixelRecessExtraFaces)return false;
+  }
+  return true;
+}
 /* A water/post character is one native source but two semantic surfaces.
  * Only reviewed authored ink moves; water, high-priority wood and explicit
  * pixel edits retain their existing placement. Snow slope endpoints use the
  * same source partition: only their two contact pixels come forward while
  * the rest of the shallow detail stays recessed. Deduplicate small masks
- * and bound the split cells, rather than storing per-pixel depths. */
+ * and bound their actual subdivisions, rather than storing per-pixel depths. */
 static bool BuildPixelRecess(ActionVoxelGeometry *c,const CastleMaterial *m,
-    const DioramaPixelEdit *edit,unsigned quadrant,int tile_x,int tile_y,uint16_t slope_foot) {
+    const DioramaPixelEdit *edit,unsigned quadrant,int tile_x,int tile_y,uint16_t slope_foot,
+    bool slope_rim) {
   const bool foot=quadrant<2 && (slope_foot&(quadrant?0x00ff:0xff00)) &&
       m->kind[quadrant]==kVoxelForeground && (m->flags&kVoxelRearMountedMaterial);
   const bool ink=(m->flags&kVoxelPixelRecessMaterial) && m->face_colors[quadrant];
-  if((!ink && !foot) || (m->words[quadrant]&0x2000))return true;
-  uint8_t rows[8]={0};unsigned any=0;
+  if((!ink && !foot && !slope_rim) || (m->words[quadrant]&0x2000))return true;
+  uint8_t rows[8]={0};unsigned any=0;bool front_ink=false;
   for(unsigned y=0;y<8;++y)for(unsigned x=0;x<8;++x) {
     const unsigned mx=(quadrant&1)*8+x,my=(quadrant>>1)*8+y;
     const unsigned p=m->pixels[quadrant][y*8+x];
     const bool rear=foot?!(my==0 && (slope_foot&(1u<<(15-mx)))):
+        slope_rim?!!(m->rear_rows[my]&(1u<<(15-mx))):
         !!(m->face_colors[quadrant]&(1u<<p));
-    if(!p || !rear || MaterialTransparent(m,edit,mx,my) ||
+    if(!p || MaterialTransparent(m,edit,mx,my) ||
         (!foot && edit && (edit->black[my]&(1u<<(15-mx)))))continue;
+    if(!rear){front_ink=true;continue;}
     rows[y]|=1u<<(7-x);any=1;
   }
   if(!any)return true;
-  if(c->pixel_recess_cell_count==kVoxelMaxPixelRecessCells)return false;
+  if(slope_rim) {
+    c->front_recess[(size_t)(tile_y-c->origin_y/8)*(c->width/8)+tile_x-c->origin_x/8]=2;
+    c->mixed_scenery=true;
+    /* Uniform rear characters need no per-pixel split or mask slot. */
+    if(!front_ink)return true;
+  }
   if(!c->pixel_recess_cells) {
     c->pixel_recess_cells=calloc((size_t)(c->width/8),c->height/8);
     if(!c->pixel_recess_cells)return false;
   }
+  const size_t at=(size_t)(tile_y-c->origin_y/8)*(c->width/8)+tile_x-c->origin_x/8;
+  const unsigned previous=c->pixel_recess_cells[at];
   unsigned owner=0;
   for(;owner<c->pixel_recess_mask_count;++owner)
     if(!memcmp(rows,c->pixel_recess_rows[owner],sizeof(rows)))break;
   if(owner==c->pixel_recess_mask_count) {
+    if(owner==kVoxelMaxPixelRecessMasks)return false;
     memcpy(c->pixel_recess_rows[owner],rows,sizeof(rows));
     ++c->pixel_recess_mask_count;
   }
-  c->pixel_recess_cells[(size_t)(tile_y-c->origin_y/8)*(c->width/8)+tile_x-c->origin_x/8]=owner+1;
-  ++c->pixel_recess_cell_count;
+  c->pixel_recess_cells[at]=owner+1;
+  if(!previous)++c->pixel_recess_cell_count;
   return true;
 }
 /* Decode each material once. Keys contain displayed art, palette slot,
@@ -627,7 +678,7 @@ static void Material(const ActionRoomScene *s, unsigned bg, const uint16_t words
   for(unsigned flip=0;flip<4 && !out->native_slope && !out->native_slope_foot &&
       !out->native_slope_support;++flip) {
     const unsigned contour=NativeContourProfile(s,MaterialKey(out,flip));
-    out->native_slope=contour==1;out->native_slope_foot=contour==2;
+    out->native_slope=contour==1 || contour==4;out->canopy_slope=contour==4;out->native_slope_foot=contour==2;
     out->native_slope_support=contour==3;
   }
   for(unsigned flip=0;flip<4 && !out->opaque_rear_ink;++flip)
@@ -659,6 +710,7 @@ static void Material(const ActionRoomScene *s, unsigned bg, const uint16_t words
     /* Backing stays in its reviewed source orientation. */
     out->flags = flip ? p->flags & ~kCastleBackingMaterial : p->flags;
     out->complete_rear_matte = p->complete_rear_matte;
+    out->leaf_canopy = p->leaf_canopy;
     out->portal_jamb = p->portal_jamb;
     out->door_closure = p->door_closure;
     out->column_shadow = p->column_shadow;
@@ -1637,8 +1689,9 @@ static bool NativeContourEdited(const DioramaRoomOverride *terrain,int x,int y) 
  * return under the outside edge of their common lintel joins them in depth.
  * The return occupies one native X coordinate and leaves the front art intact. */
 static bool MaterialHasGrille(const CastleMaterial *material) {
-  return material->gate_colors[0] || material->gate_colors[1] ||
-         material->gate_colors[2] || material->gate_colors[3];
+  for(unsigned q=0;q<4;++q)
+    if(material->kind[q]==kVoxelGate || material->gate_colors[q])return true;
+  return false;
 }
 
 /* The tomb lintels already have their own face geometry. Use the paired
@@ -1906,6 +1959,8 @@ static bool BuildMountainRampReturns(ActionVoxelGeometry *c,const ActionRoomScen
 #include "action_voxel_marsh_fold.inc"
 #include "action_voxel_castle_columns.inc"
 #include "action_voxel_desert_columns.inc"
+#include "action_voxel_snow_trunks.inc"
+#include "action_voxel_snow_canopy.inc"
 #include "action_voxel_authored.inc"
 #include "action_voxel_surfaces.inc"
 #include "action_voxel_jungle_water.inc"
@@ -2015,6 +2070,11 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
           !NativeContourEdited(terrain,cx,cy);
       const bool snow_rock_base=snow_rock &&
           SnowRockReturnsToBank(&material,s,stamps,native,cx,cy,tiles,tile_pitch);
+      /* The art above a walking ramp's collision contour is the same raised
+       * rear rim as the neighbouring loose snow tiles. Keep its thickness;
+       * partition it from the full-depth walking surface in the same cell. */
+      const bool snow_rim=c->profile==kActionVoxelProfile_NorthwallSnow &&
+          material.native_slope && !material.canopy_slope && !snow_rock && !NativeContourEdited(terrain,cx,cy);
       if ((material.flags & kVoxelSoftSurfaceMaterial) || slope_foot || have_slope_support) {
         if (!c->soft_surfaces) {
           c->soft_surfaces=calloc((size_t)c->width/16,c->height/16);
@@ -2092,16 +2152,18 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
             (kind==kVoxelSolid || kind==kVoxelForeground || kind==kVoxelThin);
         if(portal_jamb)
           kind=high_priority?kVoxelForeground:c->front_recess?kVoxelThin:kVoxelRearOnly;
+        const bool thin_trim=((material.flags&kVoxelNativePrioritySceneryMaterial) || portal_jamb) &&
+            high_priority && !solid && kind==kVoxelForeground;
         /* Reviewed raised crenellations need matching rear trim. Portals
          * with authored rear jambs do not request a second copy. */
         const bool rear_trim = high_priority && !portal_jamb && (material.flags & kCastleRearMaterial);
         if (rear_trim && !(tx & 1) && !(ty & 1)) {
           VoxelRearTrim *last = c->rear_trim_count ? &c->rear_trims[c->rear_trim_count - 1] : NULL;
-          if (last && last->y == ty * 8 && last->x + last->width == tx * 8)
+          if (last && last->y == ty * 8 && last->x + last->width == tx * 8 && last->thin==thin_trim)
             last->width += 16;
           else {
             if (c->rear_trim_count == kVoxelMaxRearTrims) return false;
-            c->rear_trims[c->rear_trim_count++] = (VoxelRearTrim){tx * 8, ty * 8, 16};
+            c->rear_trims[c->rear_trim_count++] = (VoxelRearTrim){tx * 8, ty * 8, 16, thin_trim};
           }
         }
         /* Reviewed continuous terrain can cross a noncolliding quadrant at
@@ -2143,6 +2205,20 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
           c->column_cells[(size_t)(ty-y0/8)*(c->width/8)+tx-x0/8]=(uint8_t)(owner+1);
         }
         bool foot_quadrant=quadrant<2 && (slope_foot&(quadrant?0x00ff:0xff00));
+        bool tapered_foot=false;
+        /* A one-row native slope endpoint continues the tapered rock above.
+         * Without its depth owner this tiny solid strip starts at the front
+         * of the entire floor, producing a long needle beside the rear bank.
+         * The rest of this quadrant already lives at the curve's rear end. */
+        if(!snow_rock && foot_quadrant && c->profile==kActionVoxelProfile_NorthwallSnow &&
+            c->column_cells && ty>y0/8) {
+          const size_t at=(size_t)(ty-y0/8)*(c->width/8)+tx-x0/8;
+          const unsigned owner=c->column_cells[at-c->width/8];
+          if(owner && owner<=c->column_curve_count &&
+              c->column_curves[owner-1].base_y==cy*16) {
+            c->column_cells[at]=(uint8_t)owner;tapered_foot=true;
+          }
+        }
         for(unsigned y=0;y<8 && !foot_quadrant;++y)
           foot_quadrant=!!(slope_support[(quadrant/2)*8+y]&((quadrant&1)?0x00ff:0xff00));
         const unsigned role=SemanticMaterialKind(&material,foot_quadrant?kVoxelSolid:kind);
@@ -2166,7 +2242,7 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
         /* Noncolliding front posts are scenery outside the walking lane.
          * Keep their native front face/priority, but do not give them the
          * quarter-deck thickness used by rocks and rear-mounted supports. */
-        if((priority_scenery || portal_jamb) && high_priority && !solid && kind==kVoxelForeground) {
+        if(thin_trim) {
           if(!c->thin_trim_cells) {
             c->thin_trim_cells=calloc((size_t)c->width/8,c->height/8);
             if(!c->thin_trim_cells)return false;
@@ -2195,7 +2271,8 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
           c->mixed_scenery=true;
         }
         c->mixed_scenery |= (material.flags&kVoxelRearMountedMaterial)!=0 || priority_scenery || portal_jamb;
-        if(!snow_rock && !BuildPixelRecess(c,&material,edit,quadrant,tx,ty,slope_foot))return false;
+        if(!snow_rock && !tapered_foot &&
+            !BuildPixelRecess(c,&material,edit,quadrant,tx,ty,slope_foot,snow_rim))return false;
         if (material.flags & (kVoxelGrowthMaterial | kVoxelBranchMaterial | kVoxelSideProfileMaterial |
                               kVoxelSpikeMaterial | kVoxelRearGrassMaterial)) {
           const unsigned patch_kind = material.flags & kVoxelRearGrassMaterial ? kVoxelPatch_RearGrass
@@ -2256,9 +2333,10 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
                 (material.cutouts[my]&(1u<<(15-mx))) && !(edit && (edit->black[my]&(1u<<(15-mx))));
             const bool foot_pixel=(my==0 && (slope_foot&(1u<<(15-mx)))) ||
                 (slope_support[my]&(1u<<(15-mx)));
-            const unsigned pixel_kind = foot_pixel ? kVoxelSolid : rear_matte || (material.rear_rows[my]&(1u<<(15-mx))) ||
-                (material.rear_colors[quadrant] & (1u << p))
-                ? kVoxelRearOnly : material.gate_colors[quadrant] & (1u << p) ? kVoxelGate
+            const unsigned pixel_kind = foot_pixel ? kVoxelSolid : rear_matte ||
+                (material.rear_colors[quadrant] & (1u << p)) ? kVoxelRearOnly :
+                (material.rear_rows[my]&(1u<<(15-mx))) ? (snow_rim?kVoxelForeground:kVoxelRearOnly) :
+                material.gate_colors[quadrant] & (1u << p) ? kVoxelGate
                 : !(material.flags&kVoxelPixelRecessMaterial) &&
                     (material.face_colors[quadrant] & (1u << p)) ? kVoxelFoliage : kind;
             c->front[(ty * 8 + y - y0) * c->width + tx * 8 + x - x0] =
@@ -2342,18 +2420,25 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
   if(!BuildForestTrunkCurves(c,s,stamps,native,tiles,tile_pitch))return false;
   if(!BuildForestRootBacking(c,s,terrain,stamps,native,palette,tiles,tile_pitch))return false;
   if(!BuildCastleColumns(c,s,stamps,native,tiles,tile_pitch))return false;
+  if(!BuildSnowTrunkRounds(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
+  if(!BuildSnowCanopyReturns(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
   if(!BuildDesertGroundedColumns(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
   if(!BuildMountainRampReturns(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
+  if(!PixelRecessBudget(c))return false;
   if(c->column_cells)for(int cy=0;cy<c->height/16;++cy)for(int cx=0;cx<c->width/16;++cx) {
-    bool column=false,ramp=false;
+    bool column=false,ramp=false,tree=false,coating=false;
     for(unsigned q=0;q<4;++q) {
       const unsigned owner=c->column_cells[(size_t)(cy*2+(q>>1))*(c->width/8)+cx*2+(q&1)];
       if(owner) {
+        coating|=c->column_curves[owner-1].native_lip!=0;
+        tree|=c->column_curves[owner-1].round_width!=0;
         ramp|=c->column_curves[owner-1].contact_count!=0;
         column|=c->column_curves[owner-1].contact_count==0;
       }
     }
-    if(column)c->semantic_cells[(size_t)cy*(c->width/16)+cx]=kVoxelSemantic_Column;
+    if(coating)continue; /* A snow finish does not turn foliage into a column/platform. */
+    if(tree)c->semantic_cells[(size_t)cy*(c->width/16)+cx]=kVoxelSemantic_TreeWood;
+    else if(column)c->semantic_cells[(size_t)cy*(c->width/16)+cx]=kVoxelSemantic_Column;
     else if(ramp)c->semantic_cells[(size_t)cy*(c->width/16)+cx]=kVoxelSemantic_Platform;
   }
   for (unsigned side = 0; side < 4; ++side) {

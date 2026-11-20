@@ -116,7 +116,7 @@ static bool BuildDesertGroundedColumns(ActionVoxelGeometry *c,const ActionRoomSc
         m.flags|=kVoxelPixelRecessMaterial;
         memcpy(m.face_colors,m.column_recess_colors,sizeof(m.face_colors));
         for(unsigned q=0;q<4;++q)
-          if(!BuildPixelRecess(c,&m,edit,q,(x+x0)*2+(q&1),(y+y0)*2+(q>>1),0)){ok=false;break;}
+          if(!BuildPixelRecess(c,&m,edit,q,(x+x0)*2+(q&1),(y+y0)*2+(q>>1),0,false)){ok=false;break;}
       }
     }
   }

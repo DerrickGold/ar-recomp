@@ -21,6 +21,16 @@ static bool PrepareHollowGuardMesh(const DioramaCapture *capture,const DioramaVi
   for(unsigned region=0;region<(rear?2u:3u);++region) {
     const float left=fmaxf(regions[region][0],first_x),right=fminf(regions[region][1],last_x);
     if(right<=left)continue;
+    if(region<2&&layer->hollow_voxel&&s_trunk_assets->side_clearance&&
+        layer->description->plane==SR_PPU_OVERLAY_BG1)continue;
+    if(region==2&&layer->hollow_voxel&&layer->description->plane==kDioramaPlane_Bg1Hi&&!rear) {
+      if(!AppendHollowRimMesh(capture,g,layer,left,right,first_y,last_y,mesh))return false;
+      continue;
+    }
+    if(region==2&&layer->hollow_column&&layer->description->plane==SR_PPU_OVERLAY_BG1&&!rear) {
+      if(!AppendHollowColumnMesh(capture,g,layer,left,right,first_y,last_y,mesh))return false;
+      continue;
+    }
     float columns[4];unsigned count=0;columns[count++]=left;
     const float joins[]={288,736};
     for(unsigned i=0;i<2;++i)if(joins[i]>left&&joins[i]<right)columns[count++]=joins[i];
@@ -31,10 +41,9 @@ static bool PrepareHollowGuardMesh(const DioramaCapture *capture,const DioramaVi
       const float x=((u-g->u0)/(g->u1-g->u0)-.5f)*g->aspect_x;
       const float y=(.5f-(v-g->v0)/(g->v1-g->v0))*g->height_scale;
       const float front=region==2?layer->authored->z-.5f:-layer->hollow_recess;
-      const float z=front-(rear?DioramaTrunk_SideDepth(layer->hollow_recess,world_x):0);
+      const float z=front-(rear?DioramaTrunk_SideDepth(layer->hollow_recess,world_x,layer->hollow_voxel):0);
       const unsigned index=(unsigned)mesh->vertex_count++;ArRenderVertex2D *vertex=&mesh->vertices[index];
-      if(!ProjectWorldPointDepth(g->matrix,x,y,z,g->width,g->height,&vertex->position,
-          mesh->has_depth?mesh->depths+index:NULL))return false;
+      if(!ProjectHollowPoint(g,mesh,index,x,y,z))return false;
       vertex->tex_coord=(ArRenderPointF){u,v};vertex->color=layer->shade;
     }
     for(unsigned col=0;col+1<count;++col) {
@@ -78,6 +87,17 @@ static PresentationOutcome DrawHollowGuard(ArRenderDevice *device,const DioramaC
     if(!PresentationOutcome_IsUsable(outcome))return outcome;
     const bool filtered=ArRenderTexture_IsValid(texture);
     if(!filtered)texture=guard->textures[band];
+    if(band==0&&layer->hollow_voxel&&s_trunk_assets->side_clearance) {
+      const float regions[2][2]={{0,320},{704,(float)s_trunk_assets->side_width}};
+      const float x0=strip->world_x+strip->valid.x,x1=x0+strip->valid.width;
+      const float y0=strip->world_y+strip->valid.y,y1=y0+strip->valid.height;
+      HollowFrontSource carved={.device=device,.capture=capture,.geometry=g,.layer=layer,
+          .strip=strip,.texture=texture,.filtered=filtered,.outcome=outcome};
+      for(unsigned region=0;region<2;++region)
+        if(!DrawHollowCarvedFront(&carved,fmaxf(regions[region][0],x0),fminf(regions[region][1],x1),y0,y1))
+          return kPresentationOutcome_CoreFailure;
+      outcome=carved.outcome;
+    }
     DioramaLayerMesh mesh;
     if(!PrepareHollowGuardMesh(capture,g,layer,strip,rear,filtered,&mesh))return kPresentationOutcome_CoreFailure;
     if(!mesh.vertex_count)continue;
@@ -92,7 +112,9 @@ static PresentationOutcome DrawHollowGuard(ArRenderDevice *device,const DioramaC
     light.mode=0;light.blur_radius=0;light.attributes_uv=source_uv;
     light.texel_width=1.f/(sample_width*(filtered?kDioramaSupersample:1));
     light.texel_height=1.f/(sample_height*(filtered?kDioramaSupersample:1));
-    if(!RenderShadedDioramaDepthGeometry(device,texture,mesh.vertices,mesh.depths,mesh.vertex_count,
+    const bool perspective=layer->hollow_voxel&&layer->depth_sink;
+    if(!RenderShadedDioramaDepthGeometryWithW(device,texture,mesh.vertices,mesh.depths,
+        perspective?mesh.clip_w:NULL,mesh.vertex_count,
         mesh.indices,mesh.index_count,layer->blend,layer->exposure,source_uv,&light,
         layer->depth_sink,layer->description->plane,false))return kPresentationOutcome_CoreFailure;
   }

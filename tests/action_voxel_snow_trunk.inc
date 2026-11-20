@@ -5,7 +5,7 @@
  * collision must not turn every other row into a recessed decorative panel. */
 static void SnowTrunkFixtures(const char *directory) {
   if(!directory)return;
-  static ActionSceneSnapshot fixture;static ActionRoomScene original;
+  static ActionSceneSnapshot fixture;static ActionRoomScene original,remapped;
   static uint8_t encoded[kActionSceneSnapshotMaxBytes];
   static DioramaRoomOverride terrain;
   for(unsigned region=0;region<3;++region) {
@@ -19,6 +19,16 @@ static void SnowTrunkFixtures(const char *directory) {
     assert(ActionVoxel_Build(base,s,NULL,settings));
     int body_tx,body_ty;assert(FixtureCell(s,0xca,&body_tx,&body_ty));
     VoxelCellGeometry body;assert(ActionVoxel_CellGeometry(base,body_tx/2,body_ty/2,&body));
+    const VoxelTrunkCurve *round=ActionVoxel_ColumnCurveForCell(base,86,22);
+    assert(round && round->round_x==688 && round->round_width==32);
+    float previous=.2f;
+    for(unsigned x=688;x<=720;x+=2) {
+      VoxelTrunkCurve section;ActionVoxel_ColumnSection(round,x,&section);
+      const float z=ActionVoxel_ColumnFrontDepth(base,&section,176);
+      assert(z<=previous && z>=0 && z<=.15f);previous=z;
+      if(x==688)assert(fabsf(z-.15f)<.000001f);
+      if(x==720)assert(z==0);
+    }
     unsigned cells=0,side_pixels=0;
     for(unsigned y=0;y<ActionRoomScene_TileHeight(s,1)/2;++y)
       for(unsigned x=0;x<ActionRoomScene_TileWidth(s,1)/2;++x) {
@@ -33,7 +43,9 @@ static void SnowTrunkFixtures(const char *directory) {
           assert(word==body_word && !(word&0x2000));
           assert(!(s->bg[0].metatiles[0x91*8+q*2]&2));
           assert(s->bg[0].metatiles[0xca*8+q*2]&2);
-          assert(cell.front[q]==0 && fabsf(cell.back[q]-.2f)<.000001f);
+          VoxelTrunkCurve section;ActionVoxel_ColumnSection(round,x*16+(q&1)*8+4,&section);
+          assert(fabsf(cell.front[q]-ActionVoxel_ColumnFrontDepth(base,&section,y*16+4))<.000001f &&
+              fabsf(cell.back[q]-.2f)<.000001f);
           assert(cell.front[q]==body.front[q] && cell.back[q]==body.back[q]);
         }
         uint32_t native[256],rear[256],front[256];
@@ -63,6 +75,25 @@ static void SnowTrunkFixtures(const char *directory) {
         }
       }
     assert(cells==4 && side_pixels);
+    remapped=*s;Renumber(&remapped);assert(ActionVoxel_Build(edited,&remapped,NULL,settings));SameGeometry(base,edited);
+    const VoxelTrunkCurve *renumbered=ActionVoxel_ColumnCurveForCell(edited,86,22);
+    assert(renumbered && renumbered->round_x==round->round_x && renumbered->round_width==round->round_width);
+    /* A mirrored stamp run turns the same curve toward the opposite edge. */
+    DioramaTileStamp stamps[6];memset(stamps,0,sizeof(stamps));
+    for(unsigned i=0;i<6;++i) {
+      uint16_t words[4];uint8_t id;
+      for(unsigned q=0;q<4;++q)assert(ActionRoomScene_LookupTile(s,1,(42+i)*2+(q&1),22+(q>>1),&words[q],&id));
+      stamps[i]=(DioramaTileStamp){.x=47-i,.y=11,.metatile=id};
+      for(unsigned q=0;q<4;++q)stamps[i].words[q]=words[q^1]^0x4000;
+    }
+    memset(&terrain,0,sizeof(terrain));terrain.stamp_layers[0]=(DioramaStampLayerOverride){.cells=stamps,.count=6};
+    assert(ActionVoxel_Build(edited,s,&terrain,settings));
+    const VoxelTrunkCurve *mirror=ActionVoxel_ColumnCurveForCell(edited,92,22);
+    assert(mirror && mirror->round_x==752 && mirror->round_width==-32);
+    for(unsigned i=0;i<=32;i+=2) {
+      VoxelTrunkCurve a,b;ActionVoxel_ColumnSection(round,688+i,&a);ActionVoxel_ColumnSection(mirror,752-i,&b);
+      assert(ActionVoxel_ColumnFrontDepth(base,&a,176)==ActionVoxel_ColumnFrontDepth(edited,&b,176));
+    }
     /* The adjacent outline and separate lower bark retain their shallow
      * scenery contract; this is not a room-wide tree depth change. */
     VoxelCellGeometry outline;assert(ActionVoxel_CellGeometry(base,42,11,&outline));
@@ -76,7 +107,8 @@ static void SnowTrunkFixtures(const char *directory) {
     const VoxelAuthoredCell *a=ActionVoxel_AuthoredCellAt(edited,43,11);assert(a&&a->surface);
     for(unsigned q=0;q<4;++q)assert(a->front[q]==edit->front && a->back[q]==edit->back && !a->priority[q]);
     VoxelCellGeometry neighbor;assert(ActionVoxel_CellGeometry(edited,43,12,&neighbor));
-    for(unsigned q=0;q<4;++q)assert(neighbor.front[q]==0 && fabsf(neighbor.back[q]-.2f)<.000001f);
+    VoxelCellGeometry native_neighbor;assert(ActionVoxel_CellGeometry(base,43,12,&native_neighbor));
+    for(unsigned q=0;q<4;++q)assert(neighbor.front[q]==native_neighbor.front[q] && fabsf(neighbor.back[q]-.2f)<.000001f);
     *edit=(DioramaVoxelCell){.x=43,.y=11,.fields=kDioramaVoxelCell_Faces,
         .faces=kDioramaVoxelFaceMask_All&~kDioramaVoxelFaceMask_Front};
     assert(ActionVoxel_Build(edited,s,&terrain,settings));
@@ -86,7 +118,7 @@ static void SnowTrunkFixtures(const char *directory) {
     assert(ActionVoxel_Build(edited,s,&terrain,settings));
     assert(!ActionVoxel_AuthoredCellAt(edited,43,11));SameGeometry(base,edited);
     assert(!memcmp(s,&original,sizeof(original)));
-    printf("Northwall entrance trunk terrain%u: four noncolliding bark cells share native body depth, no internal ledges; artwork, priority, outline and authored edits preserved\n",region);
+    printf("Northwall entrance trunk terrain%u: continuous rounded bark return, four noncolliding cells share body depth, no internal ledges; artwork, priority, outline and authored edits preserved\n",region);
     ActionVoxel_Release(base);ActionVoxel_Release(edited);
   }
 }

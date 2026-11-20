@@ -206,6 +206,89 @@ static void NorthwallForegroundEntrance(const ActionRoomScene *s, const ActionVo
   assert(cells == 17);
 }
 
+/* The closed entrance grille shares a metatile with its inner stone jamb.
+ * Its native strip must span the door depth; open artwork must not retain it. */
+static void NorthwallGateChecks(const ActionRoomScene *s,const ActionVoxelGeometry *g) {
+  unsigned expected=0,actual=0;
+  for(unsigned y=0;y<ActionRoomScene_TileHeight(s,1);y+=2)
+    for(unsigned x=0;x<ActionRoomScene_TileWidth(s,1);x+=2) {
+      uint16_t word;uint8_t id;assert(ActionRoomScene_LookupTile(s,1,x,y,&word,&id));
+      if(id!=0xc0)continue;
+      expected+=16;
+      for(unsigned q=0;q<4;++q) {
+        uint8_t rows[8];ActionVoxel_GateInkRows(g,x+(q&1),y+(q>>1),false,rows);
+        unsigned ink=0;for(unsigned py=0;py<8;++py)ink|=rows[py];
+        assert((ink!=0)==!(q&1));
+        if(q&1)assert(ActionVoxel_FrontRecess(g,x+1,y+(q>>1))==ActionVoxel_SceneryRecess(g));
+      }
+    }
+  unsigned count;const VoxelGate *gates=ActionVoxel_Gates(g,&count);
+  for(unsigned i=0;i<count;++i) {
+    const VoxelGate *gate=gates+i;actual+=gate->height;
+    assert(!gate->width && !gate->solid_face && !gate->centered && !gate->high_priority);
+    uint16_t word;assert(ActionRoomScene_LookupTile(s,1,gate->x/8,gate->y/8,&word,NULL));
+    assert(gate->to_right==!!(word&0x4000));
+  }
+  assert(actual==expected);
+}
+/* The climbing cave mixes opaque black8a with transparent00 for the same
+ * dark interior. Only that reviewed native void gets a rear-plane matte;
+ * neither the physical silhouette nor source alpha is changed. */
+static uint64_t TombCapKey(const ActionRoomScene *,const uint16_t [4],unsigned,unsigned);
+static bool TombCapWords(const ActionRoomScene *,const DioramaRoomOverride *,int,int,uint16_t [4],unsigned *);
+static uint64_t TombCapGeometryHash(const ActionVoxelGeometry *);
+static void NorthwallCaveVoidChecks(const ActionRoomScene *s,const ActionVoxelGeometry *g,
+    ActionVoxelGeometry *edited,ActionVoxelSettings settings,unsigned region) {
+  static ActionRoomScene remapped,changed;
+  static DioramaRoomOverride terrain;
+  const ActionRoomSceneFrameState frame={.brightness=15};
+  uint32_t low[256]={0},rear[256],front[256];
+  const int columns=ActionRoomScene_TileWidth(s,1)/2,rows=ActionRoomScene_TileHeight(s,1)/2;
+  unsigned cells=0;int first_x=-1,first_y=-1;
+  remapped=*s;Renumber(&remapped);assert(ActionVoxel_Build(edited,&remapped,NULL,settings));
+  assert(TombCapGeometryHash(g)==TombCapGeometryHash(edited));
+  assert(g->width==edited->width && g->height==edited->height &&
+      !memcmp(g->front,edited->front,(size_t)g->width*g->height));
+  for(int y=0;y<rows;++y)for(int x=0;x<columns;++x) {
+    uint16_t words[4];unsigned collision;uint8_t id;uint16_t word;
+    assert(ActionRoomScene_LookupTile(s,1,x*2,y*2,&word,&id));
+    if(id!=0)continue; /* Fixture locator, deliberately independent of policy keys. */
+    assert(TombCapWords(s,NULL,x,y,words,&collision) && !collision);
+    assert(TombCapKey(s,words,collision,0)==UINT64_C(0x2b9585b6483447e5));
+    for(unsigned p=0;p<256;++p)assert(!FixturePixel(s,x*16+p%16,y*16+p/16));
+    for(unsigned remap=0;remap<2;++remap) {
+      assert(ActionVoxel_Split(remap?edited:g,x*16,y*16,16,16,16,&frame,low,16,rear,front));
+      for(unsigned p=0;p<256;++p)assert(rear[p]==UINT32_C(0xff000000) && !front[p]);
+    }
+    if(first_x<0){first_x=x;first_y=y;}++cells;
+  }
+  /* Regional layouts have different blank-cell counts; every native cell
+   * above is independently checked, including beyond the old512-fill limit. */
+  assert(cells>512 && g->rear_fill_count<kVoxelMaxRearFills);
+  /* A fill supplies missing backing, never overwrites supplied rear art. */
+  low[0]=UINT32_C(0xff123456);
+  assert(ActionVoxel_Split(g,first_x*16,first_y*16,16,16,16,&frame,low,16,rear,front));
+  assert(rear[0]==low[0]);low[0]=0;
+  memset(&terrain,0,sizeof(terrain));terrain.pixel_layers[0].count=1;
+  DioramaPixelEdit *pixel=&terrain.pixel_layers[0].edits[0];
+  *pixel=(DioramaPixelEdit){.by_cell=true,.x=first_x,.y=first_y};pixel->transparent[5]=1u<<11;
+  assert(ActionVoxel_Build(edited,s,&terrain,settings));
+  assert(ActionVoxel_Split(edited,first_x*16,first_y*16,16,16,16,&frame,low,16,rear,front));
+  for(unsigned p=0;p<256;++p)assert(rear[p]==(p==84?0:UINT32_C(0xff000000)) && !front[p]);
+  memset(&terrain,0,sizeof(terrain));terrain.voxel.cell_count=1;
+  terrain.voxel.cells[0]=(DioramaVoxelCell){.x=first_x,.y=first_y,
+    .fields=kDioramaVoxelCell_Backing,.backing=kDioramaVoxelBacking_None};
+  assert(ActionVoxel_Build(edited,s,&terrain,settings));
+  assert(ActionVoxel_Split(edited,first_x*16,first_y*16,16,16,16,&frame,low,16,rear,front));
+  for(unsigned p=0;p<256;++p)assert(!rear[p] && !front[p]);
+  /* Replacing the blank character changes its fingerprint: new source art
+   * cannot inherit the cave's automatic opaque matte. */
+  changed=*s;changed.characters[0]=0x80;
+  assert(ActionVoxel_Build(edited,&changed,NULL,settings));
+  assert(ActionVoxel_Split(edited,first_x*16,first_y*16,16,16,16,&frame,low,16,rear,front));
+  for(unsigned p=0;p<256;++p)assert(!rear[p] && !front[p]);
+  printf("Northwall cave void region%u: %u complete rear cells; native geometry, remapping, supplied art and explicit removals preserved\n",region,cells);
+}
 static unsigned NorthwallFixtures(const char *directory) {
   static ActionSceneSnapshot fixture;
   static ActionRoomScene variant;
@@ -224,6 +307,39 @@ static unsigned NorthwallFixtures(const char *directory) {
     assert(ActionVoxel_Profile(a)==(ice?kActionVoxelProfile_NorthwallIce:kActionVoxelProfile_NorthwallSnow));
     assert(ActionVoxel_Depth(a)==(ice?.22f:.20f));
     assert(ActionVoxel_PlayRecess(a)==(ice?.075f:.065f));
+    if(room==3)NorthwallCaveVoidChecks(s,a,b,settings,region);
+    if(ice) {
+      unsigned finish_count=0,edge_count;const VoxelEdge *finish_edges=ActionVoxel_Edges(a,&edge_count);
+      for(unsigned i=0;i<edge_count;++i)if(finish_edges[i].surface_finish) {
+        const VoxelEdge *e=finish_edges+i;
+        assert(e->surface_finish==kVoxelSurfaceFinishIce && !e->side && e->far_rank==2 && !e->room_edge_color);
+        uint16_t word;assert(ActionRoomScene_LookupTile(s,1,e->x/8,e->y/8,&word,NULL));
+        assert(((word>>10)&7)==5); /* Native blue ice, never the cave stone/snow palette. */
+        ++finish_count;
+      }
+      assert(finish_count);printf("Northwall ice finish 06/%02u region%u: %u reviewed top strips\n",room,region,finish_count);
+      NorthwallGateChecks(s,a);
+      variant=*s;variant.bg[0].map[0]=0xc0;
+      assert(ActionVoxel_Build(b,&variant,NULL,settings));NorthwallGateChecks(&variant,b);
+      unsigned closed;ActionVoxel_Gates(b,&closed);assert(closed);
+      DioramaRoomOverride mirror={0};DioramaTileStamp stamp={.metatile=0xc0};
+      uint16_t words[4];
+      for(unsigned q=0;q<4;++q)
+        assert(ActionRoomScene_LookupTile(&variant,1,q&1,q>>1,&words[q],NULL));
+      for(unsigned q=0;q<4;++q)stamp.words[q]=words[q^1]^0x4000;
+      mirror.stamp_layers[0]=(DioramaStampLayerOverride){.cells=&stamp,.count=1};
+      assert(ActionVoxel_Build(b,&variant,&mirror,settings));
+      unsigned mirrored_count;const VoxelGate *mirrored=ActionVoxel_Gates(b,&mirrored_count);
+      bool mirror_found=false;
+      for(unsigned i=0;i<mirrored_count;++i)if(mirrored[i].x==8 && mirrored[i].y==0) {
+        assert(!mirrored[i].to_right && mirrored[i].height==16);mirror_found=true;
+      }
+      assert(mirror_found && mirrored_count==closed);
+      for(size_t i=0;i<variant.bg[0].map_size;++i)
+        if(variant.bg[0].map[i]==0xc0)variant.bg[0].map[i]=0x7b;
+      assert(ActionVoxel_Build(b,&variant,NULL,settings));
+      unsigned opened;ActionVoxel_Gates(b,&opened);assert(!opened);
+    }
     if(room==5) {
       NorthwallAnimation(s,a,b,settings);
       NorthwallForegroundEntrance(s,a);

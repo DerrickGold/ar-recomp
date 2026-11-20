@@ -234,7 +234,8 @@ static void MarshAuditWetPosts(const ActionVoxelGeometry *g,const ActionRoomScen
           assert(p && p<8);++pixels;
         }
     }
-  assert(cells==63 && cells<=kVoxelMaxPixelRecessCells && pixels);
+  assert(cells==63 && g->pixel_recess_mask_count<=kVoxelMaxPixelRecessMasks &&
+      g->pixel_recess_extra_faces<=kVoxelMaxPixelRecessExtraFaces && pixels);
   assert(!ActionVoxel_PixelRecessRows(g,INT_MIN,INT_MAX));
   assert(!ActionVoxel_PixelRecessRows(NULL,0,0));
   printf("marsh mixed post placement: %u cells, %u wood pixels; water/high priority unchanged\n",cells,pixels);

@@ -39,13 +39,13 @@ static bool Sample(const ActionRoomScene *s,const DioramaRoomOverride *edits,
 typedef struct TrunkSideProfile {
   uint64_t key;
   uint16_t rooms;
-  uint8_t native_slope;
+  uint8_t native_slope,opening;
   uint16_t solid[4],rear[4],snow[4],snow_face[4];
 } TrunkSideProfile;
 #include "action_trunk_side_materials.inc"
 typedef struct TrunkSideMaterial {
   uint16_t words[4],solid[4],rear[4],snow[4],snow_face[4];
-  uint8_t pixels[256],collision,native_slope;
+  uint8_t pixels[256],collision,native_slope,opening;
   uint64_t key;
 } TrunkSideMaterial;
 
@@ -89,6 +89,7 @@ static void SideMaterial(const ActionRoomScene *s,const uint16_t words[4],
     }
     /* A vertical artwork reflection is not a native walking-ramp contract. */
     m->native_slope=p->native_slope&&!(flip&2);
+    m->opening=p->opening;
     break;
   }
 }
@@ -147,21 +148,42 @@ static bool BuildSides(ActionTrunkAssets *out,const ActionRoomScene *s,
    * case the existing native bark atlas remains the visible cap fallback. */
   if(!have_snow)memset(out->side_snow,0,sizeof(out->side_snow));
   out->side_width=width;
+  out->column_geometry=true;
+  uint8_t passage[kActionTrunkMaxHeight/8][kActionTrunkSideWidth/8]={{0}};
   for(unsigned cy=0;cy<out->height/16;++cy)for(unsigned cx=0;cx<width/16;++cx) {
-    if(cx>=20&&cx<44)continue;
+    const bool column=cx>=30&&cx<34;
+    if(cx>=20&&cx<44&&!column)continue;
     TrunkSideMaterial m;const DioramaPixelEdit *edit=NULL;
     if(!SideCell(s,edits,native,(int)cx,(int)cy,&m,&edit))continue;
     const unsigned left=SideCollision(s,edits,native,(int)cx-1,(int)cy);
     const unsigned right=SideCollision(s,edits,native,(int)cx+1,(int)cy);
     for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x) {
       const unsigned q=(y/8)*2+x/8,word=m.words[q],edit_bit=1u<<(15-x);
+      if(column&&(m.collision&(1u<<q)))
+        out->column_front[(cy*16+y)/8]|=(uint8_t)(1u<<((cx-30)*2+x/8));
       if(edit&&(edit->transparent[y]&edit_bit))continue;
       const bool painted_black=edit&&(edit->black[y]&edit_bit);
       const unsigned p=painted_black?1:m.pixels[y*16+x];if(!p)continue;
+      if(column) {
+        if(m.collision&(1u<<q)) {
+          /* The colliding central shelf includes pale frost as well as
+           * bark. A bark-only color mask makes internal ridges under its
+           * intact front artwork and leaves the actual walking top open. */
+          if(!painted_black&&((word>>10)&7)==5&&p>=2)
+            out->column_caps[(cy*16+y)*8+(cx-30)*2+x/8]|=(uint8_t)(1u<<(x&7));
+        }
+        continue;
+      }
       const unsigned bit=1u<<p,at=(cy*16+y)*kActionTrunkSideMaskPitch+cx*2+x/8,mask=1u<<(x&7);
       const bool high=!!(word&0x2000);
       bool solid=!painted_black&&!!(m.solid[q]&bit);
       bool rear=!painted_black&&!!(m.rear[q]&bit);
+      /* Reviewed decorated entrances and complete noncolliding native black
+       * quarters identify passages. Outlines, foliage and sky are not holes. */
+      if(m.opening&&!high&&!(m.collision&(1u<<q)))
+        passage[cy*2+y/8][cx*2+x/8]=64;
+      else if(rear&&!high&&!(m.collision&(1u<<q))&&!(palette[((word>>10)&7)*16+p]&0xffffff))
+        ++passage[cy*2+y/8][cx*2+x/8];
       if(solid&&m.native_slope&&(m.collision==6||m.collision==9)) {
         /* Match the native $90A9/$9084 adjacent-ramp rule, also used by the
          * generic voxel compiler. Fringe above contact is real rear art. */
@@ -172,6 +194,8 @@ static bool BuildSides(ActionTrunkAssets *out,const ActionRoomScene *s,
         if(y<16-height){solid=false;rear=true;}
       }
       if(solid)out->side_masks[kActionTrunkSideSolid][at]|=(uint8_t)mask;
+      if(!solid&&!rear&&!high)
+        out->side_detail_cells[(cy*2+y/8)*(kActionTrunkSideWidth/8)+cx*2+x/8]=1;
       /* Explicit high artwork must keep its native actor occlusion even if
        * its low-priority source was an interior matte or rear decoration. */
       if(rear&&!high)out->side_masks[kActionTrunkSideRear][at]|=(uint8_t)mask;
@@ -189,6 +213,55 @@ static bool BuildSides(ActionTrunkAssets *out,const ActionRoomScene *s,
       }
     }
   }
+  /* Native exposed floor contacts, plus one-way shelf tops even when the
+   * player's head can pass in front of the bank immediately above them. */
+  for(unsigned cy=0;cy<out->height/16;++cy)for(unsigned cx=0;cx<width/16;++cx) {
+    if(cx>=20&&cx<44)continue;
+    TrunkSideMaterial m,above;
+    if(!SideCell(s,edits,native,cx,cy,&m,NULL)||!m.collision)continue;
+    const bool have_above=SideCell(s,edits,native,cx,(int)cy-1,&above,NULL);
+    const unsigned left=SideCollision(s,edits,native,(int)cx-1,cy);
+    const unsigned right=SideCollision(s,edits,native,(int)cx+1,cy);
+    for(unsigned x=0;x<16;++x) {
+      unsigned top=16;
+      if(m.collision==6||m.collision==9) {
+        const unsigned phase=m.collision==6?(x&14):((~x)&14);
+        const bool upper=m.collision==6?left==6:right==9,lower=m.collision==6?right==6:left==9;
+        top=16-(upper?8+phase/2:lower?phase/2:phase);
+      } else if(m.collision&(1u<<(x/8)))top=0;
+      else if(m.collision&(1u<<(2+x/8)))top=8;
+      if(top==16)continue;
+      bool blocked=top==0&&have_above&&!!(above.collision&(1u<<(2+x/8)));
+      /* A preceding ramp's last sample can be empty even in an occupied
+       * native quarter; retain its existing solid footer endpoint. */
+      if(blocked&&(above.collision==6||above.collision==9)) {
+        const unsigned al=SideCollision(s,edits,native,(int)cx-1,(int)cy-1);
+        const unsigned ar=SideCollision(s,edits,native,(int)cx+1,(int)cy-1);
+        const unsigned phase=above.collision==6?(x&14):((~x)&14);
+        const bool upper=above.collision==6?al==6:ar==9,lower=above.collision==6?ar==6:al==9;
+        blocked=(upper?8+phase/2:lower?phase/2:phase)>0;
+      }
+      const unsigned wx=cx*16+x,wy=cy*16+top;
+      bool crown=false;
+      /* Rounded artwork can begin a few pixels below its physical contact.
+       * Do not alternate depth according to the snow's decorative outline. */
+      for(unsigned py=top;py<16&&py<top+8;++py)
+        crown|=ActionTrunk_SideSolid(out,wx,cy*16+py,kActionTrunkSideSolid);
+      if((!blocked||m.collision==3)&&crown&&!ActionTrunk_SideSolid(out,wx,wy,kActionTrunkSidePriority))
+        out->side_contacts[wy*kActionTrunkSideMaskPitch+wx/8]|=(uint8_t)(1u<<(wx&7));
+    }
+  }
+  /* Keep an eight-pixel clearance rim, then blend over the next eight pixels
+   * back into the unchanged bank. This immutable grid is shared by captures,
+   * guards and caps, so orbiting needs no distance search or new GPU upload. */
+  const unsigned grid_pitch=kActionTrunkSideWidth/8+1;
+  for(int gy=0;gy<=(int)out->height/8;++gy)for(int gx=0;gx<=(int)width/8;++gx) {
+    bool near=false;
+    for(int y=gy-2;y<=gy+1&&!near;++y)for(int x=gx-2;x<=gx+1;++x)
+      if(x>=0&&x<(int)width/8&&y>=0&&y<(int)out->height/8&&passage[y][x]==64){near=true;break;}
+    out->side_clearance_grid[gy*grid_pitch+gx]=near?255:0;
+  }
+  out->side_clearance=true;
   return true;
 }
 

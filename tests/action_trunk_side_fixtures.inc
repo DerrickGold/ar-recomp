@@ -97,6 +97,60 @@ static void TrunkTestSideEqual(const ActionTrunkAssets *a,const ActionTrunkAsset
   assert(a->side_width==b->side_width && a->height==b->height);
   assert(!memcmp(a->side_masks,b->side_masks,sizeof(a->side_masks)));
   assert(!memcmp(a->side_snow,b->side_snow,sizeof(a->side_snow)));
+  assert(a->side_clearance==b->side_clearance);
+  assert(!memcmp(a->side_contacts,b->side_contacts,sizeof(a->side_contacts)));
+  assert(!memcmp(a->side_detail_cells,b->side_detail_cells,sizeof(a->side_detail_cells)));
+  assert(!memcmp(a->side_clearance_grid,b->side_clearance_grid,sizeof(a->side_clearance_grid)));
+  assert(a->column_geometry==b->column_geometry);
+  assert(!memcmp(a->column_front,b->column_front,sizeof(a->column_front)));
+  assert(!memcmp(a->column_caps,b->column_caps,sizeof(a->column_caps)));
+}
+static void TrunkTestColumn(const ActionRoomScene *s,const DioramaRoomOverride *terrain,
+    const ActionTrunkAssets *a) {
+  assert(a->column_geometry);unsigned recessed=0,contacts=0,caps=0;
+  for(unsigned y=0;y<a->height;++y)for(unsigned x=480;x<544;++x) {
+    uint16_t word;uint8_t id;unsigned ink;
+    const bool sampled=TrunkTestSample(s,terrain,x,y,&word,&ink,&id);
+    const unsigned q=(y%16/8)*2+x%16/8;
+    const bool contact=sampled&&!!(TrunkTestCollision(s,terrain,x/16,y/16)&(1u<<q));
+    assert(ActionTrunk_ColumnRecess(a,x,y)==!contact);
+    const bool cap=!!(a->column_caps[y*8+(x-480)/8]&(1u<<(x&7)));
+    const bool material=sampled&&((word>>10)&7)==5&&ink>=2;
+    assert(cap==(contact&&material));
+    recessed+=!contact;contacts+=contact;caps+=cap;
+  }
+  assert(recessed&&contacts&&caps);
+  assert(!ActionTrunk_ColumnRecess(a,479,10)&&!ActionTrunk_ColumnRecess(a,544,10));
+  assert(!ActionTrunk_ColumnRecess(a,500,-1)&&!ActionTrunk_ColumnRecess(a,500,a->height));
+}
+static void TrunkTestColumnEdits(const ActionRoomScene *s,const ActionTrunkAssets *base,
+    ActionTrunkAssets *edited) {
+  int source_x=-1,source_y=-1,target_x=-1,target_y=-1;
+  for(unsigned cy=0;cy<base->height/16;++cy)for(unsigned cx=30;cx<34;++cx) {
+    const unsigned collision=TrunkTestCollision(s,NULL,cx,cy);
+    if(collision==15){source_x=cx;source_y=cy;}
+    if(!collision){target_x=cx;target_y=cy;}
+  }
+  assert(source_x>=0&&target_x>=0);static DioramaRoomOverride terrain;memset(&terrain,0,sizeof(terrain));
+  DioramaTileStamp stamp=TrunkTestStamp(s,source_x,source_y,target_x,target_y);
+  terrain.stamp_layers[0]=(DioramaStampLayerOverride){.count=1,.cells=&stamp};
+  assert(ActionTrunk_Build(edited,s,&terrain));TrunkTestColumn(s,&terrain,edited);
+  for(unsigned q=0;q<4;++q)
+    assert(!ActionTrunk_ColumnRecess(edited,target_x*16+(q&1)*8,target_y*16+(q>>1)*8));
+  for(unsigned row=0;row<base->height/8;++row) {
+    const unsigned mask=row/2==(unsigned)target_y?3u<<((target_x-30)*2):0;
+    assert((base->column_front[row]&~mask)==(edited->column_front[row]&~mask));
+  }
+  /* Erasing artwork removes its caps without inventing or changing collision. */
+  terrain.pixel_layers[0].count=1;
+  terrain.pixel_layers[0].edits[0]=(DioramaPixelEdit){.by_cell=true,.x=target_x,.y=target_y};
+  for(unsigned y=0;y<16;++y)terrain.pixel_layers[0].edits[0].transparent[y]=0xffff;
+  assert(ActionTrunk_Build(edited,s,&terrain));
+  for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x) {
+    assert(!ActionTrunk_ColumnRecess(edited,target_x*16+x,target_y*16+y));
+    assert(!(edited->column_caps[(target_y*16+y)*8+(target_x-30)*2+x/8]&(1u<<(x&7))));
+  }
+  assert(ActionTrunk_Build(edited,s,NULL));TrunkTestSideEqual(base,edited);
 }
 static void TrunkTestRemap(ActionRoomScene *s) {
   /* The room also contains animated artwork. Keep each animation phase in
@@ -401,6 +455,118 @@ static void TrunkTestSlopeStamps(const ActionRoomScene *s,ActionTrunkAssets *edi
     }
   }
 }
+/* The snowy crown and bark lip form one fall-through entrance. Numeric IDs
+ * locate independent native specimens; runtime matching uses displayed art. */
+static unsigned TrunkTestDivotCell(const ActionRoomScene *s,const DioramaRoomOverride *terrain,
+    const ActionTrunkAssets *a,unsigned cx,unsigned cy) {
+  uint32_t native[256],low[256],high[256],rear[256];unsigned pixels=0;
+  for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x) {
+    uint16_t word=0;uint8_t id;unsigned ink=0;
+    if(!TrunkTestSample(s,terrain,cx*16+x,cy*16+y,&word,&ink,&id))ink=0;
+    assert(!(word&0x2000));pixels+=!!ink;
+    native[y*16+x]=TrunkTestColor(s,word,ink,15);
+    for(unsigned kind=0;kind<kActionTrunkSideMaskCount;++kind)
+      assert(ActionTrunk_SideSolid(a,cx*16+x,cy*16+y,kind)==
+          (kind==kActionTrunkSideRear&&ink!=0));
+  }
+  const uint32_t *input[3]={native,NULL,NULL};const size_t pitch[3]={16,16,16};
+  uint32_t *output[3]={low,high,rear};
+  ActionTrunk_Split(a,cx*16,cy*16,16,16,16,input,pitch,output,15);
+  assert(!memcmp(native,rear,sizeof(native)));
+  for(unsigned i=0;i<256;++i)assert(!low[i]&&!high[i]);
+  return pixels;
+}
+static void TrunkTestDivots(const ActionRoomScene *s,const ActionTrunkAssets *base,
+    ActionTrunkAssets *edited,unsigned region) {
+  if(s->map!=6)return;
+  const unsigned ids[]={0x45,0x46,0x4d,0x4e,0x55,0x56,0x5d,0x5e};unsigned cells=0,pixels=0,variants=0;
+  int specimens[8][2]={{0}};
+  for(unsigned cy=0;cy<base->height/16;++cy)for(unsigned cx=0;cx<base->side_width/16;++cx) {
+    if(cx>=20&&cx<44)continue;
+    uint16_t word;uint8_t id;assert(ActionRoomScene_LookupTile(s,1,cx*2,cy*2,&word,&id));
+    unsigned family=8;for(unsigned i=0;i<8;++i)if(id==ids[i])family=i;
+    if(family==8)continue;
+    assert(!TrunkTestCollision(s,NULL,cx,cy));uint8_t paired;
+    assert(ActionRoomScene_LookupTile(s,1,cx*2,(cy+(family%4<2?1:-1))*2,&word,&paired));
+    assert(paired==ids[family^2]);
+    variants|=1u<<family;++cells;specimens[family][0]=cx;specimens[family][1]=cy;
+    pixels+=TrunkTestDivotCell(s,NULL,base,cx,cy);
+  }
+  assert(cells&&pixels&&variants==255);
+  static DioramaRoomOverride terrain;
+  for(unsigned family=0;family<8;++family) {
+    DioramaTileStamp stamp=TrunkTestStamp(s,specimens[family][0],specimens[family][1],2,2);
+    const DioramaTileStamp original=stamp;
+    memset(&terrain,0,sizeof(terrain));terrain.stamp_layers[0]=(DioramaStampLayerOverride){.cells=&stamp,.count=1};
+    for(unsigned flip=0;flip<4;++flip) {
+      stamp=original;TrunkTestReflect(&stamp,flip);assert(ActionTrunk_Build(edited,s,&terrain));
+      assert(TrunkTestDivotCell(s,&terrain,edited,2,2));
+    }
+    stamp=original;terrain.pixel_layers[0].count=1;
+    terrain.pixel_layers[0].edits[0]=(DioramaPixelEdit){.by_cell=true,.x=2,.y=2};
+    terrain.pixel_layers[0].edits[0].transparent[8]=0xffff;
+    assert(ActionTrunk_Build(edited,s,&terrain));TrunkTestDivotCell(s,&terrain,edited,2,2);
+    assert(ActionTrunk_Build(edited,s,NULL));TrunkTestSideEqual(base,edited);
+  }
+  printf("trunk side divots region%u: %u cells/8 complete entrance variants, %u native pixels recessed; source transparency, flips, erasure and reset preserved\n",
+      region,cells,pixels);
+}
+static void TrunkTestClearance(const ActionRoomScene *s,const ActionTrunkAssets *a,unsigned region) {
+  assert(a->side_clearance);unsigned contacts=0,one_way=0,full_bank=0,carved=0;
+  for(unsigned cy=0;cy<a->height/16;++cy)for(unsigned cx=0;cx<a->side_width/16;++cx) {
+    if(cx>=20&&cx<44)continue;
+    if(TrunkTestCollision(s,NULL,cx,cy)!=3)continue;
+    for(unsigned x=0;x<16;++x) {
+      bool crown=false;for(unsigned y=0;y<8;++y)crown|=ActionTrunk_SideSolid(a,cx*16+x,cy*16+y,kActionTrunkSideSolid);
+      if(!crown)continue;
+      assert(ActionTrunk_SideContact(a,cx*16+x,cy*16));++one_way;
+    }
+  }
+  for(unsigned y=0;y<a->height;++y)for(unsigned x=0;x<a->side_width;++x) {
+    if(!ActionTrunk_SideContact(a,x,y))continue;
+    assert(!ActionTrunk_SideSolid(a,x,y,kActionTrunkSidePriority));++contacts;
+    for(unsigned d=0;d<4;++d)if(ActionTrunk_SideSolid(a,x,y+d,kActionTrunkSideSolid))
+      assert(ActionTrunk_SideFrontFraction(a,x,y+d,x,y+d)==0);
+    bool next_contact=false;
+    for(unsigned d=1;d<8;++d)next_contact|=ActionTrunk_SideContact(a,x,y+d);
+    /* A ramp can reach the next standing quarter within eight pixels. Its
+     * new lip takes precedence over the return from the preceding contact. */
+    if(!next_contact&&ActionTrunk_SideSolid(a,x,y+7,kActionTrunkSideSolid)&&
+        !ActionTrunk_SideSolid(a,x,y+7,kActionTrunkSidePriority)) {
+      assert(fabsf(ActionTrunk_SideFrontFraction(a,x,y+7,x,y+8)-.75f*ActionTrunk_SideClearance(a,x,y+8))<.000001f);
+    }
+  }
+  assert(contacts);
+  if(s->map==6) {
+    unsigned roof=0,lip=0;
+    /* The reported upper shelf is directly below the formerly full-height
+     * bank. Native standing support must survive while that bank recedes. */
+    for(unsigned y=1008;y<1024;++y)for(unsigned x=160;x<176;++x)
+      if(ActionTrunk_SideSolid(a,x,y,kActionTrunkSideSolid)) {
+        assert(ActionTrunk_SideFrontFraction(a,x,y,x,y)==.75f*ActionTrunk_SideClearance(a,x,y));++roof;
+      }
+    for(unsigned x=160;x<208;++x) {
+      assert(ActionTrunk_SideContact(a,x,1024));
+      assert(ActionTrunk_SideCrown(a,x,1024));
+      for(unsigned y=1024;y<1028;++y)if(ActionTrunk_SideSolid(a,x,y,kActionTrunkSideSolid)) {
+        assert(ActionTrunk_SideFrontFraction(a,x,y,x,y)==0);++lip;
+      }
+    }
+    assert(roof&&lip&&one_way);
+    /* The bank beside the native 45/4D entrance must retreat too. Black-only
+     * passage detection missed this decorated opening above the shelf. */
+    assert(ActionTrunk_SideClearance(a,175,1016)>.99f);
+  }
+  for(unsigned y=0;y<a->height;++y)for(unsigned x=0;x<a->side_width;++x)
+    if(ActionTrunk_SideSolid(a,x,y,kActionTrunkSideSolid)) {
+      const float weight=ActionTrunk_SideClearance(a,x,y);
+      if(!weight){assert(!ActionTrunk_SideFrontFraction(a,x,y,x,y));++full_bank;}
+      else if(ActionTrunk_SideFrontFraction(a,x,y,x,y)>0)++carved;
+    }
+  assert(full_bank);if(s->map==6)assert(carved);
+  printf("trunk clearance region%u room%u: %u native standing contacts (%u one-way samples), %u full-depth bank pixels, %u opening-rim pixels carved\n",
+      region,s->map,contacts,one_way,full_bank,carved);
+}
 static void TrunkSideFixtures(const char *directory) {
   if(!directory)return;
   static ActionSceneSnapshot snapshot;static ActionRoomScene original,remapped;
@@ -415,10 +581,11 @@ static void TrunkSideFixtures(const char *directory) {
     assert(TrunkLegacyBuild(legacy,s,NULL));assert(ActionTrunk_Build(base,s,NULL));TrunkTestCoreEqual(legacy,base);
     /* Historical witness: the old production output owns no outer geometry. */
     assert(!legacy->side_width);for(size_t i=0;i<sizeof(legacy->side_masks);++i)assert(!((const uint8_t *)legacy->side_masks)[i]);
-    TrunkTestNative(s,base,region);
+    TrunkTestNative(s,base,region);TrunkTestColumn(s,NULL,base);
+    TrunkTestDivots(s,base,edited,region);TrunkTestClearance(s,base,region);
     TrunkTestSplit(s,NULL,legacy,base,15,true);TrunkTestSplit(s,NULL,legacy,base,7,false);TrunkTestSplit(s,NULL,legacy,base,0,false);
     remapped=*s;TrunkTestRemap(&remapped);assert(ActionTrunk_Build(edited,&remapped,NULL));TrunkTestSideEqual(base,edited);
-    TrunkTestEdits(s,base,edited);TrunkTestSlopeStamps(s,edited);
+    TrunkTestEdits(s,base,edited);TrunkTestColumnEdits(s,base,edited);TrunkTestSlopeStamps(s,edited);
     assert(!memcmp(s,&original,sizeof(original)));
   }
   free(base);free(legacy);free(edited);puts("trunk side six-region fixtures: PASS");

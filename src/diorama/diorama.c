@@ -1194,6 +1194,11 @@ static bool SubmitShadedDioramaDepth(void *context,const ArRenderVertex2D *v,
   s->performance=DioramaPerformance_Begin(kDioramaPerformance_Mesh);
   return ok;
 }
+static bool SubmitShadedDioramaPerspective(void *context,const ArRenderVertex2D *v,
+    const float *depths,const float *clip_w,int nv,const int32_t *indices,int ni) {
+  DioramaDepthShadingSubmit *submit=context;submit->draw.clip_w=clip_w;
+  return SubmitShadedDioramaDepth(context,v,depths,nv,indices,ni);
+}
 static bool RenderShadedDioramaDepthGeometryWithReceiver(ArRenderDevice *device,ArRenderTexture texture,
     const ArRenderVertex2D *v,const float *depths,const float *clip_w,const ArRenderPointF *heat_world_xy,int nv,const int32_t *indices,int ni,
     ArRenderBlendMode blend,const SceneryShadingField *field,ArRenderRectF source_uv,
@@ -1201,16 +1206,16 @@ static bool RenderShadedDioramaDepthGeometryWithReceiver(ArRenderDevice *device,
     int plane,bool native_actor,bool binary_texture_alpha,const DioramaDepthTextureBank *texture_bank) {
   if(!sink)return RenderShadedDioramaGeometry(device,texture,v,nv,indices,ni,blend,field,source_uv,lighting);
   if(!sink->submit || !depths)return false;
-  /* Generated caps are clipped in world/source space before projection and
-   * already carry vertex lighting. SceneryShading may split affine meshes;
-   * never pass an unmodified W sidecar through that separate clipping path. */
-  if((clip_w && (field || native_actor)) || (heat_world_xy && !clip_w))return false;
+  /* Authored source cuts must clip W along with their vertices. Native OBJ
+   * keeps its established affine sampling/priority path. */
+  if((clip_w && native_actor) || (heat_world_xy && (!clip_w || field)))return false;
   DioramaDepthShadingSubmit submit={.device=device,.sink=sink,
       .draw={.texture=texture,.blend=blend,.lighting=lighting,.plane=plane,
           .native_actor=native_actor,.binary_texture_alpha=binary_texture_alpha,.texture_bank=texture_bank,
           .clip_w=clip_w,.heat_world_xy=heat_world_xy},
       .performance=DioramaPerformance_Begin(kDioramaPerformance_Mesh)};
-  const bool ok=clip_w?SubmitShadedDioramaDepth(&submit,v,depths,nv,indices,ni):
+  const bool ok=clip_w?SceneryShading_DrawPerspective(field,source_uv,v,depths,clip_w,nv,indices,ni,
+      SubmitShadedDioramaPerspective,&submit):
       SceneryShading_DrawDepth(field,source_uv,v,depths,nv,indices,ni,SubmitShadedDioramaDepth,&submit);
   DioramaPerformance_End(submit.performance);
   return ok;
@@ -2367,7 +2372,10 @@ static int HollowResolveLayers(const DioramaScene *scene,DioramaResolvedLayer *l
       for(int j=0;j<count;++j)if(original[j].plane==d->plane){layers[i]=original[j];break;}
     if(d->plane==SR_PPU_OVERLAY_BG1||DioramaPlaneIsObjectPriority(d->plane))
       layers[i].z-=scene->trunk_settings.recess;
-    if(d->plane==kDioramaPlane_Bg1Hi||d->plane==kDioramaPlane_Bg1Far)layers[i].z=.5f;
+    if(d->plane==kDioramaPlane_Bg1Hi)
+      layers[i].z=scene->voxel_mode?.5f-scene->trunk_settings.recess+
+          DioramaTrunk_RimDepth(scene->trunk_settings.recess,true):.5f;
+    if(d->plane==kDioramaPlane_Bg1Far)layers[i].z=.5f;
   }
   return kDioramaLayerCount;
 }
@@ -3377,6 +3385,8 @@ typedef struct DioramaLayerDraw {
   ArRenderColorF shade;
   float dimming;
   float hollow_recess;
+  bool hollow_column;
+  bool hollow_voxel;
   float voxel_depth,voxel_recess;
   const ActionVoxelGeometry *voxel_geometry;
   ArRenderRectF dimming_ramp;
@@ -3524,6 +3534,7 @@ static ArRenderTexture BuildDioramaPrioritySurface(
 typedef struct DioramaLayerMesh {
   ArRenderVertex2D vertices[DIORAMA_VERTS_PER_LAYER];
   float depths[DIORAMA_VERTS_PER_LAYER];
+  float clip_w[DIORAMA_VERTS_PER_LAYER];
   int32_t indices[DIORAMA_INDICES_PER_LAYER];
   int vertex_count, index_count;
   bool constrained;
@@ -3577,7 +3588,16 @@ static ArRenderColorF LifeBranchColor(float,float);
 static const ActionTrunkAssets *s_trunk_assets;
 static DioramaTrunkSettings s_trunk_settings;
 static float s_trunk_fade;
+static bool s_trunk_column;
 static float TrunkRecess(void) {return s_trunk_settings.enabled?s_trunk_settings.recess:0;}
+static bool ProjectHollowPoint(const DioramaViewGeometry *g,DioramaLayerMesh *mesh,
+    unsigned index,float x,float y,float z) {
+  if(!ProjectWorldPointDepth(g->matrix,x,y,z,g->width,g->height,
+      &mesh->vertices[index].position,mesh->has_depth?mesh->depths+index:NULL))return false;
+  Scene3DClipPoint clip;
+  if(!Scene3D_TransformToClip(g->matrix,x,y,z,&clip)||clip.w<=0)return false;
+  mesh->clip_w[index]=clip.w;return true;
+}
 static void PrepareHollowMesh(const DioramaCapture *capture,
     const DioramaViewGeometry *g, const DioramaLayerDraw *layer,
     float first_y,float last_y,float repeat_y,DioramaLayerMesh *mesh) {
@@ -3606,8 +3626,8 @@ static void PrepareHollowMesh(const DioramaCapture *capture,
     const float z=layer->authored->z-.5f-TrunkRecess()-s_trunk_settings.depth*fmaxf(0,1-q*q);
     const int index=mesh->vertex_count++;
     ArRenderVertex2D *v=&mesh->vertices[index];
-    if(!ProjectWorldPointDepth(g->matrix,(s-.5f)*g->aspect_x,(.5f-t)*g->height_scale,
-        z,g->width,g->height,&v->position,mesh->has_depth?mesh->depths+index:NULL)) {mesh->vertex_count=0;return;}
+    if(!ProjectHollowPoint(g,mesh,(unsigned)index,(s-.5f)*g->aspect_x,(.5f-t)*g->height_scale,z))
+      {mesh->vertex_count=0;return;}
     v->tex_coord=(ArRenderPointF){g->u0+s*(g->u1-g->u0),local_y/SR_PPU_SURFACE_MAX_HEIGHT};
     v->color=LifeWallColor(world_x,capture->camera_y-capture->authentic_y0+1+local_y,layer->shade);
   }
@@ -3616,17 +3636,88 @@ static void PrepareHollowMesh(const DioramaCapture *capture,
   for(int i=0;i<mesh->vertex_count;++i)mesh->vertices[i].tex_coord.y-=repeat_y/SR_PPU_SURFACE_MAX_HEIGHT;
 }
 
-static void PrepareHollowRegionMesh(const DioramaCapture *capture,
+/* A finite native-source panel, shared by the primary and guard meshes.
+ * Collision quarters stay at actor contact; decorative shaft quarters meet
+ * the existing branch backs. No resampling or additional captured plane. */
+static bool AppendHollowColumnMesh(const DioramaCapture *capture,
     const DioramaViewGeometry *g,const DioramaLayerDraw *layer,
-    float region_left,float region_right,float front_z,bool rear,DioramaLayerMesh *mesh) {
+    float left,float right,float top,float bottom,DioramaLayerMesh *mesh) {
+  const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
+  const float oy=capture->camera_y-capture->authentic_y0+1;
+  float columns[11];unsigned count=0;columns[count++]=left;
+  for(int x=480;x<=544;x+=8)if(x>left&&x<right)columns[count++]=(float)x;
+  columns[count++]=right;
+  for(float y=top;y<bottom;) {
+    const float end_y=fminf(bottom,(floorf(y/8)+1)*8);
+    for(unsigned col=0;col+1<count;) {
+      const bool recessed=ActionTrunk_ColumnRecess(s_trunk_assets,
+          (int)floorf((columns[col]+columns[col+1])*.5f),(int)floorf(y));
+      unsigned end=col+1;
+      while(end+1<count && ActionTrunk_ColumnRecess(s_trunk_assets,
+          (int)floorf((columns[end]+columns[end+1])*.5f),(int)floorf(y))==recessed)++end;
+      if(mesh->vertex_count+4>DIORAMA_VERTS_PER_LAYER || mesh->index_count+6>DIORAMA_INDICES_PER_LAYER)return false;
+      const float z=layer->authored->z-.5f-(recessed?DioramaTrunk_BranchDepth(layer->hollow_recess):0);
+      const int base=mesh->vertex_count;
+      for(unsigned corner=0;corner<4;++corner) {
+        const float wx=columns[(corner==1||corner==2)?end:col],wy=corner>=2?end_y:y;
+        const float u=(wx-ox)/SR_PPU_SURFACE_MAX_WIDTH,v=(wy-oy)/SR_PPU_SURFACE_MAX_HEIGHT;
+        const float x=((u-g->u0)/(g->u1-g->u0)-.5f)*g->aspect_x;
+        const float yy=(.5f-(v-g->v0)/(g->v1-g->v0))*g->height_scale;
+        const unsigned i=(unsigned)mesh->vertex_count++;ArRenderVertex2D *vertex=&mesh->vertices[i];
+        if(!ProjectHollowPoint(g,mesh,i,x,yy,z))return false;
+        vertex->tex_coord=(ArRenderPointF){u,v};vertex->color=layer->shade;
+      }
+      const int indices[]={base,base+1,base+2,base,base+2,base+3};
+      memcpy(mesh->indices+mesh->index_count,indices,sizeof(indices));mesh->index_count+=6;col=end;
+    }
+    y=end_y;
+  }
+  return true;
+}
+static bool AppendHollowRimMesh(const DioramaCapture *capture,const DioramaViewGeometry *g,
+    const DioramaLayerDraw *layer,float left,float right,float top,float bottom,DioramaLayerMesh *mesh) {
+  const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
+  const float oy=capture->camera_y-capture->authentic_y0+1;
+  float columns[kActionTrunkWidth/2+2];unsigned count=0;columns[count++]=left;
+  for(float x=floorf(left/2)*2+2;x<right;x+=2)columns[count++]=x;
+  columns[count++]=right;
+  if(mesh->vertex_count+(int)count*2>DIORAMA_VERTS_PER_LAYER||
+      mesh->index_count+(int)(count-1)*6>DIORAMA_INDICES_PER_LAYER)return false;
+  const int base=mesh->vertex_count;
+  for(unsigned row=0;row<2;++row)for(unsigned col=0;col<count;++col) {
+    const float x=columns[col],y=row?bottom:top,u=(x-ox)/SR_PPU_SURFACE_MAX_WIDTH,v=(y-oy)/SR_PPU_SURFACE_MAX_HEIGHT;
+    const unsigned at=(unsigned)mesh->vertex_count++;ArRenderVertex2D *vertex=mesh->vertices+at;
+    if(!ProjectHollowPoint(g,mesh,at,((u-g->u0)/(g->u1-g->u0)-.5f)*g->aspect_x,
+        (.5f-(v-g->v0)/(g->v1-g->v0))*g->height_scale,DioramaTrunk_RimFront(layer->hollow_recess,x,true)))return false;
+    vertex->tex_coord=(ArRenderPointF){u,v};vertex->color=layer->shade;
+  }
+  for(unsigned col=0;col+1<count;++col) {
+    const int a=base+(int)col,b=a+1,c=b+(int)count,d=a+(int)count;
+    const int indices[]={a,b,c,a,c,d};memcpy(mesh->indices+mesh->index_count,indices,sizeof(indices));mesh->index_count+=6;
+  }
+  return true;
+}
+static bool PrepareHollowRegionMesh(const DioramaCapture *capture,
+    const DioramaViewGeometry *g,const DioramaLayerDraw *layer,
+    float region_left,float region_right,float first_y,float last_y,
+    float front_z,bool rear,DioramaLayerMesh *mesh) {
   memset(mesh,0,sizeof(*mesh));mesh->constrained=true;mesh->has_depth=layer->depth_sink!=NULL;
   const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
   const float oy=capture->camera_y-capture->authentic_y0+1;
   const float left=fmaxf(region_left,ox+g->u0*SR_PPU_SURFACE_MAX_WIDTH);
   const float right=fminf(region_right,ox+g->u1*SR_PPU_SURFACE_MAX_WIDTH);
-  const float top=fmaxf(0,oy+g->v0*SR_PPU_SURFACE_MAX_HEIGHT);
-  const float bottom=fminf(s_trunk_assets->height,oy+g->v1*SR_PPU_SURFACE_MAX_HEIGHT);
-  if(right<=left||bottom<=top)return;
+  const float top=fmaxf(first_y,fmaxf(0,oy+g->v0*SR_PPU_SURFACE_MAX_HEIGHT));
+  const float bottom=fminf(last_y,fminf(s_trunk_assets->height,oy+g->v1*SR_PPU_SURFACE_MAX_HEIGHT));
+  if(right<=left||bottom<=top)return true;
+  if(layer->hollow_voxel&&layer->description->plane==kDioramaPlane_Bg1Hi&&!rear&&region_left==320&&region_right==704) {
+    if(!AppendHollowRimMesh(capture,g,layer,left,right,top,bottom,mesh))return false;
+    ShadeDioramaVertices(layer,mesh->vertices,mesh->vertex_count);return true;
+  }
+  if(layer->hollow_column&&layer->description->plane==SR_PPU_OVERLAY_BG1&&
+      !rear&&region_left==320&&region_right==704) {
+    if(!AppendHollowColumnMesh(capture,g,layer,left,right,top,bottom,mesh))return false;
+    ShadeDioramaVertices(layer,mesh->vertices,mesh->vertex_count);return true;
+  }
   float columns[4];int n=0;columns[n++]=left;
   const float joints[]={288,736};
   for(unsigned i=0;i<2;++i)if(joints[i]>left&&joints[i]<right)columns[n++]=joints[i];
@@ -3636,19 +3727,20 @@ static void PrepareHollowRegionMesh(const DioramaCapture *capture,
     const float u=(world_x-ox)/SR_PPU_SURFACE_MAX_WIDTH,v=(world_y-oy)/SR_PPU_SURFACE_MAX_HEIGHT;
     const float x=((u-g->u0)/(g->u1-g->u0)-.5f)*g->aspect_x;
     const float y=(.5f-(v-g->v0)/(g->v1-g->v0))*g->height_scale;
-    const float z=front_z-(rear?DioramaTrunk_SideDepth(layer->hollow_recess,world_x):0);
+    const float z=front_z-(rear?DioramaTrunk_SideDepth(layer->hollow_recess,world_x,layer->hollow_voxel):0);
     const unsigned index=(unsigned)mesh->vertex_count++;ArRenderVertex2D *vertex=&mesh->vertices[index];
-    if(!ProjectWorldPointDepth(g->matrix,x,y,z,g->width,g->height,&vertex->position,
-        mesh->has_depth?mesh->depths+index:NULL)){mesh->vertex_count=0;return;}
+    if(!ProjectHollowPoint(g,mesh,index,x,y,z))return false;
     vertex->tex_coord=(ArRenderPointF){u,v};vertex->color=layer->shade;
   }
   TriangulateGrid(n-1,1,mesh->indices,&mesh->index_count);
   ShadeDioramaVertices(layer,mesh->vertices,mesh->vertex_count);
+  return true;
 }
 
 #include "diorama_ground_cover_render.inc"
 #include "diorama_ground_fog.inc"
 #include "diorama_wet_surface.inc"
+#include "diorama_ice_surface.inc"
 #include "diorama_trunk_edges.inc"
 #include "diorama_voxel_edges.inc"
 #include "diorama_voxel_authored.inc"
@@ -3952,6 +4044,9 @@ static PresentationOutcome DrawDioramaLayerFace(
     const DioramaLayerMesh *mesh, DioramaAttachedMesh *attached, DioramaFaceSource *source) {
   PresentationOutcome outcome = kPresentationOutcome_Complete;
   const bool depth_draw=mesh->has_depth && layer->depth_sink;
+  const bool hollow_perspective=depth_draw&&layer->hollow_voxel&&
+      (layer->description->plane==SR_PPU_OVERLAY_BG1||layer->description->plane==kDioramaPlane_Bg1Hi||
+       layer->description->plane==kDioramaPlane_Bg1Far);
   if(depth_draw && attached->vertex_count)return kPresentationOutcome_CoreFailure;
   if(layer->voxel_guard&&!ArRenderTexture_IsValid(layer->texture)) {
     DioramaSceneryLightEffectParams light=layer->lighting;
@@ -3967,7 +4062,9 @@ static PresentationOutcome DrawDioramaLayerFace(
                   layer->description->plane != SR_PPU_OVERLAY_BG3 &&
                   DofBlurEnabled(device, geometry->options);
   const float focal_bias=layer->description->plane==SR_PPU_OVERLAY_BG1||
-      DioramaPlaneIsObjectPriority(layer->description->plane)?layer->hollow_recess:0;
+      DioramaPlaneIsObjectPriority(layer->description->plane)?layer->hollow_recess:
+      layer->hollow_voxel&&layer->description->plane==kDioramaPlane_Bg1Hi
+          ?layer->hollow_recess-DioramaTrunk_RimDepth(layer->hollow_recess,true):0;
   const float actor_focus=DioramaPlaneIsObjectPriority(layer->description->plane)?layer->voxel_recess:0;
   float dof_radius = want_dof ? DofRadiusForLayer(layer->authored->z+focal_bias+actor_focus) : 0.0f;
   if (dof_radius < 0.05f)
@@ -4249,10 +4346,12 @@ static PresentationOutcome DrawDioramaLayerFace(
         source_uv,&lighting,depth_draw?layer->depth_sink:NULL,mesh->flat_native_grid) : layer->voxel_guard ? RenderVoxelNativeSources(device,layer,draw_texture,draw_verts,
         depth_draw?mesh->depths:NULL,NULL,mesh->vertex_count,mesh->indices,mesh->index_count,
         layer->blend,layer->exposure,source_uv,&lighting,depth_draw?layer->depth_sink:NULL,true,false,mesh->flat_native_grid) :
-      RenderShadedDioramaDepthGeometry(device, draw_texture, draw_verts,
+      RenderShadedDioramaDepthGeometryWithW(device, draw_texture, draw_verts,
                                            depth_draw?mesh->depths:NULL,
+                                           hollow_perspective?mesh->clip_w:NULL,
                                            mesh->vertex_count, mesh->indices,
-                                           mesh->index_count, layer->blend, layer->exposure, source_uv, &lighting,
+                                           mesh->index_count, layer->blend,layer->exposure,
+                                           source_uv, &lighting,
                                            depth_draw?layer->depth_sink:NULL,layer->description->plane,
                                            DioramaPlaneIsObjectPriority(layer->description->plane));
   }
@@ -4265,6 +4364,8 @@ static PresentationOutcome DrawDioramaLayerFace(
   return outcome;
 }
 
+#include "diorama_trunk_clearance.inc"
+
 /* Side captures have finite native bounds. They never repeat the central
  * lattice or replace transparent sky with a rectangular distant backstop. */
 static PresentationOutcome DrawHollowSideFaces(ArRenderDevice *device,
@@ -4273,12 +4374,33 @@ static PresentationOutcome DrawHollowSideFaces(ArRenderDevice *device,
   const float regions[3][2]={{0,320},{704,(float)s_trunk_assets->side_width},{320,704}};
   PresentationOutcome outcome=kPresentationOutcome_Complete;DioramaFaceSource source={0};
   for(unsigned i=0;i<(include_core?3u:2u);++i) {
-    DioramaLayerMesh mesh;DioramaAttachedMesh attached={0};
+    if(i<2&&!rear&&layer->hollow_voxel&&s_trunk_assets->side_clearance&&
+        layer->description->plane==SR_PPU_OVERLAY_BG1) {
+      const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
+      const float oy=capture->camera_y-capture->authentic_y0+1;
+      HollowFrontSource carved={.device=device,.capture=capture,.geometry=geometry,.layer=layer,
+          .primary=&source,.outcome=outcome};
+      if(!DrawHollowCarvedFront(&carved,fmaxf(regions[i][0],ox+geometry->u0*SR_PPU_SURFACE_MAX_WIDTH),
+          fminf(regions[i][1],ox+geometry->u1*SR_PPU_SURFACE_MAX_WIDTH),
+          fmaxf(0,oy+geometry->v0*SR_PPU_SURFACE_MAX_HEIGHT),
+          fminf(s_trunk_assets->height,oy+geometry->v1*SR_PPU_SURFACE_MAX_HEIGHT)))return kPresentationOutcome_CoreFailure;
+      outcome=carved.outcome;continue;
+    }
     const float front_z=i==2?layer->authored->z-.5f:-layer->hollow_recess;
-    PrepareHollowRegionMesh(capture,geometry,layer,regions[i][0],regions[i][1],front_z,rear,&mesh);
-    if(!mesh.vertex_count||!mesh.index_count)continue;
-    outcome=PresentationOutcome_Combine(outcome,
-        DrawDioramaLayerFace(device,capture,geometry,layer,&mesh,&attached,&source));
+    const float height=s_trunk_assets->height;
+    const float step=i==2&&layer->hollow_column&&!rear?64:height;
+    const float oy=capture->camera_y-capture->authentic_y0+1;
+    const float first=fmaxf(0,oy+geometry->v0*SR_PPU_SURFACE_MAX_HEIGHT);
+    const float last=fminf(height,oy+geometry->v1*SR_PPU_SURFACE_MAX_HEIGHT);
+    for(float y=first;y<last;y+=step) {
+      DioramaLayerMesh mesh;DioramaAttachedMesh attached={0};
+      if(!PrepareHollowRegionMesh(capture,geometry,layer,regions[i][0],regions[i][1],
+          y,fminf(last,y+step),front_z,rear,&mesh))return kPresentationOutcome_CoreFailure;
+      if(!mesh.vertex_count||!mesh.index_count)continue;
+      outcome=PresentationOutcome_Combine(outcome,
+          DrawDioramaLayerFace(device,capture,geometry,layer,&mesh,&attached,&source));
+      if(!PresentationOutcome_IsUsable(outcome))return outcome;
+    }
     if(!PresentationOutcome_IsUsable(outcome))break;
   }
   return outcome;
@@ -4552,12 +4674,11 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       ? scene->render->voxel_inspection : kDioramaVoxelInspect_All;
   if(inspection==kDioramaVoxelInspect_Backing && DioramaPlaneIsObjectPriority(description->plane))
     return kPresentationOutcome_Complete;
-  /* Rooted forest effects sit over the completed walking surface and before
-   * actors. Submitting them with the recessed backdrop would let the front
-   * grass face erase the plants; their projection remains the path surface. */
+  /* BG1 playfield effects sit over completed walking surfaces and before
+   * actors/foreground pillars in every voxel profile. Submitting them with
+   * the rear sheet lets the subsequently drawn floor erase its own mist. */
   const bool forest=ActionVoxel_Profile(scene->voxel_geometry)==kActionVoxelProfile_FillmoreForest;
-  const bool front_effects=forest || ActionVoxel_Profile(scene->voxel_geometry)==kActionVoxelProfile_BloodpoolMarsh ||
-      ActionVoxel_Profile(scene->voxel_geometry)==kActionVoxelProfile_KassandoraDesert;
+  const bool front_effects=ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number);
   const int effect_plane=front_effects && description->plane==SR_PPU_OVERLAY_BG1 ? -1
       : front_effects && description->plane==kDioramaPlane_Bg1Far ? SR_PPU_OVERLAY_BG1
       : description->plane;
@@ -4606,6 +4727,8 @@ static PresentationOutcome DrawResolvedDioramaLayer(
           },
       .dimming = dimming,
       .hollow_recess = HollowPlaySpace(scene)?TrunkRecess():0,
+      .hollow_column = s_trunk_column,
+      .hollow_voxel = scene->voxel_mode&&HollowPlaySpace(scene),
       .voxel_geometry = scene->voxel_geometry,
       .voxel_depth = ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number)?ActionVoxel_Depth(scene->voxel_geometry):0,
       .voxel_recess = ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number)?ActionVoxel_PlayRecess(scene->voxel_geometry):0,
@@ -4768,11 +4891,22 @@ static PresentationOutcome DrawResolvedDioramaLayer(
     const PresentationOutcome guards=DrawHollowGuard(device,capture,geometry,&layer,scene->trunk_guard,scene->map_number);
     if(!PresentationOutcome_IsUsable(guards))return guards;
   }
-  if(HollowPlaySpace(scene)&&scene->trunk->side_high_pixels&&description->plane==kDioramaPlane_Bg1Hi) {
-    /* Native high side details keep their actor-plane depth and high slot;
-     * only the existing shaft rim belongs on the forward plane at zero. */
+  if(layer.hollow_voxel&&description->plane==SR_PPU_OVERLAY_BG1) {
     const PresentationOutcome faces=DrawHollowSideFaces(device,capture,geometry,&layer,false,true);
     if(!PresentationOutcome_IsUsable(faces))return faces;
+    if(!DrawHollowLife(device,capture,geometry,&layer,1-scene->native_bloom_dimming))
+      return kPresentationOutcome_CoreFailure;
+    return PresentationOutcome_Combine(faces,DioramaSubmitPlaneEffect(output_frame,
+        scene->plane_effect,scene->plane_effect_userdata,description->plane,
+        out_projection,scene->render->source_effect_batch));
+  }
+  if(HollowPlaySpace(scene)&&(scene->voxel_mode||scene->trunk->side_high_pixels)&&description->plane==kDioramaPlane_Bg1Hi) {
+    /* Native high side details retain actor contact; the shaft rim uses
+     * its own shell front, with a fixed join at the interior plane. */
+    const PresentationOutcome faces=DrawHollowSideFaces(device,capture,geometry,&layer,false,true);
+    if(!PresentationOutcome_IsUsable(faces))return faces;
+    if(!DrawHollowLife(device,capture,geometry,&layer,1-scene->native_bloom_dimming))
+      return kPresentationOutcome_CoreFailure;
     return PresentationOutcome_Combine(faces,DioramaSubmitPlaneEffect(output_frame,
         scene->plane_effect,scene->plane_effect_userdata,description->plane,
         out_projection,scene->render->source_effect_batch));
@@ -5109,6 +5243,7 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
     trunk_scene.render=&trunk_render;scene=&trunk_scene;
   }
   s_trunk_assets=scene->trunk;s_trunk_settings=scene->trunk_settings;
+  s_trunk_column=scene->voxel_mode&&HollowPlaySpace(scene)&&scene->trunk->column_geometry&&TrunkRecess()>0;
   s_trunk_fade=1-scene->native_bloom_dimming;
   TrunkLifePrepare(scene->trunk_effects,scene->native_bloom_clock,
       scene->trunk_lighting,scene->trunk_particles);
@@ -5191,6 +5326,7 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
   if(!GroundCoverPrepare(scene,out_projection))goto failed;
   GroundFogPrepare(scene, &geometry);
   WetSurfacePrepare(scene, &geometry);
+  IceSurfacePrepare(scene, &geometry);
   DioramaProjection cover_projection;
   if(!out_projection&&(s_ground_cover.active_count || s_ground_fog.span_count)) {
     /* Effect callbacks still need projection ownership when the caller does

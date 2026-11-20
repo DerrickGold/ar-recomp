@@ -1,5 +1,5 @@
 {
-  "description": "Reviewed Marahna temple masonry, foreground columns, recessed carvings and path-wide spike rows. Runtime identity follows displayed native art, palette slots, collision and priority, not source IDs. Native opaque arch shadows remain behind the route; torch animation stays in the rear capture.",
+  "description": "Reviewed Marahna temple masonry, foreground columns, recessed carvings and path-wide spike rows. Runtime identity follows displayed native art, palette slots, collision and priority, not source IDs. Native opaque arch shadows remain behind the route; torch animation stays in the rear capture. Noncolliding foreground column ornaments use the shared shallow native-priority post treatment, leaving the walking lane open while preserving their source front and rear artwork.",
   "materials": [
     {
       "key": "01a681a3002c2ada",
@@ -146,7 +146,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -368,9 +368,9 @@
       "key": "0922a738c80034d4",
       "kinds": [
         7,
-        4,
         7,
-        4
+        7,
+        7
       ],
       "flags": 8,
       "role": "closed_grille",
@@ -1467,7 +1467,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -1589,7 +1589,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -2461,7 +2461,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -2662,7 +2662,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -2790,7 +2790,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -2918,7 +2918,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -2982,7 +2982,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -3649,7 +3649,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -4150,7 +4150,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -4445,7 +4445,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -4494,7 +4494,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -4721,9 +4721,9 @@
     {
       "key": "549d1e7f31c7d91c",
       "kinds": [
-        4,
         7,
-        4,
+        7,
+        7,
         7
       ],
       "flags": 8,
@@ -5292,7 +5292,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -5853,7 +5853,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -6466,7 +6466,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -6740,7 +6740,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -7302,7 +7302,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -7763,7 +7763,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -7827,7 +7827,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -7910,7 +7910,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -8704,7 +8704,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -9655,7 +9655,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -9783,7 +9783,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -10591,7 +10591,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -10888,7 +10888,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -11399,7 +11399,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [
@@ -12336,7 +12336,7 @@
         4,
         4
       ],
-      "flags": 9,
+      "flags": 1048585,
       "role": "foreground_ornament",
       "origins": [
         [

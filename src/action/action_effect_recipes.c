@@ -260,9 +260,9 @@ static unsigned RecipeCost(const ActionEffectRecipe *r) {
           42*((r->field_style.point_count<9?9:r->field_style.point_count)-1))+4*r->particles+
           (r->field_style.wake>0?kActionFieldWakeCount*(16*kActionGroundWakePuffs+
             4*(kActionGroundWakeGrains-kActionGroundWakePuffs)):0) :
-        r->field_style.rolling>0 ? 16*r->field_style.strands+(r->field_style.wake>0?16:0)+
+        r->field_style.rolling>0 ? 16*r->field_style.strands*(r->field_style.voxel_depth>0?kActionCloudInteriorLayers:1)+(r->field_style.wake>0?16:0)+
           (r->field_style.rainbow>0?kActionMistRainbowColumns*kActionMistRainbowRows*2*7:0)+
-          (r->field_style.sparkle>0?4*kActionMistSparklesPerStrand*r->field_style.strands:0) :
+          (r->field_style.sparkle>0?4*kActionMistSparklesPerStrand*r->field_style.strands*(r->field_style.voxel_depth>0?kActionCloudInteriorLayers:1):0) :
         (r->field_style.textured?8:37)*r->field_style.strands;
     case kActionEffect_AuthoredExposure: return 0; /* union is budgeted once per room below */
     case kActionEffect_AuthoredContour: return 14*(r->field_style.point_count-1);
@@ -822,6 +822,8 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
         bit=UINT64_C(1)<<60;ok=VoxelCloudGaps(value,&current->field_style);
       } else if (!strcmp(key,"volume") && current->kind==kActionEffect_AuthoredCloud) {
         bit=UINT64_C(1)<<63;ok=Number(value,0,1,&current->field_style.volume);
+      } else if (!strcmp(key,"voxel-depth") && current->kind==kActionEffect_AuthoredCloud) {
+        bit=UINT64_C(1)<<48;ok=Number(value,0,1,&current->field_style.voxel_depth);
       } else if (!strcmp(key,"plume") && current->kind==kActionEffect_AuthoredCloud) {
         bit=UINT64_C(1)<<58;ok=!strcmp(value,"0")||!strcmp(value,"1");current->field_style.plume=!strcmp(value,"1");
       } else if (!strcmp(key,"debris") && current->kind==kActionEffect_AuthoredDrips) {
@@ -952,6 +954,8 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
     if(r->kind==kActionEffect_AuthoredCloud && r->field_style.textured && r->field_style.point_count) {ok=false;break;}
     if(r->kind==kActionEffect_AuthoredCloud) {
       const ActionEffectFieldStyle *s=&r->field_style;
+      if(s->voxel_depth>0 && (r->anchor!=kActionEffectAnchor_Bg1 || s->placement!=1 ||
+          !s->textured || s->rolling<=0 || s->point_count || s->plume || r->actor.target)) {ok=false;break;}
       if (r->voxel_bg1_bounds.x1 > r->voxel_bg1_bounds.x0 &&
           (r->anchor != kActionEffectAnchor_Bg2Point || s->placement != 0 ||
            s->point_count || r->actor.target)) {ok=false;break;}

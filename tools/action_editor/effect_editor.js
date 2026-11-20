@@ -92,7 +92,7 @@ const EffectEditor=(()=>{
   const requiresTerrain=name=>name.startsWith('stage:')||terrainNames.includes(name)||name.endsWith('-field')&&name!=='moon-field';
   const fieldFields=[['emitterGlowStyle','glow-style','insects'],['emitterChorus','chorus','0'],['emitterTrail','trail','0'],['emitterRipple','ripple','0'],['emitterPlume','plume','0'],['emitterDebris','debris','0'],['emitterLanding','landing','0'],['emitterPlacement','placement','foreground'],['emitterPattern','pattern','motes'],
     ['emitterFoliageSeed','seed',''],['emitterBare','bare','0'],['emitterFlowers','flowers','0'],['emitterFlowerStyle','flower-style','mixed'],['emitterPetals','petals','0'],['emitterCrown','crown','0'],['emitterOpening','opening','0'],['emitterRayThickness','thickness','1'],['emitterRayFadeIn','fade-in','0'],['emitterAngle','angle','0'],['emitterFan','fan','36'],['emitterStrands','strands','8'],
-    ['emitterSoftness','softness','0.35'],['emitterDrift','drift','0'],['emitterAmplitude','amplitude','2'],['emitterCarry','carry','0'],['emitterGroundDepth','ground-depth','0'],['emitterGroundWidth','ground-width','0'],['emitterGust','gust','0'],['emitterTwinkle','twinkle','0'],['emitterActivity','activity','1'],['emitterShadows','shadows','0'],['emitterScatter','scatter','.12'],['emitterBounce','bounce','.4'],['emitterTextured','textured','0'],['emitterRolling','rolling','0'],['emitterVolume','volume','0'],['emitterRainbow','rainbow','0'],['emitterSparkle','sparkle','0'],['emitterWake','wake','0'],['emitterLightResponse','canopy-response','0']];
+    ['emitterSoftness','softness','0.35'],['emitterDrift','drift','0'],['emitterAmplitude','amplitude','2'],['emitterCarry','carry','0'],['emitterGroundDepth','ground-depth','0'],['emitterGroundWidth','ground-width','0'],['emitterGust','gust','0'],['emitterTwinkle','twinkle','0'],['emitterActivity','activity','1'],['emitterShadows','shadows','0'],['emitterScatter','scatter','.12'],['emitterBounce','bounce','.4'],['emitterTextured','textured','0'],['emitterRolling','rolling','0'],['emitterVolume','volume','0'],['emitterVoxelDepth','voxel-depth','0'],['emitterRainbow','rainbow','0'],['emitterSparkle','sparkle','0'],['emitterWake','wake','0'],['emitterLightResponse','canopy-response','0']];
   const cloudFields=[['edge-strength',9],['halo-strength',1.3],['streak-strength',1.7],
     ['echo-strength',.55],['falloff',.42],['cloud-cover',.55],['edge-position',.15],['echo-position',.8],['sun-depth',48],['background-brightness',1]];
   const stormFields=[['parallax-x',''],['ground-palette','0'],['ground-colors','none']];
@@ -132,6 +132,7 @@ const EffectEditor=(()=>{
       case 'scatter': return ['soft-light','starfield','canopy-light'].includes(name);
       case 'bounce': return name==='canopy-light';
       case 'canopy-response': return name==='foliage-shadow'&&record.flowers==='1'||area||['particle-path','drips'].includes(name)||terrainCloud&&record.plume!=='1';
+      case 'voxel-depth': return freeTexturedCloud&&record.plume!=='1'&&(!record.anchor||record.anchor==='bg1')&&record.placement==='playfield';
       case 'rolling': case 'volume': case 'rainbow': case 'sparkle': return freeTexturedCloud&&record.plume!=='1';
       case 'wake': return name==='particle-path'&&record.pattern==='butterflies'&&(!record.anchor||record.anchor==='bg1')||name==='foliage-shadow'&&record.flowers==='1'||(terrainCloud&&record.plume!=='1'||area)&&(!record.anchor||record.anchor==='bg1');
       case 'textured': return (cloud||name==='foliage-shadow'&&record.bare!=='1'||area&&record.pattern==='leaves')&&!record.points;
@@ -515,14 +516,16 @@ const EffectEditor=(()=>{
     }
     const next=new Map(records),record={...(source?.nativeExposure?source.record:{}),...next.get(id)};
     if(id.includes(':cloud-bank:')) {
-      if(patch.points)patch={...patch,textured:null,plume:null,rolling:null,volume:null,rainbow:null,sparkle:null};
-      if((Number(patch.volume)>0||Number(patch.rainbow)>0||Number(patch.sparkle)>0)&&!(Number(patch.rolling??record.rolling)>0))patch={...patch,rolling:'.8'};
+      if(patch.points)patch={...patch,textured:null,plume:null,rolling:null,volume:null,'voxel-depth':null,rainbow:null,sparkle:null};
+      if(Number(patch['voxel-depth'])>0)patch={...patch,anchor:'bg1',placement:'playfield'};
+      if((Number(patch['voxel-depth'])>0||Number(patch.volume)>0||Number(patch.rainbow)>0||Number(patch.sparkle)>0)&&!(Number(patch.rolling??record.rolling)>0))patch={...patch,rolling:'.8'};
       if(patch['ground-depth']!==undefined&&!(Number(patch['ground-depth'])>0))patch={...patch,'ground-width':null};
       if(Number(patch['ground-depth'])>0)patch={...patch,anchor:'bg1',placement:'foreground'};
       if(patch.points===null||patch.placement&&patch.placement!=='foreground')patch={...patch,'ground-depth':null,'ground-width':null};
-      if(patch.anchor?.startsWith('bg2'))patch={...patch,wake:null,'canopy-response':null,'ground-depth':null,'ground-width':null};
+      if(patch.placement&&patch.placement!=='playfield'||patch.plume==='1')patch={...patch,'voxel-depth':null};
+      if(patch.anchor?.startsWith('bg2'))patch={...patch,'voxel-depth':null,wake:null,'canopy-response':null,'ground-depth':null,'ground-width':null};
       if(!(patch.points??record.points)&&(patch.textured!==undefined&&String(patch.textured)!=='1'||patch.rolling!==undefined&&!(Number(patch.rolling)>0)))
-        patch={...patch,rolling:null,volume:null,rainbow:null,sparkle:null,wake:null,'canopy-response':null};
+        patch={...patch,rolling:null,volume:null,'voxel-depth':null,rainbow:null,sparkle:null,wake:null,'canopy-response':null};
     }
     if((id.includes(':particle-area:')||id.includes(':particle-path:'))&&patch.anchor&&patch.anchor!=='bg1')patch={...patch,wake:null};
     if(id.includes(':wet-contour:')&&!record.points&&(patch.width!==undefined||patch.height!==undefined))record.points='-32,0 32,0';
@@ -624,7 +627,7 @@ const EffectEditor=(()=>{
   };
   $('#actorBindingStop').onclick=()=>{try{SharedRoomPreview.previewActorBinding(null,0,0,0);}catch(error){status(error.message);}};
   $('#emitterPoints').onchange=e=>editEmitter(selected,{points:e.target.value.trim()||null,
-    ...(e.target.value.trim()&&selected.includes(':cloud-bank:')?{textured:null,plume:null,rolling:null,volume:null,rainbow:null,sparkle:null}:{}),
+    ...(e.target.value.trim()&&selected.includes(':cloud-bank:')?{textured:null,plume:null,rolling:null,volume:null,'voxel-depth':null,rainbow:null,sparkle:null}:{}),
     ...(!e.target.value.trim()&&selected.includes(':cloud-bank:')?{carry:null,'ground-depth':null,'ground-width':null,particles:null,twinkle:null,wake:null,'canopy-response':null}:{})});
   for(const [key] of cloudFields)$('#cloudLight-'+key).onchange=e=>editEmitter(selected,{[key]:e.target.value});
   for(const [key] of skyFields)$('#sky-'+key).onchange=e=>editEmitter(selected,{[key]:e.target.value.trim()||null});
@@ -638,7 +641,7 @@ const EffectEditor=(()=>{
     ...(key==='flowers'&&e.target.value==='1'?{bare:null,textured:null,shadows:null,crown:null,angle:'0',anchor:'bg1',placement:'playfield',
       width:String(Math.min(512,Number(records.get(selected)?.width??48))),height:String(Math.max(4,Math.min(64,Number(records.get(selected)?.height??24)))),
       'actor-target':null,'actor-source':null,'actor-parent':null,'actor-state':null,'actor-animation':null,'actor-handler':null,'actor-resume':null,'actor-visual':null,'actor-limit':null}:{}),
-    ...(key==='textured'&&e.target.value!=='1'?(selected.includes(':foliage-shadow:')?{shadows:null,crown:null}:selected.includes(':cloud-bank:')?{plume:null,rolling:null,volume:null,rainbow:null,sparkle:null,wake:null,'canopy-response':null}:{}):{}),
+    ...(key==='textured'&&e.target.value!=='1'?(selected.includes(':foliage-shadow:')?{shadows:null,crown:null}:selected.includes(':cloud-bank:')?{plume:null,rolling:null,volume:null,'voxel-depth':null,rainbow:null,sparkle:null,wake:null,'canopy-response':null}:{}):{}),
     ...(key==='plume'&&e.target.value==='1'?{textured:'1',rolling:null,volume:null,rainbow:null,sparkle:null,wake:null,'canopy-response':null,points:null,particles:'0',carry:null,'ground-depth':null,'ground-width':null,twinkle:null,gust:null}:{}),
     ...(key==='debris'?e.target.value==='1'?{ripple:null}:{landing:null}:{}),
     ...(key==='pattern'&&e.target.value!=='leaves'?{textured:null}:{}),

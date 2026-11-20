@@ -13,6 +13,7 @@
 #include "action_soft_light.h"
 #include "action_storm.h"
 #include "action_starfield.h"
+#include "action_effect_volume.h"
 
 typedef struct ExposureWriter {
   ActionEffectGeometryWriter *writer;
@@ -1261,6 +1262,20 @@ static bool LeafParticle(ActionEffectGeometryWriter *w,const ActionEffectInstanc
   return MaskQuad(w,e,clip,p,uv,color,NULL,project,context);
 }
 
+/* Only visible airborne geometry moves through depth. Receiver sampling
+ * stays on the authored world field, and staging keeps camera-free seeds. */
+static const ActionEffectProjectionContext *AirContext(ActionEffectGeometryWriter *w,
+    const ActionEffectInstance *e,ActionEffectProjectPointFn project,void *context,
+    float *rear,float *front) {
+  if(!ActionEffectVolume_Range(e,rear,front))return NULL;
+  const ActionEffectProjectionContext *air=SceneVoxelVolumeContext(w,e,project,context);
+  if(!air||air->light_receiver||air->scenery_lighting_only||
+      (w->frame&&w->frame->light_receiver))return NULL;
+  if(air->diorama_projection&&(!air->diorama_projection->bg1_plane.valid||
+      !air->diorama_projection->bg1_high_plane.valid))return NULL;
+  return air;
+}
+
 typedef struct GlowPoint { float x,y,size,glow; ArRenderColorF color; } GlowPoint;
 typedef struct GlowOrbit {
   uint32_t seed;
@@ -1331,15 +1346,25 @@ static bool Fireflies(ActionEffectGeometryWriter *w,const ActionEffectInstance *
   const ActionEffectFieldStyle *s=&e->field_style;
   if(e->particle_count>32||s->glow_style>=kActionGlow_Count||
       !isfinite(s->chorus)||s->chorus<0||s->chorus>1||!isfinite(s->trail)||s->trail<0||s->trail>1)return false;
+  float rear=0,front=0;
+  const ActionEffectProjectionContext *air=AirContext(w,e,project,context,&rear,&front);
   for(unsigned i=0;i<e->particle_count;++i) {
     const GlowOrbit orbit=GlowOrbitFor(e,i);
+    const float depth=rear+(front-rear)*HashUnit(orbit.seed^0xD7u);
+    ActionEffectProjectionContext volume_context;DioramaProjection volume_projection;
+    void *point_context=context;
+    if(air&&!w->source) {
+      if(!ActionEffectProjection_VolumeContext(air,depth,&volume_context,&volume_projection))return false;
+      point_context=&volume_context;
+    }
+    const unsigned first=w->vertex_count;
     const float clock=e->pulse_ticks/(float)e->particle_lifetime;
     const GlowPoint p=GlowPointAtTime(e,&orbit,clock);
     ArRenderColorF color=p.color;
     if(lighting) {
       const float radius=8+p.size*12;
       color.a=fminf(1,e->tuning.intensity*p.glow*.13f);
-      if(!MaskPatch(w,e,clip,kActionMaskGlow,p.x,p.y,radius,radius,color,project,context))return false;
+      if(!MaskPatch(w,e,clip,kActionMaskGlow,p.x,p.y,radius,radius,color,project,point_context))return false;
     }
     if(particles) {
       if(s->glow_style==kActionGlow_Wisps&&s->trail>0) {
@@ -1360,21 +1385,22 @@ static bool Fireflies(ActionEffectGeometryWriter *w,const ActionEffectInstance *
           const ArRenderPointF uv[4]={ActionEffectMasks_Uv(cell,0,0),ActionEffectMasks_Uv(cell,1,0),
               ActionEffectMasks_Uv(cell,1,1),ActionEffectMasks_Uv(cell,0,1)};
           ArRenderColorF c=p.color;c.a=fminf(1,e->tuning.intensity*(.38f-.07f*j)*s->trail);
-          if(!MaskQuad(w,e,clip,corners,uv,c,NULL,project,context))return false;
+          if(!MaskQuad(w,e,clip,corners,uv,c,NULL,project,point_context))return false;
         }
       }
       if(s->glow_style==kActionGlow_Moss) {
         color.a=fminf(1,e->tuning.intensity*(.35f+.65f*p.glow));
         if(!MaskPatch(w,e,clip,kActionMaskMossFirst+(e->particle_style.seed+i)%kActionMaskMossCount,
-            p.x,p.y,p.size*9,p.size*4,color,project,context))return false;
+            p.x,p.y,p.size*9,p.size*4,color,project,point_context))return false;
         continue;
       }
       /* A bright core and a feathered halo share one quad. Transparent edges
        * avoid hard diamond flicker under subpixel camera/rotation movement. */
       color=MixColor(color,(ArRenderColorF){1,1,.82f,1},.2f);
       color.a=fminf(1,e->tuning.intensity*(.10f+.90f*p.glow));
-      if(!MaskPatch(w,e,clip,kActionMaskFirefly,p.x,p.y,p.size*6,p.size*6,color,project,context))return false;
+      if(!MaskPatch(w,e,clip,kActionMaskFirefly,p.x,p.y,p.size*6,p.size*6,color,project,point_context))return false;
     }
+    if(air&&w->source&&!ActionEffectSource_VolumeRange(w->source,first,depth))return false;
   }
   return true;
 }
@@ -1547,7 +1573,8 @@ static bool CanopyLight(ActionEffectGeometryWriter *w,const ActionEffectInstance
 
 /* Two masks per validated cloud lobe, plus one player and one enemy wake.
  * This scratch list is local to a bank; no frame cache or invalidation state. */
-enum { kRollingMistMaxStrands=24, kRollingMistMaxPatches=kRollingMistMaxStrands*2+2 };
+enum { kRollingMistMaxStrands=24,
+  kRollingMistMaxPatches=kRollingMistMaxStrands*2*kActionCloudInteriorLayers+2 };
 typedef struct MistPatch {
   float x,y,rx,ry,crest;
   float depth; /* Paired body/crest share one stable position inside a voxel bank. */
@@ -1805,13 +1832,9 @@ static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance
   const ActionEffectFieldStyle *s=&e->field_style;
   const ActionEffectLocalRect *r=&e->geometry.data.rect;
   const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
-  const ActionEffectProjectionContext *bank_air=s->volume>0 && s->placement!=2?
-      SceneVoxelVolumeContext(w,e,project,context):NULL;
-  if(bank_air && (bank_air->light_receiver || bank_air->scenery_lighting_only ||
-      (w->frame && w->frame->light_receiver)))bank_air=NULL;
-  if(bank_air && bank_air->diorama_projection &&
-      (!bank_air->diorama_projection->bg1_plane.valid ||
-       !bank_air->diorama_projection->bg1_high_plane.valid))bank_air=NULL;
+  float rear=0,front=0;
+  const ActionEffectProjectionContext *bank_air=AirContext(w,e,project,context,&rear,&front);
+  const unsigned bands=bank_air&&s->voxel_depth>0?kActionCloudInteriorLayers:1;
   const CloudBankMotion motion={.x=r->x0,.y=r->y0,.width=r->x1-r->x0,.height=r->y1-r->y0,
     .drift=s->drift,.amplitude=s->amplitude,.rolling=s->rolling,.intensity=e->tuning.intensity,
     .phase=phase,.wind_phase=sinf(phase),.strands=s->strands,.volume=s->volume>0};
@@ -1820,14 +1843,18 @@ static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance
     const uint32_t seed=e->particle_style.seed^(i+1)*0x9e3779b9u;
     CloudBankPatch pair[2];
     CloudMotion_Bank(&motion,i,seed,pair);
-    for(unsigned tier=0;tier<2;++tier) {
+    for(unsigned band=0;band<bands;++band)for(unsigned tier=0;tier<2;++tier) {
       const CloudBankPatch *p=&pair[tier];
       const unsigned cell=motion.volume?
           (tier?kActionMaskCloudLightFirst:kActionMaskCloudBodyFirst)+DeterministicHash_Mix32(seed)%kActionMaskCloudCount:
           kActionMaskFogFirst+(seed+tier*3)%kActionMaskFogCount;
+      const float depth=bands>1?band/(float)(bands-1):HashUnit(seed^0x64a3u);
+      /* Divide opacity between depth slices so their overlap stays
+       * comparable to the authored bank instead of tripling its density. */
+      const float alpha=bands>1?1-powf(1-p->alpha,1.f/bands):p->alpha;
       AddMistPatch(patches,&count,clip,(MistPatch){.x=p->x,.y=p->y,.rx=p->rx,.ry=p->ry,
-          .crest=tier,.depth=bank_air?s->volume*(.08f+.52f*HashUnit(seed^0x64a3u)):0,
-          .cell=cell,.seed=seed,.tint={.a=p->alpha}});
+          .crest=tier,.depth=bank_air?rear+(front-rear)*depth:0,
+          .cell=cell,.seed=seed,.tint={.a=alpha}});
     }
   }
   /* A fixed allowance per bank; prefer the player and then the strongest
@@ -1855,9 +1882,8 @@ static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance
         .tint={.a=fminf(.65f,e->tuning.intensity*s->wake*weights[i]*.7f)}});
   }
   TintMistPatches(w,e,patches,count);
-  /* Populate the existing billows through the bank instead of stacking more
-   * full-opacity copies. Depth is independent of camera and animation; body
-   * and crest stay together. This retains the ordinary geometry budget. */
+  /* Depth is independent of camera and animation; body and crest stay
+   * together. Sort the complete bank, including explicitly expanded slices. */
   if(bank_air)for(unsigned i=1;i<count;++i) {
     const MistPatch patch=patches[i];unsigned j=i;
     while(j && patches[j-1].depth>patch.depth){patches[j]=patches[j-1];--j;}
@@ -1922,13 +1948,14 @@ static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance
    * their own billow rather than remaining pasted on the rear sheet. */
   ActionEffectProjectionContext rainbow_context;DioramaProjection rainbow_projection;
   void *rainbow_target=context;
+  const float rainbow_depth=s->volume>0?(s->placement==2?1-s->volume*.3f:s->volume*.3f):.5f;
   if(bank_air && !w->source) {
-    if(!ActionEffectProjection_VolumeContext(bank_air,s->volume*.3f,&rainbow_context,&rainbow_projection))return false;
+    if(!ActionEffectProjection_VolumeContext(bank_air,rainbow_depth,&rainbow_context,&rainbow_projection))return false;
     rainbow_target=&rainbow_context;
   }
   const unsigned first=w->vertex_count;
   if(!MistRainbow(w,e,patches,count,clip,project,rainbow_target))return false;
-  if(bank_air && w->source && !ActionEffectSource_VolumeRange(w->source,first,s->volume*.3f))return false;
+  if(bank_air && w->source && !ActionEffectSource_VolumeRange(w->source,first,rainbow_depth))return false;
   return MistSparkles(w,e,patches,count,clip,project,context);
 }
 
@@ -2262,6 +2289,9 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
           !isfinite(s->canopy_response)||s->canopy_response<0||s->canopy_response>1)return false;
       if(!isfinite(s->volume)||s->volume<0||s->volume>1||
           (s->volume>0&&(!s->textured||s->point_count||s->rolling<=0)))return false;
+      if(!isfinite(s->voxel_depth)||s->voxel_depth<0||s->voxel_depth>1||
+          (s->voxel_depth>0&&(!s->textured||s->rolling<=0||s->point_count||s->plume||
+            s->placement!=1||e->projection_plane!=kActionEffectProjectionPlane_Bg1)))return false;
       if(!isfinite(s->rainbow)||s->rainbow<0||s->rainbow>1||
           (s->rainbow>0&&(!s->textured||s->point_count||s->rolling<=0)))return false;
       if(!isfinite(s->sparkle)||s->sparkle<0||s->sparkle>1||
@@ -2295,8 +2325,18 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       }
       const float width=r->x1-r->x0,height=r->y1-r->y0;
       const float phase=(e->pulse_ticks%e->particle_lifetime)*6.2831853f/e->particle_lifetime;
+      float rear=0,front=0;
+      const ActionEffectProjectionContext *air=AirContext(w,e,project,context,&rear,&front);
       for(unsigned i=0;i<s->strands;++i) {
         const uint32_t seed=(s->textured?e->particle_style.seed:e->generation)^i*0x9e3779b9u;
+        const float depth=rear+(front-rear)*HashUnit(seed^0x64a3u);
+        ActionEffectProjectionContext volume_context;DioramaProjection volume_projection;
+        void *patch_context=context;
+        if(air&&!w->source) {
+          if(!ActionEffectProjection_VolumeContext(air,depth,&volume_context,&volume_projection))return false;
+          patch_context=&volume_context;
+        }
+        const unsigned first=w->vertex_count;
         const float x=r->x0+width*(.2f+.6f*HashUnit(seed))+sinf(phase+HashUnit(seed^7)*6)*s->drift;
         const float y=r->y0+height*(.25f+.5f*HashUnit(seed^91))+cosf(phase+HashUnit(seed^23)*6)*s->amplitude;
         if(s->textured) {
@@ -2310,9 +2350,10 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
           const float px=(r->x0+r->x1)*.5f+(space_x-fabsf(drift))*(2*HashUnit(seed)-1)+sinf(phase+HashUnit(seed^7)*6)*drift;
           const float py=(r->y0+r->y1)*.5f+(space_y-billow)*(2*HashUnit(seed^91)-1)+cosf(phase+HashUnit(seed^23)*6)*billow;
           ArRenderColorF tint=FieldColor(e->tuning.color);tint.a=fminf(1,e->tuning.intensity*.7f);
-          if(!MaskPatch(w,e,&visible,kActionMaskFogFirst+(seed%kActionMaskFogCount),px,py,rx,ry,tint,project,context))return false;
+          if(!MaskPatch(w,e,&visible,kActionMaskFogFirst+(seed%kActionMaskFogCount),px,py,rx,ry,tint,project,patch_context))return false;
         } else if(!AppendSceneSoftCloud(w,e,x,y,width*(.10f+.08f*HashUnit(seed^11)),height*.25f,
-            FieldColor(e->tuning.color),fminf(1,e->tuning.intensity*(.06f+.12f*s->softness)),seed,project,context))return false;
+            FieldColor(e->tuning.color),fminf(1,e->tuning.intensity*(.06f+.12f*s->softness)),seed,project,patch_context))return false;
+        if(air&&w->source&&!ActionEffectSource_VolumeRange(w->source,first,depth))return false;
       }
       return true;
     }

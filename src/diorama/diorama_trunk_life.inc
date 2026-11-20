@@ -121,7 +121,8 @@ static bool DrawHollowLife(ArRenderDevice *device,const DioramaCapture *capture,
       float glint=fmaxf(0,cosf(g->camera.tilt_y*2.4f+p->seed*7));glint*=glint;glint*=glint;
       ArRenderColorF color={.r=.64f+.32f*glint,.g=.82f+.16f*glint,.b=.97f,
         .a=s_life.frost*(.24f+.48f*glint)*l->strength*fade};
-      if(!LifeQuad(capture,g,z,p->x,p->y,.35f+p->seed*.35f,.22f+p->seed*.16f,0,color))return false;
+      const float rim_z=layer->hollow_voxel?DioramaTrunk_RimFront(layer->hollow_recess,p->x,true):z;
+      if(!LifeQuad(capture,g,rim_z,p->x,p->y,.35f+p->seed*.35f,.22f+p->seed*.16f,0,color))return false;
     }
   }
   if(layer->description->plane==SR_PPU_OVERLAY_BG1&&s_life.particles&&s_life.bark>0) {

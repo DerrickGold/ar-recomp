@@ -1782,6 +1782,55 @@ static unsigned JungleFixtures(const char *directory) {
   }
   return 9;
 }
+/* Every foreground column occurrence, not only the report's cell. The
+ * native face/priority stays intact while the back stops before the player. */
+static void MarahnaTemplePillarChecks(const ActionRoomScene *s,const ActionVoxelGeometry *g) {
+  unsigned pillars=0,rear=0;
+  for(int ty=g->origin_y/8;ty<(g->origin_y+g->height)/8;++ty)
+    for(int tx=g->origin_x/8;tx<(g->origin_x+g->width)/8;++tx) {
+      uint16_t word;assert(ActionRoomScene_LookupTile(s,1,tx,ty,&word,NULL));
+      bool front=false,back=false;
+      for(unsigned y=0;y<8;++y)for(unsigned x=0;x<8;++x) {
+        const unsigned pixel=g->front[(size_t)(ty*8+y-g->origin_y)*g->width+tx*8+x-g->origin_x];
+        if((pixel&kVoxelKindMask)!=kVoxelForeground)continue;
+        assert(!(pixel&kVoxelColliding));
+        assert(!!(pixel&kVoxelHighPriority)==!!(word&0x2000));
+        assert(FixturePixel(s,tx*8+x,ty*8+y));
+        if(pixel&kVoxelHighPriority)front=true;else back=true;
+      }
+      if(!front&&!back)continue;
+      VoxelCellGeometry cell;assert(ActionVoxel_CellGeometry(g,tx/2,ty/2,&cell));
+      const unsigned q=(tx&1)|((ty&1)<<1);
+      if(front) {
+        assert(!back);++pillars;
+        assert(cell.front[q]==0 && fabsf(cell.back[q]-.024f)<.00001f);
+        assert(cell.back[q]<ActionVoxel_PlayRecess(g)*.5f);
+        /* Complete native front silhouette, including intentional rear ink. */
+        for(unsigned y=0;y<8;++y)for(unsigned x=0;x<8;++x) {
+          const unsigned ink=FixturePixel(s,tx*8+x,ty*8+y);
+          const unsigned pixel=g->front[(size_t)(ty*8+y-g->origin_y)*g->width+tx*8+x-g->origin_x];
+          if(ink&&ink!=13)assert((pixel&kVoxelKindMask)==kVoxelForeground);
+        }
+      } else {
+        ++rear;
+      }
+    }
+  unsigned trims;const VoxelRearTrim *trim=ActionVoxel_RearTrims(g,&trims);
+  if(pillars)assert(trims);
+  for(unsigned i=0;i<trims;++i) {
+    assert(trim[i].thin); /* The complete rear copy shares the post's thickness. */
+    const float wall=ActionVoxel_Depth(g),start=ActionVoxel_RearTrimRecess(g,true);
+    assert(fabsf(start-.216f)<.00001f && fabsf(start+.024f-wall)<.00001f);
+    for(int tx=trim[i].x/8;tx<(trim[i].x+trim[i].width)/8;++tx)
+      for(int ty=trim[i].y/8;ty<trim[i].y/8+2;++ty) {
+        const size_t at=(size_t)(ty-g->origin_y/8)*(g->width/8)+tx-g->origin_x/8;
+        assert(g->thin_trim_cells&&g->thin_trim_cells[at]);
+      }
+  }
+  if(s->map!=8)assert(pillars);
+  assert(rear);
+  printf("Marahna temple pillars room%u: %u shallow front quadrants, %u rear quadrants excluded\n",s->map,pillars,rear);
+}
 static unsigned MarahnaTempleFixtures(const char *directory) {
   static ActionSceneSnapshot fixture;static ActionRoomScene variant;
   static uint8_t encoded[kActionSceneSnapshotMaxBytes];
@@ -1795,6 +1844,7 @@ static unsigned MarahnaTempleFixtures(const char *directory) {
     assert(ActionVoxel_Build(a,s,NULL,settings) && ActionVoxel_Active(a,5,room));
     assert(ActionVoxel_Profile(a)==kActionVoxelProfile_MarahnaTemple);
     assert(ActionVoxel_Depth(a)==.24f && ActionVoxel_PlayRecess(a)==.08f);
+    MarahnaTemplePillarChecks(s,a);
     variant=*s;Renumber(&variant);assert(ActionVoxel_Build(b,&variant,NULL,settings));SameGeometry(a,b);
     variant=*s;memset(variant.palette,0,sizeof(variant.palette));
     assert(ActionVoxel_Build(b,&variant,NULL,settings));SameGeometry(a,b);
@@ -1827,12 +1877,22 @@ static unsigned MarahnaTempleFixtures(const char *directory) {
     if(FixtureCell(s,0x20,&tx,&ty))assert(ActionVoxel_FrontRecess(a,tx,ty)==0);
     DesertMaterial(a,s,0x08,kVoxelSolid);
     DesertMaterial(a,s,0x43,kVoxelRearOnly);
+    /* Door masonry stays at the rear while the independent bar mask owns
+     * the physical grille. Exercise both mirrored definitions in each region. */
+    if(room!=4)assert(RearGateJambChecks(s,a,0xd9,0xe0));
+    variant=*s;variant.bg[0].map[0]=0xd9;variant.bg[0].map[16]=0xe0;
+    assert(ActionVoxel_Build(b,&variant,NULL,settings));
+    assert(RearGateJambChecks(&variant,b,0xd9,0xe0));
+    memset(variant.characters+0x9a*32,0,32);
+    assert(ActionVoxel_Build(b,&variant,NULL,settings));
+    assert(RearGateJambChecks(&variant,b,0xd9,0xe0));
     /* Removing the source bars cannot leave a depth gate behind. Source
      * tile identities remain constant, exercising live composition changes. */
     unsigned closed,opened;ActionVoxel_Gates(a,&closed);
     if(room!=4)assert(closed);
     variant=*s;memset(variant.characters+0x9a*32,0,32);
     assert(ActionVoxel_Build(b,&variant,NULL,settings));ActionVoxel_Gates(b,&opened);assert(!opened);
+    if(room!=4)assert(RearGateJambChecks(&variant,b,0xd9,0xe0));
     variant=*s;memset(variant.characters,0,sizeof(variant.characters));
     assert(ActionVoxel_Build(b,&variant,NULL,settings) && !ActionVoxel_Active(b,5,room));
     printf("Marahna temple %u terrain %u: %u contours, %u rear, %u spike strips, %u gates\n",room,region,count,rear,patches,closed);
@@ -1880,6 +1940,8 @@ static unsigned MarahnaTempleFixtures(const char *directory) {
 #include "action_voxel_castle_cap_finish.inc"
 #include "action_voxel_castle_post_join.inc"
 #include "action_voxel_snow_slopes.inc"
+#include "action_voxel_snow_canopy.inc"
+#include "action_voxel_snow_divots.inc"
 #include "diorama_trunk_guard.inc"
 #include "action_voxel_jungle_water.inc"
 #include "action_voxel_jungle_terminal.inc"
@@ -1904,7 +1966,23 @@ static unsigned MarahnaTempleFixtures(const char *directory) {
 #include "action_voxel_snow_cap_phase.inc"
 #include "action_voxel_snow_closing_risers.inc"
 #include "action_voxel_castle_water.inc"
+static void RearTrimAttachmentChecks(void) {
+  ActionVoxelGeometry *g=ActionVoxel_Create();assert(g);
+  g->profile=kActionVoxelProfile_MarahnaTemple;g->settings=ActionVoxel_SettingsForRoom(5,4);
+  g->mixed_scenery=true;
+  for(unsigned thin=0;thin<2;++thin) {
+    VoxelEdge edge={.side=1,.length=8,.far_rank=1,.high_priority=1,.rear_trim=1,.thin_trim=thin};
+    VoxelEdgeSpan span;
+    assert(ActionVoxel_ResolveEdgeSpan(g,&edge,kVoxelEdgeRearTrim,0,ActionVoxel_TrimDepth(g),&span));
+    const float front=ActionVoxel_RearTrimRecess(g,thin!=0);
+    assert(span.near_depth==0 && span.far_depth>0);
+    assert(fabsf(front+span.far_depth-ActionVoxel_Depth(g))<.00001f);
+    assert(fabsf(front-(thin?.216f:.18f))<.00001f);
+  }
+  ActionVoxel_Release(g);
+}
 int main(int argc,char **argv) {
+  RearTrimAttachmentChecks();
   if(argc>1 && !strcmp(argv[1],"--surface-inventory"))return SurfaceFixtureInventory(argc,argv);
   SummitCrestFixtures(getenv("AR_VOXEL_SUMMIT_CREST_FIXTURES"));
   Lifecycle();
@@ -1965,6 +2043,8 @@ int main(int argc,char **argv) {
   CastleCapFinishFixtures(getenv("AR_VOXEL_CASTLE_CAP_FIXTURES"));
   CastlePostJoinFixtures(getenv("AR_VOXEL_CASTLE_POST_JOIN_FIXTURES"));
   SnowAct2SlopeFixtures(getenv("AR_VOXEL_SNOW_SLOPE_FIXTURES"));
+  SnowCanopyFixtures(getenv("AR_VOXEL_SNOW_CANOPY_FIXTURES"));
+  SnowDivotFixtures(getenv("AR_VOXEL_SNOW_DIVOT_FIXTURES"));
   DesertSkeletonFixtures(getenv("AR_VOXEL_SKELETON_FIXTURES"));
   SurfaceFixtureEdits(getenv("AR_VOXEL_SURFACE_FIXTURE"));
   SurfaceRoleFixtures(getenv("AR_VOXEL_SURFACE_ROLE_FIXTURES"));
@@ -1996,7 +2076,8 @@ int main(int argc,char **argv) {
   const unsigned cavern=cavern_directory?CavernFixtures(cavern_directory):0;
   const char *jungle_directory=argc>8?argv[8]:getenv("AR_VOXEL_JUNGLE_FIXTURES");
   const unsigned jungle=jungle_directory?JungleFixtures(jungle_directory):0;
-  const unsigned marahna_temple=argc>9?MarahnaTempleFixtures(argv[9]):0;
+  const char *marahna_directory=argc>9?argv[9]:getenv("AR_VOXEL_MARAHNA_TEMPLE_FIXTURES");
+  const unsigned marahna_temple=marahna_directory?MarahnaTempleFixtures(marahna_directory):0;
   const char *northwall_directory=getenv("AR_VOXEL_NORTHWALL_FIXTURES");
   const unsigned northwall=northwall_directory?NorthwallFixtures(northwall_directory):0;
   if(northwall)printf("Northwall: %u regional fixtures\n",northwall);

@@ -23,20 +23,28 @@ typedef bool (*SceneryShadingSubmit)(void *, const ArRenderVertex2D *, int,
 typedef bool (*SceneryShadingDepthSubmit)(void *, const ArRenderVertex2D *,
     const float *, int, const int32_t *, int);
 
+typedef bool (*SceneryShadingPerspectiveSubmit)(void *, const ArRenderVertex2D *,
+    const float *, const float *, int, const int32_t *, int);
+
 enum { kSceneryShadingBatchVertices = 4096, kSceneryShadingBatchIndices = 12288 };
 typedef struct SceneryShadingBatch {
   ArRenderVertex2D vertices[kSceneryShadingBatchVertices];
-  float depths[kSceneryShadingBatchVertices];
+  float depths[kSceneryShadingBatchVertices],clip_w[kSceneryShadingBatchVertices];
   int32_t indices[kSceneryShadingBatchIndices];
   int nv, ni;
   SceneryShadingDepthSubmit submit;
-  bool has_depth;
+  SceneryShadingPerspectiveSubmit submit_perspective;
+  bool has_depth,has_w;
   void *context;
 } SceneryShadingBatch;
 
 static inline bool SceneryShading_Flush(SceneryShadingBatch *b) {
-  if (b->ni && !b->submit(b->context,b->vertices,b->has_depth?b->depths:NULL,
-      b->nv,b->indices,b->ni)) return false;
+  if(b->ni) {
+    const bool ok=b->has_w?b->submit_perspective(b->context,b->vertices,b->depths,b->clip_w,
+        b->nv,b->indices,b->ni):b->submit(b->context,b->vertices,b->has_depth?b->depths:NULL,
+        b->nv,b->indices,b->ni);
+    if(!ok)return false;
+  }
   b->nv=b->ni=0;
   return true;
 }
@@ -45,26 +53,32 @@ static inline float SceneryShading_Axis(ArRenderVertex2D v, unsigned axis) {
 }
 static inline ArRenderVertex2D SceneryShading_Intersect(
     ArRenderVertex2D a, ArRenderVertex2D b, unsigned axis, float edge,
-    float za,float zb,float *depth) {
+    float za,float zb,float *depth,float wa,float wb,float *clip_w) {
   /* Canonical edge order makes shared intersections identical. */
   if (a.tex_coord.x>b.tex_coord.x ||
       (a.tex_coord.x==b.tex_coord.x && a.tex_coord.y>b.tex_coord.y)) {
     const ArRenderVertex2D swap=a;a=b;b=swap;
     const float swap_z=za;za=zb;zb=swap_z;
+    const float swap_w=wa;wa=wb;wb=swap_w;
   }
   const float t=(edge-SceneryShading_Axis(a,axis))/
       (SceneryShading_Axis(b,axis)-SceneryShading_Axis(a,axis));
+  /* UV cuts are linear in source/world space. Screen coordinates and GPU
+   * depth use the corresponding projected fraction, while W stays linear. */
+  const float w=wa+(wb-wa)*t;
+  const float projected=clip_w?t*wb/w:t;
   ArRenderVertex2D v={
-    .position={a.position.x+(b.position.x-a.position.x)*t,a.position.y+(b.position.y-a.position.y)*t},
+    .position={a.position.x+(b.position.x-a.position.x)*projected,a.position.y+(b.position.y-a.position.y)*projected},
     .tex_coord={a.tex_coord.x+(b.tex_coord.x-a.tex_coord.x)*t,a.tex_coord.y+(b.tex_coord.y-a.tex_coord.y)*t},
     .color={a.color.r+(b.color.r-a.color.r)*t,a.color.g+(b.color.g-a.color.g)*t,
       a.color.b+(b.color.b-a.color.b)*t,a.color.a+(b.color.a-a.color.a)*t}};
   if(axis)v.tex_coord.y=edge;else v.tex_coord.x=edge;
-  if(depth)*depth=za+(zb-za)*t;
+  if(depth)*depth=za+(zb-za)*projected;
+  if(clip_w)*clip_w=w;
   return v;
 }
-static inline unsigned SceneryShading_Clip(const ArRenderVertex2D *in,const float *depths,unsigned n,
-    ArRenderVertex2D out[8],float *out_depths,unsigned axis,float edge,bool lower) {
+static inline unsigned SceneryShading_Clip(const ArRenderVertex2D *in,const float *depths,const float *ws,unsigned n,
+    ArRenderVertex2D out[8],float *out_depths,float *out_ws,unsigned axis,float edge,bool lower) {
   unsigned count=0;
   for(unsigned i=0;i<n;++i) {
     const ArRenderVertex2D a=in[i],b=in[(i+1)%n];
@@ -73,17 +87,19 @@ static inline unsigned SceneryShading_Clip(const ArRenderVertex2D *in,const floa
     /* Endpoints on the cut are already emitted by the adjacent edge. */
     if(ai!=bi && av!=edge && bv!=edge) {
       out[count]=SceneryShading_Intersect(a,b,axis,edge,
-          depths?depths[i]:0,depths?depths[(i+1)%n]:0,out_depths?out_depths+count:NULL);
+          depths?depths[i]:0,depths?depths[(i+1)%n]:0,out_depths?out_depths+count:NULL,
+          ws?ws[i]:1,ws?ws[(i+1)%n]:1,out_ws?out_ws+count:NULL);
       ++count;
     }
     if(bi) {
-      out[count]=b;if(out_depths)out_depths[count]=depths[(i+1)%n];++count;
+      out[count]=b;if(out_depths)out_depths[count]=depths[(i+1)%n];
+      if(out_ws)out_ws[count]=ws[(i+1)%n];++count;
     }
   }
   return count;
 }
 static inline bool SceneryShading_Polygon(SceneryShadingBatch *b,
-    const SceneryShadingField *field,ArRenderRectF uv,ArRenderVertex2D *v,const float *depths,unsigned n,
+    const SceneryShadingField *field,ArRenderRectF uv,ArRenderVertex2D *v,const float *depths,const float *ws,unsigned n,
     float inside_x,float inside_y,float uniform) {
   if(n<3)return true;
   if(b->nv+(int)n>kSceneryShadingBatchVertices ||
@@ -96,6 +112,7 @@ static inline bool SceneryShading_Polygon(SceneryShadingBatch *b,
         uv.x+inside_x*uv.w,uv.y+inside_y*uv.h);
     v[i].color.r*=shade;v[i].color.g*=shade;v[i].color.b*=shade;
     if(b->has_depth)b->depths[b->nv]=depths[i];
+    if(b->has_w)b->clip_w[b->nv]=ws[i];
     b->vertices[b->nv++]=v[i];
   }
   for(unsigned i=1;i+1<n;++i) {
@@ -112,13 +129,15 @@ static inline unsigned SceneryShading_First(const float *cuts,unsigned n,float v
 /* Split only triangles crossed by authored boundaries. Positions, source UVs,
  * alpha, painter order and active material remain intact. Fixed scratch batches
  * stream arbitrarily complex zones without allocations or extra render targets. */
-static inline bool SceneryShading_DrawDepth(const SceneryShadingField *field,ArRenderRectF uv,
-    const ArRenderVertex2D *vertices,const float *depths,int nv,const int32_t *indices,int ni,
-    SceneryShadingDepthSubmit submit,void *context) {
-  if(!field || !field->sample)return submit(context,vertices,depths,nv,indices,ni);
+static inline bool SceneryShading_DrawProjected(const SceneryShadingField *field,ArRenderRectF uv,
+    const ArRenderVertex2D *vertices,const float *depths,const float *ws,int nv,const int32_t *indices,int ni,
+    SceneryShadingDepthSubmit submit,SceneryShadingPerspectiveSubmit perspective,void *context) {
+  if(!field || !field->sample)return ws?perspective(context,vertices,depths,ws,nv,indices,ni):
+      submit(context,vertices,depths,nv,indices,ni);
   if(uv.w<=0 || uv.h<=0)return false;
   SceneryShadingBatch batch;
   batch.nv=batch.ni=0;batch.submit=submit;batch.context=context;batch.has_depth=depths!=NULL;
+  batch.has_w=ws!=NULL;batch.submit_perspective=perspective;
   /* Most draws are entirely inside/outside a room-wide box. Keep their indexed
    * mesh intact and sample each vertex once; no clipping or extra draw calls. */
   if(nv>0 && nv<=kSceneryShadingBatchVertices) {
@@ -142,20 +161,22 @@ static inline bool SceneryShading_DrawDepth(const SceneryShadingField *field,ArR
             uv.x+v->tex_coord.x*uv.w,uv.y+v->tex_coord.y*uv.h,mx,my);
         v->color.r*=factor;v->color.g*=factor;v->color.b*=factor;
       }
-      return submit(context,batch.vertices,depths,nv,indices,ni);
+      return ws?perspective(context,batch.vertices,depths,ws,nv,indices,ni):
+          submit(context,batch.vertices,depths,nv,indices,ni);
     }
   }
   for(int i=0;i<ni;i+=3) {
     ArRenderVertex2D triangle[3]={vertices[indices[i]],vertices[indices[i+1]],vertices[indices[i+2]]};
-    float triangle_z[3]={0};
+    float triangle_z[3]={0},triangle_w[3]={1,1,1};
     if(depths)for(unsigned j=0;j<3;++j)triangle_z[j]=depths[indices[i+j]];
+    if(ws)for(unsigned j=0;j<3;++j)triangle_w[j]=ws[indices[i+j]];
     float x0=triangle[0].tex_coord.x,x1=x0,y0=triangle[0].tex_coord.y,y1=y0;
     for(unsigned j=1;j<3;++j){x0=fminf(x0,triangle[j].tex_coord.x);x1=fmaxf(x1,triangle[j].tex_coord.x);
       y0=fminf(y0,triangle[j].tex_coord.y);y1=fmaxf(y1,triangle[j].tex_coord.y);}
     float shade;
     if(field->uniform && field->uniform(field->userdata,
         uv.x+x0*uv.w,uv.y+y0*uv.h,uv.x+x1*uv.w,uv.y+y1*uv.h,&shade)) {
-      if(!SceneryShading_Polygon(&batch,field,uv,triangle,triangle_z,3,0,0,shade))return false;
+      if(!SceneryShading_Polygon(&batch,field,uv,triangle,triangle_z,triangle_w,3,0,0,shade))return false;
       continue;
     }
     const unsigned first_x=SceneryShading_First(field->x,field->nx,x0,uv.x,uv.w);
@@ -170,21 +191,34 @@ static inline bool SceneryShading_DrawDepth(const SceneryShadingField *field,ArR
         const float left=right;
         right=col<field->nx?fminf(x1,(field->x[col]-uv.x)/uv.w):x1;
         if(right<=left && x0<x1)continue;
-        ArRenderVertex2D a[8],b[8];float za[8],zb[8];
-        for(unsigned j=0;j<3;++j){a[j]=triangle[j];za[j]=triangle_z[j];}unsigned n=3;
+        ArRenderVertex2D a[8],b[8];float za[8],zb[8],wa[8],wb[8];
+        for(unsigned j=0;j<3;++j){a[j]=triangle[j];za[j]=triangle_z[j];wa[j]=triangle_w[j];}unsigned n=3;
         const bool cut[]={left>x0,right<x1,top>y0,bottom<y1};
         const float edges[]={left,right,top,bottom};
         for(unsigned c=0;c<4;++c)if(cut[c]) {
-          n=SceneryShading_Clip(a,depths?za:NULL,n,b,depths?zb:NULL,c/2,edges[c],(c&1)==0);
-          for(unsigned j=0;j<n;++j){a[j]=b[j];if(depths)za[j]=zb[j];}
+          n=SceneryShading_Clip(a,depths?za:NULL,ws?wa:NULL,n,b,depths?zb:NULL,ws?wb:NULL,c/2,edges[c],(c&1)==0);
+          for(unsigned j=0;j<n;++j){a[j]=b[j];if(depths)za[j]=zb[j];if(ws)wa[j]=wb[j];}
         }
-        if(!SceneryShading_Polygon(&batch,field,uv,a,za,n,(left+right)*.5f,(top+bottom)*.5f,-1))return false;
+        if(!SceneryShading_Polygon(&batch,field,uv,a,za,wa,n,(left+right)*.5f,(top+bottom)*.5f,-1))return false;
         if(right>=x1)break;
       }
       if(bottom>=y1)break;
     }
   }
   return SceneryShading_Flush(&batch);
+}
+
+/* The affine entry point remains unchanged for existing callers. */
+static inline bool SceneryShading_DrawDepth(const SceneryShadingField *field,ArRenderRectF uv,
+    const ArRenderVertex2D *vertices,const float *depths,int nv,const int32_t *indices,int ni,
+    SceneryShadingDepthSubmit submit,void *context) {
+  return SceneryShading_DrawProjected(field,uv,vertices,depths,NULL,nv,indices,ni,submit,NULL,context);
+}
+static inline bool SceneryShading_DrawPerspective(const SceneryShadingField *field,ArRenderRectF uv,
+    const ArRenderVertex2D *vertices,const float *depths,const float *ws,int nv,const int32_t *indices,int ni,
+    SceneryShadingPerspectiveSubmit submit,void *context) {
+  if(!depths||!ws||!submit)return false;
+  return SceneryShading_DrawProjected(field,uv,vertices,depths,ws,nv,indices,ni,NULL,submit,context);
 }
 
 typedef struct SceneryShadingLegacySubmit {

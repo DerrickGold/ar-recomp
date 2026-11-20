@@ -1211,11 +1211,11 @@ retry_projection:;
   };
   DioramaAstralRift_Attach(slot->action_environmental_effects, device, &scene);
   DioramaSnapshotCapture_Write(slot, &capture, &view, &scene);
-  /* Shared visibility follows the ActionVoxel material/object contract.
-   * The established curved-tree enclosure has its own split-plane priority
-   * policy and no verified modeled OBJ family; retain that compositor. */
+  /* Curved tree platforms and the recessed shaft intersect in world space;
+   * they need the same visibility pass as ordinary Voxel terrain. */
   const bool shared_depth=slot->diorama_voxel_mode &&
-      ActionVoxel_Active(scene.voxel_geometry,scene.map_group,scene.map_number);
+      (ActionVoxel_Active(scene.voxel_geometry,scene.map_group,scene.map_number) ||
+       (scene.trunk&&scene.trunk_settings.enabled));
   if (shared_depth) {
     scene.depth_sink=DioramaDepthGpu_Begin(device);
     if (!scene.depth_sink) {

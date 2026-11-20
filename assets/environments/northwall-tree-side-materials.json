@@ -964,17 +964,17 @@
     },
     {
       "key": "25d02ff5b3060eb7",
-      "role": "bark_branch_body",
+      "role": "recessed_noncolliding_snow_hollow",
       "solid_colors": [
-        7680,
-        15872,
-        15872,
+        0,
+        0,
+        0,
         0
       ],
       "rear_colors": [
-        2,
-        2,
-        0,
+        7682,
+        15874,
+        15872,
         0
       ],
       "snow_colors": [
@@ -1006,7 +1006,8 @@
         0,
         0,
         0
-      ]
+      ],
+      "rear_reason": "The complete noncolliding bark hollow, including its upper rim and hanging lip, remains on the rear plane so the native fall-through opening is not bridged by a foreground extrusion."
     },
     {
       "key": "263db9913e186637",
@@ -2123,18 +2124,18 @@
     },
     {
       "key": "50c9cee4a7c7b5d7",
-      "role": "bark_branch_body",
+      "role": "recessed_noncolliding_snow_divot",
       "solid_colors": [
-        7680,
-        14848,
-        1536,
-        512
+        0,
+        0,
+        0,
+        0
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        7682,
+        14850,
+        1538,
+        514
       ],
       "snow_colors": [
         0,
@@ -2165,7 +2166,8 @@
         0,
         0,
         0
-      ]
+      ],
+      "rear_reason": "The complete native fall-through entrance (snow crown and bark lip) sits on the rear plane. Its collision is zero; adjacent solid banks and transparent opening pixels retain their own geometry."
     },
     {
       "key": "50e3e0f3ffd2dc4f",
@@ -2897,18 +2899,18 @@
     },
     {
       "key": "79ca6263bbe4fd95",
-      "role": "bark_branch_body",
+      "role": "recessed_noncolliding_snow_hollow",
       "solid_colors": [
-        1536,
-        512,
-        1536,
-        512
+        0,
+        0,
+        0,
+        0
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        1538,
+        514,
+        1538,
+        514
       ],
       "snow_colors": [
         0,
@@ -2939,7 +2941,8 @@
         0,
         0,
         0
-      ]
+      ],
+      "rear_reason": "The complete noncolliding bark hollow, including its upper rim and hanging lip, remains on the rear plane so the native fall-through opening is not bridged by a foreground extrusion."
     },
     {
       "key": "81b669d57cf30312",
@@ -3189,24 +3192,24 @@
     },
     {
       "key": "89f36184a92bfbfe",
-      "role": "snow_branch_body",
+      "role": "recessed_noncolliding_snow_divot",
       "solid_colors": [
-        24576,
-        61440,
-        61440,
-        64512
-      ],
-      "rear_colors": [
         0,
         0,
         0,
         0
       ],
-      "snow_colors": [
+      "rear_colors": [
         24576,
         61440,
         61440,
         64512
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
       ],
       "native_slope": false,
       "origins": [
@@ -3227,12 +3230,12 @@
         ]
       ],
       "snow_face_colors": [
-        24576,
-        61440,
-        61440,
-        61440
+        0,
+        0,
+        0,
+        0
       ],
-      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+      "rear_reason": "The complete native fall-through entrance (snow crown and bark lip) sits on the rear plane. Its collision is zero; adjacent solid banks and transparent opening pixels retain their own geometry."
     },
     {
       "key": "8a75ab67412aef33",
@@ -4131,18 +4134,18 @@
     },
     {
       "key": "b0b725d79e6270b7",
-      "role": "bark_branch_body",
+      "role": "recessed_noncolliding_snow_hollow",
       "solid_colors": [
-        15872,
-        7680,
         0,
-        15872
-      ],
-      "rear_colors": [
-        2,
-        2,
+        0,
         0,
         0
+      ],
+      "rear_colors": [
+        15874,
+        7682,
+        0,
+        15872
       ],
       "snow_colors": [
         0,
@@ -4173,7 +4176,8 @@
         0,
         0,
         0
-      ]
+      ],
+      "rear_reason": "The complete noncolliding bark hollow, including its upper rim and hanging lip, remains on the rear plane so the native fall-through opening is not bridged by a foreground extrusion."
     },
     {
       "key": "b2c02ccffe812c80",
@@ -4270,24 +4274,24 @@
     },
     {
       "key": "b4528d45dd2c5c2e",
-      "role": "snow_branch_body",
+      "role": "recessed_noncolliding_snow_divot",
       "solid_colors": [
-        61440,
-        24576,
-        64512,
-        61440
-      ],
-      "rear_colors": [
         0,
         0,
         0,
         0
       ],
-      "snow_colors": [
+      "rear_colors": [
         61440,
         24576,
         64512,
         61440
+      ],
+      "snow_colors": [
+        0,
+        0,
+        0,
+        0
       ],
       "native_slope": false,
       "origins": [
@@ -4308,12 +4312,12 @@
         ]
       ],
       "snow_face_colors": [
-        61440,
-        24576,
-        61440,
-        61440
+        0,
+        0,
+        0,
+        0
       ],
-      "snow_face_reason": "Reviewed native snow coating, including its index12 blue outline. Lower wood-only quarters retain bark; transparent sky and green foliage are never surface art."
+      "rear_reason": "The complete native fall-through entrance (snow crown and bark lip) sits on the rear plane. Its collision is zero; adjacent solid banks and transparent opening pixels retain their own geometry."
     },
     {
       "key": "b654ed24267c4976",
@@ -4688,18 +4692,18 @@
     },
     {
       "key": "c47f2802ea897e3f",
-      "role": "bark_branch_body",
+      "role": "recessed_noncolliding_snow_divot",
       "solid_colors": [
-        14848,
-        7680,
-        512,
-        1536
+        0,
+        0,
+        0,
+        0
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        14850,
+        7682,
+        514,
+        1538
       ],
       "snow_colors": [
         0,
@@ -4730,7 +4734,8 @@
         0,
         0,
         0
-      ]
+      ],
+      "rear_reason": "The complete native fall-through entrance (snow crown and bark lip) sits on the rear plane. Its collision is zero; adjacent solid banks and transparent opening pixels retain their own geometry."
     },
     {
       "key": "c4beccfa9050e014",
@@ -5150,18 +5155,18 @@
     },
     {
       "key": "ea024ef5a32e9875",
-      "role": "bark_branch_body",
+      "role": "recessed_noncolliding_snow_hollow",
       "solid_colors": [
-        512,
-        1536,
-        512,
-        1536
+        0,
+        0,
+        0,
+        0
       ],
       "rear_colors": [
-        2,
-        2,
-        2,
-        2
+        514,
+        1538,
+        514,
+        1538
       ],
       "snow_colors": [
         0,
@@ -5192,7 +5197,8 @@
         0,
         0,
         0
-      ]
+      ],
+      "rear_reason": "The complete noncolliding bark hollow, including its upper rim and hanging lip, remains on the rear plane so the native fall-through opening is not bridged by a foreground extrusion."
     },
     {
       "key": "ea9ec52f3b75ee84",

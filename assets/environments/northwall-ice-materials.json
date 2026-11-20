@@ -718,8 +718,9 @@
         7,
         7
       ],
-      "flags": 0,
-      "role": "native_empty",
+      "flags": 8388608,
+      "role": "cave_void_rear_matte",
+      "complete_rear_matte": true,
       "origins": [
         [
           3,
@@ -3170,13 +3171,13 @@
       "key": "b8f1b1e1f73a1525",
       "portal_jamb": true,
       "kinds": [
+        5,
         2,
-        2,
-        2,
+        5,
         2
       ],
       "flags": 32768,
-      "role": "ice_gate_inner_jamb",
+      "role": "ice_gate_grille_and_inner_jamb",
       "origins": [
         [
           2,
@@ -4286,7 +4287,7 @@
       ]
     }
   ],
-  "rear_matte_contract": "Four reviewed ice-slope fingerprints keep their native opaque cave-shadow pixels only on the rear plane. Their diagonal foreground contours remain cut out, joining the unchanged opaque cave interior without exposing the compositor clear color. Explicit black and transparent pixel edits retain precedence.",
+  "rear_matte_contract": "Four reviewed ice-slope fingerprints keep their native opaque cave-shadow pixels only on the rear plane. Their diagonal foreground contours remain cut out, joining the unchanged opaque cave interior without exposing the compositor clear color. The climbing cave also fills its reviewed transparent void fingerprint with rear-only black, matching adjacent opaque cave-shadow cells. Explicit black, transparent pixel edits and backing removal retain precedence.",
   "top_surface_contract": "Reviewed palette5 ice slopes borrow complete opaque native ice-body artwork from the same ice_rock family. Two native ice-body donors retain their complete16px pattern on horizontal caps. Pale palette4 snow, dark cave rock, transparent matte and animated art are not donor substitutes. Face contours, collision and priority are unchanged.",
   "native_surfaces": [
     {

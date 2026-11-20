@@ -917,6 +917,14 @@ static bool BuildAutomaticSurfaceArt(ActionVoxelGeometry *c,const ActionRoomScen
   memcpy(c->edges,edges,count*sizeof(*edges));c->edge_count=count;
   SurfaceSnowCapRiserPhase(b);
   SurfaceSnowNativeClosingRisers(b);
+  if(c->profile==kActionVoxelProfile_NorthwallIce)for(unsigned i=0;i<count;++i) {
+    VoxelEdge *e=c->edges+i;
+    if(e->side || e->far_rank!=2 || e->room_edge_color)continue;
+    CastleMaterial m;const DioramaPixelEdit *edit;
+    if(SurfaceMaterial(b,e->x,e->y,&m,&edit) && !edit &&
+        (m.native_surface_family==kVoxelNativeSurfaceIceCrystal || m.top_family==5))
+      e->surface_finish=kVoxelSurfaceFinishIce;
+  }
   memset(c->pass_counts,0,sizeof(c->pass_counts));
   for(unsigned i=0;i<count;++i) {
     const VoxelEdge *e=&c->edges[i];

@@ -105,7 +105,7 @@ static void TrunkGuardCheckFace(TrunkGuardProbe *probe,unsigned band,unsigned re
       }
     }
     if(band==2)assert(side); /* The original curved core Far owns its source. */
-    const float z=side?-.24f-(band==2?TrunkSideExpectedSpan(wx):0):band==0?-.24f:0;
+    const float z=side?-.24f-(band==2?TrunkSideExpectedSpan(wx,probe->recorder->trunk_voxel):0):band==0?-.24f:0;
     Scene3DClipPoint clip;
     assert(Scene3D_TransformToClip(p->matrix,((wx-ox)/capture->width-.5f)*p->aspect_x,
         (.5f-(wy-oy)/capture->height)*p->height_scale,z,&clip));

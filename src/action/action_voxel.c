@@ -462,6 +462,9 @@ float ActionVoxel_BranchBackDepth(const ActionVoxelGeometry *c) {
 float ActionVoxel_RearFaceDepth(const ActionVoxelGeometry *c) {
   return ActionVoxel_Depth(c) - ActionVoxel_TrimDepth(c);
 }
+float ActionVoxel_RearTrimRecess(const ActionVoxelGeometry *c,bool thin) {
+  return ActionVoxel_Depth(c)-ActionVoxel_LocalTrimDepth(c,thin);
+}
 const VoxelTrunkCurve *ActionVoxel_TrunkCurveForCell(const ActionVoxelGeometry *c,int tile_x,int tile_y) {
   if(!c || !c->ready || !c->trunk_cells)return NULL;
   const int64_t x=(int64_t)tile_x-c->origin_x/8,y=(int64_t)tile_y-c->origin_y/8;
@@ -565,6 +568,20 @@ const VoxelTrunkCurve *ActionVoxel_ColumnCurveForEdge(const ActionVoxelGeometry 
 void ActionVoxel_ColumnSection(const VoxelTrunkCurve *curve,float world_x,VoxelTrunkCurve *section) {
   if(!section)return;
   *section=curve?*curve:(VoxelTrunkCurve){0};
+  if(curve && curve->native_lip && curve->contact_count==9 && isfinite(world_x)) {
+    const float x=fmaxf(0,fminf(8,(world_x-curve->contact_x)*.5f));
+    const unsigned column=(unsigned)fminf(7,floorf(x));const float t=x-column;
+    const float contact=curve->contact[column]*(1-t)+curve->contact[column+1]*t;
+    const float top=curve->canopy_top[column]*(1-t)+curve->canopy_top[column+1]*t;
+    section->top_y=0;section->base_y=1;
+    section->section_offset=top;section->section_height=fmaxf(1,contact+16-top);section->contact_count=0;
+    return;
+  }
+  if(curve && curve->round_width && isfinite(world_x)) {
+    const float t=fmaxf(0,fminf(1,(world_x-curve->round_x)/curve->round_width));
+    section->round_weight=1-sqrtf(fmaxf(0,1-(1-t)*(1-t)));
+    return;
+  }
   if(!curve || curve->contact_count!=8 || !isfinite(world_x))return;
   int column=(int)floorf((world_x-curve->contact_x)*.5f);
   if(column<0)column=0;else if(column>7)column=7;
@@ -574,13 +591,16 @@ void ActionVoxel_ColumnSection(const VoxelTrunkCurve *curve,float world_x,VoxelT
   memset(section->contact,0,sizeof(section->contact));
 }
 float ActionVoxel_ColumnFrontDepth(const ActionVoxelGeometry *c,const VoxelTrunkCurve *curve,float world_y) {
+  if(curve && curve->native_lip && curve->section_height>0)
+    world_y=(world_y-curve->section_offset)/curve->section_height;
+  if(curve && curve->round_width)return ActionVoxel_SceneryRecess(c)*curve->round_weight;
   /* Grounded desert supports follow their shadowed underside into the shaft.
    * Native priority chooses which side of actor contact the shaft retains. */
   const float weight=curve && curve->linear && curve->base_y>curve->top_y && isfinite(world_y)
       ? fmaxf(0,fminf(1,(world_y-curve->top_y)/(curve->base_y-curve->top_y)))
       : TrunkCurveWeight(curve,world_y);
   if(c && c->profile==kActionVoxelProfile_NorthwallSnow && curve) {
-    const float contact=fmaxf(0,ActionVoxel_PlayRecess(c)-.01f);
+    const float contact=curve->native_lip?0:fmaxf(0,ActionVoxel_PlayRecess(c)-.01f);
     return contact+(ActionVoxel_SceneryRecess(c)-contact)*weight;
   }
   if(c && c->profile==kActionVoxelProfile_KassandoraDesert && curve) {
@@ -625,15 +645,17 @@ bool ActionVoxel_ResolveEdgeSpanAtY(const ActionVoxelGeometry *c, const VoxelEdg
     exposed_near=ActionVoxel_SceneryFront(c,e->rear_mounted,e->raised_scenery);
     if(e->column_curve && e->column_curve<=c->column_curve_count) {
       VoxelTrunkCurve section;
-      ActionVoxel_ColumnSection(&c->column_curves[e->column_curve-1],e->x+.5f,&section);
+      const VoxelTrunkCurve *curve=&c->column_curves[e->column_curve-1];
+      ActionVoxel_ColumnSection(curve,e->x+(curve->round_width || curve->native_lip?(e->side==1):.5f),&section);
       exposed_near=ActionVoxel_ColumnFrontDepth(c,&section,world_y);
     }
     exposed_far=e->far_rank==1?ActionVoxel_SceneryBack(c,exposed_near,e->thin_trim,e->raised_scenery):depths[e->far_rank];
     float neighbor_near=ActionVoxel_SceneryFront(c,e->neighbor_rear_mounted,e->neighbor_raised_scenery);
     if(e->neighbor_column_curve && e->neighbor_column_curve<=c->column_curve_count) {
       VoxelTrunkCurve section;
-      ActionVoxel_ColumnSection(&c->column_curves[e->neighbor_column_curve-1],
-          e->x+.5f+(e->side==1?1:e->side==3?-1:0),&section);
+      const VoxelTrunkCurve *curve=&c->column_curves[e->neighbor_column_curve-1];
+      ActionVoxel_ColumnSection(curve,e->x+(curve->round_width || curve->native_lip?(e->side==1):
+          .5f+(e->side==1?1:e->side==3?-1:0)),&section);
       neighbor_near=ActionVoxel_ColumnFrontDepth(c,&section,world_y);
     }
     const float neighbor_far=e->near_rank==1?ActionVoxel_SceneryBack(c,neighbor_near,e->neighbor_thin_trim,
@@ -653,7 +675,9 @@ bool ActionVoxel_ResolveEdgeSpanAtY(const ActionVoxelGeometry *c, const VoxelEdg
     }
   }
   out->near_depth = behind_actors ? exposed_near : fmaxf(near_depth, exposed_near);
-  if(e->far_rank==1 || e->far_rank==3)
+  const bool canopy_return=e->column_curve && e->column_curve<=c->column_curve_count &&
+      c->column_curves[e->column_curve-1].native_lip;
+  if((e->far_rank==1 || e->far_rank==3) && !canopy_return)
     out->near_depth=fmaxf(out->near_depth,ActionVoxel_EdgeRecess(c,e));
   out->far_depth = fminf(far_depth, exposed_far);
   return out->far_depth > out->near_depth;
@@ -661,6 +685,18 @@ bool ActionVoxel_ResolveEdgeSpanAtY(const ActionVoxelGeometry *c, const VoxelEdg
 bool ActionVoxel_ResolveEdgeSpan(const ActionVoxelGeometry *c,const VoxelEdge *e,
     VoxelEdgePass pass,float near_depth,float far_depth,VoxelEdgeSpan *out) {
   const float y=e->y+(e->side==2);
+  if(!(e->side&1) && e->column_curve && e->column_curve<=c->column_curve_count &&
+      (c->column_curves[e->column_curve-1].round_width || c->column_curves[e->column_curve-1].native_lip)) {
+    bool any=false;
+    const unsigned samples=c->column_curves[e->column_curve-1].native_lip?(e->length+1)/2+1:2;
+    for(unsigned i=0;i<samples;++i) {
+      VoxelEdge point=*e;point.x+=samples>1?e->length*i/(samples-1):0;VoxelEdgeSpan span;
+      if(!ActionVoxel_ResolveEdgeSpanAtY(c,&point,pass,near_depth,far_depth,y,&span))continue;
+      if(!any)*out=span;else {out->near_depth=fminf(out->near_depth,span.near_depth);out->far_depth=fmaxf(out->far_depth,span.far_depth);}
+      any=true;
+    }
+    return any;
+  }
   if(!(e->side&1) || (!e->column_curve && !e->neighbor_column_curve))
     return ActionVoxel_ResolveEdgeSpanAtY(c,e,pass,near_depth,far_depth,y,out);
   const unsigned owners[]={e->column_curve,e->neighbor_column_curve};
