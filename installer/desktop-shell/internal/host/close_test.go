@@ -1,13 +1,13 @@
 package host
 
 import (
-	"errors"
+	"bufio"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func closeTestBackend(t *testing.T, status *atomic.Int32, requests *atomic.Int32) *Backend {
@@ -29,120 +29,74 @@ func closeTestBackend(t *testing.T, status *atomic.Int32, requests *atomic.Int32
 	return &Backend{URL: u, Done: make(chan struct{})}
 }
 
-func TestCloseUsesNativeYesNoResponses(t *testing.T) {
-	for _, answer := range []string{CloseAffirmative, CloseNegative, "Cancel", "", "Close", "OK"} {
-		t.Run(answer, func(t *testing.T) {
-			var status, requests atomic.Int32
-			status.Store(http.StatusOK)
-			b := closeTestBackend(t, &status, &requests)
-			var guard CloseGuard
-			prevent := guard.BeforeClose(b, func() (string, error) { return answer, nil }, func(err error) { t.Fatal(err) })
-			wantClose := answer == "Yes"
-			if prevent == wantClose || (requests.Load() == 1) != wantClose {
-				t.Fatalf("answer %q: prevent=%v, close requests=%d", answer, prevent, requests.Load())
-			}
-		})
+func TestNativeCloseWhileStarting(t *testing.T) {
+	var bridge Bridge
+	if bridge.BeforeClose(nil) {
+		t.Fatal("startup without a backend should allow closing")
 	}
-}
-
-func TestCloseBusyBackendCanRetry(t *testing.T) {
 	var status, requests atomic.Int32
 	status.Store(http.StatusConflict)
 	b := closeTestBackend(t, &status, &requests)
-	var guard CloseGuard
-	var reported error
-	confirm := func() (string, error) { return CloseAffirmative, nil }
-	report := func(err error) { reported = err }
-	if !guard.BeforeClose(b, confirm, report) || reported == nil || !strings.Contains(reported.Error(), "current build") {
-		t.Fatalf("busy close must be vetoed and explained: %v", reported)
+	if !bridge.BeforeClose(b) {
+		t.Fatal("the backend refused to close while building")
 	}
 	status.Store(http.StatusOK)
-	reported = nil
-	if guard.BeforeClose(b, confirm, report) || reported != nil || requests.Load() != 2 {
-		t.Fatalf("retry failed: %v, requests=%d", reported, requests.Load())
+	if bridge.BeforeClose(b) || requests.Load() != 2 {
+		t.Fatal("the host should allow a successful startup close")
 	}
 }
 
-func TestCloseSerializesDialogsAndRemembersApproval(t *testing.T) {
+func TestNativeCloseReachesRendererAndWaitsForBackend(t *testing.T) {
+	var bridge Bridge
 	var status, requests atomic.Int32
 	status.Store(http.StatusOK)
 	b := closeTestBackend(t, &status, &requests)
-	var guard CloseGuard
-	entered, answer, finished := make(chan struct{}), make(chan string), make(chan bool, 1)
-	unwanted := func() (string, error) { t.Error("opened another dialog"); return "", nil }
-	report := func(err error) { t.Error(err) }
-	go func() {
-		finished <- guard.BeforeClose(b, func() (string, error) { close(entered); return <-answer, nil }, report)
-	}()
-	<-entered
-	if !guard.BeforeClose(b, unwanted, report) {
-		t.Error("duplicate close bypassed the pending confirmation")
-	}
-	answer <- CloseNegative
-	if !<-finished {
-		t.Fatal("No did not veto close")
-	}
-	if guard.BeforeClose(b, func() (string, error) { return CloseAffirmative, nil }, report) {
-		t.Fatal("Yes after No did not close")
-	}
-	if guard.BeforeClose(b, unwanted, report) || requests.Load() != 1 {
-		t.Fatal("an approved close opened another confirmation/request")
-	}
-}
+	bridge.Connect(b.URL)
 
-func TestCloseAllowsStartupAndExitedBackend(t *testing.T) {
-	b := &Backend{Done: make(chan struct{})}
-	close(b.Done)
-	for _, backend := range []*Backend{nil, b} {
-		var guard CloseGuard
-		if guard.BeforeClose(backend, func() (string, error) { t.Error("unexpected dialog"); return "", nil }, func(err error) { t.Error(err) }) {
-			t.Fatal("closing was vetoed without a running backend")
+	path := "/__shell/close-requests"
+	native := httptest.NewRecorder()
+	bridge.Bootstrap(native, httptest.NewRequest(http.MethodGet, path, nil))
+	if native.Code != http.StatusNotFound {
+		t.Fatalf("close stream exposed on the bootstrap origin: %d", native.Code)
+	}
+
+	address, stop, err := StartRenderer(&bridge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	client := &http.Client{Timeout: 3 * time.Second}
+	connect := func() *http.Response {
+		t.Helper()
+		response, err := client.Get(address + path[1:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" {
+			response.Body.Close()
+			t.Fatalf("close stream missing: %s (%s)", response.Status, response.Header.Get("Content-Type"))
+		}
+		t.Cleanup(func() { response.Body.Close() })
+		return response
+	}
+	response := connect()
+	defer response.Body.Close()
+	stream := bufio.NewReader(response.Body)
+	for i := 0; i < 2; i++ {
+		// A second native close can arrive after the player cancels the first.
+		if !bridge.BeforeClose(b) || requests.Load() != 0 {
+			t.Fatal("native close bypassed the renderer's draft check")
+		}
+		for _, want := range []string{"event: close-request\n", "data: {}\n", "\n"} {
+			line, err := stream.ReadString('\n')
+			if err != nil || line != want {
+				t.Fatalf("read %q, want %q: %v", line, want, err)
+			}
 		}
 	}
-}
 
-func TestCloseReportsDialogAndTransportErrors(t *testing.T) {
-	for _, failure := range []string{"dialog", "transport"} {
-		t.Run(failure, func(t *testing.T) {
-			var guard CloseGuard
-			// Invalid protocol fails locally without depending on a refused TCP port.
-			b := &Backend{URL: &url.URL{Scheme: "invalid", Host: "127.0.0.1"}, Done: make(chan struct{})}
-			var reported error
-			prevent := guard.BeforeClose(b, func() (string, error) {
-				if failure == "dialog" {
-					return "", errors.New("dialog unavailable")
-				}
-				return CloseAffirmative, nil
-			}, func(err error) { reported = err })
-			if !prevent || reported == nil {
-				t.Fatalf("failure must be reported without silently discarding edits: prevent=%v, error=%v", prevent, reported)
-			}
-		})
-	}
-}
-
-func TestCloseDoesNotLoseBackendExitDuringDialogs(t *testing.T) {
-	for _, dialog := range []string{"confirmation", "warning"} {
-		t.Run(dialog, func(t *testing.T) {
-			var guard CloseGuard
-			b := &Backend{Done: make(chan struct{})}
-			exitWhilePending := func() {
-				close(b.Done)
-				// Simulate the backend-exit watcher's concurrent Quit callback.
-				if !guard.BeforeClose(b, nil, nil) {
-					t.Error("pending guard was bypassed")
-				}
-			}
-			prevent := guard.BeforeClose(b, func() (string, error) {
-				if dialog == "confirmation" {
-					exitWhilePending()
-					return CloseNegative, nil
-				}
-				return "", errors.New("dialog failed")
-			}, func(error) { exitWhilePending() })
-			if prevent {
-				t.Fatal("backend-exit request was lost behind a dialog")
-			}
-		})
+	close(b.Done)
+	if bridge.BeforeClose(b) {
+		t.Fatal("the host must allow quitting after the backend exits")
 	}
 }

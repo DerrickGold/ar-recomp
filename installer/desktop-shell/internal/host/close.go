@@ -1,68 +1,68 @@
 package host
 
-import "sync"
-
-// Wails' native Linux/Windows question dialogs return these strings regardless
-// of custom button labels. macOS is configured with the same labels by the host.
-const (
-	CloseAffirmative = "Yes"
-	CloseNegative    = "No"
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
 )
 
-// CloseGuard prevents repeated window/menu close requests from opening competing
-// native dialogs (Wails Linux uses a single shared dialog-result channel).
-type CloseGuard struct {
-	mu       sync.Mutex
-	pending  bool
-	approved bool
-}
-
-// BeforeClose follows Wails' convention: true vetoes closing the window.
-func (g *CloseGuard) BeforeClose(b *Backend, confirm func() (string, error), report func(error)) (prevent bool) {
-	g.mu.Lock()
-	if g.approved {
-		g.mu.Unlock()
-		return false
-	}
-	if g.pending {
-		g.mu.Unlock()
-		return true
-	}
-	g.pending = true
-	g.mu.Unlock()
-	defer func() {
-		g.mu.Lock()
-		defer g.mu.Unlock()
-		// A quit from the backend-exit watcher may have been suppressed while
-		// either dialog was open. Do not lose it when the dialog returns.
-		if b != nil && b.exited() {
-			prevent = false
-		}
-		g.approved = !prevent
-		g.pending = false
-	}()
+// BeforeClose follows Wails' convention: true keeps the window open. The
+// renderer owns the draft state and calls the normal close endpoint when ready.
+func (h *Bridge) BeforeClose(b *Backend) bool {
 	if b == nil || b.exited() {
 		return false
 	}
-	answer, err := confirm()
-	// The backend-exit watcher may have requested Quit while the dialog was
-	// open. Complete that request here instead of losing it to the guard.
-	if b.exited() {
-		return false
-	}
-	if err != nil {
-		report(err)
-		return true
-	}
-	if answer != CloseAffirmative {
-		return true
-	}
-	if err := b.RequestClose(); err != nil {
-		if b.exited() {
-			return false
+	h.mu.RLock()
+	requests := h.closeRequests
+	h.mu.RUnlock()
+	if requests != nil {
+		select {
+		case requests <- struct{}{}:
+		default: // Coalesce repeated native close requests.
 		}
-		report(err)
+		return !b.exited()
+	}
+	// During startup there is no Workshop to confirm with. Still let the
+	// backend reject the close if it has already started an automatic build.
+	if err := b.RequestClose(); err != nil && !b.exited() {
+		fmt.Fprintln(os.Stderr, err)
 		return true
 	}
 	return false
+}
+
+func (h *Bridge) serveCloseRequests(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	h.mu.Lock()
+	if h.closeRequests == nil {
+		// Keep a single pending request across a renderer reconnect.
+		h.closeRequests = make(chan struct{}, 1)
+	}
+	requests := h.closeRequests
+	h.mu.Unlock()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	stream := http.NewResponseController(w)
+	if err := stream.Flush(); err != nil {
+		return
+	}
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-requests:
+			if _, err := io.WriteString(w, "event: close-request\ndata: {}\n\n"); err != nil {
+				return
+			}
+			if err := stream.Flush(); err != nil {
+				return
+			}
+		}
+	}
 }

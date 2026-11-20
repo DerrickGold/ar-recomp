@@ -281,6 +281,11 @@ func TestStartupAndOutputFeedbackAssets(t *testing.T) {
 	s, _ := outputFixture(t)
 	bridge := &Bridge{}
 	bridge.SetOutputSelection(s)
+	w := httptest.NewRecorder()
+	bridge.ServeHTTP(w, httptest.NewRequest("GET", "http://127.0.0.1/__shell/output/controls.css", nil))
+	if w.Code != 200 || w.Body.Len() == 0 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/css") {
+		t.Fatal("game-folder chooser is missing its shared control styles")
+	}
 	for _, name := range []string{"feedback.js", "feedback.css"} {
 		for _, prefix := range []string{"/__shell/", "/__shell/output/"} {
 			w := httptest.NewRecorder()
@@ -299,5 +304,25 @@ func TestStartupAndOutputFeedbackAssets(t *testing.T) {
 		if w.Code != 404 {
 			t.Fatal("native bootstrap exposed output route", name)
 		}
+	}
+}
+
+func TestOutputChooserShipsTranslationsBeforeSelectingGame(t *testing.T) {
+	s, _ := outputFixture(t)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("GET", "/__shell/output/", nil))
+	page := w.Body.String()
+	if w.Code != 200 || strings.Contains(page, "{{UI_CATALOG}}") ||
+		!strings.Contains(page, `"builder.output.consent":[`) || !strings.Contains(page, `"builder.feedback.close":[`) {
+		t.Fatal("missing first-run chooser or feedback translations")
+	}
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("GET", "/__shell/output/interface-text.js", nil))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "workshopI18n") {
+		t.Fatal("missing first-run language bindings")
+	}
+	if w := outputCall(t, s, "review", map[string]string{"directory": "relative"}); w.Code != 400 ||
+		!strings.Contains(w.Body.String(), `"errorCode":"builder.output.absolute"`) {
+		t.Fatal("missing translated destination error", w.Body.String())
 	}
 }

@@ -19,6 +19,7 @@ type InstalledPackSummary struct {
 	Revision string       `json:"revision"`
 	Enabled  bool         `json:"enabled"`
 	Archive  bool         `json:"archive,omitempty"`
+	Content  string       `json:"-"`
 	Error    string       `json:"error,omitempty"`
 }
 
@@ -69,6 +70,30 @@ func openInstalledAuthorPack(dir, manifest string) (*AuthorPack, error) {
 // InspectInstalledPack includes disabled packages, without loading scripts.
 func InspectInstalledPack(root, key string) (InstalledPackSummary, error) {
 	return readInstalledSummary(root, key)
+}
+
+// OpenInstalledLanguage reads the selected legacy installation even if it is
+// disabled. It does not restore its manifest or change the active catalog.
+func OpenInstalledLanguage(root, key string) (*AuthorPack, error) {
+	if IsLanguageArchiveName(key) {
+		if _, err := readInstalledArchive(root, key); err != nil {
+			return nil, err
+		}
+		project, err := OpenAuthorInput(filepath.Join(root, key))
+		if err != nil {
+			return nil, err
+		}
+		return project.Pack(), nil
+	}
+	dir, err := installedDirectory(root, key)
+	if err != nil {
+		return nil, err
+	}
+	manifest, _, err := installedManifest(dir)
+	if err != nil {
+		return nil, err
+	}
+	return openInstalledAuthorPack(dir, manifest)
 }
 
 func installedDirectory(root, key string) (string, error) {
@@ -162,7 +187,7 @@ func InstallProjectInLibrary(root string, project *AuthorProject, replace bool) 
 		}
 		if strings.EqualFold(row.Metadata.ID, id) {
 			if row.Archive || row.Key != id {
-				return "", fmt.Errorf("package %s is installed as %s; uninstall that copy first, or export a reviewed .arlang and replace its archive", id, row.Key)
+				return "", fmt.Errorf("package %s is installed as %s; publish a reviewed .o2r update or use a separate ID for draft testing", id, row.Key)
 			}
 			exists = true
 		}

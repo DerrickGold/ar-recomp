@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/ar2game"
 	"github.com/DerrickGold/ar-recomp/installer/internal/ar2master"
@@ -26,6 +27,8 @@ type Plan struct {
 	media         [][]byte
 	sources       []*localization.AuthorProject
 }
+
+func (plan *Plan) LanguageSources() []*localization.AuthorProject { return slices.Clone(plan.sources) }
 
 const SequelID = "ar2-us"
 

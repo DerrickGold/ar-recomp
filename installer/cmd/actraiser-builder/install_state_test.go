@@ -457,7 +457,7 @@ func TestPlaySessionPassesWindowModeToGame(t *testing.T) {
 	}
 	root := t.TempDir()
 	binary := filepath.Join(root, "ActRaiserRecomp")
-	stub := "#!/bin/sh\nprintf '%s' \"$AR_SESSION_WINDOW_MODE\" > window-mode.txt\n"
+	stub := "#!/bin/sh\nprintf '%s' \"$AR_SESSION_WINDOW_MODE\" > window-mode.txt\nprintf '%s' \"$AR_SESSION_MOD_RECOVERY\" > mod-recovery.txt\n"
 	if err := os.WriteFile(binary, []byte(stub), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +473,7 @@ func TestPlaySessionPassesWindowModeToGame(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		done, err := startGameSession(builder.Result{BinaryPath: binary, WorkingDir: root}, mode)
+		done, err := startGameSession(builder.Result{BinaryPath: binary, WorkingDir: root, ModRecovery: "prepared"}, mode)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -484,6 +484,9 @@ func TestPlaySessionPassesWindowModeToGame(t *testing.T) {
 		if err != nil || string(data) != test.want {
 			t.Fatalf("game received window mode %q, want %q with %q in %q: %v",
 				data, test.want, test.requested, test.launcher, err)
+		}
+		if data, err := os.ReadFile(filepath.Join(root, "mod-recovery.txt")); err != nil || string(data) != "prepared" {
+			t.Fatalf("game did not receive mod recovery mode: %q %v", data, err)
 		}
 	}
 }

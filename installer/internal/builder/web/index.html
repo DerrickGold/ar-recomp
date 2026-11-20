@@ -5,155 +5,231 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="workshop-version" content="{{BUILDER_VERSION}}">
 <title>{{TITLE}}</title>
+<link rel="stylesheet" href="builder/controls.css">
 <link rel="stylesheet" href="builder/theme.css">
 <link rel="stylesheet" href="builder/big-screen.css">
 <link rel="stylesheet" href="builder/feedback.css">
 <script type="application/json" id="interface-catalog">{{UI_CATALOG}}</script>
+<script src="builder/interface-text.js" defer></script>
 <script src="builder/i18n.js" defer></script>
 <script src="builder/feedback.js" defer></script>
+<script src="builder/confirm.js" defer></script>
 <script src="builder/file-input.js" defer></script>
+<script src="builder/archive-save.js" defer></script>
 <script src="builder/project-links.js" defer></script>
 </head>
-<body data-big-screen="{{BIG_SCREEN}}" data-play-session="{{PLAY_SESSION}}" data-controller-hint="{{CONTROLLER_HINT}}">
-<div id="workshop-atmosphere" aria-hidden="true"><canvas id="ambient-scene" width="640" height="420"></canvas></div>
+<body data-big-screen="{{BIG_SCREEN}}" data-desktop-shell="{{DESKTOP_SHELL}}" data-play-session="{{PLAY_SESSION}}" data-controller-hint="{{CONTROLLER_HINT}}">
 <a class="skip-link" href="#workspace" data-i18n="builder.nav.skip">Skip to workspace</a>
 <aside class="sidebar">
   <a class="brand" href="#home"><span class="brand-sigil" aria-hidden="true">✦</span><span>ACTRAISER<small data-i18n="builder.brand.workshop">THE WORKSHOP</small></span></a>
-  <div class="nav-label" data-i18n="builder.nav.workspace">YOUR WORKSPACE</div>
-  <div class="tabs" role="tablist" aria-orientation="vertical" aria-label="Workshop sections" data-i18n-aria="builder.nav.sections">
-    <button class="tab" id="tab-home" role="tab" aria-selected="true" aria-controls="panel-home"><span class="nav-icon" aria-hidden="true">⌂</span><span data-i18n="builder.nav.home">Home</span></button>
-    <button class="tab" id="tab-build" role="tab" aria-selected="false" aria-controls="panel-build" tabindex="-1"><span class="nav-icon" aria-hidden="true">◇</span><span id="build-nav-label" data-i18n="builder.nav.build_game">Build game</span><span class="badge" aria-hidden="true"></span></button>
-    <button class="tab" id="tab-localization" role="tab" aria-selected="false" aria-controls="panel-localization" tabindex="-1" disabled data-i18n-title="builder.language.unavailable_title" title="Requires the native US language source"><span class="nav-icon" aria-hidden="true">文</span><span data-i18n="builder.nav.languages">Languages</span></button>
-    <button class="tab" id="tab-assets" role="tab" aria-selected="false" aria-controls="panel-assets" tabindex="-1"><span class="nav-icon" aria-hidden="true">♫</span><span data-i18n="builder.nav.assets">Assets</span></button>
-    <button class="tab" id="tab-manual" role="tab" aria-selected="false" aria-controls="panel-manual" tabindex="-1"><span class="nav-icon" aria-hidden="true">▤</span><span data-i18n="builder.nav.help">Help &amp; manual</span></button>
-  </div>
-  <div class="project-links">
-    <a href="https://github.com/DerrickGold/ar-recomp/releases" target="_blank" rel="noopener noreferrer" data-project-link="releases"><span data-i18n="builder.links.updates">Check for updates</span><span aria-hidden="true">↗</span></a>
-    <a href="https://github.com/DerrickGold/ar-recomp" target="_blank" rel="noopener noreferrer" data-project-link="repository"><span data-i18n="builder.links.repository">GitHub repository</span><span aria-hidden="true">↗</span></a>
-    <p id="project-link-status" role="status" hidden></p>
+  <div class="tabs" role="tablist" aria-orientation="vertical" aria-label="Builder sections" data-i18n-aria="builder.nav.sections">
+    <button class="tab" id="tab-home" role="tab" aria-selected="true" aria-controls="panel-home"><span data-i18n="builder.nav.play">Play</span></button>
+    <button class="tab" id="tab-workshop" role="tab" aria-selected="false" aria-controls="panel-workshop" tabindex="-1"><span data-i18n="builder.nav.workshop">Workshop</span></button>
+    <button class="tab" id="tab-build" role="tab" aria-selected="false" aria-controls="panel-build" tabindex="-1"><span data-i18n="builder.nav.setup">Setup</span></button>
+    <button class="tab" id="tab-mods" role="tab" aria-selected="false" aria-controls="panel-mods" tabindex="-1"><span data-i18n="builder.nav.mods">Manage Mods</span></button>
+    <button class="tab" id="tab-progress" role="tab" aria-selected="false" aria-controls="build-view" tabindex="-1" hidden><span data-i18n="builder.build.status">Build status</span><span class="badge" aria-hidden="true"></span></button>
+    <button class="tab" id="tab-settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1"><span data-i18n="builder.nav.settings">Builder Settings</span></button>
   </div>
   <div class="sidebar-bottom">
     <button id="open-big-screen" class="quiet" type="button" aria-keyshortcuts="F8" data-i18n="builder.big_screen.open">Big Screen · F8</button>
-    <div class="sidebar-tools"><button class="quiet" type="button" id="game-folder-open" hidden data-i18n="builder.output.change">Change game folder…</button>
-    <button class="quiet" type="button" id="import-install-open" hidden data-i18n="builder.import.open">Import previous installation…</button></div>
-    <label for="interface-language" data-i18n="interface.language">Interface language</label>
-    <select id="interface-language" aria-describedby="interface-language-status"><option value="en">English</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option></select>
-    <p id="interface-language-status" class="local-note" role="status" hidden></p>
-    <label for="scene-motion" data-i18n="builder.atmosphere">A little atmosphere</label>
-    <select id="scene-motion"><option value="auto" data-i18n="builder.motion.auto">Follow system</option><option value="animated" data-i18n="builder.motion.animated">Animated scene</option><option value="still" data-i18n="builder.motion.still">Still scene</option><option value="off" data-i18n="builder.motion.off">Scene off</option></select>
-    <label for="scene-setting" data-i18n="builder.scenery">Scenery</label>
-    <select id="scene-setting"><option value="fillmore" data-i18n="builder.scenery.fillmore">Fillmore · the Master’s patrol</option><option value="palace" data-i18n="builder.scenery.palace">Sky Palace · angel patrol</option></select>
-    <button id="close" class="quiet" type="button" data-i18n="builder.close">Close workshop</button>
+    <button id="close" class="quiet" type="button" data-i18n="builder.close">Quit Builder</button>
   </div>
 </aside>
 
 <main id="workspace" tabindex="-1">
-  <header class="workspace-bar"><div id="dock" data-open="false" data-kind="idle"><span id="workspace-status" class="status-badge" role="status" data-i18n="builder.checking">Checking installation…</span><span id="track" role="progressbar" aria-label="Build progress" data-i18n-aria="builder.progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span><button id="dock-error" class="secondary" type="button" hidden data-i18n="builder.feedback.view">View error details</button><button id="dock-launch" type="button" hidden disabled data-i18n="builder.run">▶ Run game</button></div></header>
+  <header class="workspace-bar">
+    <div id="dock" data-open="false" data-kind="idle">
+      <span id="workspace-status" class="status-badge" role="status" data-i18n="builder.checking">Checking installation…</span>
+      <span id="track" role="progressbar" aria-label="Build progress" data-i18n-aria="builder.progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span>
+      <button id="dock-error" class="secondary" type="button" hidden data-i18n="builder.feedback.view">View error details</button>
+      <button id="dock-launch" type="button" hidden disabled data-i18n="builder.run">▶ Run game</button>
+    </div>
+    <label class="bar-language" for="interface-language">
+      <span class="sr-only" data-i18n="interface.language">Interface language</span>
+      <span class="language-globe" aria-hidden="true"></span>
+      <select id="interface-language" title="Interface language" data-i18n-title="interface.language" aria-describedby="interface-language-status">
+        <option value="en" lang="en">English</option>
+        <option value="fr" lang="fr">Français</option>
+        <option value="de" lang="de">Deutsch</option>
+        <option value="ja" lang="ja">日本語</option>
+      </select>
+    </label>
+    <p id="interface-language-status" role="status" hidden></p>
+  </header>
   <section id="game-version-notice" class="notice game-version-notice" aria-labelledby="game-version-title" role="status" hidden>
     <div><strong id="game-version-title"></strong><p id="game-version-help"></p><small id="game-version-labels"></small></div>
-    <button id="game-version-rebuild" class="secondary" type="button" data-i18n="builder.version.review">Review rebuild</button>
+    <div class="game-version-actions"><button id="game-version-rebuild" class="secondary" type="button" data-i18n="builder.version.review">Review rebuild</button><button id="game-version-dismiss" class="quiet" type="button" data-i18n="builder.language.dismiss_drop">Dismiss</button></div>
   </section>
   <section class="panel" id="panel-home" role="tabpanel" aria-labelledby="tab-home">
     <div class="home-hero">
       <div class="hero-copy">
-        <div id="workshop-home-copy"><h1 data-i18n="builder.home.title">Shape the land.&#10;Make it yours.</h1><p class="lede" data-i18n="builder.home.intro">Build ActRaiser, give its people a new voice, and tune the adventure to your liking.</p><div class="actions"><button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button></div><p id="home-game-note" class="muted" data-i18n="builder.home.rom">Choose your US ActRaiser ROM to build the game.</p></div>
+        <div id="workshop-home-copy">
+          <h1>ActRaiser</h1>
+          <p id="home-game-note" class="muted" data-i18n="builder.home.checking">Checking your game…</p>
+          <div class="actions">
+            <button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button>
+            <button class="secondary" data-nav="mods" type="button" data-i18n="builder.nav.mods">Manage Mods</button>
+          </div>
+          <details class="blurb"><summary data-i18n="builder.help.about">About ActRaiser</summary><img class="manual-cover" src="boxart.webp" width="760" height="555" loading="lazy" alt="Original ActRaiser box artwork" data-i18n-alt="builder.help.box_art">
+            <h2 data-i18n="builder.help.genre">Action &amp; Simulation</h2>
+            <p data-i18n="builder.help.story">Pulse-stopping action sequences combined with a Simulation Mode that lets you
+            forge a new civilization &mdash; a game built to use the Super NES to the full.
+            Long ago you and your people built a peaceful land; since then the evil Tanzra
+            and his Guardians have made it a breeding ground for monsters. Punish Tanzra and
+            give your people back the world they knew.</p>
+            <p class="colophon" data-i18n="builder.help.attribution">Box artwork and text &copy; 1990&ndash;1992 Quintet / Enix,
+            shown for identification. This project ships no game code, game data or instruction
+            manual &mdash; the game is generated on this machine from your own ROM.</p>
+          </details>
+        </div>
         <div id="big-screen-panel" hidden>
           <p class="big-screen-brand"><span class="brand-sigil" aria-hidden="true">✦</span><span data-i18n="builder.brand.workshop">THE WORKSHOP</span></p>
-          <h1 id="big-screen-title">ActRaiser</h1>
+          <div class="big-screen-heading">
+            <h1 id="big-screen-title">ActRaiser</h1>
+            <button id="big-screen-language" class="quiet" type="button" aria-haspopup="dialog">
+              <span class="language-globe" aria-hidden="true"></span>
+              <span class="sr-only" data-i18n="interface.language">Interface language</span>
+              <span id="big-screen-language-name" lang="en">English</span>
+            </button>
+          </div>
           <div id="big-screen-menu">
           <div id="big-screen-actions">
-            <button id="big-screen-rebuild" class="secondary" type="button" hidden data-i18n="builder.build.rebuild_game">Rebuild game</button>
+            <button id="big-screen-rebuild" class="secondary" type="button" aria-labelledby="big-screen-rebuild-label" aria-describedby="big-screen-rebuild-note" hidden>
+              <span id="big-screen-rebuild-label" data-i18n="builder.build.rebuild_game">Rebuild game</span>
+              <small id="big-screen-rebuild-note" data-i18n="builder.version.recommended">Rebuild recommended</small>
+            </button>
+            <button id="big-screen-build-open" class="secondary" type="button" hidden data-i18n="builder.build.status">Build status</button>
             <div id="big-screen-rom" hidden>
-              <p id="big-rom-help" data-i18n="builder.big_screen.rom_picker">Choose your ActRaiser (USA) ROM. You can also use the system picker with a keyboard or mouse.</p>
-              <button class="secondary" id="big-rom-browse" type="button" data-i18n="builder.big_screen.browse_roms">Browse ROMs</button>
+              <div id="big-screen-rom-checklist"></div>
+              <div id="big-rom-actions" data-big-band>
+                <button id="big-rom-checklist-back" class="quiet" type="button"><span class="controller-glyph" role="img" data-pad-button="back" aria-label="Esc">Esc</span><span data-i18n="common.back">Back</span></button>
+              </div>
             </div>
-            <button id="big-screen-customize-open" class="secondary" type="button" data-i18n="builder.big_screen.customize">Customize</button>
-            <button id="big-screen-desktop" class="quiet" type="button" aria-keyshortcuts="F8" data-i18n="builder.big_screen.desktop">Desktop Workshop</button>
-            <button id="big-screen-exit" class="quiet" type="button" data-i18n="builder.close">Close workshop</button>
+            <div class="big-menu-tools" data-big-band>
+              <button id="big-screen-roms-open" class="secondary" type="button" data-i18n="builder.roms.title">ROM checklist</button>
+              <button id="big-screen-customize-open" class="secondary" type="button" data-i18n="builder.nav.mods">Manage Mods</button>
+            </div>
+            <div class="big-menu-tools" data-big-band>
+              <button id="big-screen-desktop" class="quiet" type="button" aria-keyshortcuts="F8"><span class="controller-glyph" role="img" data-pad-button="menu" aria-label="Menu" hidden>☰</span><kbd class="controller-glyph big-keyboard-glyph">F8</kbd><span data-i18n="builder.big_screen.desktop">Desktop Workshop</span></button>
+              <button id="big-screen-exit" class="quiet" type="button"><span class="controller-glyph" role="img" data-pad-button="back" aria-label="Esc">Esc</span><span id="big-screen-exit-label" data-i18n="builder.close">Quit Builder</span></button>
+            </div>
           </div>
           <div id="big-screen-status">
             <progress id="big-screen-progress" max="100" aria-label="Build progress" data-i18n-aria="builder.progress" hidden></progress>
           </div>
           </div>
           <section id="big-screen-customize" aria-labelledby="big-customize-title" hidden>
-            <h2 id="big-customize-title" data-i18n="builder.big_screen.customize">Customize</h2>
-            <div class="big-screen-list" id="big-customize-menu">
-              <button class="secondary" type="button" data-big-page="title" data-i18n="builder.assets.title_art">Title artwork</button>
-              <button class="secondary" type="button" data-big-page="languages" data-i18n="builder.nav.languages">Languages</button>
-              <button class="secondary" type="button" data-big-page="music" data-i18n="builder.assets.music">Music</button>
-            </div>
-            <div id="big-customize-title-options" hidden>
-              <div class="big-screen-list" role="group" aria-label="Title artwork" data-i18n-aria="builder.assets.title_art">
-                <button class="secondary" type="button" data-big-title="original" aria-pressed="false" data-i18n="builder.big_screen.original_title">Original title</button>
-                <button class="secondary" type="button" data-big-title="en" aria-pressed="false" data-i18n="builder.big_screen.hd_title_en">HD title · English</button>
-                <button class="secondary" type="button" data-big-title="ja" aria-pressed="false" data-i18n="builder.big_screen.hd_title_ja">HD title · Japanese</button>
+            <div class="big-mod-header">
+              <div class="big-mod-heading">
+                <h2 id="big-customize-title" data-i18n="builder.nav.mods">Manage Mods</h2>
+                <span class="big-screen-prompt" id="big-customize-paging" role="group" data-i18n-aria="builder.big_screen.page_list" data-i18n-title="builder.big_screen.page_list" hidden><span class="controller-glyph" role="img" data-pad-button="left" aria-label="Page Up">PgUp</span><span class="controller-glyph" role="img" data-pad-button="right" aria-label="Page Down">PgDn</span><span data-i18n="builder.big_screen.page">Page</span></span>
               </div>
-              <img id="big-title-preview" width="2212" height="760" hidden
-                   alt="Preview of the included high-resolution ActRaiser title treatment" data-i18n-alt="builder.assets.title_preview">
+              <div id="big-mod-actions" class="big-screen-footer" data-big-band>
+                <button class="secondary" id="big-mod-filter" type="button" aria-haspopup="dialog"><span class="sr-only" data-i18n="builder.mods.filter">Mod type</span><strong id="big-mod-filter-value" data-i18n="builder.mods.all_types">All types</strong></button>
+                <button class="secondary" id="big-mod-conflicts" type="button" hidden></button>
+                <button class="secondary" id="big-mod-install" type="button" data-i18n="builder.mods.install_action">Install mod</button>
+                <button class="quiet" id="big-mod-refresh" type="button" data-i18n="builder.mods.refresh">Refresh packs</button>
+              </div>
             </div>
-            <div id="big-customize-rows" class="big-screen-list big-screen-scroll" data-big-page-list hidden></div>
-            <p class="big-screen-feedback big-screen-prompt" id="big-customize-paging" hidden><span class="controller-glyph" role="img" data-pad-button="left" aria-label="Page Up">PgUp</span><span class="controller-glyph" role="img" data-pad-button="right" aria-label="Page Down">PgDn</span><span data-i18n="builder.big_screen.page_list">Page through the list</span></p>
-            <button class="secondary" id="big-music-extract" type="button" hidden data-i18n="builder.assets.extract_previews">Extract original-audio previews</button>
-            <audio id="big-music-player" preload="none"></audio>
-            <p class="big-screen-feedback" id="big-customize-status" role="status" tabindex="-1" hidden></p>
-            <p class="big-screen-feedback" id="big-customize-desktop-hint" hidden></p>
-            <div class="big-screen-footer">
+            <div id="big-customize-content" class="big-screen-scroll" data-big-page-list data-big-scroll data-big-scroll-when-focused>
+              <div class="mod-install-feedback">
+                <p class="big-screen-feedback" id="big-customize-status" role="status" tabindex="-1" hidden></p>
+              </div>
+              <ul id="big-mod-install-results" aria-label="Installation results" data-i18n-aria="builder.mods.batch_title" hidden></ul>
+              <div id="big-customize-rows" class="big-screen-list"></div>
+            </div>
+            <div class="big-screen-footer" id="big-mod-footer" data-big-band>
+              <button class="secondary" id="big-mod-primary" type="button" hidden><span class="controller-glyph" role="img" data-pad-button="confirm" aria-label="Enter">Enter</span><span id="big-mod-primary-label"></span></button>
+              <button class="secondary" id="big-mod-preview-open" type="button" data-pad-action="west" aria-keyshortcuts="X" aria-haspopup="dialog" hidden><span class="controller-glyph" role="img" data-pad-button="west" aria-label="X">X</span><span data-i18n="builder.mods.preview_button">Preview</span></button>
+              <button class="secondary" id="big-mod-more" type="button" data-pad-action="north" aria-keyshortcuts="Y" aria-haspopup="dialog" hidden><span class="controller-glyph" role="img" data-pad-button="north" aria-label="Y">Y</span><span data-i18n="builder.mods.actions">Actions</span></button>
+              <button class="quiet" id="big-game-music" type="button" data-i18n="builder.mods.rom_music" hidden>Game music</button>
+              <button class="secondary" id="big-music-extract" type="button" hidden data-i18n="builder.assets.extract_previews">Extract original-audio previews</button>
               <button class="quiet" id="big-customize-desktop" type="button" hidden data-i18n="builder.big_screen.desktop">Desktop Workshop</button>
-              <button class="quiet" id="big-customize-back" type="button" data-i18n="common.back">Back</button>
+              <button class="quiet" id="big-customize-back" type="button"><span class="controller-glyph" role="img" data-pad-button="back" aria-label="Esc">Esc</span><span data-i18n="common.back">Back</span></button>
             </div>
           </section>
           <section id="big-screen-build" aria-labelledby="big-build-title" hidden>
             <div class="big-build-main">
-              <h2 id="big-build-title" data-i18n="builder.nav.build">Build &amp; play</h2>
-              <div id="big-build-summary"></div>
-              <p id="big-build-phase" class="muted" hidden></p>
-              <div class="big-screen-list">
-                <button id="big-build-report" class="secondary" type="button" data-i18n="builder.big_screen.save_report">Save build report</button>
-                <button id="big-build-back" class="quiet" type="button" data-i18n="common.back">Back</button>
+              <div class="big-build-header">
+                <h2 id="big-build-title" data-i18n="builder.nav.build">Build &amp; play</h2>
+                <div class="big-screen-footer" data-big-band>
+                  <button id="big-build-play" type="button" hidden data-i18n="builder.home.play">Play ActRaiser</button>
+                  <button id="big-build-back" class="quiet" type="button"><span class="controller-glyph" role="img" data-pad-button="back" aria-label="Esc">Esc</span><span data-i18n="common.back">Back</span></button>
+                </div>
               </div>
-              <p id="big-build-report-status" role="status" hidden></p>
+              <div id="big-build-summary"><p id="big-build-phase" class="muted" hidden></p></div>
+              <div id="big-build-stages"></div>
             </div>
             <div class="big-build-console">
-              <h3 id="big-build-log-title" data-i18n="builder.build.log">Build log</h3>
+              <div class="big-build-header">
+                <h3 id="big-build-log-title" data-i18n="builder.build.log">Build log</h3>
+                <span class="big-build-log-hint big-screen-prompt"><span class="controller-glyph" role="img" data-pad-button="left" aria-label="Page Up">PgUp</span><span class="controller-glyph" role="img" data-pad-button="right" aria-label="Page Down">PgDn</span><span data-i18n="builder.big_screen.log_scroll">Scroll log</span></span>
+              </div>
               <div id="big-build-log"><pre id="big-launch-details" data-big-scroll hidden></pre></div>
-              <p class="big-build-log-hint big-screen-prompt"><span class="controller-glyph" role="img" data-pad-button="left" aria-label="Page Up">PgUp</span><span class="controller-glyph" role="img" data-pad-button="right" aria-label="Page Down">PgDn</span><span data-i18n="builder.big_screen.log_scroll">Scroll log</span></p>
             </div>
           </section>
           <div class="big-screen-controls">
             <span id="big-screen-move" data-i18n="builder.big_screen.move_keyboard">Arrow keys to move</span>
             <span class="big-screen-prompt"><span class="controller-glyph" role="img" data-pad-button="confirm" aria-label="Enter">Enter</span><span data-i18n="builder.big_screen.select_action">Select</span></span>
-            <span class="big-screen-prompt"><span class="controller-glyph" role="img" data-pad-button="back" aria-label="Esc">Esc</span><span data-i18n="common.back">Back</span></span>
           </div>
-          <p class="big-screen-mode-hint big-screen-prompt"><span class="controller-glyph" role="img" data-pad-button="menu" aria-label="Menu" hidden>☰</span><kbd class="controller-glyph">F8</kbd><span data-i18n="builder.big_screen.mode_shortcut">Switch views</span></p>
         </div>
       </div>
       <div class="home-companion">
-        <div id="big-screen-rom-checklist"></div>
         <div class="scene-stage"><canvas id="palace-scene" width="640" height="420" aria-label="A small illustrated palace floating above the clouds" data-i18n-aria="builder.scene.placeholder_aria"></canvas><span class="scene-caption" id="scene-caption" data-i18n="builder.scene.placeholder">A quiet moment above the clouds</span></div>
       </div>
     </div>
-    <div id="home-rom-checklist">
+  </section>
+
+  <section class="panel" id="panel-build" role="tabpanel" aria-labelledby="tab-build" hidden>
+    <div class="page-heading"><div><h1 data-i18n="builder.nav.setup">Setup</h1><p data-i18n="builder.build.intro">ActRaiser (USA) supplies the core game. Review your ROMs before building.</p></div></div>
+    <div class="sidebar-tools">
+      <button class="quiet" type="button" id="game-folder-open" hidden data-i18n="builder.output.change">Change game folder…</button>
+      <button class="quiet" type="button" id="import-install-open" hidden data-i18n="builder.import.open">Import previous installation…</button>
+    </div>
+    <p class="notice" data-language-status data-i18n="builder.language.source_checking" role="status">Checking the native US language source…</p>
+    <div id="build-rom-checklist">
       <section id="rom-checklist" aria-labelledby="rom-checklist-title">
         <h2 id="rom-checklist-title" data-i18n="builder.roms.title">ROM checklist</h2>
+        <p id="rom-checklist-help" class="muted" data-i18n="builder.roms.desktop_picker">Select a checklist entry or drop .sfc and .smc files here.</p>
+        <input id="rom-picker" type="file" accept=".sfc,.smc" hidden>
         <div id="rom-checklist-rows" data-big-page-list></div>
         <button id="rom-import-selected" class="secondary" type="button" hidden data-i18n="builder.roms.import_selected">Import selected extras</button>
         <p id="rom-checklist-unavailable" role="status" hidden></p>
         <p id="rom-checklist-feedback" role="status" hidden></p>
       </section>
     </div>
-    <div class="section-heading"><h2 data-i18n="builder.home.customize">Choose your path</h2></div>
-    <div class="home-actions">
-      <button class="task-card" data-nav="localization" type="button" disabled><span class="card-icon" aria-hidden="true">文</span><strong data-i18n="builder.home.voice">Give the people a voice</strong><span data-i18n="builder.home.voice_help">Install a translation or continue one of your own.</span><span class="card-link" data-i18n="builder.home.open_languages">Open languages ↗</span></button>
-      <button class="task-card" data-nav="assets" type="button"><span class="card-icon" aria-hidden="true">♫</span><strong data-i18n="builder.home.atmosphere">Set the scene</strong><span data-i18n="builder.home.atmosphere_help">Choose the title treatment and audition music from every realm.</span><span class="card-link" data-i18n="builder.home.browse_assets">Browse assets ↗</span></button>
-      <button class="task-card" data-nav="manual" type="button"><span class="card-icon" aria-hidden="true">▤</span><strong data-i18n="builder.home.guide">Consult the archives</strong><span data-i18n="builder.home.guide_help">Read the original instruction booklet and workshop guide.</span><span class="card-link" data-i18n="builder.home.open_guide">Open the guide ↗</span></button>
+    <details id="setup-regional-archive">
+      <summary data-i18n="builder.media.archive_summary">Import a private regional media archive</summary>
+      <form id="regional-media-form" class="regional-media-card">
+        <p data-i18n="builder.media.archive_help">Install a private .armedia archive you extracted earlier. Select regional ROMs through the checklist above.</p>
+        <label for="regional-media-file" data-i18n="builder.media.archive_file">Private .armedia file</label>
+        <input id="regional-media-file" type="file" accept=".armedia" required>
+        <div class="regional-media-actions"><button id="regional-media-install" type="submit" data-i18n="builder.media.install_archive">Install archive</button><button id="regional-media-refresh" type="button" class="secondary" data-i18n="builder.media.refresh">Refresh installed files</button></div>
+        <p id="regional-media-status" role="status" aria-live="polite"></p>
+        <ul id="regional-media-donors" class="regional-media-donors" aria-label="Regional media availability" data-i18n-aria="builder.media.availability"></ul>
+        <p class="section-note" data-i18n="builder.media.choose">After installation, restart the game and choose regional artwork or music under Settings → Regions → Art & music. Missing donors use the US fallback; gameplay rules do not require a donor ROM.</p>
+        <p class="section-note" data-i18n="builder.media.private">These files contain ROM-derived graphics and music data. Keep them private; they are not shareable language packs.</p>
+      </form>
+    </details>
+    <div id="build-box">
+      <form id="build-form">
+        <p id="saved-rom-note" class="muted" role="status" hidden></p>
+        <div class="actions">
+          <button id="build" type="submit" data-i18n="builder.nav.build_game">Build game</button>
+          <button id="launch" class="secondary" type="button" disabled data-i18n="builder.build.launch">Launch game</button>
+        </div>
+      </form>
     </div>
-    <p class="notice" data-language-status data-i18n="builder.language.source_checking" role="status">Checking the native US language source…</p>
-    <section id="home-translations" hidden><div class="section-heading"><h2 data-i18n="builder.home.translations">Return to your translations</h2></div><div id="home-projects" class="project-library"></div></section>
-  </section>
 
-  <section class="panel" id="panel-build" role="tabpanel" aria-labelledby="tab-build" hidden>
-    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.build.eyebrow">FROM YOUR ROM TO THE REALM</p><h1 data-i18n="builder.nav.build">Build &amp; play</h1><p data-i18n="builder.build.intro">ActRaiser (USA) supplies the core game. Review your ROMs before building.</p></div></div>
-    <p class="notice" data-language-status data-i18n="builder.language.source_checking" role="status">Checking the native US language source…</p>
+    <!-- Why building is unavailable. Only rendered in the modes where the
+         build block is hidden, so it explains an absence rather than
+         decorating a working page. -->
+    <div id="nobuild" hidden class="notice">
+      <strong data-i18n="builder.build.no_rebuild">Rebuilding is unavailable in this copy.</strong>
+      <span data-i18n="builder.build.no_rebuild_help">The build tools were removed to save space. Download the package again from
+      the repository if you want to rebuild from a ROM.</span>
+    </div>
+
     <!-- Show Play whenever a built game is on disk. -->
     <div id="play-box" hidden>
       <div class="play-head">
@@ -165,6 +241,7 @@
       </div>
     </div>
 
+    <button id="view-build-log" class="quiet" type="button" hidden data-i18n="builder.build.view_log">View build log</button>
     <!-- CLEANUP OFFER. Appears after a successful build, and on any install
          that still carries removable build files. -->
     <details id="slim-box" hidden>
@@ -184,81 +261,108 @@
       Build tools removed &mdash; this install is now just the game.
     </div>
 
-    <div id="build-rom-checklist"></div>
-    <div id="build-box">
-      <form id="build-form">
-        <label for="rom" id="rom-label" data-i18n="builder.build.rom_label">Game ROMs (.sfc or .smc)</label>
-        <input id="rom" name="rom" type="file" multiple accept=".sfc,.smc" required>
-        <p id="saved-rom-note" class="muted" role="status" hidden></p>
-        <p id="rom-build-hint" class="muted" role="status" hidden></p>
-        <div class="actions">
-          <button id="build" type="submit" data-i18n="builder.nav.build_game">Build game</button>
-          <button id="clear-rom-upload" class="quiet" type="button" hidden data-i18n="builder.build.clear_files">Clear chosen files</button>
-          <button id="launch" class="secondary" type="button" disabled data-i18n="builder.build.launch">Launch game</button>
-        </div>
-      </form>
+  </section>
+
+  <section id="build-view" class="panel" role="tabpanel" aria-labelledby="tab-progress" hidden>
+    <h1 id="build-view-title" tabindex="-1" data-i18n="builder.build.status">Build status</h1>
+    <div id="state" role="status" tabindex="-1" data-kind="idle" data-i18n="builder.checking">Checking installation…</div>
+    <progress id="build-progress" max="100" aria-label="Build progress" data-i18n-aria="builder.progress" hidden></progress>
+    <p id="build-phase" class="muted" hidden></p>
+    <div id="build-view-actions" class="actions" hidden>
+      <button id="build-view-play" type="button" hidden data-i18n="builder.run">▶ Run game</button>
+      <button id="build-report" class="secondary" type="button" data-i18n="builder.big_screen.save_report" hidden>Save build report</button>
+      <button id="build-view-back" class="quiet" type="button" data-i18n="common.back">Back</button>
     </div>
-
-    <!-- Why building is unavailable. Only rendered in the modes where the
-         build block is hidden, so it explains an absence rather than
-         decorating a working page. -->
-    <div id="nobuild" hidden class="notice">
-      <strong data-i18n="builder.build.no_rebuild">Rebuilding is unavailable in this copy.</strong>
-      <span data-i18n="builder.build.no_rebuild_help">The build tools were removed to save space. Download the package again from
-      the repository if you want to rebuild from a ROM.</span>
-    </div>
-
-    <div id="state" role="status" aria-live="polite" tabindex="-1" data-kind="idle" data-i18n="builder.build.ready_to_build">Ready to build &mdash; choose your ROM above</div>
-
+    <p id="build-report-status" role="status" hidden></p>
     <div id="steps-box" hidden>
       <ol class="steps" id="steps">{{STEPS}}</ol>
     </div>
-
-    <details id="log-box">
-      <summary data-i18n="builder.build.log">Build log</summary>
-      <pre id="log" data-i18n="builder.build.select_rom">Select your ROM files to begin.</pre>
-    </details>
+    <section id="log-box" aria-labelledby="build-log-title">
+      <h2 id="build-log-title" data-i18n="builder.build.log">Build log</h2>
+      <pre id="log" tabindex="0" aria-labelledby="build-log-title"></pre>
+    </section>
   </section>
 
-  <section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden>
-    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.assets.eyebrow">SET THE STAGE</p><h1 data-i18n="builder.assets.title">Sights &amp; sounds</h1><p data-i18n="builder.assets.intro">Choose the title treatment, audition music from every realm, and save the arrangement for your next journey.</p></div></div>
-      <div class="asset-categories" aria-label="Asset categories" data-i18n-aria="builder.assets.categories"><button type="button" data-asset-category="music" aria-pressed="true"><span data-i18n="builder.assets.music">Music</span> <span class="count">17</span></button><button type="button" data-asset-category="title" aria-pressed="false" data-i18n="builder.assets.title_art">Title artwork</button><button type="button" data-asset-category="regions" aria-pressed="false" data-i18n="builder.media.category">Regional media</button><button type="button" data-asset-category="imports" aria-pressed="false" hidden data-i18n="builder.imports.category">Game imports</button></div>
-    <form id="assets-form">
-      <div class="asset-bar" id="asset-bar" data-dirty="false">
-        <div class="asset-bar-text">
-          <strong id="asset-bar-title" data-i18n="builder.assets.replacements">Asset replacements</strong>
-          <span id="asset-bar-note" data-i18n="builder.assets.loading">Loading the current configuration&hellip;</span>
-        </div>
-        <div class="asset-bar-actions">
-          <button type="button" id="discard-assets" class="quiet" disabled data-i18n="builder.assets.discard">Discard</button>
-          <button type="submit" id="save-assets-top" disabled data-i18n="builder.assets.save_changes">Save changes</button>
-        </div>
-      </div>
-
-      <div class="asset-title-card" id="asset-title-view" hidden>
-        <img id="title-preview" src="title-logo.png" width="2212" height="760" loading="lazy"
-             alt="Preview of the included high-resolution ActRaiser title treatment" data-i18n-alt="builder.assets.title_preview">
-        <div class="asset-title-copy">
-          <h2 data-i18n="builder.assets.hd_title">High-resolution title</h2>
-          <p data-i18n="builder.assets.hd_title_help">The included art replaces both the settled title logo and its Mode-7 intro swirl.
-          Turn it off at any time to return to the ROM artwork.</p>
-          <label for="title-variant" data-i18n="builder.assets.title_variant">Artwork style</label>
-          <select id="title-variant" name="title-variant">
-            <option value="en" data-i18n="builder.assets.title_english">English — Recompiled</option>
-            <option value="ja" data-i18n="builder.assets.title_japanese">Japanese — アクトレイザー</option>
+  <section class="panel" id="panel-mods" role="tabpanel" aria-labelledby="tab-mods" hidden>
+    <section id="asset-packs" class="mod-pack-panel" aria-labelledby="asset-pack-heading">
+      <div class="page-heading"><h1 id="asset-pack-heading" data-i18n="builder.nav.mods">Manage Mods</h1><span id="asset-pack-language-counts" class="muted" role="status" hidden></span></div>
+      <div class="mod-pack-actions">
+        <button id="asset-pack-install" type="button" data-i18n="builder.mods.install_action" aria-describedby="asset-pack-formats">Install mod</button>
+        <span id="asset-pack-formats" class="sr-only" data-i18n="builder.mods.install_legacy">Install mods (.o2r, .arlang, .pdf)</span>
+        <input id="asset-pack-file" type="file" accept=".o2r,.arlang,.pdf" multiple data-validate-batch hidden>
+        <label><span data-i18n="builder.mods.filter">Mod type</span>
+          <select id="asset-pack-type">
+            <option value="all" data-i18n="builder.mods.all_types">All types</option>
+            <option value="actraiser-music" data-i18n="builder.assets.music">Music</option>
+            <option value="actraiser-title" data-i18n="builder.assets.title_art">Title artwork</option>
+            <option value="actraiser-language" data-i18n="builder.nav.languages">Languages</option>
+            <option value="actraiser-manual" data-i18n="builder.mods.manual_packs">Manual packs</option>
           </select>
-          <div class="asset-toggle">
-            <input id="title-toggle" name="title" type="checkbox">
-            <label for="title-toggle" data-i18n="builder.assets.use_hd_title">Use the included HD title</label>
+        </label>
+        <label id="asset-pack-language-search-field" hidden><span data-i18n="builder.language.find_pack">Find a package</span>
+          <input id="asset-pack-language-search" type="search" placeholder="Package name, locale or ID…" data-i18n-placeholder="builder.language.find_hint" aria-controls="asset-pack-list">
+        </label>
+        <button type="button" id="asset-pack-clear-filter" class="secondary" data-i18n="builder.mods.clear_filter" hidden>Clear filter</button>
+        <button type="button" id="asset-pack-refresh" class="quiet" data-i18n="builder.mods.refresh">Refresh packs</button>
+        <button class="quiet" type="button" id="legacy-mod-review" hidden data-i18n="builder.migration.review">Review legacy customizations…</button>
+      </div>
+      <section id="asset-pack-batch" aria-labelledby="asset-pack-batch-title" hidden>
+        <div class="section-heading">
+          <h2 id="asset-pack-batch-title" data-i18n="builder.mods.batch_title">Installation results</h2>
+          <button type="button" class="quiet" id="asset-pack-batch-dismiss" data-i18n="builder.language.dismiss_drop">Dismiss</button>
+        </div>
+        <ul id="asset-pack-batch-list" aria-live="polite"></ul>
+      </section>
+      <a class="linkbtn" id="asset-pack-manual-reader" href="manual.pdf" target="_blank" rel="noreferrer" data-i18n="builder.help.open_manual" hidden>Open manual</a>
+      <div id="asset-pack-legacy-manual" class="legacy-manual-actions" hidden></div>
+      <div class="mod-install-feedback">
+        <p id="asset-pack-status" role="status" hidden></p>
+        <button id="asset-pack-review-conflict" type="button" class="secondary" hidden></button>
+      </div>
+      <div id="asset-pack-list"></div>
+    </section>
+  </section>
+
+  <section id="panel-workshop" role="tabpanel" aria-labelledby="tab-workshop" hidden>
+    <div id="workshop-overview" class="panel">
+      <div class="page-heading"><h1 data-i18n="builder.nav.workshop">Workshop</h1></div>
+      <div class="workshop-tools">
+        <button type="button" class="secondary" data-nav="localization" disabled><strong data-i18n="builder.nav.languages">Languages</strong><span data-i18n="builder.workshop.language_help">Create or edit a translation and publish a language pack.</span></button>
+        <button type="button" class="secondary" data-nav="assets"><strong data-i18n="builder.assets.music">Music</strong><span data-i18n="builder.workshop.asset_help">Compare original tracks, edit replacements, and package music mods.</span></button>
+        <button type="button" class="secondary" id="workshop-package-title"><strong data-i18n="builder.mods.export_title">Create title artwork pack</strong><span data-i18n="builder.workshop.title_help">Package a custom PNG for the title screen.</span></button>
+        <button type="button" class="secondary" id="workshop-package-pdf"><strong data-i18n="builder.mods.export_manual">Create manual pack</strong><span data-i18n="builder.workshop.manual_help">Turn a compatible PDF manual into a shareable mod.</span></button>
+      </div>
+      <p class="notice" data-language-status data-i18n="builder.language.source_checking" role="status">Checking the native US language source…</p>
+      <section id="home-translations" hidden>
+        <div class="section-heading"><h2 data-i18n="builder.home.translations">Return to your translations</h2></div>
+        <div id="home-projects" class="project-library"></div>
+      </section>
+    </div>
+    <div id="workshop-navigation" class="actions" hidden>
+      <button type="button" class="workshop-back" data-nav="workshop"><span aria-hidden="true">←</span> <span data-i18n="builder.nav.workshop">Workshop</span></button>
+      <div class="workshop-tabs" role="tablist" aria-label="Workshop" data-i18n-aria="builder.nav.workshop">
+        <button class="tab" id="tab-localization" role="tab" aria-selected="false" aria-controls="panel-localization" tabindex="-1" disabled data-i18n-title="builder.language.unavailable_title" title="Requires the native US language source"><span class="nav-icon" aria-hidden="true">文</span><span data-i18n="builder.nav.languages">Languages</span></button>
+        <button class="tab" id="tab-assets" role="tab" aria-selected="false" aria-controls="panel-assets" tabindex="-1"><span class="nav-icon" aria-hidden="true">♫</span><span data-i18n="builder.assets.music">Music</span></button>
+      </div>
+    </div>
+  <section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden>
+    <form id="assets-form">
+      <div class="editor-bar" id="asset-bar" data-dirty="false">
+        <div class="editor-toolbar">
+          <div class="editor-identity">
+            <h1 id="asset-bar-title" data-i18n="builder.assets.music_draft">Music draft</h1>
+            <span id="asset-bar-note" role="status" data-i18n="builder.assets.loading">Loading the current configuration…</span>
           </div>
-          <input id="title-change" name="title-change" type="hidden" value="0">
+          <button type="button" id="discard-assets" class="quiet" hidden disabled data-i18n="builder.assets.discard_all_menu">Discard all changes…</button>
+          <button type="button" id="asset-pack-export-open" class="secondary" data-i18n="builder.mods.install_export">Install or export…</button>
+          <button type="submit" id="save-assets-top" disabled data-i18n="common.save">Save</button>
         </div>
       </div>
 
       <div class="asset-music" id="asset-music-view">
         <div class="asset-browser"><div class="asset-track-picker"><label for="asset-track-toggle" data-i18n="builder.assets.track">Music track</label><button id="asset-track-toggle" type="button" aria-expanded="false" aria-controls="asset-track-options"><span id="asset-selected-track" data-i18n="builder.assets.choose_track">Choose a track</span><span aria-hidden="true">▾</span></button><div id="asset-track-options" hidden><label for="asset-search" class="sr-only" data-i18n="builder.assets.search">Search music tracks</label><input id="asset-search" type="search" placeholder="Search Sky Palace, Fillmore…" autocomplete="off" data-i18n-placeholder="builder.assets.search_hint"><div id="asset-track-list" aria-label="Matching music tracks" data-i18n-aria="builder.assets.matches"></div><p id="asset-search-empty" class="muted" role="status" hidden data-i18n="builder.assets.no_matches">No matching tracks.</p></div></div><div class="asset-detail">
         <div class="preview-tools">
-          <button id="generate-previews" type="button" disabled data-i18n="builder.assets.extract_previews">
+          <button id="generate-previews" type="button" class="secondary" disabled data-i18n="builder.assets.extract_previews">
             Extract original-audio previews
           </button>
           <!-- Previews are cached per ROM, and the renderer is deterministic, so
@@ -280,75 +384,139 @@
 
 
       <div id="asset-state" role="status" hidden></div>
-      <p class="section-note" data-i18n="builder.assets.restart_note">Saved changes take effect the next time the game starts.</p>
-    </form>
-    <form id="game-imports-form" class="regional-media-card" hidden>
-      <h2 data-i18n="builder.imports.title">Import game content</h2>
-      <p data-i18n="builder.imports.help">Choose a supported content set to add from a ROM you provide. Imports add assets and features to your local game.</p>
-      <label for="game-imports-content" data-i18n="builder.imports.content">Content to import</label>
-      <select id="game-imports-content" required></select>
-      <p id="game-imports-help"></p>
-      <label for="game-imports-file" data-i18n="builder.imports.file">Source game ROM</label>
-      <input id="game-imports-file" type="file" accept=".sfc,.smc" required>
-      <div class="regional-media-actions"><button type="submit" data-i18n="builder.media.install">Extract &amp; install</button><button id="game-imports-refresh" type="button" class="secondary" data-i18n="builder.media.refresh">Refresh installed files</button></div>
-      <p id="game-imports-status" role="status" aria-live="polite"></p>
-      <p id="game-imports-next" class="section-note"></p>
-    </form>
-    <form id="regional-media-form" class="regional-media-card" hidden>
-      <h2 data-i18n="builder.media.title">Bring another region’s sights and sounds along</h2>
-      <p data-i18n="builder.media.help">Extract private graphics and music sequences from a supported regional ROM, or install a .armedia file you extracted earlier. This never replaces your US build ROM or selects gameplay rules.</p>
-      <label for="regional-media-file" data-i18n="builder.media.file">Regional ROM or private .armedia file</label>
-      <input id="regional-media-file" type="file" accept=".sfc,.smc,.armedia" required>
-      <div class="regional-media-actions"><button id="regional-media-install" type="submit" data-i18n="builder.media.install">Extract &amp; install</button><button id="regional-media-refresh" type="button" class="secondary" data-i18n="builder.media.refresh">Refresh installed files</button></div>
-      <p id="regional-media-status" role="status" aria-live="polite"></p>
-      <ul id="regional-media-donors" class="regional-media-donors" aria-label="Regional media availability" data-i18n-aria="builder.media.availability"></ul>
-      <p class="section-note" data-i18n="builder.media.choose">After installation, restart the game and choose regional artwork or music under Settings → Regions → Art & music. Missing donors use the US fallback; gameplay rules do not require a donor ROM.</p>
-      <p class="section-note" data-i18n="builder.media.private">These files contain ROM-derived graphics and music data. Keep them private; they are not shareable language packs.</p>
     </form>
   </section>
 
   {{LOCALIZATION}}
-  <section class="panel" id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" hidden>
-    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.help.eyebrow">GUIDANCE FROM THE SKY PALACE</p><h1 data-i18n="builder.nav.help">Help &amp; manual</h1><p data-i18n="builder.help.intro">Your instruction manual, plus practical guidance for the workshop.</p></div></div>
-    <details class="workshop-help"><summary data-i18n="builder.help.projects">How do workshop projects and installed packs differ?</summary><p data-i18n="builder.help.projects_help">Opening a pack makes an editable workshop copy. Install it once from the editor; saving then automatically updates the installed copy. Restart the game to load changes. Choose the package name in the game’s localization settings; translated packs use enhanced text rendering.</p></details>
-    <div class="manual-bar">
-      <p data-i18n="builder.help.manual_help">The workshop ships no instruction manual. Install your own PDF and it is read here and in the game, from the Manual entry in the game’s settings.</p>
-      <a class="linkbtn" id="manual-open" href="manual.pdf" target="_blank" rel="noreferrer" data-i18n="builder.help.open_manual" hidden>Open manual</a>
-    </div>
-    <form id="manual-form" class="manual-install">
-      <label><span data-i18n="builder.help.manual_file">Instruction manual (PDF)</span><input id="manual-file" name="manual" type="file" accept=".pdf,application/pdf" required></label>
-      <div class="manual-actions">
-        <button id="manual-save" data-i18n="builder.help.manual_install">Install manual</button>
-        <button id="manual-remove" type="button" hidden data-i18n="builder.help.manual_remove">Remove manual</button>
+  </section>
+
+  <section class="panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+    <div class="page-heading"><h1 data-i18n="builder.nav.settings">Builder Settings</h1></div>
+    <div class="builder-preferences">
+      <div class="preference-row">
+        <label for="scene-motion" data-i18n="builder.settings.scene_motion">Play scene motion</label>
+        <select id="scene-motion"><option value="auto" data-i18n="builder.motion.auto">Follow system</option><option value="animated" data-i18n="builder.motion.animated">Animated scene</option><option value="still" data-i18n="builder.motion.still">Still scene</option><option value="off" data-i18n="builder.motion.off">Scene off</option></select>
       </div>
-      <p class="loc-help" data-i18n="builder.help.manual_format">The in-game reader needs a scan album: one baseline JPEG per page, all about the same size. Any other PDF still opens in the workshop below.</p>
-      <p id="manual-message" class="manual-message" role="status" hidden></p>
-    </form>
-    <p id="manual-empty" class="manual-empty" data-i18n="builder.help.manual_none" hidden>No manual installed yet. Choose a PDF above to read it here.</p>
-    <iframe id="manual-frame" title="Instruction manual" data-i18n-title="builder.help.manual_title" hidden></iframe>
-    <details class="blurb"><summary data-i18n="builder.help.about">About ActRaiser</summary><img class="manual-cover" src="boxart.webp" width="760" height="555" loading="lazy" alt="Original ActRaiser box artwork" data-i18n-alt="builder.help.box_art">
-      <h2 data-i18n="builder.help.genre">Action &amp; Simulation</h2>
-      <p data-i18n="builder.help.story">Pulse-stopping action sequences combined with a Simulation Mode that lets you
-      forge a new civilization &mdash; a game built to use the Super NES to the full.
-      Long ago you and your people built a peaceful land; since then the evil Tanzra
-      and his Guardians have made it a breeding ground for monsters. Punish Tanzra and
-      give your people back the world they knew.</p>
-      <p class="colophon" data-i18n="builder.help.attribution">Box artwork and text &copy; 1990&ndash;1992 Quintet / Enix,
-      shown for identification. This project ships no game code, game data or instruction
-      manual &mdash; the game is generated on this machine from your own ROM.</p>
-    </details>
+      <div class="preference-row">
+        <label for="scene-setting" data-i18n="builder.scenery">Scenery</label>
+        <select id="scene-setting"><option value="fillmore" data-i18n="builder.scenery.fillmore">Fillmore · the Master’s patrol</option><option value="palace" data-i18n="builder.scenery.palace">Sky Palace · angel patrol</option></select>
+      </div>
+      <div class="preference-row" id="close-on-launch-setting">
+        <label for="close-on-launch" data-i18n="builder.launch.close_setting">Close Builder when the game launches</label>
+        <input type="checkbox" id="close-on-launch" aria-describedby="close-on-launch-help">
+        <p id="close-on-launch-help" class="muted" data-i18n="builder.launch.close_help">The game keeps running. The Builder stays open if you have unsaved Workshop edits.</p>
+      </div>
+    </div>
+    <section class="settings-help" aria-labelledby="settings-help-title">
+      <h2 id="settings-help-title" data-i18n="builder.settings.help">Help and updates</h2>
+      <div class="project-links">
+        <a href="https://github.com/DerrickGold/ar-recomp/releases" target="_blank" rel="noopener noreferrer" data-project-link="releases"><span data-i18n="builder.links.updates">Check for updates</span><span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/DerrickGold/ar-recomp" target="_blank" rel="noopener noreferrer" data-project-link="repository"><span data-i18n="builder.links.repository">GitHub repository</span><span aria-hidden="true">↗</span></a>
+        <p id="project-link-status" role="status" hidden></p>
+      </div>
+      <details class="workshop-help"><summary data-i18n="builder.help.projects">How do workshop projects and installed packs differ?</summary><p data-i18n="builder.help.projects_help">Opening a pack makes an editable workshop copy. Install it once from the editor; saving then automatically updates the installed copy. Restart the game to load changes. Choose the package name in the game’s localization settings; translated packs use enhanced text rendering.</p></details>
+    </section>
   </section>
 </main>
+<dialog id="asset-pack-export" class="builder-dialog" aria-labelledby="asset-pack-export-heading">
+  <form id="asset-pack-export-form">
+    <div class="pack-dialog-heading">
+      <h2 id="asset-pack-export-heading" data-i18n="builder.mods.pack_music">Create music pack</h2>
+      <button type="button" id="asset-pack-export-close" class="quiet" data-i18n="builder.feedback.close">Close</button>
+    </div>
+    <div class="pack-metadata">
+      <label><span data-i18n="builder.mods.name">Pack name</span><input name="name" maxlength="160" autofocus required></label>
+      <label><span data-i18n="builder.mods.author">Author</span><input name="author" maxlength="256" required></label>
+      <label><span data-i18n="builder.mods.version">Version</span><input name="version" value="1.0.0" maxlength="64" required></label>
+      <label><span data-i18n="builder.mods.optional_license">License (optional)</span><input name="license" maxlength="256"></label>
+    </div>
+    <fieldset id="asset-pack-export-music"><legend data-i18n="builder.mods.tracks">Tracks to share</legend><div id="asset-pack-export-tracks"></div><p id="asset-pack-track-count" role="status" hidden></p></fieldset>
+    <label id="asset-pack-export-image" hidden><span data-i18n="builder.mods.artwork_file">Title artwork (PNG)</span><input id="asset-pack-artwork" name="artwork" aria-describedby="asset-pack-artwork-guide asset-pack-artwork-status" type="file" accept=".png,image/png" disabled required></label>
+    <label id="asset-pack-export-pdf" hidden><span data-i18n="builder.help.manual_file">Instruction manual (PDF)</span><input id="asset-pack-pdf" name="manual" aria-describedby="asset-pack-manual-status" type="file" accept=".pdf,application/pdf" disabled required></label>
+    <p id="asset-pack-artwork-guide" class="section-note" data-i18n="builder.mods.artwork_guide" hidden>Use a 2212 × 760 PNG. Visible artwork must cover at least 1% of the canvas.</p>
+    <p id="asset-pack-artwork-status" role="status" hidden></p>
+    <p id="asset-pack-manual-status" role="status" hidden></p>
+    <p id="asset-pack-export-status" role="status" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" id="asset-pack-export-discard" class="quiet" hidden data-i18n="builder.mods.discard_draft">Discard draft</button>
+      <button type="submit" id="asset-pack-export-submit" class="secondary" disabled data-i18n="builder.mods.download">Export .o2r…</button>
+      <button type="submit" id="asset-pack-export-install" disabled data-i18n="builder.language.install_game">Install in game</button>
+    </div>
+  </form>
+</dialog>
 
-<dialog id="big-rom-dialog" aria-labelledby="big-rom-title">
-  <h2 id="big-rom-title" data-i18n="builder.big_screen.browse_roms">Browse ROMs</h2>
-  <p id="big-rom-location" tabindex="-1" role="status"></p>
+<dialog id="mod-conflict-review" class="builder-dialog" aria-labelledby="mod-conflict-heading" aria-describedby="mod-conflict-help">
+  <h2 id="mod-conflict-heading"></h2>
+  <p id="mod-conflict-help" data-i18n="builder.mods.pick_target">Choose a target to see the mods that provide it.</p>
+  <div id="mod-conflict-targets"></div>
+  <form method="dialog" class="dialog-actions"><button class="quiet" data-i18n="common.back">Back</button></form>
+</dialog>
+
+<dialog id="builder-confirm-dialog" class="builder-dialog" aria-labelledby="builder-confirm-title" aria-describedby="builder-confirm-message">
+  <h2 id="builder-confirm-title"></h2>
+  <p id="builder-confirm-message"></p>
+  <form method="dialog" class="dialog-actions">
+    <button type="submit" class="quiet" value="cancel" data-i18n="common.cancel" autofocus>Cancel</button>
+    <button type="submit" id="builder-confirm-accept" class="danger" value="accept"></button>
+  </form>
+</dialog>
+
+<dialog id="big-screen-language-dialog" class="builder-dialog" aria-labelledby="big-screen-language-title">
+  <header class="big-dialog-heading">
+    <h2 id="big-screen-language-title" data-i18n="interface.language">Interface language</h2>
+    <form method="dialog"><button class="quiet" data-i18n="common.back">Back</button></form>
+  </header>
+  <div id="big-screen-language-options" class="big-choice-grid"></div>
+  <p id="big-screen-language-status" role="status" hidden></p>
+</dialog>
+<dialog id="big-mod-filter-dialog" class="builder-dialog" aria-labelledby="big-mod-filter-title">
+  <header class="big-dialog-heading">
+    <h2 id="big-mod-filter-title" data-i18n="builder.mods.filter">Mod type</h2>
+    <form method="dialog"><button class="quiet" data-i18n="common.cancel">Cancel</button></form>
+  </header>
+  <div id="big-customize-menu" class="big-choice-grid">
+    <div data-big-band>
+      <button class="secondary" type="button" data-big-page="all" aria-pressed="true" data-i18n="builder.mods.all_types">All types</button>
+      <button class="secondary" type="button" data-big-page="title" aria-pressed="false" data-i18n="builder.assets.title_art">Title artwork</button>
+    </div>
+    <div data-big-band>
+      <button class="secondary" type="button" data-big-page="packs" aria-pressed="false" data-i18n="builder.mods.title">Music packs</button>
+      <button class="secondary" type="button" data-big-page="languages" aria-pressed="false" data-i18n="builder.nav.languages">Languages</button>
+    </div>
+    <div data-big-band>
+      <button class="secondary" type="button" data-big-page="manual" aria-pressed="false" data-i18n="builder.mods.manual_packs">Manual packs</button>
+      <button class="secondary" type="button" data-big-page="issues" aria-pressed="false" data-i18n="builder.mods.needs_attention" hidden>Needs attention</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="big-mod-actions-dialog" class="builder-dialog" aria-labelledby="big-mod-actions-title">
+  <h2 id="big-mod-actions-title"></h2>
+  <form method="dialog" class="dialog-actions" data-big-band><div id="big-mod-options"></div><button class="quiet" autofocus data-i18n="common.cancel">Cancel</button></form>
+</dialog>
+<dialog id="big-rom-dialog" class="builder-dialog" aria-labelledby="big-rom-title">
+  <header class="big-dialog-heading">
+    <h2 id="big-rom-title" data-i18n="builder.big_screen.browse_roms">Browse ROMs</h2>
+    <p id="big-rom-location" role="status"></p>
+  </header>
+  <p id="big-rom-message" role="status" hidden></p>
   <div id="big-rom-entries" class="big-screen-list big-screen-scroll" data-big-page-list></div>
-  <div class="dialog-actions"><button id="big-rom-back" class="quiet" type="button" data-i18n="common.back">Back</button></div>
+  <div class="dialog-actions" data-big-band>
+    <button id="big-rom-up" class="secondary" type="button" data-pad-action="west" hidden><span class="controller-glyph" role="img" data-pad-button="west" aria-label="X">X</span><span data-i18n="builder.big_screen.rom_up">Up one folder</span></button>
+    <button id="big-rom-computer" class="quiet" type="button" data-pad-action="north" hidden><span class="controller-glyph" role="img" data-pad-button="north" aria-label="Y">Y</span><span data-i18n="builder.big_screen.rom_computer">Computer</span></button>
+    <button id="big-rom-back" class="quiet" type="button"><span class="controller-glyph" role="img" data-pad-button="back" aria-label="Esc">Esc</span><span data-i18n="common.cancel">Cancel</span></button>
+  </div>
 </dialog>
 
 <script src="builder/scene.js" type="module"></script>
-<dialog id="stale-build-dialog" aria-labelledby="stale-build-title" aria-describedby="stale-build-help">
+<dialog id="close-workshop-dialog" class="builder-dialog" aria-labelledby="close-workshop-title" aria-describedby="close-workshop-message">
+  <h2 id="close-workshop-title" data-i18n="builder.close_title">Quit Builder?</h2>
+  <p id="close-workshop-message" data-i18n="builder.close_confirm">Unsaved edits will be discarded. Saved projects and installed mods will be kept.</p>
+  <form method="dialog" class="dialog-actions">
+    <button type="submit" value="cancel" class="quiet" autofocus data-i18n="common.cancel">Cancel</button>
+    <button id="close-workshop-confirm" type="submit" value="close" data-i18n="builder.close">Quit Builder</button>
+  </form>
+</dialog>
+<dialog id="stale-build-dialog" class="builder-dialog" aria-labelledby="stale-build-title" aria-describedby="stale-build-help">
   <h2 id="stale-build-title" data-i18n="builder.version.play_title">Play without rebuilding?</h2>
   <p id="stale-build-help" data-i18n="builder.version.play_help">Playing now uses your existing game build. Changes bundled with this Builder will not be applied until you rebuild. Your saves and settings are kept when rebuilding.</p>
   <div class="dialog-actions">
@@ -357,8 +525,38 @@
     <button id="stale-build-review" type="button" data-i18n="builder.version.review">Review rebuild</button>
   </div>
 </dialog>
+<dialog id="mod-recovery-dialog" class="builder-dialog" aria-labelledby="mod-recovery-title" aria-describedby="mod-recovery-detail">
+  <h2 id="mod-recovery-title" data-i18n="builder.mods.scan_failed">The mod setup could not be refreshed.</h2>
+  <p id="mod-recovery-detail" class="muted"></p>
+  <div class="dialog-actions">
+    <button id="mod-recovery-cancel" class="quiet" type="button" data-i18n="common.cancel">Cancel</button>
+    <button id="mod-recovery-play" class="secondary" type="button" hidden></button>
+    <button id="mod-recovery-retry" type="button" autofocus data-i18n="builder.mods.retry_scan">Retry scan</button>
+  </div>
+</dialog>
 
-<dialog id="import-install" aria-labelledby="import-install-title">
+<dialog id="mod-preview-dialog" class="builder-dialog" aria-labelledby="mod-preview-title">
+  <h2 id="mod-preview-title"></h2>
+  <p id="mod-preview-status" role="status"></p>
+  <div id="mod-preview-content" tabindex="0" data-big-scroll aria-label="Preview" data-i18n-aria="builder.mods.preview_button"></div>
+  <div class="dialog-actions" data-big-band>
+    <button type="button" class="secondary" id="mod-preview-save" hidden data-i18n="builder.mods.save_copy">Save .o2r copy</button>
+    <button type="button" class="secondary" id="mod-preview-prev" hidden data-i18n="builder.mods.previous_page">Previous page</button>
+    <button type="button" class="secondary" id="mod-preview-next" hidden data-i18n="builder.mods.next_page">Next page</button>
+    <button type="button" class="secondary" id="mod-preview-close" data-i18n="builder.feedback.close">Close</button>
+  </div>
+</dialog>
+<dialog id="legacy-mod-dialog" class="builder-dialog" aria-labelledby="legacy-mod-title">
+  <h2 id="legacy-mod-title" data-i18n="builder.migration.title">Move customizations to Manage Mods</h2>
+  <p data-i18n="builder.migration.intro">Convert compatible replacements into local mod packs. Existing mods keep their selections, and you can keep playing with your current customizations if you choose Later.</p>
+  <p id="legacy-mod-status" role="status"></p>
+  <ul id="legacy-mod-items"></ul>
+  <div class="dialog-actions">
+    <button type="button" id="legacy-mod-later" class="quiet" data-i18n="builder.migration.later">Later</button>
+    <button type="button" id="legacy-mod-apply" hidden data-i18n="builder.migration.apply">Convert customizations</button>
+  </div>
+</dialog>
+<dialog id="import-install" class="builder-dialog" aria-labelledby="import-install-title">
   <h2 id="import-install-title" data-i18n="builder.import.title">Import from another installation</h2>
   <p data-i18n="builder.import.help">Import saves, settings, Workshop preferences, and custom assets. Originals stay untouched. Existing user files win; untouched shipped assets may be replaced. ROMs and build tools are not copied.</p>
   <p id="import-install-detected" hidden data-i18n="builder.import.detected">Previous installation found. Review it before importing.</p>
@@ -373,14 +571,19 @@
   <div class="dialog-actions"><button class="quiet" type="button" id="import-install-skip" data-i18n="builder.import.skip">Cancel</button><button type="button" id="import-install-apply" disabled data-i18n="builder.import.apply">Import into game output</button><button type="button" id="import-install-reload" hidden data-i18n="builder.import.reload">Reload Workshop</button></div>
 </dialog>
 <script src="builder/big-screen.js" defer></script>
+<script src="builder/mod-packs.js" defer></script>
+<script src="builder/audio-transport.js" defer></script>
+<script src="builder/workshop-publishing.js" defer></script>
+<script src="builder/mod-preview.js" defer></script>
+<script src="builder/mod-migration.js" defer></script>
 <script src="builder/big-screen-customize.js" defer></script>
 <script src="builder/rom-browser.js" defer></script>
 <script src="builder/rom-checklist.js" defer></script>
 <script src="builder/app.js" defer></script>
 <script src="builder/regional-media.js" defer></script>
-<script src="builder/game-imports.js" defer></script>
 <script src="builder/install-import.js" defer></script>
-<dialog id="game-folder-dialog" aria-labelledby="game-folder-title"><h2 id="game-folder-title" data-i18n="builder.output.change">Change game folder…</h2><p data-i18n="builder.output.next_launch">Changes take effect after you close and reopen the Builder. This session keeps its current folder.</p><iframe id="game-folder-frame" title="Choose game folder" data-i18n-title="builder.output.choose"></iframe><div class="dialog-actions"><button class="secondary" type="button" id="game-folder-dismiss" data-i18n="builder.output.close">Close</button></div></dialog>
+<dialog id="game-folder-dialog" class="builder-dialog" aria-labelledby="game-folder-title"><h2 id="game-folder-title" data-i18n="builder.output.change">Change game folder…</h2><p data-i18n="builder.output.next_launch">Changes take effect after you close and reopen the Builder. This session keeps its current folder.</p><iframe id="game-folder-frame" title="Choose game folder" data-i18n-title="builder.output.choose"></iframe><div class="dialog-actions"><button class="secondary" type="button" id="game-folder-dismiss" data-i18n="builder.output.close">Close</button></div></dialog>
 <script src="builder/game-folder.js" defer></script>
+<div id="builder-drop-hint" hidden><span data-i18n="builder.drop.hint">Drop a ROM or mod pack</span></div>
 </body>
 </html>

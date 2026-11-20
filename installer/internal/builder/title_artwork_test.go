@@ -9,10 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestTitleArtworkSharesMedallion(t *testing.T) {
@@ -191,17 +189,5 @@ func TestTitleArtworkInvalidOrUntouchedSelection(t *testing.T) {
 	after, err := os.ReadFile(liveAssetManifestPath(root))
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("invalid or untouched selection changed the live manifest")
-	}
-}
-
-func TestTitleArtworkBrowserBehavior(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is unavailable")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if out, err := exec.CommandContext(ctx, node, "--test", "testdata/title_artwork.test.mjs").CombinedOutput(); err != nil {
-		t.Fatalf("title artwork browser checks: %v\n%s", err, out)
 	}
 }

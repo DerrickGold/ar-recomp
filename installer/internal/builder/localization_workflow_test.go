@@ -172,7 +172,7 @@ func TestLocalizationCatalogAndUninstallPreserveProject(t *testing.T) {
 }
 
 func TestLocalizationEditorHasVisibleWorkflowActions(t *testing.T) {
-	for _, want := range []string{`id="loc-save-progress"`, `id="loc-back-projects"`, `id="loc-reference-project"`, `id="loc-extract-reference"`, `class="loc-comparison"`, `id="loc-library-filter"`} {
+	for _, want := range []string{`id="loc-save-progress"`, `id="loc-back-projects"`, `id="loc-reference-project"`, `id="loc-extract-reference"`, `class="loc-comparison"`, `id="loc-library-search"`, `id="loc-manage-mods"`} {
 		if !strings.Contains(localizationHTML, want) {
 			t.Fatal("missing editor action", want)
 		}

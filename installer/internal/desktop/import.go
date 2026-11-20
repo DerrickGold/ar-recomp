@@ -11,12 +11,23 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/modconfig"
 )
 
 const importStateName = ".actraiser-import.json"
 
 var importLeaves = []string{"config.ini", "settings.ini", "diorama-layers.ini", "action-effects.ini", "saves", "game-assets"}
+
+const importModOverlay = "game-assets/" + modconfig.OverlayName
+
+func passiveModOverlay(path string) bool {
+	state, err := modconfig.Read(path)
+	return err == nil && !state.HasChoices() && len(state.Directories) == 0 &&
+		(len(state.RelativeDirectories) == 0 || slices.Equal(state.RelativeDirectories, []string{modconfig.LauncherDirectory}))
+}
 
 type ImportDecision struct {
 	Schema  int      `json:"schema"`
@@ -251,6 +262,10 @@ func PreviewInstallImport(ctx context.Context, source, destination string) (Impo
 				return walkErr
 			}
 			if entry.IsDir() {
+				switch path {
+				case "game-assets/mods-cache", "game-assets/languages/packs/.arlang-cache":
+					return fs.SkipDir
+				}
 				return nil
 			}
 			if !entry.Type().IsRegular() {
@@ -282,6 +297,9 @@ func PreviewInstallImport(ctx context.Context, source, destination string) (Impo
 					item.Action = "identical"
 					p.Identical++
 				case strings.HasPrefix(path, "game-assets/") && seed[path] == item.DestinationHash:
+					item.Action = "replace-default"
+					p.Copy++
+				case path == importModOverlay && passiveModOverlay(filepath.Join(p.Destination, path)):
 					item.Action = "replace-default"
 					p.Copy++
 				default:

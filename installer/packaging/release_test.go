@@ -451,6 +451,10 @@ func testDesktopReleaseUsesFinalPayloadVersion(t *testing.T, platform, kind, fil
 file(WRITE "${BUILDER_DIST_BUILD}/CMakeCache.txt" "SNESBUILD_VERSION_STAMP:INTERNAL=v1.0\n")
 file(WRITE "%s" "built payload for v1.0\n")
 `, target)
+	if kind == "windows" {
+		packager += `file(WRITE "${BUILDER_DIST_BUILD}/bin/actraiser-builder.exe" "console helper")
+`
+	}
 	shell := filepath.Join(root, "installer", "desktop-shell")
 	if err := os.WriteFile(filepath.Join(shell, "package-"+kind+".cmake"), []byte(packager), 0600); err != nil {
 		t.Fatal(err)
@@ -474,14 +478,23 @@ file(WRITE "%s" "built payload for v1.0\n")
 	if err != nil || string(checksum) != want {
 		t.Fatalf("checksum must identify the final version: %q, %v", checksum, err)
 	}
-	if kind == "macos" {
+	if kind == "macos" || kind == "windows" {
 		extracted := t.TempDir()
 		cmd := exec.Command(cmake, "-E", "tar", "xf", filepath.Join(release, name))
 		cmd.Dir = extracted
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatal(err, string(output))
 		}
-		checkReleaseLauncherProfile(t, filepath.Join(extracted, strings.TrimSuffix(name, ".zip")), macOSBuilderProgram)
+		bundle := filepath.Join(extracted, strings.TrimSuffix(name, ".zip"))
+		if kind == "macos" {
+			checkReleaseLauncherProfile(t, bundle, macOSBuilderProgram)
+		} else {
+			checkReleaseLauncherProfile(t, bundle, "ActRaiserRecompBuilder.exe")
+			helper, err := os.ReadFile(filepath.Join(bundle, "actraiser-builder.exe"))
+			if err != nil || string(helper) != "console helper" {
+				t.Fatalf("missing mod CLI in portable release: %v", err)
+			}
+		}
 	}
 }
 

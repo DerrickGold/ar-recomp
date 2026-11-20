@@ -36,6 +36,10 @@ func TestContractCompleteStillReportsMissingLiveHudAndCredits(t *testing.T) {
 	if !r.ContractComplete || r.Required.Total != 495 || r.Required.Provided != 495 || len(r.Required.Missing) != 0 || r.LiveOptional.Total != 70 || r.LiveOptional.Provided != 0 || len(r.LiveOptional.Missing) != 70 {
 		t.Fatalf("wrong required/live distinction: %+v", r)
 	}
+	live := pack.RuntimeTextCoverage()
+	if live.Total != 564 || live.Provided != 494 {
+		t.Fatalf("live coverage included dormant text or excluded intentional empty entries: %+v", live)
+	}
 	if !slices.Contains(r.Dormant, "credits.special_mode") || !slices.Contains(r.Dormant, "sound_test.menu.labels") {
 		t.Fatal(r.Dormant)
 	}

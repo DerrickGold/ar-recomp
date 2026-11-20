@@ -2,8 +2,6 @@ package localization
 
 import (
 	"fmt"
-	"io"
-	"path/filepath"
 	"strings"
 )
 
@@ -33,8 +31,7 @@ func FindInstalledPack(root, id string) (*InstalledPackSummary, error) {
 
 // UpdateInstalledProject refreshes only the inspected installation. It never
 // installs a new pack or restores one uninstalled while the project was saved.
-// The archive path is local iteration, not publication: all draft messages are
-// retained and the project gains no permission to export a publication.
+// Published archives are read-only. Editable installations are directories.
 func UpdateInstalledProject(root string, project *AuthorProject, expected InstalledPackSummary) (string, error) {
 	if project == nil || !project.installationReady {
 		return "", fmt.Errorf("prepare installation before updating")
@@ -56,9 +53,7 @@ func UpdateInstalledProject(root string, project *AuthorProject, expected Instal
 		return "", ErrProjectConflict
 	}
 	if current.Archive {
-		path := filepath.Join(root, current.Key)
-		err := atomicAuthorFile(path, func(w io.Writer) error { return project.writeArchive(w, "publication") })
-		return path, err
+		return "", fmt.Errorf("publish the updated project as an .o2r release")
 	}
 	dir, err := installedDirectory(root, current.Key)
 	if err != nil {

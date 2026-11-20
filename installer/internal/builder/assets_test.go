@@ -132,9 +132,8 @@ func TestManualServedInlineAndTokenGated(t *testing.T) {
 	}
 }
 
-// The page must reference both assets, and the CSP must admit the manual's
-// iframe without loosening object-src.
-func TestPageReferencesAssetsAndPermitsTheManualFrame(t *testing.T) {
+// Self-hosted helper frames still work under the same object-src restriction.
+func TestPageReferencesAssetsAndPermitsHelperFrames(t *testing.T) {
 	app := newApplication(context.Background(), Options{
 		Title: "Builder", ProjectRoot: t.TempDir(),
 	}, "tok")
@@ -142,20 +141,22 @@ func TestPageReferencesAssetsAndPermitsTheManualFrame(t *testing.T) {
 	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/tok/", nil))
 	body := response.Body.String()
 	for _, reference := range []string{
-		`src="boxart.webp"`, `src="title-logo.png"`, `href="manual.pdf"`,
-		`id="title-variant"`, `value="ja"`, `id="title-preview"`,
-		`id="manual-form"`, `accept=".pdf,application/pdf"`,
+		`src="boxart.webp"`, `href="manual.pdf"`,
+		`id="mod-preview-dialog"`, `value="actraiser-title"`, `id="workshop-package-title"`,
+		`id="asset-pack-manual-reader"`, `accept=".pdf,application/pdf"`,
 	} {
 		if !strings.Contains(body, reference) {
 			t.Errorf("page does not reference %s", reference)
 		}
 	}
-	if !strings.Contains(body, `id="manual-frame"`) {
-		t.Error("page has no manual iframe")
+	for _, legacy := range []string{`id="title-toggle"`, `id="title-variant"`, `data-big-title=`} {
+		if strings.Contains(body, legacy) {
+			t.Errorf("page still exposes a legacy title selector: %s", legacy)
+		}
 	}
 	policy := response.Header().Get("Content-Security-Policy")
 	if !strings.Contains(policy, "frame-src 'self'") {
-		t.Errorf("CSP must admit the manual iframe: %s", policy)
+		t.Errorf("CSP must admit helper frames: %s", policy)
 	}
 	if !strings.Contains(policy, "object-src 'none'") {
 		t.Errorf("CSP loosened object-src: %s", policy)

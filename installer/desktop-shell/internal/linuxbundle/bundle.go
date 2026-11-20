@@ -551,6 +551,10 @@ if [ "${XDG_DATA_DIRS+x}" = x ]; then export AR_BUILDER_HOST_XDG_DATA_DIRS_MODE=
 export XDG_DATA_DIRS="$APPDIR/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}:/usr/local/share:/usr/share"
 export GST_PLUGIN_SYSTEM_PATH_1_0="$APPDIR/usr/lib/gstreamer-1.0"
 export GST_PLUGIN_PATH_1_0="$GST_PLUGIN_SYSTEM_PATH_1_0"
+if [ "${1-}" = mods ]; then
+    if [ -n "${OWD:-}" ]; then cd "$OWD" || exit 1; fi
+    LD_LIBRARY_PATH="$APPDIR/usr/lib" exec "$APPDIR/usr/bin/ActRaiserRecompBuilder" "$@"
+fi
 export GST_PLUGIN_SCANNER="$APPDIR/usr/libexec/gst-plugin-scanner"
 export WEBKIT_INJECTED_BUNDLE_PATH="$APPDIR/usr/@WEBKIT@/injected-bundle"
 export GDK_PIXBUF_MODULEDIR="$APPDIR/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders"

@@ -38,6 +38,8 @@ type localizationProjectStore interface {
 type localizationWork struct {
 	localizationStateData
 	root      string
+	modRoot   string
+	modDirs   []string
 	fontProbe lk.FontCoverageProbe
 	preview   localizationPlayback
 }
@@ -83,7 +85,11 @@ func (app *application) localizationSnapshot() (*localizationWork, error) {
 		}
 	}
 	s.mu.Lock()
-	work := &localizationWork{localizationStateData: s.localizationStateData, root: app.localizationRoot(), fontProbe: app.probeLocalizationFonts, preview: app.playbackLocalization}
+	work := &localizationWork{
+		localizationStateData: s.localizationStateData, root: app.localizationRoot(),
+		modRoot: app.options.ProjectRoot, modDirs: app.options.ModDirectories,
+		fontProbe: app.probeLocalizationFonts, preview: app.playbackLocalization,
+	}
 	s.mu.Unlock()
 	return work, nil
 }

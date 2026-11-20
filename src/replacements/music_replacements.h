@@ -37,7 +37,9 @@
  * lock-serialised the same way msu1.c is. */
 
 enum {
-  kMusicMaxReplacements = 32,
+  kMusicMaxLegacyReplacements = 32,
+  kMusicMaxPackReplacements = 64,
+  kMusicMaxReplacements = kMusicMaxLegacyReplacements + kMusicMaxPackReplacements,
   kMusicNameCapacity = 48,
   kMusicPathCapacity = 512,
   kMusicSongAny = -1,
@@ -71,6 +73,8 @@ extern int g_music_replacement_count;
  * (existence, rate, length, loop tags). Returns entries loaded; 0 with no
  * output if the manifest does not exist. */
 int MusicReplacements_Load(const char *manifest_path);
+int MusicReplacements_LoadWithOverlay(const char *manifest_path,
+                                     const char *overlay_path);
 /* Load/Shutdown are lifecycle operations with the audio producer stopped.
  * Encoded-file snapshots live until shutdown; duplicate paths share storage.
  * A bounded cache removes filesystem access from normal streaming, not DSP

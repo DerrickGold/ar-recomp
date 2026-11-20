@@ -12,6 +12,7 @@ type localizationProjectRequest struct {
 	ProjectID     string          `json:"projectID"`
 	Revision      string          `json:"revision"`
 	ID            string          `json:"id"`
+	KeepBoth      bool            `json:"keepBoth"`
 	NewID         string          `json:"newID"`
 	Metadata      lk.PackMetadata `json:"metadata"`
 	Directory     string          `json:"directory"`
@@ -21,10 +22,23 @@ type localizationProjectRequest struct {
 	ImportToken   string          `json:"importToken"`
 }
 
+func newTranslationIdentity() (string, error) {
+	token, err := randomToken()
+	return "translation-" + token, err
+}
+
 func (work *localizationWork) manageLocalizationProject(w *localizationReply, r *http.Request, endpoint string, q localizationProjectRequest) error {
 	if endpoint == "accept-import" {
 		if work.pendingImport == nil || q.ImportToken != work.pendingImport.token {
 			return fmt.Errorf("%w: import preview expired; select the pack again", lk.ErrProjectConflict)
+		}
+		if q.KeepBoth {
+			var err error
+			q.NewID, err = newTranslationIdentity()
+			if err != nil {
+				return err
+			}
+			q.Replace = false
 		}
 		if err := work.acceptLocalizationImport(work.pendingImport.project, q.NewID, q.Replace, q.Expected); err != nil {
 			return err
@@ -85,6 +99,13 @@ func (work *localizationWork) manageLocalizationProject(w *localizationReply, r 
 			}
 		}
 		m := q.Metadata
+		if m.ID == "" {
+			var err error
+			m.ID, err = newTranslationIdentity()
+			if err != nil {
+				return err
+			}
+		}
 		m.SourceProfile, m.Target, m.Coverage, m.Fallback = "us", "us-runtime", "partial", "native-us"
 		p, err := lk.NewTranslationProject(source, m)
 		if err != nil {
@@ -106,6 +127,12 @@ func (work *localizationWork) manageLocalizationProject(w *localizationReply, r 
 	p := work.current
 	var next *lk.AuthorProject
 	var err error
+	if (endpoint == "upgrade-v2" || endpoint == "clone") && q.NewID == "" {
+		q.NewID, err = newTranslationIdentity()
+		if err != nil {
+			return err
+		}
+	}
 	switch endpoint {
 	case "upgrade-v2":
 		next, report, err := p.UpgradeV2(q.NewID)

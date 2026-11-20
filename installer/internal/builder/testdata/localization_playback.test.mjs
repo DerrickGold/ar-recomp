@@ -13,6 +13,9 @@ class Element {
   setAttribute(name,value) {this[name]=value;}
   addEventListener(name,action) {(this.listeners[name]??=[]).push(action);}
   fire(name) {for(const action of this.listeners[name]||[]) action();}
+  showModal() {this.open=true;}
+  close() {this.open=false;this.fire("close");}
+  focus() {}
   querySelectorAll(tag) {const tags=tag.split(",").map(t=>t.trim());return this.children.filter(x=>typeof x!=="string").flatMap(x=>[...(tags.includes(x.tagName)?[x]:[]),...x.querySelectorAll(tag)]);}
   getContext() {return {clearRect:()=>{},drawImage:(...args)=>this.draws.push(args)};}
 }
@@ -25,17 +28,18 @@ const frames=[
 function movie(id) {return {width:100,height:30,page:0,pages:2,nativeBounds:true,messageID:id,resolvedID:id,source:"text/example.artext",line:4,layout:"flow",fonts:[{reference:"fallback.otf",pixels:25,missing:false}],frames,sheets:["data:image/png;base64,test"]};}
 function response(id="message.one") {const scenario={page:0,delay:3,size:140,sampling:0,pixelation:2,pixelSize:2,values:{master_name:"Player"},inks:{}};return {source:movie(id),draft:movie(id),scenario,sourceScenario:structuredClone(scenario),sourceLanguage:"en",draftLanguage:"fr"};}
 function setup() {
-  const host=new Element("div"),errors=[],requests=[],animations=new Map();let next=1,now=0;
+  const host=new Element("div"),body=new Element("body"),errors=[],requests=[],animations=new Map();let next=1,now=0;
+  body.append(host);
   let answer=async()=>({ok:true,json:async()=>response()});
   const ui={set(node,key,args={}) {node.textContent=this.text(key,args);}, unbind(){}, attribute(node,name,key){node.setAttribute(name,this.text(key));}, text(key,args={}) {let value=messages[key]?.[0]??key;for(const [name,text] of Object.entries(args)) value=value.replaceAll("{"+name+"}",String(text));return value;}};
   class Image {set src(value) {this.url=value;queueMicrotask(()=>this.onload());}}
-  const context={window:{workshopI18n:ui},navigator:{userAgent:"Playback test browser"},document:{querySelector:()=>null,createElement:tag=>new Element(tag),createTextNode:text=>String(text),addEventListener:()=>{}},URL,location:{href:"http://localhost:1/secret/"},Image,AbortController,structuredClone,
+  const context={window:{workshopI18n:ui},navigator:{userAgent:"Playback test browser"},document:{body,querySelector:()=>null,createElement:tag=>new Element(tag),createTextNode:text=>String(text),addEventListener:()=>{}},URL,location:{href:"http://localhost:1/secret/"},Image,AbortController,structuredClone,
     performance:{now:()=>now},requestAnimationFrame:callback=>{const id=next++;animations.set(id,callback);return id;},cancelAnimationFrame:id=>animations.delete(id),
     fetch:async(url,options)=>{requests.push({url:String(url),...options});return answer(url,options);}};
   runInNewContext(readFileSync(new URL("../../workshopui/feedback.js",import.meta.url),"utf8"),context);
   runInNewContext(readFileSync(new URL("../localization_playback.js",import.meta.url),"utf8"),context);
   const player=context.window.workshopPlayback.create(host,()=>({projectID:"pack",revision:"r1",id:"message.one",body:"Unsaved <i>words</i>",status:"wip"}),error=>errors.push(error));
-  return {host,player,requests,errors,respond(fn){answer=fn;},tick(time){now=time;const callbacks=[...animations.values()];animations.clear();callbacks.forEach(fn=>fn(now));},button(text,index=0){return host.querySelectorAll("button").filter(b=>b.textContent===text)[index];}};
+  return {host,body,player,requests,errors,respond(fn){answer=fn;},tick(time){now=time;const callbacks=[...animations.values()];animations.clear();callbacks.forEach(fn=>fn(now));},button(text,index=0){return host.querySelectorAll("button").filter(b=>b.textContent===text)[index];}};
 }
 
 test("native image playback keeps linked clocks, pauses on controls and exposes template/font trace",async()=>{
@@ -115,12 +119,14 @@ test("playback reports response metadata and clears it after a successful retry"
  const s=setup();
  s.respond(async()=>({ok:false,status:504,json:async()=>({error:"worker deadline",errorCode:"builder.errors.timeout",recoveryKey:"builder.recovery.timeout"})}));
  await s.player.show();
- const report=s.host.querySelectorAll("textarea").find(node=>node.readOnly);
+ const [modal]=s.body.querySelectorAll("dialog");
+ assert.equal(modal.open,true);
+ const report=modal.querySelectorAll("textarea").find(node=>node.readOnly);
  assert.match(report.value,/Operation: Render language playback/);
  assert.match(report.value,/Code: builder.errors.timeout/);
  assert.match(report.value,/HTTP status: 504/);
  assert.match(report.value,/Details: worker deadline/);
  s.respond(async()=>({ok:true,json:async()=>response()}));
  await s.player.show();
- assert.equal(s.host.querySelectorAll("textarea").filter(node=>node.readOnly).length,0);
+ assert.equal(s.body.querySelectorAll("dialog").length,0);
 });

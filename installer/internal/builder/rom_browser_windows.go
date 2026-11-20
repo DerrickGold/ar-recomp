@@ -10,7 +10,7 @@ func romDriveLocations() []romLocation {
 	for letter := 'A'; letter <= 'Z'; letter++ {
 		if mask&(1<<(letter-'A')) != 0 {
 			drive := string(letter) + ":"
-			locations = append(locations, romLocation{ID: drive, Label: drive, path: drive + `\`})
+			locations = append(locations, romLocation{ID: drive, Label: drive, Drive: true, path: drive + `\`})
 		}
 	}
 	return locations

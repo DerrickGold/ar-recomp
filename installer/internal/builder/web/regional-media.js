@@ -35,10 +35,16 @@
   }
   async function run(action,operation){
     if(busy||closed)return;busy=true;
+    const trigger=document.activeElement;
     for(const node of form.querySelectorAll("input,button"))node.disabled=true;
     window.workshopFeedback?.clear(status);ui.set(status,"builder.media.working");
     try { await action(); } catch(error){errorMessage(error,operation);}
-    finally {busy=false;for(const node of form.querySelectorAll("input,button"))node.disabled=closed;}
+    finally {
+      busy=false;
+      for(const node of form.querySelectorAll("input,button"))node.disabled=closed;
+      if(!closed&&trigger&&document.activeElement===document.body&&form.contains(trigger))
+        trigger.focus({preventScroll:true});
+    }
   }
   function load(){return run(async()=>{await inventory();ui.set(status,"builder.media.ready");},"Read regional media status");}
   async function install(file,replace){
@@ -46,7 +52,7 @@
     const response=await fetchResponse("regional-media",{method:"POST",body});
     const data=await read(response,[409]);
     if(response.status===409 && data.code==="replace_required" && !replace){
-      if(!window.confirm(ui.text("builder.media.replace",{region:ui.text(names[data.release])}))){ui.set(status,"builder.media.cancelled");return null;}
+      if(!await window.workshopConfirm("builder.media.replace_action","builder.media.replace",{region:ui.text(names[data.release])})){ui.set(status,"builder.media.cancelled");return null;}
       return install(file,true);
     }
     if(!response.ok)throw window.workshopFeedback?.responseError ?
@@ -67,10 +73,12 @@
       }
       ui.set(status,result.changed?"builder.media.done":"builder.media.unchanged");
       form.reset();
+      document.dispatchEvent(new Event("workshop:content-imported"));
     },"Install regional media");
   });
   refresh.addEventListener("click",load);
-  document.querySelector('[data-asset-category="regions"]').addEventListener("click",load);
-  document.addEventListener("workshop:navigate",()=>{if(!form.hidden && !document.getElementById("panel-assets").hidden)load();});
+  const section=document.getElementById("setup-regional-archive");
+  section.addEventListener("toggle",()=>{if(section.open) return load();});
+  document.addEventListener("workshop:navigate",()=>{if(section.open && !document.getElementById("panel-build").hidden)load();});
   document.addEventListener("workshop:closed",()=>{closed=true;for(const node of form.querySelectorAll("input,button"))node.disabled=true;});
 })();

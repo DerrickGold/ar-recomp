@@ -89,6 +89,22 @@ To bring over an existing installation in a different folder, use the Builder's
 RecompLauncher updates the Builder download. The Builder checks whether the
 locally generated game needs to be rebuilt the next time you open it.
 
+RecompLauncher supplies its sibling `mods/` folder to the Builder. Keep that
+folder beside the playable `ActRaiserRecomp/` folder when moving a launcher
+installation. Registered folders elsewhere continue to use their original
+paths. A new portable game output carries local archives and their activation
+choices, and reconstructs the cache when the game starts.
+
+Use the same CLI for any supported pack type. Pass the game data folder as
+`--output-dir`, and pass the launcher-managed directory to `mods rescan` for
+discovery.
+
+```sh
+actraiser-builder mods inspect --json pack.o2r
+actraiser-builder mods install --output-dir ./ActRaiserRecomp --json pack.o2r
+actraiser-builder mods rescan --output-dir ./ActRaiserRecomp --mods-dir ./mods --json
+```
+
 When started from RecompLauncher Big Picture, the game starts in borderless
 fullscreen. You can change **Window mode** in the game for that session. To
 always start windowed from RecompLauncher, save `--game-window-mode=windowed`
@@ -111,21 +127,29 @@ Screen and the desktop Workshop during the same session.
 Big Screen shows the button glyphs for the current controller. When present,
 RecompLauncher’s controller hint supplies the glyphs at startup.
 
-In Customize, you can switch title artwork, enable or disable installed
-language packs, and listen to installed music replacements and ROM previews.
-Use the desktop Workshop to add music files or import and edit languages.
+Select the globe and current language beside **ActRaiser** to change the Builder
+interface. On desktop, the same globe appears beside build status in the top bar.
+
+In **Manage Mods**, press Up or Down to highlight a pack, or Left to reach
+the **Mod type** filter. Use the bottom face button to enable or disable
+the highlighted pack, the left face button for **Preview**, and the top
+face button for **Actions** such as reviewing a conflict or uninstalling.
+Shoulder buttons page through the list. **Game music** has original ROM
+previews and existing manifest replacements. Use the desktop Workshop to
+author packs and edit translations.
 On first launch, use **Use suggested folder** to approve the Builder's
-suggested destination. **Browse ROMs** in Big Screen can select a file from
-your game folder, Downloads, home folder or mounted media. You can also
-use the system file picker with a keyboard or mouse.
+suggested destination. The Big Screen file picker opens in a recent or
+default folder. Use the left face button for **Up one folder**, or the top
+face button for **Computer**, which lists system and mounted drives. The
+desktop Workshop uses the system file picker.
 
 On a fresh install, **Choose US ROM** opens the ActRaiser (USA) entry and offers
 a discovered copy when available. Choose optional ROMs from the checklist.
 Both views check file-picker selections and show what needs attention before
 enabling Build.
 
-The **ROM checklist** is available on Home in both views and in **Build & play**
-in the desktop Workshop. It shows each ROM's purpose, files supplied by the
+Open **ROM checklist** from Big Screen or **Setup** on desktop. It shows each
+ROM's purpose, files supplied by the
 launcher, files found beside the Builder or in the game folder, and imported
 content. Select a row to use a found file, browse for another one, or clear its
 selection. The desktop file picker can add or replace ROMs for the next build.
@@ -133,10 +157,10 @@ selection. The desktop file picker can add or replace ROMs for the next build.
 If the game is already playable, use **Import selected extras** to add content
 without rebuilding.
 
-The build view shows progress and a live log side by side. Use LB / L1 and
-RB / R1 or Page Up and Page Down to scroll the log. Save build report writes
-a snapshot of the current phase, error and recent log to the game's `logs/`
-folder.
+The build view shows progress and stages above the live log. Use LB / L1 and
+RB / R1 or Page Up and Page Down to scroll the log. After a build fails,
+**Save build report** writes the phase, error and recent log to the game's
+`logs/` folder.
 The same buttons page through ROMs, music and language packs. Launch errors
 have a separate report action in the same view.
 

@@ -4,10 +4,11 @@ Regional graphics and music sequences are extracted locally from a supported, un
 They are not included in the repository or release downloads. Gameplay rules
 that use numerical regional tables do not require these packages.
 
-In the ActRaiser Builder, open **Assets → Regional media** and select a
-supported ROM. **Extract & install** identifies the release, extracts only
-the reviewed media, and installs it in the correct game data folder. You can
-also select a private `.armedia` file extracted previously. The list reports
+In the ActRaiser Builder, open **Setup → ROM checklist**, select a supported
+ROM, and choose **Import selected extras**, or include it with your first
+build. The Builder identifies the release, extracts the reviewed media, and
+installs it in the correct game data folder. For an existing `.armedia` file,
+use **Import a private regional media archive** in Setup. The list reports
 which donors are installed or need re-extraction. Identical files are left
 alone; replacing a different existing donor requires confirmation. The
 builder never replaces the US build ROM or selects gameplay rules for you.

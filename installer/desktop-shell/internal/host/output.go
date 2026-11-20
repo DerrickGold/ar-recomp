@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/buildworkspace"
+	"github.com/DerrickGold/ar-recomp/installer/internal/interfacecatalog"
 	"github.com/DerrickGold/ar-recomp/installer/internal/workshopui"
 )
 
@@ -26,6 +27,26 @@ var outputHTML string
 
 //go:embed output.js
 var outputJS string
+
+var localizedOutputPage = sync.OnceValues(func() (string, error) {
+	messages, err := interfacecatalog.Messages("builder.output.", "builder.feedback.")
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(struct {
+		Locales  []string        `json:"locales"`
+		Messages json.RawMessage `json:"messages"`
+	}{interfacecatalog.Locales(), messages})
+	if err != nil {
+		return "", err
+	}
+	return strings.Replace(outputHTML, "{{UI_CATALOG}}", string(data), 1), nil
+})
+
+type outputProblem struct {
+	key string
+	error
+}
 
 type outputPreference struct {
 	Schema   int    `json:"schema"`
@@ -46,17 +67,18 @@ type OutputReview struct {
 // path never seeds or clears that directory. The backend is started only after
 // the first decision; later changes are explicitly deferred to the next launch.
 type OutputSelection struct {
-	mu                                sync.Mutex
-	artifact, workspace               string
-	protected                         []string
-	candidate, current, next, warning string
-	suggested                         string
-	bigScreen                         bool
-	selected                          chan string
-	chooser                           func() (string, error)
-	choosing                          bool
-	explicit                          bool
-	pending                           *OutputReview
+	mu                       sync.Mutex
+	artifact, workspace      string
+	protected                []string
+	candidate, current, next string
+	warning, warningDetail   string
+	suggested                string
+	bigScreen                bool
+	selected                 chan string
+	chooser                  func() (string, error)
+	choosing                 bool
+	explicit                 bool
+	pending                  *OutputReview
 }
 
 func NewOutputSelection(artifact, workspace string, protected ...string) *OutputSelection {
@@ -95,12 +117,12 @@ func (s *OutputSelection) Initial(ctx context.Context, override string) (string,
 			s.mu.Unlock()
 			return review.Directory, nil
 		}
-		s.warning = "The saved game folder is missing or no longer recognized. Review a destination before continuing."
+		s.warning = "saved_missing"
 	} else if !errors.Is(err, os.ErrNotExist) {
-		s.warning = "The saved game-folder preference could not be read. Choose a destination again. " + err.Error()
+		s.warning, s.warningDetail = "pref_unreadable", err.Error()
 	}
 	if s.candidate == "" {
-		s.warning = "Choose a writable game folder. The Builder's current location cannot be used as the default."
+		s.warning, s.warningDetail = "no_default", ""
 	}
 	s.mu.Unlock()
 	return s.Wait(ctx)
@@ -119,7 +141,7 @@ func (s *OutputSelection) Retry(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.current = ""
-	s.warning = "Could not open the game folder. Choose another destination or correct the problem and try again. " + err.Error()
+	s.warning, s.warningDetail = "open_failed", err.Error()
 	s.pending = nil
 }
 
@@ -143,31 +165,31 @@ func (s *OutputSelection) NeedsChoice() bool {
 func (s *OutputSelection) review(path string) (OutputReview, error) {
 	var result OutputReview
 	if !filepath.IsAbs(path) {
-		return result, errors.New("Enter the full path to your game folder, or use Choose folder….")
+		return result, outputProblem{"absolute", errors.New("Enter the full path to your game folder, or use Choose folder….")}
 	}
 	physical, err := buildworkspace.Physical(filepath.Clean(path))
 	if err != nil {
 		return result, err
 	}
 	if physical == filepath.Dir(physical) {
-		return result, errors.New("choose a game subfolder, not a filesystem root")
+		return result, outputProblem{"dedicated", errors.New("choose a game subfolder, not a filesystem root")}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		resolved, _ := buildworkspace.Physical(home)
 		if physical == resolved {
-			return result, errors.New("choose a game subfolder, not your home folder")
+			return result, outputProblem{"dedicated", errors.New("choose a game subfolder, not your home folder")}
 		}
 	}
 	for _, protected := range append([]string{s.workspace, s.artifact}, s.protected...) {
 		if protected != "" {
 			if err := buildworkspace.Separate(physical, protected); err != nil {
-				return result, fmt.Errorf("game folder must be separate from the Builder, its inputs and its workspace: %w", err)
+				return result, outputProblem{"separate", fmt.Errorf("game folder must be separate from the Builder, its inputs and its workspace: %w", err)}
 			}
 		}
 	}
 	for parent := physical; parent != filepath.Dir(parent); parent = filepath.Dir(parent) {
 		if strings.HasSuffix(strings.ToLower(parent), ".app") || strings.HasSuffix(strings.ToLower(parent), ".appdir") {
-			return result, errors.New("select the folder containing the game application, not a folder inside an application")
+			return result, outputProblem{"outside_app", errors.New("select the folder containing the game application, not a folder inside an application")}
 		}
 	}
 	result.Directory = physical
@@ -187,14 +209,14 @@ func (s *OutputSelection) review(path string) (OutputReview, error) {
 		return result, err
 	}
 	if !info.IsDir() {
-		return result, errors.New("game output must be a directory")
+		return result, outputProblem{"directory_required", errors.New("game output must be a directory")}
 	}
 	entries, err := dir.ReadDir(513)
 	if err != nil && err != io.EOF {
 		return result, err
 	}
 	if len(entries) > 512 {
-		return result, errors.New("this folder contains too many items; choose a dedicated game subfolder")
+		return result, outputProblem{"dedicated", errors.New("this folder contains too many items; choose a dedicated game subfolder")}
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	// Directory metadata is part of the optimistic review receipt. A path that
@@ -232,17 +254,17 @@ func (s *OutputSelection) review(path string) (OutputReview, error) {
 	result.Revision = fmt.Sprintf("%x", hash.Sum(nil))
 	if !result.Game {
 		if info, err := os.Stat(filepath.Join(physical, "utils", "game-assets", "manifest.ini")); err == nil && info.Mode().IsRegular() {
-			return OutputReview{}, errors.New("this legacy installation stores its data in utils; choose a new game subfolder, then use Import previous installation to bring its saves, settings and assets into the new layout")
+			return OutputReview{}, outputProblem{"legacy", errors.New("this legacy installation stores its data in utils; choose a new game subfolder, then use Import previous installation to bring its saves, settings and assets into the new layout")}
 		}
 		for _, entry := range entries {
 			name := strings.ToLower(entry.Name())
 			if name == "actraiserrecomp" || strings.HasPrefix(name, "actraiserrecomp.") || strings.HasPrefix(name, "sdl3") || strings.HasPrefix(name, "libsdl3") || name == "user-rom.sfc" {
-				return OutputReview{}, errors.New("unrecognized folder contains files with game-output names; choose a dedicated game folder to avoid replacing unrelated files")
+				return OutputReview{}, outputProblem{"colliding_files", errors.New("unrecognized folder contains files with game-output names; choose a dedicated game folder to avoid replacing unrelated files")}
 			}
 		}
 		for _, name := range []string{"actraiser-builder", "actraiser-builder.exe"} {
 			if _, err := os.Lstat(filepath.Join(physical, "tools", name)); err == nil {
-				return OutputReview{}, errors.New("unrecognized folder already contains a runtime helper; choose a dedicated game folder")
+				return OutputReview{}, outputProblem{"colliding_files", errors.New("unrecognized folder already contains a runtime helper; choose a dedicated game folder")}
 			}
 		}
 	}
@@ -330,19 +352,26 @@ func outputJSON(w http.ResponseWriter, code int, value any) {
 func (s *OutputSelection) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if r.Method == "GET" && (r.URL.Path == "/__shell/output/feedback.js" || r.URL.Path == "/__shell/output/feedback.css" || r.URL.Path == "/__shell/output/big-screen.js") {
-		name := strings.TrimPrefix(r.URL.Path, "/__shell/output/")
-		data, _ := workshopui.Assets.ReadFile(name)
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		if strings.HasSuffix(name, ".css") {
-			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/__shell/output/") {
+		switch name := strings.TrimPrefix(r.URL.Path, "/__shell/output/"); name {
+		case "interface-text.js", "controls.css", "feedback.js", "feedback.css", "big-screen.js":
+			data, _ := workshopui.Assets.ReadFile(name)
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			if strings.HasSuffix(name, ".css") {
+				w.Header().Set("Content-Type", "text/css; charset=utf-8")
+			}
+			w.Write(data)
+			return
 		}
-		w.Write(data)
-		return
 	}
 	if r.Method == "GET" && r.URL.Path == "/__shell/output/" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, outputHTML)
+		page, err := localizedOutputPage()
+		if err != nil {
+			http.Error(w, "Folder chooser unavailable", 500)
+			return
+		}
+		io.WriteString(w, page)
 		return
 	}
 	if r.Method == "GET" && r.URL.Path == "/__shell/output/app.js" {
@@ -353,7 +382,7 @@ func (s *OutputSelection) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" && r.URL.Path == "/__shell/output/state" {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		outputJSON(w, 200, map[string]any{"candidate": s.candidate, "current": s.current, "next": s.next, "warning": s.warning,
+		outputJSON(w, 200, map[string]any{"candidate": s.candidate, "current": s.current, "next": s.next, "warning": s.warning, "warningDetail": s.warningDetail,
 			"suggested": s.suggested, "bigScreen": s.bigScreen})
 		return
 	}
@@ -367,16 +396,23 @@ func (s *OutputSelection) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid origin", 403)
 		return
 	}
-	fail := func(code int, err error) { outputJSON(w, code, map[string]string{"error": err.Error()}) }
+	fail := func(code int, err error) {
+		key := "folder_error"
+		var problem outputProblem
+		if errors.As(err, &problem) {
+			key = problem.key
+		}
+		outputJSON(w, code, map[string]string{"error": err.Error(), "errorCode": "builder.output." + key})
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if r.URL.Path == "/__shell/output/choose" {
 		if s.choosing {
-			fail(409, errors.New("a folder chooser is already open"))
+			fail(409, outputProblem{"picker_open", errors.New("a folder chooser is already open")})
 			return
 		}
 		if s.chooser == nil {
-			fail(400, errors.New("folder chooser unavailable; enter an absolute path"))
+			fail(400, outputProblem{"absolute", errors.New("folder chooser unavailable; enter an absolute path")})
 			return
 		}
 		s.choosing = true
@@ -418,7 +454,7 @@ func (s *OutputSelection) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		outputJSON(w, 200, review)
 	case "/__shell/output/apply":
 		if s.pending == nil || q.Revision != s.pending.Revision {
-			fail(409, errors.New("review the destination again before continuing"))
+			fail(409, outputProblem{"review_first", errors.New("review the destination again before continuing")})
 			return
 		}
 		review, err := s.review(s.pending.Directory)
@@ -428,11 +464,11 @@ func (s *OutputSelection) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if review.Revision != s.pending.Revision {
 			s.pending = nil
-			fail(409, errors.New("the destination changed; review it again"))
+			fail(409, outputProblem{"changed", errors.New("the destination changed; review it again")})
 			return
 		}
 		if review.Existing && !q.Confirm {
-			fail(400, errors.New("confirm updating this non-empty game folder"))
+			fail(400, outputProblem{"consent", errors.New("confirm updating this non-empty game folder")})
 			return
 		}
 		if err := s.savePreference(review.Directory, !review.Existing); err != nil {

@@ -92,11 +92,17 @@ func TestLocalizationSaveRefreshesInstalledPack(t *testing.T) {
 					t.Fatal(err)
 				}
 				update := result.InstallationUpdate
+				root := filepath.Join(app.localizationRoot(), "packs")
+				row, err := lk.InspectInstalledPack(root, before.Key)
+				if archive {
+					if err != nil || update.Updated || row.Revision != before.Revision || row.Enabled != enabled {
+						t.Fatal("editing the project changed the legacy publication", update, row, err)
+					}
+					return
+				}
 				if !update.Updated || !update.Installed || update.Enabled != enabled || update.Error != "" {
 					t.Fatal(update)
 				}
-				root := filepath.Join(app.localizationRoot(), "packs")
-				row, err := lk.InspectInstalledPack(root, before.Key)
 				if err != nil || row.Revision == before.Revision || row.Enabled != enabled || row.Metadata.Name != q.Metadata.Name {
 					t.Fatal("installation was not refreshed in place", row, err)
 				}

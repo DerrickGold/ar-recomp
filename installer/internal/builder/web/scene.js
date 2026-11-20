@@ -8,14 +8,8 @@ import {MASTER_ACTIONS,sampleMasterPatrol,sampleMasterGlide} from "./ar2-scenes.
 (() => {
   "use strict";
   const canvas = document.querySelector("#palace-scene");
-  // One small scene buffer drives both the Home preview and the atmosphere
-  // behind all menus. No game state, offscreen decoders, or full-window DPR
-  // buffers. Work panels don't cause the scene clock to reset.
-  const buffer=document.createElement("canvas");buffer.width=640;buffer.height=420;
-  const context = buffer.getContext("2d");
-  const preview=canvas.getContext("2d");
-  const ambient=document.querySelector("#ambient-scene").getContext("2d");
-  if (!context||!preview||!ambient) return;
+  const context = canvas.getContext("2d");
+  if (!context) return;
   const choice = document.querySelector("#scene-motion");
   const setting = document.querySelector("#scene-setting");
   const panel = document.querySelector("#panel-home");
@@ -207,8 +201,6 @@ import {MASTER_ACTIONS,sampleMasterPatrol,sampleMasterGlide} from "./ar2-scenes.
     else if(!nativeArt) drawPlaceholder(t);
     else if(setting.value==="fillmore") drawFillmore(t);
     else drawPalace(t);
-    if(!panel.hidden) {preview.clearRect(0,0,640,420);preview.drawImage(buffer,0,0);}
-    ambient.clearRect(0,0,640,420);ambient.drawImage(buffer,0,0);
   }
   function describe() {
     const scene=masterArt&&setting.value.startsWith("ar2-")?setting.value:nativeArt?setting.value:"placeholder";
@@ -297,7 +289,7 @@ import {MASTER_ACTIONS,sampleMasterPatrol,sampleMasterGlide} from "./ar2-scenes.
     document.body.dataset.sceneMotion=mode;
     const animate=(mode==="auto"||mode==="animated")&&!reduced.matches;
     canvas.dataset.running=String(animate&&!closed&&onScreen&&!document.hidden);
-    if(closed || mode==="off" || document.hidden || !onScreen) { canvas.dataset.running="false"; return; }
+    if(closed || mode==="off" || document.hidden || panel.hidden || !onScreen) { canvas.dataset.running="false"; return; }
     draw(elapsed);
     if(animate) raf=requestAnimationFrame(frame);
     loadArt();
@@ -310,7 +302,7 @@ import {MASTER_ACTIONS,sampleMasterPatrol,sampleMasterGlide} from "./ar2-scenes.
   document.addEventListener("workshop:build-state",()=>loadArt(true));
   document.addEventListener("workshop:content-imported",()=>loadArt(true));
   document.addEventListener("workshop:closed",()=>{ closed=true;pending.abort();sync(); });
-  if(window.IntersectionObserver) new IntersectionObserver(entries=>{onScreen=entries[0].isIntersecting;sync();}).observe(document.querySelector("#workshop-atmosphere"));
+  if(window.IntersectionObserver) new IntersectionObserver(entries=>{onScreen=entries[0].isIntersecting;sync();}).observe(stage);
   window.addEventListener("pagehide",() => { cancelAnimationFrame(raf); raf=0; });
   window.addEventListener("pageshow",sync);
   canvas.dataset.art="illustration";

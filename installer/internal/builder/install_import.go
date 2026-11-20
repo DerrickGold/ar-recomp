@@ -175,6 +175,12 @@ func (app *application) serveInstallImport(w http.ResponseWriter, r *http.Reques
 				fmt.Fprintf(log, "Import kept destination: %s\n", file.Path)
 			}
 		}
+		if err := prepareBundledTitles(app.options.ProjectRoot, app.options.ModDirectories); err != nil {
+			fmt.Fprintf(log, "Prepare imported title packs: %v\n", err)
+		}
+		if err := prepareExistingROMMods(app.options.ProjectRoot, app.options.ModDirectories); err != nil {
+			fmt.Fprintf(log, "Prepare imported language mods: %v\n", err)
+		}
 		app.refreshState()
 		writeJSON(w, 200, result)
 	default:

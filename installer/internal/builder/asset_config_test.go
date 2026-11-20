@@ -34,6 +34,11 @@ func fakeVorbisFile() []byte {
 func postAssetForm(t *testing.T, app *application, fields map[string]string,
 	files map[string][]byte) *httptest.ResponseRecorder {
 	t.Helper()
+	return postAssetFormTo(t, app, "/tok/assets", fields, files)
+}
+
+func postAssetFormTo(t *testing.T, app *application, path string, fields map[string]string, files map[string][]byte) *httptest.ResponseRecorder {
+	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	for name, value := range fields {
@@ -53,7 +58,7 @@ func postAssetForm(t *testing.T, app *application, fields map[string]string,
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "/tok/assets", &body)
+	request := httptest.NewRequest(http.MethodPost, path, &body)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 	response := httptest.NewRecorder()
 	app.ServeHTTP(response, request)

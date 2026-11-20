@@ -86,12 +86,38 @@ func TestInterfacePreferenceIsIndependentAndDurable(t *testing.T) {
 	}
 }
 
+func TestCloseOnLaunchPreferenceMergesWithLanguageAndSurvivesRestart(t *testing.T) {
+	root := t.TempDir()
+	app := newApplication(context.Background(), Options{ProjectRoot: root}, "first")
+	for _, body := range []string{`{"closeOnLaunch":true}`, `{"language":"fr"}`} {
+		if w := interfacePOST(app, "/first/interface/preferences", body); w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	app = newApplication(context.Background(), Options{ProjectRoot: root}, "second")
+	prefs, err := app.readInterfacePreferences()
+	if err != nil || prefs.Language != "fr" || !prefs.CloseOnLaunch {
+		t.Fatalf("reopen: %+v %v", prefs, err)
+	}
+	bootstrap, err := app.interfaceBootstrap()
+	if err != nil || !strings.Contains(bootstrap, `"closeOnLaunch":true`) {
+		t.Fatal("close-on-launch preference missing from bootstrap", err)
+	}
+	if w := interfacePOST(app, "/second/interface/preferences", `{"closeOnLaunch":false}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	prefs, err = app.readInterfacePreferences()
+	if err != nil || prefs.Language != "fr" || prefs.CloseOnLaunch {
+		t.Fatalf("turn off: %+v %v", prefs, err)
+	}
+}
+
 func TestInterfacePreferenceRejectsInvalidRequestsWithoutMutation(t *testing.T) {
 	app := newApplication(context.Background(), Options{ProjectRoot: t.TempDir()}, "tok")
 	if w := interfacePOST(app, "/tok/interface/preferences", `{"language":"fr"}`); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	for _, body := range []string{`{"language":"de-DE"}`, `{"language":"ja","path":"../settings.ini"}`, `{"language":"ja"} {}`, `null`, strings.Repeat("x", 1025)} {
+	for _, body := range []string{`{"language":"de-DE"}`, `{"closeOnLaunch":"true"}`, `{"language":"ja","path":"../settings.ini"}`, `{"language":"ja"} {}`, `null`, strings.Repeat("x", 1025)} {
 		w := interfacePOST(app, "/tok/interface/preferences", body)
 		if w.Code != 400 || !strings.Contains(w.Body.String(), `"errorCode":"builder.interface.invalid"`) {
 			t.Fatal(w.Code, w.Body.String())

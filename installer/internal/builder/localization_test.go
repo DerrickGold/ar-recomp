@@ -363,6 +363,7 @@ func TestLocalizationGUIAuthorSharingLifecycle(t *testing.T) {
 	backup := locJSON(t, app, "backup", q, 200).Body.Bytes()
 	locJSON(t, app, "publish", q, 400)
 	q.ConfirmRights = true
+	q.Version = "1.0.0"
 	shared := locJSON(t, app, "publish", q, 200).Body.Bytes()
 	q.PrepareDownload = true
 	prepared := locJSON(t, app, "publish", q, 200)
@@ -374,7 +375,7 @@ func TestLocalizationGUIAuthorSharingLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	attachment := locGET(t, app, strings.TrimPrefix(link.URL, "localization/"), nil)
-	if !bytes.Equal(attachment.Body.Bytes(), shared) || !strings.Contains(attachment.Header().Get("Content-Disposition"), ".arlang") {
+	if !bytes.Equal(attachment.Body.Bytes(), shared) || !strings.Contains(attachment.Header().Get("Content-Disposition"), ".o2r") {
 		t.Fatal("download changed publication bytes")
 	}
 	q.PrepareDownload = false
@@ -432,6 +433,7 @@ func TestLocalizationGUIAuthorSharingLifecycle(t *testing.T) {
 	q = locIdentity(fresh)
 	q.ConfirmRights = true
 	q.IncludeWIP = true
+	q.Version = "1.0.0"
 	locJSON(t, fresh, "publish", q, 200)
 	locUpload(t, fresh, "import", backup, map[string]string{"newID": "community.restored"}, 200)
 	if fresh.localization.current.Notes() != "Private reminder" {
@@ -504,6 +506,7 @@ func TestLocalizationGUIRetailExtraction(t *testing.T) {
 		t.Skip("optional five-ROM GUI acceptance")
 	}
 	app := localizationTestApp(t)
+	writeJapaneseROMFontFixture(t, app.options.ProjectRoot)
 	// Expected counts and HUD lettering are reviewed values held independently
 	// of the extractor: the HUD labels are transcriptions of packed graphics, so
 	// a decoder change must not be able to redefine its own gate. The counts
@@ -602,9 +605,9 @@ func TestLocalizationGUIRetailExtraction(t *testing.T) {
 	locJSON(t, app, "edit", q, 200)
 	q = locIdentity(app)
 	q.ConfirmRights = true
+	q.Version = "1.0.0"
 	locJSON(t, app, "publish", q, 200)
-	q.ConfirmRights = false
-	locJSON(t, app, "install", q, 200)
+	locJSON(t, app, "install", locIdentity(app), 200)
 }
 
 func TestLocalizationRetailReferencesPreserveEditingProject(t *testing.T) {
@@ -613,6 +616,7 @@ func TestLocalizationRetailReferencesPreserveEditingProject(t *testing.T) {
 		t.Skip("optional five-ROM in-editor reference acceptance")
 	}
 	app := editableWorkflowFixture(t)
+	writeJapaneseROMFontFixture(t, app.options.ProjectRoot)
 	before := app.localization.current.ProjectRevision()
 	for _, file := range []string{"ar.sfc", "ar-eu.sfc", "ar-ger.sfc", "ar-fra.sfc", "ar-jp.sfc", "ar.sfc"} {
 		data, err := os.ReadFile(filepath.Join(root, file))

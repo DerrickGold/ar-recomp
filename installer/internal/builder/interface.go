@@ -10,30 +10,20 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/interfacecatalog"
 )
 
 type interfacePreferences struct {
-	Language string `json:"language"`
+	Language      string `json:"language"`
+	CloseOnLaunch bool   `json:"closeOnLaunch,omitempty"`
 }
 
 // Interface catalogs are trusted executable resources, never imported game
 // pack data. Cache their validation/encoding once, independently of sessions.
 var interfaceMessages = sync.OnceValues(func() (json.RawMessage, error) {
-	entries, err := interfacecatalog.Entries()
-	if err != nil {
-		return nil, err
-	}
-	messages := make(map[string][]string)
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Key, "builder.") || strings.HasPrefix(entry.Key, "common.") || strings.HasPrefix(entry.Key, "interface.") {
-			messages[entry.Key] = entry.Text
-		}
-	}
-	return json.Marshal(messages)
+	return interfacecatalog.Messages("builder.", "common.", "interface.")
 })
 
 func (app *application) interfacePreferencesPath() string {
@@ -81,6 +71,10 @@ func decodeInterfacePreferences(reader io.Reader) (interfacePreferences, error) 
 func (app *application) readInterfacePreferences() (interfacePreferences, error) {
 	app.interfaceMu.Lock()
 	defer app.interfaceMu.Unlock()
+	return app.readInterfacePreferencesLocked()
+}
+
+func (app *application) readInterfacePreferencesLocked() (interfacePreferences, error) {
 	fallback := interfacePreferences{Language: "en"}
 	f, err := os.Open(app.interfacePreferencesPath())
 	if os.IsNotExist(err) {
@@ -117,7 +111,8 @@ func (app *application) interfaceBootstrap() (string, error) {
 		Locales         []string        `json:"locales"`
 		Messages        json.RawMessage `json:"messages"`
 		PreferenceError bool            `json:"preferenceError"`
-	}{prefs.Language, interfacecatalog.Locales(), messages, preferenceErr != nil}
+		CloseOnLaunch   bool            `json:"closeOnLaunch"`
+	}{prefs.Language, interfacecatalog.Locales(), messages, preferenceErr != nil, prefs.CloseOnLaunch}
 	encoded, err := json.Marshal(value)
 	return string(encoded), err
 }
@@ -130,16 +125,45 @@ func (app *application) serveInterfacePreferences(w http.ResponseWriter, r *http
 		return
 	}
 	defer r.Body.Close()
-	prefs, err := decodeInterfacePreferences(http.MaxBytesReader(w, r.Body, 1024))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Choose a supported interface language.", "errorCode": "builder.interface.invalid"})
+	var patch struct {
+		Language      *string `json:"language"`
+		CloseOnLaunch *bool   `json:"closeOnLaunch"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&patch); err != nil ||
+		(patch.Language == nil && patch.CloseOnLaunch == nil) ||
+		(patch.Language != nil && !slices.Contains(interfacecatalog.Locales(), *patch.Language)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid Builder preferences.", "errorCode": "builder.interface.invalid"})
 		return
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid Builder preferences.", "errorCode": "builder.interface.invalid"})
+		return
+	}
+	// Merge individual changes under the same lock so a language change and
+	// a launch preference change cannot overwrite one another.
+	prefs, err := app.saveInterfacePreferences(patch.Language, patch.CloseOnLaunch)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Could not save Builder preferences.", "errorCode": "builder.interface.save_failed", "detail": fmt.Sprint(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, prefs)
+}
+
+func (app *application) saveInterfacePreferences(language *string, closeOnLaunch *bool) (interfacePreferences, error) {
+	app.interfaceMu.Lock()
+	defer app.interfaceMu.Unlock()
+	prefs, _ := app.readInterfacePreferencesLocked()
+	if language != nil {
+		prefs.Language = *language
+	}
+	if closeOnLaunch != nil {
+		prefs.CloseOnLaunch = *closeOnLaunch
 	}
 	encoded, err := json.Marshal(prefs)
 	if err == nil {
-		// Only this tiny preference transaction is serialized. No pack editor,
-		// build-session, asset or response-transfer lock is held here.
-		app.interfaceMu.Lock()
 		path := app.interfacePreferencesPath()
 		// Do not let the Windows replacement fallback rename a directory or
 		// symlink out of the way. This path belongs only to this preference file.
@@ -150,11 +174,6 @@ func (app *application) serveInterfacePreferences(w http.ResponseWriter, r *http
 		} else {
 			err = writeAtomicFile(path, append(encoded, '\n'))
 		}
-		app.interfaceMu.Unlock()
 	}
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Could not save the interface language.", "errorCode": "builder.interface.save_failed", "detail": fmt.Sprint(err)})
-		return
-	}
-	writeJSON(w, http.StatusOK, prefs)
+	return prefs, err
 }

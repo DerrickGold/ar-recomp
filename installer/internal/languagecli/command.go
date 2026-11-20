@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
+	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
 	"github.com/DerrickGold/ar-recomp/installer/internal/fontprobe"
 	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
 )
@@ -23,7 +25,7 @@ func (s *samples) Set(v string) error { *s = append(*s, v); return nil }
 
 func Run(ctx context.Context, args []string, output io.Writer) error {
 	if len(args) > 0 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
-		_, err := fmt.Fprintln(output, "Usage: actraiser-builder language <command> [options]\n\n  validate   Check a directory/archive; --game adds font coverage\n  upgrade    Create a v2 project copy with explicit template styling\n  package    Publish reviewed translations as a .arlang\n  reference  Export the ROM-free US authoring contract as JSON\n  install    Copy a publication into this game's language library\n  enable     Enable an installed file/folder\n  disable    Disable without modifying archive contents\n  uninstall  Remove from discovery with a recovery copy\n\nUse <command> --help for options. No command opens the editor.")
+		_, err := fmt.Fprintln(output, "Usage: actraiser-builder language <command> [options]\n\n  validate   Check a directory/archive; --game adds font coverage\n  upgrade    Create a v2 project copy with explicit template styling\n  package    Publish reviewed translations as an .o2r\n  reference  Export the ROM-free US authoring contract as JSON\n  install    Add an .o2r or import a legacy .arlang publication\n  enable     Enable an installed legacy file/folder\n  disable    Disable without modifying archive contents\n  uninstall  Remove from discovery with a recovery copy\n\nUse mods to manage installed .o2r packs. Use <command> --help for options.")
 		return err
 	}
 	if len(args) == 0 {
@@ -31,7 +33,7 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 	}
 	allowed := map[string][]string{
 		"validate":  {"pack", "out", "root", "game", "sample"},
-		"package":   {"pack", "out", "root", "game", "sample", "confirm-rights", "include-wip", "all-messages"},
+		"package":   {"pack", "out", "version", "root", "game", "sample", "confirm-rights", "include-wip", "all-messages"},
 		"reference": {"out"}, "install": {"pack", "root", "replace"},
 		"enable": {"installed", "root"}, "disable": {"installed", "root"}, "uninstall": {"installed", "root"},
 		"prepare": {"root", "packs-root"},
@@ -42,9 +44,9 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 	}
 	f := flag.NewFlagSet("language "+args[0], flag.ContinueOnError)
 	f.SetOutput(output)
-	packUsage := "author directory, .arlang or private .arproject"
+	packUsage := "author directory, .o2r, legacy .arlang or private .arproject"
 	if args[0] == "install" {
-		packUsage = "publication .arlang file"
+		packUsage = "publication .o2r or legacy .arlang file"
 	}
 	packPath := f.String("pack", "", packUsage)
 	installed := f.String("installed", "", "installed archive filename or unpacked directory name")
@@ -52,6 +54,7 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 	packsRoot := f.String("packs-root", "", "internal startup adapter: explicit installation root")
 	game := f.String("game", "", "trusted game executable for font coverage; never selected by a pack")
 	out := f.String("out", "", "new output file; never overwritten")
+	version := f.String("version", "", "publication release version (MAJOR.MINOR.PATCH)")
 	newID := f.String("new-id", "", "new package ID for a v2 project copy")
 	rights := f.Bool("confirm-rights", false, "confirm that you may redistribute the publication's content")
 	wip := f.Bool("include-wip", false, "include WIP as well as Done messages in publication")
@@ -105,11 +108,7 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 		return writeOutput(*out, output, func(w io.Writer) error { e := json.NewEncoder(w); e.SetIndent("", "  "); return e.Encode(data) })
 	}
 	if args[0] == "prepare" {
-		path := filepath.Join(absRoot, "game-assets", "languages", "packs")
-		if *packsRoot != "" {
-			path = *packsRoot
-		}
-		return lk.PrepareLanguageArchives(ctx, path, output)
+		return builder.PrepareRuntimeLanguages(ctx, absRoot, *packsRoot, output)
 	}
 	if args[0] == "enable" || args[0] == "disable" || args[0] == "uninstall" {
 		path := filepath.Join(absRoot, "game-assets", "languages", "packs")
@@ -141,12 +140,19 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 		return fmt.Errorf("--pack is required")
 	}
 	if args[0] == "install" {
+		if strings.EqualFold(filepath.Ext(*packPath), ".o2r") {
+			if err := builder.InstallLanguageMod(absRoot, *packPath); err != nil {
+				return err
+			}
+			_, err := fmt.Fprintln(output, "Language pack installed. Restart the game and select it under Text source.")
+			return err
+		}
 		path, report, err := lk.InstallLanguageArchive(filepath.Join(absRoot, "game-assets", "languages", "packs"), *packPath, *replace)
 		if err != nil {
 			return err
 		}
 		if report.Upgrade != nil {
-			if _, err := fmt.Fprintln(output, "Automatically upgraded the installed copy from v1 to v2. The original archive is unchanged."); err != nil {
+			if _, err := fmt.Fprintln(output, "The game will prepare a v2 copy in its language cache."); err != nil {
 				return err
 			}
 		}
@@ -172,8 +178,11 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 	}
 	var publication lk.PublicationReport
 	if args[0] == "package" {
-		if *out == "" || *game == "" {
-			return fmt.Errorf("package requires --out and --game (font coverage is required)")
+		if !strings.EqualFold(filepath.Ext(*out), ".o2r") || *game == "" {
+			return fmt.Errorf("package requires --out pointing to a new .o2r file and --game for font coverage")
+		}
+		if _, err := lk.ParseLanguageRelease(*version); err != nil {
+			return err
 		}
 		if *all {
 			p, err = p.ReviewedAll()
@@ -227,7 +236,7 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 	if coverage == nil || !coverage.Complete {
 		return fmt.Errorf("font coverage failed; run language validate with --game for details")
 	}
-	if err = writeOutput(*out, output, func(w io.Writer) error { return p.WriteArchive(w, "publication") }); err != nil {
+	if err = writeOutput(*out, output, func(w io.Writer) error { return p.WriteLanguageMod(w, *version) }); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(output, "Published %d messages to %s (%d WIP, %d omitted native-source messages).\n", publication.Included, *out, publication.WIP, publication.UnchangedSource)

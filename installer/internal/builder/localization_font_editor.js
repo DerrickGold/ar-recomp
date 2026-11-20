@@ -5,6 +5,7 @@
   window.workshopLanguageFonts = {
     create({$, ui, phrase, option, keyedOption, feedbackKey, onChange, onRender}) {
       let saved = {}, role = "body", stacks = {}, stack = [], dirty = false;
+      let savedStacks = {};
       const uploads = new Map();
       function load(fonts) {
         saved = fonts;
@@ -13,6 +14,7 @@
             Object.assign(Object.create(null), {body: [fonts.primary, ...(fonts.fallback || [])]});
         for (const fontRole of fonts.roles || [])
           stacks[fontRole.name] = [fontRole.primary, ...(fontRole.fallback || [])];
+        savedStacks = Object.fromEntries(Object.entries(stacks).map(([name, fonts]) => [name, [...fonts]]));
         stack = stacks.body;
         clearDirty();
         $("font-report").replaceChildren();
@@ -48,10 +50,14 @@
         fontChanged();
       });
       function fontChanged() {
-        dirty = true;
         for (const name of uploads.keys())
           if (!Object.values(stacks).some(stack => stack.includes(name)))
             uploads.delete(name);
+        dirty = uploads.size > 0 || Object.keys(stacks).length !== Object.keys(savedStacks).length ||
+          Object.entries(stacks).some(([name, fonts]) => {
+            const original = savedStacks[name];
+            return original?.length !== fonts.length || fonts.some((font, i) => font !== original[i]);
+          });
         $("font-report").replaceChildren();
         renderFonts();
         onChange();
@@ -86,8 +92,6 @@
           });
           label.append(select);
           row.append(label);
-          if (uploads.has(reference))
-            label.append(phrase("builder.editor.pending_font", {}, "small"));
           const fileLabel = document.createElement("label");
           fileLabel.append(phrase("builder.editor.choose_font_file"));
           const file = document.createElement("input");
@@ -143,6 +147,12 @@
             actions.append(button);
           }
           row.append(actions);
+          if (uploads.has(reference)) {
+            const pending = phrase("builder.editor.pending_font", {}, "small");
+            pending.id = "loc-font-pending-" + index;
+            select.setAttribute("aria-describedby", pending.id);
+            row.append(pending);
+          }
           return row;
         }));
         onRender();

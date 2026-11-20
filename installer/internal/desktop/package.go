@@ -170,6 +170,9 @@ func stageResources(root, resources string) error {
 		return err
 	}
 	seed := filepath.Join(resources, "seed")
+	if err := stageLocalMods(root, seed); err != nil {
+		return err
+	}
 	for _, leaf := range []string{"languages/native-us/pack.ini", "fonts/noto/NotoSans-SemiCondensedExtraBold.ttf", "fonts/noto/NotoSansJP-Bold.otf", "fonts/noto/NotoSansArabic-Bold.ttf", "fonts/noto/NotoSansHebrew-Bold.ttf", "fonts/noto/OFL.txt", "fonts/noto/NotoSansJP-OFL.txt"} {
 		if _, err := fileHash(filepath.Join(seed, "game-assets", leaf)); err != nil {
 			return fmt.Errorf("required runtime content %s: %w", leaf, err)

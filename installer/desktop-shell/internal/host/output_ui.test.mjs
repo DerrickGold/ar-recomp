@@ -4,6 +4,8 @@ import {readFileSync} from "node:fs";
 import {runInNewContext} from "node:vm";
 const html=readFileSync(new URL("output.html",import.meta.url),"utf8");
 const script=readFileSync(new URL("output.js",import.meta.url),"utf8");
+const entries=JSON.parse(readFileSync(new URL("../../../internal/interfacecatalog/messages.json",import.meta.url),"utf8"));
+const messages=new Map(entries.map(entry=>[entry.key,entry.text]));
 class Node {
   constructor(tag){this.tag=tag;this.listeners={};this.value="";this.textContent="";this.hidden=false;this.disabled=false;this.checked=false;}
   addEventListener(name,fn){this.listeners[name]=fn;}
@@ -11,11 +13,13 @@ class Node {
   replaceChildren(...nodes){this.children=nodes;}
   focus(){this.focused=true;}
 }
-async function setup(current="",bigScreen=false){
+async function setup(current="",bigScreen=false,language=0){
   const nodes=Object.fromEntries([...html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)].map(([,tag,id])=>[id,new Node(tag)]));
   const requests=[],navigation=[];let response=(endpoint)=>({candidate:"/portable/Game",suggested:"/portable/Game",current,bigScreen});
   const document={body:{dataset:{}},getElementById:id=>nodes[id],createElement:tag=>new Node(tag),querySelectorAll:()=>Object.values(nodes).filter(n=>["button","input"].includes(n.tag))};
-  runInNewContext(script,{window:{workshopBigScreenNavigation(){}},document,location:{replace:path=>navigation.push(path)},fetch:async(endpoint,options)=>{
+  const text=(key,args={})=>messages.get(key)[language].replace(/\{(\w+)\}/g,(_,k)=>args[k]);
+  const ui={text,set:(node,key,args)=>node.textContent=text(key,args),unbind(){}};
+  runInNewContext(script,{window:{workshopI18n:ui,workshopBigScreenNavigation(){}},document,location:{replace:path=>navigation.push(path)},fetch:async(endpoint,options)=>{
     const body=options?.body?JSON.parse(options.body):undefined;requests.push({endpoint,body});
     const value=await response(endpoint,body);return {ok:!value.error,status:value.error?400:200,json:async()=>value};
   }});
@@ -55,7 +59,7 @@ test("non-empty destinations require confirmation, invalidated by edits",async()
   await n["folder-form"].fire("submit");
   assert.equal(n["review-title"].textContent,"Existing game folder");assert.equal(n.apply.disabled,true);
   assert.equal(n.apply.textContent,"Open existing installation");
-  assert.match(n["review-description"].textContent,/use its settings, assets, ROM and saves directly; no import is needed/);
+  assert.match(n["review-description"].textContent,/use the settings, assets, ROM and saves in this installation/);
   n.confirm.checked=true;await n.confirm.fire("change");assert.equal(n.apply.disabled,false);
   assert.equal(n.entries.children[1].textContent,"<not HTML>");
   n.directory.value="/different";await n.directory.fire("input");
@@ -67,11 +71,21 @@ test("changing output during a session only saves for next launch",async()=>{
   s.respond(()=>({directory:"/next/Game",revision:"next",existing:false,entries:[]}));await n["folder-form"].fire("submit");
   assert.equal(n.apply.textContent,"Save for next launch");
   s.respond(()=>({restartRequired:true,directory:"/next/Game"}));await n.apply.fire("click");
-  assert.deepEqual(s.navigation,[]);assert.match(n.status.textContent,/close and reopen/);assert.equal(n.directory.disabled,true);
+  assert.deepEqual(s.navigation,[]);assert.match(n.status.textContent,/close and reopen/i);assert.equal(n.directory.disabled,true);
 });
 test("cancelled picker and failed review leave an editable retry path",async()=>{
   const s=await setup(),n=s.nodes;
   s.respond(()=>({directory:""}));await n.browse.fire("click");assert.equal(n.directory.value,"/portable/Game");
   s.respond(()=>({error:"read-only destination"}));await n["folder-form"].fire("submit");
   assert.equal(n.apply.disabled,true);assert.equal(n.directory.disabled,false);assert.equal(n.status.textContent,"read-only destination");
+});
+
+test("German review keeps a non-empty folder gated by its checkbox without a ready message",async()=>{
+  const s=await setup("",false,2),n=s.nodes;
+  s.respond(()=>({directory:"/Archiv",existing:true,game:true,entries:[]}));
+  await n["folder-form"].fire("submit");
+  assert.equal(n.apply.textContent,"Vorhandene Installation öffnen");
+  assert.equal(n.apply.disabled,true);
+  assert.equal(n.status.textContent,"");
+  assert.equal(n["confirm-label"].hidden,false);
 });

@@ -124,7 +124,7 @@ func readVorbisUpload(header *multipart.FileHeader, label string) ([]byte, error
 	head := content[:min(4096, len(content))]
 	if !bytes.HasPrefix(head, []byte("OggS")) ||
 		!bytes.Contains(head, []byte{0x01, 'v', 'o', 'r', 'b', 'i', 's'}) {
-		return nil, fmt.Errorf("%s must be an Ogg Vorbis file", label)
+		return nil, fmt.Errorf("music replacements need Ogg Vorbis audio. Convert %q to Ogg Vorbis, then choose the resulting .ogg file", header.Filename)
 	}
 	return content, nil
 }

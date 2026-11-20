@@ -58,7 +58,7 @@ static bool PrepareArchives(ArLanguagePackCatalog *catalog,
     helper[0] = 0;
   }
   if (!helper[0]) {
-    fprintf(stderr, "[localization] .arlang files need the installed ActRaiser "
+    fprintf(stderr, "[localization] language archives need the installed ActRaiser "
                     "Builder helper; restore utils/tools/actraiser-builder or "
                     "use unpacked packs\n");
     return false;
@@ -131,15 +131,19 @@ bool ArLanguagePackCatalog_ScanDesktop(ArLanguagePackCatalog *catalog,
   catalog->visit_limit_reached = false;
   catalog->conflict_count = 0;
   SDL_PathInfo info;
-  if (!SDL_GetPathInfo(root, &info)) return true; /* No installed packs yet. */
-  if (info.type != SDL_PATHTYPE_DIRECTORY) return false;
+  bool have_root = SDL_GetPathInfo(root, &info);
+  if (have_root && info.type != SDL_PATHTYPE_DIRECTORY) return false;
   ScanContext scan = {.catalog = catalog};
   ArLanguagePackFileIo_Init(&scan.io);
   bool archives = false;
-  if (!SDL_EnumerateDirectory(root, FindArchive, &archives)) return false;
-  if (archives) (void)PrepareArchives(catalog, &scan.io, root);
-  if (!SDL_EnumerateDirectory(root, VisitPack, &scan))
-    return false;
+  if (have_root) {
+    if (!SDL_EnumerateDirectory(root, FindArchive, &archives) ||
+        !SDL_EnumerateDirectory(root, VisitPack, &scan)) return false;
+  }
+  SDL_PathInfo mods;
+  if (archives || SDL_GetPathInfo("game-assets/mods", &mods) ||
+      SDL_GetPathInfo("game-assets/mods-active.ini", &mods))
+    (void)PrepareArchives(catalog, &scan.io, root);
   /* Say so rather than quietly presenting a subset as the whole library. */
   if (catalog->dropped)
     fprintf(stderr,

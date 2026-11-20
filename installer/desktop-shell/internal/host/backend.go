@@ -30,6 +30,7 @@ type BackendOptions struct {
 	BigScreen         bool
 	GameWindowMode    string
 	ROMs              []string
+	ModDirectories    []string
 	BuildOnFirstRun   bool
 }
 
@@ -91,6 +92,9 @@ func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outpu
 		}
 		if options[0].BigScreen {
 			b.command.Args = append(b.command.Args, "--big-screen")
+		}
+		for _, dir := range options[0].ModDirectories {
+			b.command.Args = append(b.command.Args, "--mods-dir", dir)
 		}
 		for _, path := range options[0].ROMs {
 			b.command.Args = append(b.command.Args, "--rom", path)
@@ -279,13 +283,17 @@ func (b *Backend) stop() {
 // Bridge keeps the renderer on its app origin. It can only reach the single
 // authenticated loopback backend chosen at startup; it is not a generic proxy.
 type Bridge struct {
-	mu          sync.RWMutex
-	proxy       *httputil.ReverseProxy
-	message     string
-	failed      bool
-	rendererURL string
-	output      *OutputSelection
-	fullscreen  func(bool)
+	mu            sync.RWMutex
+	proxy         *httputil.ReverseProxy
+	backendURL    *url.URL
+	message       string
+	failed        bool
+	rendererURL   string
+	output        *OutputSelection
+	fullscreen    func(bool)
+	closeRequests chan struct{}
+	savePicker    func(name, title string) (string, error)
+	saving        sync.Mutex
 }
 
 func (h *Bridge) SetOutputSelection(selection *OutputSelection) {
@@ -317,12 +325,18 @@ func (h *Bridge) Fail(err error) {
 }
 func (h *Bridge) Connect(address *url.URL) {
 	p := httputil.NewSingleHostReverseProxy(address)
+	direct := p.Director
+	p.Director = func(r *http.Request) {
+		direct(r)
+		r.Header.Set("X-ActRaiser-Desktop-Shell", "1")
+	}
 	p.Transport = &http.Transport{Proxy: nil}
 	p.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		http.Error(w, "The local Builder stopped. Close and reopen the application.", http.StatusBadGateway)
 	}
 	h.mu.Lock()
 	h.proxy = p
+	h.backendURL = address
 	h.mu.Unlock()
 }
 func (h *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -339,6 +353,22 @@ func (h *Bridge) serveHTTP(w http.ResponseWriter, r *http.Request, allowProxy bo
 	h.mu.RLock()
 	proxy, message, failed, rendererURL, output, fullscreen := h.proxy, h.message, h.failed, h.rendererURL, h.output, h.fullscreen
 	h.mu.RUnlock()
+	if r.URL.Path == "/__shell/save-archive" {
+		if !allowProxy {
+			http.NotFound(w, r)
+			return
+		}
+		h.serveSaveArchive(w, r)
+		return
+	}
+	if r.URL.Path == "/__shell/close-requests" {
+		if !allowProxy || proxy == nil {
+			http.NotFound(w, r)
+			return
+		}
+		h.serveCloseRequests(w, r)
+		return
+	}
 	if r.URL.Path == "/__shell/window-mode" {
 		if !allowProxy || proxy == nil || fullscreen == nil {
 			http.NotFound(w, r)

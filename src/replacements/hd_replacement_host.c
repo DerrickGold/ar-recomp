@@ -33,100 +33,127 @@ static ArRenderTexture s_m7_texture;
 
 ArRenderTexture HdReplacementHost_Mode7Texture(void) { return s_m7_texture; }
 
-void HdReplacementHost_LoadTextures(void) {
-  Settings_SetHdReplacementsAvailable(false);
-  const char *manifest_path = getenv("AR_HD_MANIFEST");
-  if (!manifest_path || !manifest_path[0])
-    manifest_path = "game-assets/manifest.ini";
-  if (!HdReplacements_Load(manifest_path)) return;
+static bool LoadReplacementArt(HdReplacement *entry) {
+  if (entry->plane == kHdPlane_Tiles) return false;
 
-  int loaded_art_count = 0;
-  for (int i = 0; i < g_hd_replacement_count; i++) {
-    HdReplacement *entry = &g_hd_replacements[i];
-    if (entry->plane == kHdPlane_Tiles) continue;
+  /* Missing images are the normal "hook available, art not provided"
+   * state. A present file that cannot decode is a real error. */
+  FILE *probe = sr_fopen(entry->image, "rb");
+  if (!probe) return false;
+  fclose(probe);
 
-    /* Missing images are the normal "hook available, art not provided"
-     * state. A present file that cannot decode is a real error. */
-    FILE *probe = sr_fopen(entry->image, "rb");
-    if (!probe) continue;
-    fclose(probe);
+  int width = 0;
+  int height = 0;
+  int source_channel_count = 0;
+  stbi_uc *rgba = stbi_load(
+      entry->image, &width, &height, &source_channel_count,
+      kRgbaChannelCount);
+  if (!rgba) {
+    fprintf(stderr, "[hd-manifest] [replace:%s] cannot decode %s (%s)\n",
+            entry->name, entry->image, stbi_failure_reason());
+    return false;
+  }
 
-    int width = 0;
-    int height = 0;
-    int source_channel_count = 0;
-    stbi_uc *rgba = stbi_load(
-        entry->image, &width, &height, &source_channel_count,
-        kRgbaChannelCount);
-    if (!rgba) {
-      fprintf(stderr, "[hd-manifest] [replace:%s] cannot decode %s (%s)\n",
-              entry->name, entry->image, stbi_failure_reason());
-      continue;
-    }
+  uint8_t *padded_rgba = NULL;
+  if (!HdReplacements_PrepareTitleCoverage(
+          entry, rgba, width, height, &padded_rgba, &width)) {
+    fprintf(stderr, "[hd-manifest] [replace:%s] title coverage allocation failed\n",
+            entry->name);
+    stbi_image_free(rgba);
+    return false;
+  }
+  const stbi_uc *image = padded_rgba ? padded_rgba : rgba;
 
-    uint8_t *padded_rgba = NULL;
-    if (!HdReplacements_PrepareTitleCoverage(
-            entry, rgba, width, height, &padded_rgba, &width)) {
-      fprintf(stderr, "[hd-manifest] [replace:%s] title coverage allocation failed\n",
-              entry->name);
-      stbi_image_free(rgba);
-      continue;
-    }
-    const stbi_uc *image = padded_rgba ? padded_rgba : rgba;
-
-    if (entry->plane == kHdPlane_Mode7) {
-      /* The engine sampler consumes raw ARGB words, not an SDL texture. */
-      uint32_t *argb = malloc(
-          (size_t)width * (size_t)height * sizeof(*argb));
-      if (argb) {
-        for (size_t pixel = 0;
-             pixel < (size_t)width * (size_t)height;
-             pixel++) {
-          const stbi_uc *source = image + pixel * kRgbaChannelCount;
-          argb[pixel] = (uint32_t)source[3] << 24 |
-                        (uint32_t)source[0] << 16 |
-                        (uint32_t)source[1] << 8 |
-                        source[2];
-        }
-        entry->pixels = argb;
-        entry->pixels_width = width;
-        entry->pixels_height = height;
-        loaded_art_count++;
-        fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d, mode7)\n",
-                entry->name, entry->image, width, height);
+  if (entry->plane == kHdPlane_Mode7) {
+    /* The engine sampler consumes raw ARGB words, not an SDL texture. */
+    uint32_t *argb = malloc(
+        (size_t)width * (size_t)height * sizeof(*argb));
+    if (argb) {
+      for (size_t pixel = 0;
+           pixel < (size_t)width * (size_t)height;
+           pixel++) {
+        const stbi_uc *source = image + pixel * kRgbaChannelCount;
+        argb[pixel] = (uint32_t)source[3] << 24 |
+                      (uint32_t)source[0] << 16 |
+                      (uint32_t)source[1] << 8 |
+                      source[2];
       }
-      free(padded_rgba);
-      stbi_image_free(rgba);
-      continue;
-    }
-
-    /* ABGR8888 matches stb's little-endian R,G,B,A byte order directly. */
-    const ArRenderTextureDesc desc = {
-      .width = width,
-      .height = height,
-      .format = kArRenderPixelFormat_Abgr8888,
-      .usage = kArRenderTextureUsage_Static,
-      .filter = kArRenderFilter_Nearest,
-      .blend = kArRenderBlendMode_Alpha,
-    };
-    ArRenderTexture texture = ArRenderTexture_Invalid();
-    if (ArRenderDevice_CreateTexture(&g_render_device, &desc, &texture) &&
-        ArRenderDevice_UpdateTexture(
-            &g_render_device, texture, NULL, image,
-            width * kArgbBytesPerPixel)) {
-      entry->texture = texture;
-      loaded_art_count++;
-      fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d)\n",
+      entry->pixels = argb;
+      entry->pixels_width = width;
+      entry->pixels_height = height;
+      fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d, mode7)\n",
               entry->name, entry->image, width, height);
-    } else {
-      ArRenderDevice_DestroyTexture(&g_render_device, texture);
-      fprintf(stderr, "[hd-manifest] [replace:%s] texture upload failed: %s\n",
-              entry->name, ArRenderDevice_LastError(&g_render_device));
     }
     free(padded_rgba);
     stbi_image_free(rgba);
+    return argb != NULL;
   }
-  fprintf(stderr, "[hd-manifest] %d entries, %d with art\n",
-          g_hd_replacement_count, loaded_art_count);
+
+  /* ABGR8888 matches stb's little-endian R,G,B,A byte order directly. */
+  const ArRenderTextureDesc desc = {
+    .width = width,
+    .height = height,
+    .format = kArRenderPixelFormat_Abgr8888,
+    .usage = kArRenderTextureUsage_Static,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  ArRenderTexture texture = ArRenderTexture_Invalid();
+  if (ArRenderDevice_CreateTexture(&g_render_device, &desc, &texture) &&
+      ArRenderDevice_UpdateTexture(
+          &g_render_device, texture, NULL, image,
+          width * kArgbBytesPerPixel)) {
+    entry->texture = texture;
+    fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d)\n",
+            entry->name, entry->image, width, height);
+  } else {
+    ArRenderDevice_DestroyTexture(&g_render_device, texture);
+    fprintf(stderr, "[hd-manifest] [replace:%s] texture upload failed: %s\n",
+            entry->name, ArRenderDevice_LastError(&g_render_device));
+  }
+  free(padded_rgba);
+  stbi_image_free(rgba);
+  return ArRenderTexture_IsValid(entry->texture);
+}
+
+static void FreeReplacementArt(HdReplacement *entry) {
+  if (ArRenderTexture_IsValid(entry->texture))
+    ArRenderDevice_DestroyTexture(&g_render_device, entry->texture);
+  entry->texture = ArRenderTexture_Invalid();
+  free(entry->pixels);
+  entry->pixels = NULL;
+}
+
+void HdReplacementHost_LoadTextures(void) {
+  Settings_SetHdReplacementsAvailable(false);
+  const char *manifest_path = getenv("AR_HD_MANIFEST");
+  const int count = manifest_path && manifest_path[0]
+      ? HdReplacements_Load(manifest_path)
+      : HdReplacements_LoadWithOverlay("game-assets/manifest.ini",
+                                       "game-assets/mods-active.ini");
+  if (!count) return;
+
+  int first_legacy = 0;
+  int loaded_art_count = 0;
+  bool title_pack_loaded = false;
+  if (g_hd_replacements[0].from_title_pack) {
+    first_legacy = kHdTitlePackEntries;
+    title_pack_loaded = LoadReplacementArt(&g_hd_replacements[0]) &&
+                        LoadReplacementArt(&g_hd_replacements[1]);
+    if (title_pack_loaded) {
+      loaded_art_count = kHdTitlePackEntries;
+    } else {
+      FreeReplacementArt(&g_hd_replacements[0]);
+      FreeReplacementArt(&g_hd_replacements[1]);
+    }
+  }
+
+  for (int i = first_legacy; i < count; i++) {
+    HdReplacement *entry = &g_hd_replacements[i];
+    if (title_pack_loaded && HdReplacements_IsTitleHook(entry)) continue;
+    if (LoadReplacementArt(entry)) loaded_art_count++;
+  }
+  fprintf(stderr, "[hd-manifest] %d entries, %d with art\n", count, loaded_art_count);
   Settings_SetHdReplacementsAvailable(loaded_art_count > 0);
 }
 
@@ -222,28 +249,16 @@ void HdReplacementHost_RebindSurfaces(const HostPpuOutputControl *output) {
 }
 
 void HdReplacementHost_ReloadTextures(void) {
-  for (int i = 0; i < g_hd_replacement_count; i++) {
-    if (ArRenderTexture_IsValid(g_hd_replacements[i].texture)) {
-      ArRenderDevice_DestroyTexture(
-          &g_render_device, g_hd_replacements[i].texture);
-      g_hd_replacements[i].texture = ArRenderTexture_Invalid();
-    }
-    free(g_hd_replacements[i].pixels);
-    g_hd_replacements[i].pixels = NULL;
-  }
+  for (int i = 0; i < g_hd_replacement_count; i++)
+    FreeReplacementArt(&g_hd_replacements[i]);
   HdReplacementHost_LoadTextures();
   HdReplacementHost_BindSurfaces();
 }
 
 void HdReplacementHost_Shutdown(void) {
   Settings_SetHdReplacementsAvailable(false);
-  for (int i = 0; i < g_hd_replacement_count; i++) {
-    ArRenderDevice_DestroyTexture(
-        &g_render_device, g_hd_replacements[i].texture);
-    g_hd_replacements[i].texture = ArRenderTexture_Invalid();
-    free(g_hd_replacements[i].pixels);
-    g_hd_replacements[i].pixels = NULL;
-  }
+  for (int i = 0; i < g_hd_replacement_count; i++)
+    FreeReplacementArt(&g_hd_replacements[i]);
   ArRenderDevice_DestroyTexture(&g_render_device, s_m7_texture);
   s_m7_texture = ArRenderTexture_Invalid();
   free(s_m7_overlay_pixels);

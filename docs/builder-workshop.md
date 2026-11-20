@@ -1,8 +1,8 @@
 # The builder workshop
 
-Choose or drop a shared `.arlang` in the Workshop to review and install it,
-then manage it using the installed-package checklist. Direct archive copies
-in the game's language-pack directory are also supported. See
+Choose a shared `.o2r` language pack in **Play → Manage Mods** or drop it onto
+the Builder. The Languages filter also includes imported
+legacy `.arlang` packs and translations delivered to the mods folder. See
 [installation and external authoring](language-packs.md)
 for archive/folder layouts, updates, command-line tools and AI-ready references.
 The installed-package checklist manages directly copied archives too.
@@ -12,7 +12,7 @@ on Linux, or `ActRaiserRecompBuilder.exe` on Windows to enter the Workshop.
 The generic Linux builder's `run-build` launcher opens the same interface in
 your browser.
 
-**Check for updates** in the sidebar opens the project's GitHub Releases page
+**Check for updates** in **Builder Settings** opens the project's GitHub Releases page
 in your system browser. Download a newer Builder there, then rebuild your game
 to apply its changes. **GitHub repository** opens the project source and README.
 
@@ -28,18 +28,18 @@ After rebuilding, the game's first launch automatically imports older saves
 in that data folder into Slot 1 and retains the originals. No manual save
 conversion is required; see [Upgrading older saves](manual.md#upgrading-older-saves).
 
-The Builder remembers your selection. **Change game folder…** in the sidebar
+The Builder remembers your selection. **Change game folder…** in **Setup**
 changes it for the next launch only: finish or save your work, then close and
 reopen the Builder. Changing folders does not move or copy the previous game.
 The generic Linux browser launcher keeps its existing output/command-line flow.
 
 After opening a game folder, the Builder checks whether the game matches the
 release **bundled with this Builder**. This is an offline comparison, not an
-online check for newer releases. Home confirms a matching build. **Rebuild
+online check for newer releases. Play confirms a matching build. **Rebuild
 recommended** appears when the release inputs differ, or when an older install
 has no verifiable build record. When the previously saved ROM is readable,
 **Rebuild now** applies the bundled changes in one click. Otherwise **Review
-rebuild** opens Build & play so you can select your ROM again. Saves, settings,
+rebuild** opens Setup so you can select your ROM again. Saves, settings,
 language packs and custom assets are preserved.
 
 You can still play the existing game. Pressing any Play button on a stale or
@@ -48,12 +48,26 @@ you rebuild; choose **Play existing build**, **Rebuild now** (or **Review rebuil
 if the ROM is missing), or **Cancel**. Matching builds launch without that prompt.
 
 The Builder keeps the ROM selected for a build as `user-rom.sfc` in the game
-data folder. Build & play shows this saved path, and **Rebuild game** reuses it
-without opening a file picker. Selecting another ROM replaces that copy. The
-original file-picker location is not needed, and moving the entire game folder
+data folder. Setup shows this saved path, and **Rebuild game** reuses it
+without opening a file picker. Building with a different core ROM replaces that
+copy. The original file-picker location is not needed, and moving the entire game folder
 keeps one-click rebuild working. Existing `game.sfc` installs are also recognized,
 including the older generic bundle layout. Missing, unreadable or invalid ROMs
 produce an error; missing copies require selecting the ROM again.
+
+In **Setup**, select a ROM checklist entry to open your system file picker.
+Dropping `.sfc` or `.smc` files onto the Builder fills the matching entries
+based on their contents. In Big Screen, the checklist opens the
+controller-friendly file browser at your last successful ROM folder, or
+at Downloads on first use when it is available. The mod picker remembers a
+separate folder. Use **Computer** to switch drives and **Up one folder** to
+move to the parent. **Cancel** or controller Back closes the picker from any
+folder. When a build starts, the Builder opens a
+dedicated view with its status, current phase and live log.
+You can visit other sections while the build runs. Return to **Build status**
+to check the current stage or review the log. After a failed build, **Save build report**
+writes the diagnostic and log to the game folder’s `logs/` directory in either view. After a successful build,
+**Play ActRaiser** launches the game directly from Big Screen’s build status.
 
 Every Builder build starts with empty temporary directories for generated code,
 object files and Zig compiler caches, even when rebuilding the same release.
@@ -73,13 +87,15 @@ Version labels alone are not trusted: two builds labelled `dev` or `dirty` can
 contain different code. Developer/older generic Builders without a release
 identity report that comparison is unavailable; use a current release Builder.
 
-**Interface language** in the sidebar selects English, French, German or
-Japanese independently of game text and of the locale you are translating.
+The globe beside build status opens **Interface language** on every desktop page.
+In Big Screen, select the globe beside **ActRaiser** on Play. The choices are
+**English**, **Français**, **Deutsch**, and **日本語**. This sets the Builder language
+independently of game text and of the locale you are translating.
 European English uses English. The preference is saved in
 `game-assets/workshop-settings.json`, so it survives reopening the builder on a
 different local browser port. Switching updates only interface labels; it does
 not reload your project, discard unsaved text/file selections, install a pack,
-or change the game's selected language. Navigation, Home, Build & play, Assets
+or change the game's selected language. Navigation, Play, Setup, Workshop
 and Help are translated, along with language-package management, creation,
 cloning, import, installation and export workflows. Message-editing controls,
 reference tools, layout guidance, previews, credits/notices and font tools also
@@ -100,16 +116,18 @@ results, reference text, font order, coverage results and unsaved credit notices
 ## Import game content
 
 Optional content is not required to build or play ActRaiser.
-**Sights & sounds → Game imports** lets you import supported content from
-a ROM you provide. Each importer validates its supported release
-before saving anything. Imports are stored with your local game and travel
+**Setup → ROM checklist** accepts optional ROM sources and shows which
+features each one supplies. Select a source and choose **Import selected extras**
+on an existing build. On the first build, the Builder imports selected extras
+along with the US game. Use **Import a private regional media archive** in
+Setup for an existing `.armedia` file. Imports are stored with your local game and travel
 with packaged builds and installation transfers.
 
 ### ActRaiser 2 Master
 
-1. Choose **ActRaiser 2 / Master character** under **Game imports**.
-2. Select an unmodified **ActRaiser 2 (USA)** ROM (`.sfc` or `.smc`, with or
-   without a copier header), then press **Extract & install**.
+1. Select **ActRaiser 2 (USA)** in the ROM checklist.
+2. Choose an unmodified ROM (`.sfc` or `.smc`, with or without a copier
+   header), then press **Import selected extras** or build the game.
 3. Restart the game, or build it first if you have not already done so.
 4. Open **System → Game → ActRaiser 2 Master** in the game.
    Turn it on or off during a level to switch characters.
@@ -121,7 +139,7 @@ The character import saves `game-assets/imports/ar2-master.armaster`; it does no
 replace your ActRaiser ROM. Keep this pack with your game when moving it.
 
 Importing also adds **ActRaiser 2 · above the clouds** to **Scenery** in the
-Workshop sidebar. **ActRaiser 2 · Fillmore patrol** appears when the Workshop
+Workshop. **ActRaiser 2 · Fillmore patrol** appears when the Workshop
 also has the original ActRaiser scenery, extracted from your US build ROM.
 These scenes use your imported character graphics and animations. They appear
 without reopening the Workshop and remain available without the AR2 source ROM.
@@ -132,30 +150,67 @@ Choose a scene yourself; importing preserves your current selection. The existin
 
 The catalog is designed to accept additional content sets. Developers register each importer in
 `installer/internal/gameimports`, with its own validation, extraction,
-installation and status functions and translated instructions. Only public
-importers appear in the Workshop catalog. The shared
-Workshop upload route and UI discover the catalog. Imported content belongs
+installation and status functions and translated instructions. The import catalog supplies the Builder and headless import tools. Imported content belongs
 under `game-assets/imports/`, which game packaging carries automatically.
 
 ## Find the right task
 
-- **Home** — build your game or play an existing installation, open a tool,
-  and return to saved language projects.
-- **Build & play** — choose your US ROM and build. Progress and percentage remain
-  in the top header while you visit other sections; **Run game** appears when
-  the game is ready. The detailed log opens on failure. After a
-  successful build, optional cleanup lives under **Storage & build tools**.
-- **Languages** — see installed packages and workshop projects together,
-  install a shared pack, create a translation, resume a project, clone a pack,
-  or extract a regional ROM reference. Search by name, locale or ID and filter
-  to installed packages or workshop-only projects.
-- **Assets** — choose Music or Title artwork. Open the searchable track dropdown, select
-  it, and compare the original and replacement in the detail pane. Regional
-  music variants remain under their parent track. Save changes explicitly;
-  the game uses the new configuration on its next launch.
-- **Help & manual** — install your own instruction manual and read workshop
-  guidance. See [Install your own manual](#install-your-own-manual) below; the
-  manual loads only when you open this section.
+- **Play** opens an existing game, shows release freshness and offers a rebuild
+  when the bundled release changes.
+  If the mod scan fails at launch, retry it or use the last working mod setup.
+  A game with no prepared setup can use its legacy replacements.
+- **Manage Mods** opens with all installed packs grouped by type, with
+  **Title artwork** first. Use the **Enabled**
+  checkbox to turn a pack on or off. **Preview** opens a dialog for music
+  tracks, title artwork, language samples or manual pages, including disabled
+  packs. The conflict count beside a pack opens its affected targets. Choose
+  a track or region to see the competing packs. A single conflict takes you
+  straight to that choice. In Big Screen, open **Actions** on the selected pack.
+  If you temporarily disable a selected pack, its priority returns when you
+  enable it again.
+  A filtered view shows **Clear filter**. Multi-file installs report each
+  file and open **All types** when the batch spans multiple mod types.
+  On desktop, choose **Languages** to search installed packs by name, locale,
+  ID, or archive filename and see how many matches are enabled or disabled.
+  Competing language releases show their filenames in both views. If launcher
+  folders supply the same filename, the choices show their paths.
+  **Needs attention** lists archives whose type could not be read.
+  In Big Screen, choose a type above the tables to filter the same screen.
+  Up and Down move between mods. Left and Right move between actions for
+  the selected mod. **Game music** in the Music packs filter opens the
+  original soundtrack browser alongside active O2R replacements and legacy
+  manifest tracks. Music previews in both layouts have play, pause, and
+  ten-second seek buttons. Desktop also has a volume slider.
+  **Uninstall** moves a local archive to
+  `game-assets/mods/.uninstalled/` after confirmation. Bundled and launcher
+  packs can be disabled from the same list.
+  The desktop **Preview** dialog offers **Save .o2r copy** for local archives,
+  including ones created by legacy conversion. Language previews show the
+  release's author, version, license and text coverage, including how many entries use
+  the Native US fallback.
+- **Setup** shows the ROM checklist, game folder, and build controls. Use
+  **View build log** to review the last build. Optional cleanup is under
+  **Storage & build tools**.
+- **Workshop** opens saved projects and authoring tools on desktop.
+  **Languages** includes translation creation, cloning, reference extraction
+  and sharing. **Music** includes original-ROM music extraction, replacement
+  previews, per-region variants and music pack export. **Save** stores
+  edits in Workshop. **Save draft and continue** saves pending changes before
+  packaging. **Discard all changes…** lists the affected tracks and regions
+  before clearing unsaved music edits. In the pack dialog, **Close** keeps the
+  pack details, file and track selections for this Builder session. **Discard
+  draft** clears the current pack draft. **Create title artwork pack** validates
+  a 2212 × 760 PNG with at least 1% visible coverage.
+  **Create manual pack** packages your PDF for sharing. **Install in game** installs
+  the pack and opens its type in **Manage Mods**. **Export .o2r…** saves a
+  shareable archive. The Builder generates an ID from the pack's contents and
+  metadata. Music replacements use Ogg Vorbis. Convert
+  MP3s to Vorbis-encoded `.ogg` files before selecting them.
+- **Builder Settings** contains scenery, help and project
+  links. Enable **Close Builder when the game launches** to close the standalone
+  Builder after a successful launch. The game keeps running. Unsaved Workshop
+  edits and pending mod writes keep the Builder open. Recomp Launcher’s tracked
+  sessions wait for the game to exit.
 
 The sidebar supports arrow-key navigation, Home and End. Browser Back and
 Forward return to sections without unloading the editor. Unsaved message text
@@ -186,27 +241,33 @@ choices, publication permissions, the WIP option and pending font uploads.
 Only install/export actions apply those choices; switching the interface
 language never installs, publishes or enables a pack.
 
-Languages and its Home shortcuts stay disabled until a complete, valid native
-US source exists at `game-assets/languages/native-us/pack.ini`. Start a build
-with your US ROM: source extraction runs first, before dependency checks and
-regeneration. Languages unlocks automatically as soon as that step finishes;
-you can edit while the rest of the build runs, even if a later step fails.
-An existing valid source unlocks it when the workshop opens, without needing
-the ROM again. Invalid sources are reported rather than silently overwritten;
-restore a valid backup, or move the invalid `native-us` folder aside and rebuild.
-If a cleaned-up installation lacks the source, restore its generated source
-folder or download the build tools again and build with your US ROM. Existing
-translation projects are preserved while the section is locked.
+The Builder extracts the US text as a protected local `.o2r` under
+`game-assets/mods/.bundled/`. The game reads its unpacked copy at
+`game-assets/languages/native-us/pack.ini`. This US baseline is required for
+enhanced text. A build prepares it before compiler discovery, and an existing
+baseline can be packaged without extracting the ROM again.
 
-## Install your own manual
+European English, German, French and Japanese ROMs create optional language
+mods under **Manage Mods → Languages**. They can be selected in-game when
+enabled. Messages that use different controls or layouts fall back to US text.
+The complete regional reference remains available in Workshop for comparison.
+Keep ROM-derived archives local.
 
-The workshop ships no instruction manual. Choose a PDF under **Help & manual**
-and it is installed to `game-assets/manual.pdf`, which is both where the
-workshop reads it and where the game's own reader looks. **Remove manual**
-clears it again, and installing a second time replaces the first.
+## Install and share manuals
 
-Without one, the workshop shows an empty state and the game simply omits its
-Manual section — nothing is broken by not having one.
+In **Manage Mods**, choose a manual `.o2r` or PDF, or drop it onto the
+Builder. Compatible PDFs are packaged as `.o2r` on import. Workshop checks
+PDF compatibility as soon as you select the file for a manual pack.
+Manual packs also work with the generic `mods` CLI and registered launcher
+folders. Enable the packs you want to keep available and choose one when they
+compete for the in-game manual. **Preview** pages through a pack without
+changing the in-game selection. **Open manual** under **Manage Mods → Manual
+packs** opens the active PDF. Big Screen supports page previews and activation
+controls under **Manage Mods → Manual packs**.
+
+Other PDFs remain readable as a loose fallback at `game-assets/manual.pdf`.
+**Manage Mods → Manual packs** can open or uninstall the fallback. Uninstall
+moves it into the legacy customization backup folder.
 
 Two readers, two requirements:
 
@@ -223,46 +284,69 @@ Two readers, two requirements:
   That is one book. An embedded figure or letterhead logo is off by tens of
   percent, which is what the rule still rejects.
 
-The workshop applies the game's own test when you install a file and tells you
-which of the three rules a PDF fails, so a manual that will not open in the game
-says so at install time rather than in the game's menu. A PDF that fails the
-test is still installed and still readable in the workshop.
+Use **Create manual pack** to publish a compatible scan album as a manual `.o2r`.
+The Builder checks in-game compatibility when exporting or installing packs.
+Previously imported loose PDFs can still be read from **Manage Mods → Manual packs**.
 
 To convert a text PDF, export or rasterise it to one baseline JPEG per page at a
 single page size, then recombine those images into a PDF.
 
+## Move legacy customizations to Manage Mods
+
+Open **Manage Mods → Review legacy customizations…** to see eligible music
+assignments, regional splits, title artwork, and your imported manual. Choose
+**Later** to keep using the current setup, or **Convert customizations** to
+move compatible entries into mod packs. Existing mod selections keep priority.
+Resolve any open conflict in **Manage Mods** before converting a replacement
+for that target. The review explains which custom rules and files stay on the
+legacy path. If Setup asks for a rebuild, finish it before converting.
+
+Preview and select the included English or Japanese HD titles in **Manage
+Mods → Title artwork**. Enabling either included design switches off the
+other. A fresh install starts with both off and uses the original ROM title.
+On upgrade, the Builder backs up the manifest and moves an exact legacy
+Builder-owned title selection to its included pack when the title slot has
+no competing choice. Custom manifest artwork remains available as a fallback.
+An archive already using one of the included IDs keeps its place in the catalog.
+
+To restore the previous setup, close the game, disable the converted packs from
+the migration, and restore the reported manifest backup as
+`game-assets/manifest.ini`. If you converted a loose manual, copy its backup
+from `game-assets/legacy-mod-backup/` to `game-assets/manual.pdf`. The original
+music and artwork files remain available at their original paths.
+
 ## Save and test language projects
 
-Use **Languages → Add a language pack** to choose an `.arlang` file, or drop it
-into the Workshop from any section. Add one pack at a time; no unzipping is
-needed. **Install a language pack** also opens this package-first flow, with
-**Install already imported** available for saved projects. Author backups
-(`.arproject`) and compatible legacy ZIPs have a secondary import option;
-**Advanced: unpacked language folder** retains **Choose folder…** and manual
-paths for authors. Selecting or dropping a package opens a preview only.
-Choose **Import & install** to save the workshop copy and install it. Matching
-package IDs require explicit replacement during import; a distinct ID lets you keep both.
+Install a shared language pack in **Manage Mods** or drop it onto the Builder.
+Legacy `.arlang` publications are converted to `.o2r` during installation.
+In **Workshop → Languages**, open a saved project or import an editable copy
+of a translation. Author backups (`.arproject`), compatible legacy ZIPs, and
+unpacked language folders are available under **Import for editing**.
+Publish releases through **Export .o2r…** with a version such as `1.0.0`.
+In the desktop app, choose the archive destination in the system Save dialog.
 
 Opening a saved project gives you an editable workshop copy. The editor's
-sticky toolbar has **Languages** and **Save progress**, with a visible
-saved/unsaved indicator. **Save progress** (or Cmd+S / Ctrl+S) saves pending
+sticky toolbar has **Languages** and **Save**, with a visible
+saved/unsaved indicator. **Save** (or Cmd+S / Ctrl+S) saves pending
 message text, Not started / WIP / Done status, package details, notes, public
 notices and font dependencies together. Validation failure leaves all of those edits unsaved so you
-can correct them. If this package ID is already installed, saving also refreshes
-that game copy, preserving whether it is enabled or disabled. Restart the game
+can correct them. Saving also refreshes game copies previously installed from
+this Workshop project, preserving whether the pack is enabled or disabled. Restart the game
 to load the updated text. If the refresh fails, the editor keeps your saved
 progress and explains why the installed copy could not be updated.
-**Messages**, **Details & credits**, and **Fonts** are separate tabs; drafts survive switching.
-For the first installation, use **Pack actions → Install in game**, then
+Drafts survive switching between **Messages**, **Details & credits**, and **Fonts**.
+Opening a different message prompts only when the current message has unsaved
+text or status changes. Package details, credits, and font edits carry over.
+For the first installation, use **Install or export… → Install in game**, then
 **Install for this game**. Subsequent saves update it automatically. Local
 installation keeps every supplied message, including unfinished translations.
 It does not ask you to confirm redistribution rights or filter someone else's
-work. Those choices belong to **Export for sharing**, where publishers choose
+work. Those choices belong to **Export .o2r…**, where publishers choose
 whether to include WIP translations. Restart the game and select the package
 name in the overlay's Localization settings with Enhanced text rendering.
 
 Use **Fonts** to choose a primary TTF/OTF, add ordered fallback fonts, or restore
-the bundled font. File selections are copied into the project by **Save progress**;
+the bundled font. File selections are copied into the project by **Save**;
 reordering retained fonts does not duplicate their data. Keep redistribution
 license notices in **Details & credits**. **Check coverage** uses the built game's
 own font backend and reports missing characters with message locations; an
@@ -273,7 +357,7 @@ Complete a game build first; scalar coverage does not prove shaping or layout.
 The library is sorted by package name, with locale and stable ID to distinguish
 editions. **Installed in game**, **Workshop only**, and **Read-only reference**
 badges make their roles explicit. An installed package can exist without an
-editable project; import its archive to edit a copy. Home shows up to four
+editable project; import its archive to edit a copy. Workshop shows up to four
 workshop projects; Languages contains the complete managed package library.
 
 While editing, choose a **Reference language** or **Extract reference ROM…**.
@@ -315,7 +399,7 @@ import/export, credits and installation details.
 ## A little atmosphere
 
 The workshop can play a quiet background scene behind every menu, with a
-brighter preview on Home. Choose **Fillmore · the Master’s patrol** for the
+brighter preview on Play. Choose **Fillmore · the Master’s patrol** for the
 Master jump-slashing birds and dispatching approaching ground enemies, or
 **Sky Palace · angel patrol** for a flight through the clouds. With a clean,
 headerless US ROM supplied to the builder, sprites, palettes, animation poses,
@@ -336,10 +420,10 @@ still allows artwork for the current session.
 These ROM-derived images are never included in distributed builder packages.
 
 Choose **Follow system**, **Animated scene**, **Still scene**, or **Scene off**
-in the sidebar. A system reduced-motion preference always keeps the scene
+in **Builder Settings**. A system reduced-motion preference always keeps the scene
 still, including when Animated is selected. Switching menus continues the same
 scene; hiding the browser tab pauses it until you return. **Scene off** hides
-both the background and Home preview. Scenery and motion choices are remembered
+both the background and Play preview. Scenery and motion choices are remembered
 for this browser session only; they do not alter game settings.
 
 ## Application icons

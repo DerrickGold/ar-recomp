@@ -70,10 +70,14 @@ func readInstalledArchive(root, key string) (InstalledPackSummary, error) {
 	if err != nil {
 		return row, err
 	}
+	if index.mod {
+		return row, fmt.Errorf("install .o2r publications through the mod library")
+	}
 	if err = requirePublication(index); err != nil {
 		return row, err
 	}
 	row.Metadata = index.manifest.Metadata()
+	row.Content = index.payloadRevision()
 	row.Enabled, err = archiveEnabled(root, row.Metadata.ID)
 	row.Revision = fmt.Sprintf("%s:%t", index.revision, row.Enabled)
 	return row, err
@@ -159,8 +163,8 @@ func uninstallArchive(root, key, id, expected string) (string, error) {
 	return backup, nil
 }
 
-// InstallLanguageArchive installs a complete publication, upgrading a v1 copy
-// to v2 without changing the source or granting publishing rights.
+// InstallLanguageArchive imports a legacy publication byte for byte. The
+// runtime prepares v1 translations in a derived snapshot.
 // The game checks fonts on use.
 func InstallLanguageArchive(root, source string, replace bool) (string, InstallationReport, error) {
 	var report InstallationReport
@@ -177,6 +181,9 @@ func InstallLanguageArchive(root, source string, replace bool) (string, Installa
 	if err != nil {
 		return "", report, err
 	}
+	if index.mod {
+		return "", report, fmt.Errorf("install .o2r publications through the mod library")
+	}
 	if err = requirePublication(index); err != nil {
 		return "", report, err
 	}
@@ -191,6 +198,9 @@ func InstallLanguageArchive(root, source string, replace bool) (string, Installa
 	if err != nil {
 		return "", report, err
 	}
+	if index.mod {
+		return "", report, fmt.Errorf("install .o2r publications through the mod library")
+	}
 	if err = requirePublication(index); err != nil {
 		return "", report, err
 	}
@@ -198,18 +208,9 @@ func InstallLanguageArchive(root, source string, replace bool) (string, Installa
 	if err != nil {
 		return "", report, err
 	}
-	prepared, report, err := p.Installation()
+	_, report, err = p.Installation()
 	if err != nil {
 		return "", report, err
-	}
-	if report.Upgrade != nil {
-		var upgraded bytes.Buffer
-		// requirePublication already verified this is a distributed publication.
-		// Do not run Publication again: it would filter supplied messages.
-		if err := prepared.writeArchive(&upgraded, "publication"); err != nil {
-			return "", report, err
-		}
-		data = upgraded.Bytes()
 	}
 	if err = makeAuthorDirectory(root); err != nil {
 		return "", report, err
@@ -336,7 +337,7 @@ func prepareArchive(root, key string) (string, string, error) {
 	current, currentErr := readPackFile(rootedPackFS{r}, "current", 64)
 	r.Close()
 	token := strings.TrimSpace(string(current))
-	if currentErr == nil && cacheVersionValid(token) {
+	if index.manifest.Version() >= 2 && currentErr == nil && cacheVersionValid(token) {
 		if info, err := os.Lstat(filepath.Join(object, token)); err == nil && info.IsDir() && validArchiveCache(filepath.Join(object, token), index) {
 			return index.manifest.Metadata().ID, digest + "/" + token, nil
 		}
@@ -355,12 +356,37 @@ func prepareArchive(root, key string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	if err = p.checkInstallable(); err != nil {
-		return "", "", err
-	}
-	version, err := os.MkdirTemp(object, "v-")
+	p, _, err = p.Installation()
 	if err != nil {
 		return "", "", err
+	}
+	files := p.projectFiles(false)
+	if currentErr == nil && cacheVersionValid(token) && snapshotContentsMatch(filepath.Join(object, token), files) {
+		return p.Pack().Manifest().Metadata().ID, digest + "/" + token, nil
+	}
+	token, err = writeArchiveSnapshot(object, files)
+	return p.Pack().Manifest().Metadata().ID, digest + "/" + token, err
+}
+
+func snapshotContentsMatch(dir string, files map[string][]byte) bool {
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		return false
+	}
+	defer r.Close()
+	for name, data := range files {
+		current, err := readPackFile(rootedPackFS{r}, name, len(data))
+		if err != nil || !bytes.Equal(current, data) {
+			return false
+		}
+	}
+	return true
+}
+
+func writeArchiveSnapshot(object string, files map[string][]byte) (string, error) {
+	version, err := os.MkdirTemp(object, "v-")
+	if err != nil {
+		return "", err
 	}
 	committed := false
 	defer func() {
@@ -368,30 +394,36 @@ func prepareArchive(root, key string) (string, string, error) {
 			os.RemoveAll(version)
 		}
 	}()
-	for name, data := range p.projectFiles(false) {
+	for name, data := range files {
 		path := filepath.Join(version, filepath.FromSlash(name))
 		if err := makeAuthorDirectory(filepath.Dir(path)); err != nil {
-			return "", "", err
+			return "", err
 		}
 		if err := atomicAuthorFile(path, func(w io.Writer) error { _, err := w.Write(data); return err }); err != nil {
-			return "", "", err
+			return "", err
 		}
 	}
-	if !validArchiveCache(version, index) {
-		return "", "", fmt.Errorf("prepared archive failed dependency verification")
-	}
-	token = filepath.Base(version)
+	token := filepath.Base(version)
 	if err := atomicAuthorFile(filepath.Join(object, "current"), func(w io.Writer) error { _, err := io.WriteString(w, token+"\n"); return err }); err != nil {
-		return "", "", err
+		return "", err
 	}
 	committed = true
-	return p.Pack().Manifest().Metadata().ID, digest + "/" + token, nil
+	return token, nil
 }
 
 // PrepareLanguageArchives is the versioned desktop startup protocol. It writes
 // an atomic bounded index of safe cache tokens, never arbitrary paths or code.
 // Diagnostics go to the caller's log. Bad packs cannot leave stale index rows.
 func PrepareLanguageArchives(ctx context.Context, root string, log io.Writer) error {
+	return PrepareLanguageCatalog(ctx, root, log, LanguageModCatalog{})
+}
+
+type LanguageModCatalog struct {
+	Active  []PreparedLanguage
+	Blocked []string
+}
+
+func PrepareLanguageCatalog(ctx context.Context, root string, log io.Writer, mods LanguageModCatalog) error {
 	rows, err := ListInstalledPacks(root)
 	if err != nil {
 		return err
@@ -402,6 +434,19 @@ func PrepareLanguageArchives(ctx context.Context, root string, log io.Writer) er
 	}
 	var index strings.Builder
 	index.WriteString(ArchiveCatalogHeader)
+	suppressed := map[string]bool{}
+	for _, id := range mods.Blocked {
+		suppressed[strings.ToLower(id)] = true
+		fmt.Fprintf(&index, "conflict\t%s\n", id)
+	}
+	for _, pack := range mods.Active {
+		digest, _, _ := strings.Cut(pack.Token, "/")
+		if !pack.Cached(root, digest) {
+			continue
+		}
+		suppressed[strings.ToLower(pack.ID)] = true
+		fmt.Fprintf(&index, "replace\t%s\t%s\n", pack.ID, pack.Token)
+	}
 	counts := map[string]int{}
 	for _, row := range rows {
 		if row.Enabled && row.Metadata.ID != "" {
@@ -414,6 +459,9 @@ func PrepareLanguageArchives(ctx context.Context, root string, log io.Writer) er
 			return err
 		}
 		id := strings.ToLower(row.Metadata.ID)
+		if suppressed[id] {
+			continue
+		}
 		if row.Enabled && counts[id] > 1 {
 			if !conflicts[id] {
 				fmt.Fprintf(&index, "conflict\t%s\n", id)

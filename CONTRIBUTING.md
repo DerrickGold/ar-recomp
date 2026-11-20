@@ -98,6 +98,8 @@ the separate cross-platform and regional-ROM gates.
 
 ## Code conventions
 
+- For Builder screens and controls, follow the layout, interaction, and review
+  examples in the [Builder UI style guide](installer/UI-STYLE.md).
 - Keep behavior, its data, and private helpers near the feature that owns them.
   Name files after what a player or developer recognizes: save slots, world
   navigation, action rooms, or a specific tool. Shared mechanisms belong below

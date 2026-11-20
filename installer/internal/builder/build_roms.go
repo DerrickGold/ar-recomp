@@ -23,7 +23,7 @@ func (app *application) prepareBuildROMs(files []*multipart.FileHeader) (string,
 func (app *application) resolveBuildROM(form *multipart.Form) (path, errorCode string, err error) {
 	files := form.File["rom"]
 	if len(form.File) != 0 && (len(form.File) != 1 || len(files) == 0) {
-		return "", "", fmt.Errorf("select supported ROM files in the main selector")
+		return "", "", fmt.Errorf("select supported ROM files in the ROM checklist")
 	}
 	firstRun := firstFormValue(form, "firstRun") == "true"
 	reuseSaved := firstFormValue(form, "reuseROM") == "true" && len(files) == 0
@@ -65,7 +65,7 @@ func (app *application) resolveBuildROM(form *multipart.Form) (path, errorCode s
 		path, err = reusableBuildROM(app.options.ProjectRoot)
 		return path, "builder.build.saved_rom_missing", err
 	}
-	return "", "", fmt.Errorf("select supported ROM files in the main selector")
+	return "", "", fmt.Errorf("select supported ROM files in the ROM checklist")
 }
 
 func firstFormValue(form *multipart.Form, key string) string {
@@ -113,21 +113,25 @@ func readUploadedROMs(files []*multipart.FileHeader) ([]romset.Input, error) {
 	}
 	inputs := make([]romset.Input, 0, len(files))
 	for _, header := range files {
-		if !validROMName(header.Filename) {
-			return nil, fmt.Errorf("%s: select a .sfc or .smc ROM", header.Filename)
-		}
-		file, err := header.Open()
-		if err != nil {
-			return nil, err
-		}
-		input, err := readBuildROM(header.Filename, file)
-		file.Close()
+		input, err := readUploadedROM(header)
 		if err != nil {
 			return nil, err
 		}
 		inputs = append(inputs, input)
 	}
 	return inputs, nil
+}
+
+func readUploadedROM(header *multipart.FileHeader) (romset.Input, error) {
+	if !validROMName(header.Filename) {
+		return romset.Input{}, fmt.Errorf("%s: select a .sfc or .smc ROM", header.Filename)
+	}
+	file, err := header.Open()
+	if err != nil {
+		return romset.Input{}, err
+	}
+	defer file.Close()
+	return readBuildROM(header.Filename, file)
 }
 
 func readBuildROM(name string, file io.Reader) (romset.Input, error) {
@@ -179,7 +183,7 @@ func (app *application) installBuildROMs(inputs []romset.Input, requireUSA bool)
 			return "", fmt.Errorf("include an ActRaiser (USA) ROM for the main game; the other ROMs add optional content")
 		}
 	}
-	if err := app.installROMContent(plan); err != nil {
+	if err := app.installROMContent(plan, false); err != nil {
 		return "", err
 	}
 	if plan.Baseline != nil {
@@ -195,11 +199,28 @@ func (app *application) installBuildROMs(inputs []romset.Input, requireUSA bool)
 	return baseline, nil
 }
 
-func (app *application) installROMContent(plan *romset.Plan) error {
+func (app *application) installROMContent(plan *romset.Plan, reimport bool) error {
 	// All selected inputs have passed identification/extraction before writes.
 	app.gameImportMu.Lock()
 	defer app.gameImportMu.Unlock()
 	app.regionalMediaMu.Lock()
 	defer app.regionalMediaMu.Unlock()
-	return plan.Install(app.options.ProjectRoot)
+	root := app.options.ProjectRoot
+	if err := plan.Install(root); err != nil {
+		return err
+	}
+	for _, source := range plan.LanguageSources() {
+		m := source.Pack().Manifest().Metadata()
+		if !reimport && regularFileExists(regionalROMModMarker(root, m.ID)) {
+			continue
+		}
+		if err := installRegionalROMMod(root, app.options.ModDirectories, source); err != nil {
+			err = fmt.Errorf("install %s language mod: %w", m.Name, err)
+			if reimport {
+				return err
+			}
+			fmt.Fprintf(&lockedLogWriter{app: app}, "Optional content: %v\n", err)
+		}
+	}
+	return nil
 }

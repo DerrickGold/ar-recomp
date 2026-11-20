@@ -46,10 +46,10 @@ void NativeAudioMixer_SetMusicReplacementActive(bool active) {
 
 /* ---- helpers ------------------------------------------------------------ */
 
-static const char *WriteManifest(const char *body) {
+static const char *WriteNamedManifest(const char *name, const char *body) {
   static char path[512];
   const char *dir = getenv("TMPDIR");
-  snprintf(path, sizeof(path), "%s/music_manifest_test.ini", dir ? dir : "/tmp");
+  snprintf(path, sizeof(path), "%s/%s", dir ? dir : "/tmp", name);
   FILE *f = fopen(path, "w");
   if (!f) {
     fprintf(stderr, "cannot write %s\n", path);
@@ -60,7 +60,33 @@ static const char *WriteManifest(const char *body) {
   return path;
 }
 
+static const char *WriteManifest(const char *body) {
+  return WriteNamedManifest("music_manifest_test.ini", body);
+}
+
 /* ---- tests -------------------------------------------------------------- */
+
+static void TestOverlayPriority(void) {
+  char legacy[512];
+  snprintf(legacy, sizeof(legacy), "%s", WriteManifest(
+      "[music:legacy-base]\nsrc = 0E:F69F\nfile = base.ogg\n"
+      "[music:legacy-region]\nsrc = 0E:F69F\nfile = region.ogg\nwhen = wram[0018]==0x01\n"
+      "[music:legacy-other]\nsrc = 0E:F69F\nfile = other.ogg\nwhen = wram[0018]==0x03\n"));
+  const char *overlay = WriteNamedManifest("music_overlay_test.ini",
+      "[music:pack-base]\nsrc = 0E:F69F\nfile = pack.ogg\n"
+      "[music:pack-region]\nsrc = 0E:F69F\nfile = pack-region.ogg\nwhen = wram[0018]==0x01\n");
+  CHECK(MusicReplacements_LoadWithOverlay(legacy, overlay) == 5);
+  for (int i = 0; i < g_music_replacement_count; i++)
+    g_music_replacements[i].has_audio = true;
+  g_ram[0x18] = 0;
+  CHECK(MusicReplacements_Select(0x0EF69F, 1) == &g_music_replacements[0]);
+  g_ram[0x18] = 1;
+  CHECK(MusicReplacements_Select(0x0EF69F, 1) == &g_music_replacements[1]);
+  g_ram[0x18] = 3;
+  CHECK(MusicReplacements_Select(0x0EF69F, 1) == &g_music_replacements[4]);
+  remove(overlay);
+  CHECK(MusicReplacements_LoadWithOverlay(legacy, overlay) == 3);
+}
 
 static void TestParseEntries(void) {
   CHECK(MusicReplacements_Load(WriteManifest("# comment\n"
@@ -745,6 +771,7 @@ static void TestNativeFadePlayback(const char *fixture) {
 int main(int argc, char **argv) {
   TestMusicResamplerMath();
   TestParseEntries();
+  TestOverlayPriority();
   TestParseRejections();
   TestSharedManifestHdSideIgnoresMusic();
   TestSelection();

@@ -67,7 +67,7 @@ func (app *application) prepareLocalizationCommand(w http.ResponseWriter, r *htt
 		command, err = localizationJSONCommand(w, r, endpoint, (*localizationWork).editLocalization)
 	case "open", "reference", "directory", "accept-import", "create", "clone", "upgrade-v2":
 		command, err = localizationJSONCommand(w, r, endpoint, (*localizationWork).manageLocalizationProject)
-	case "installation", "installation-check", "install", "set-enabled", "uninstall":
+	case "installation", "installation-check", "install", "set-enabled", "uninstall", "select-language-release":
 		command, err = localizationJSONCommand(w, r, endpoint, (*localizationWork).manageLocalizationInstallation)
 	case "backup", "publish", "publication-check":
 		command, err = localizationJSONCommand(w, r, endpoint, (*localizationWork).exportLocalization)

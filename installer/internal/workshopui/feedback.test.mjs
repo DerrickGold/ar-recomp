@@ -6,7 +6,8 @@ import {runInNewContext} from "node:vm";
 class Node {
   constructor(tag){this.tag=tag;this.children=[];this.events={};this.textContent="";this.disabled=false;this.value="";}
   append(...nodes){this.children.push(...nodes);}
-  after(node){this.next=node;}
+  showModal(){this.open=true;}
+  close(){this.open=false;this.events.close?.();}
   remove(){this.removed=true;}
   setAttribute(name,value){this[name]=value;}
   addEventListener(name,fn){this.events[name]=fn;}
@@ -14,10 +15,13 @@ class Node {
   select(){this.selected=true;}
 }
 function setup(clipboard, fetch=async()=>{throw new TypeError("Failed to fetch");}){
-  const window={},document={createElement:tag=>new Node(tag),querySelector:()=>({content:"test-version"})};
+  const window={},document=new Node("document");
+  document.body=new Node("body");
+  document.createElement=tag=>new Node(tag);
+  document.querySelector=()=>({content:"test-version"});
   const navigator={userAgent:"Test webview",clipboard};
   runInNewContext(readFileSync(new URL("feedback.js",import.meta.url),"utf8"),{window,document,navigator,TypeError,Error,Date,fetch});
-  return {api:window.workshopFeedback,target:new Node("p"),window};
+  return {api:window.workshopFeedback,target:new Node("p"),window,modal:()=>document.body.children.find(node=>node.open)};
 }
 const find=(node,tag)=>node.children.flatMap(child=>[...(child.tag===tag?[child]:[]),...find(child,tag)]);
 test("reports strip session addresses, tokens and home names without changing payload hashes",()=>{
@@ -32,49 +36,49 @@ test("non-JSON responses get a stable error code and HTTP status, not a parser e
   await assert.rejects(api.readJSON({status:409,ok:false,json:async()=>({error:"Close the game first",errorCode:"GAME_BUSY"})}),error=>error.code==="GAME_BUSY"&&error.status===409);
 });
 test("copy includes only the previewed bounded report; duplicate errors keep the same card",async()=>{
-  let copied;const {api,target}=setup({writeText:async value=>{copied=value;}});
+  let copied;const {api,target,modal}=setup({writeText:async value=>{copied=value;}});
   const error=new Error("<script>literal failure</script>");
   const options={operation:"Launch game",log:"old-log"+"x".repeat(17000)};
-  api.show(target,error,options);const card=target.next,report=find(card,"textarea")[0];
+  api.show(target,error,options);const card=modal(),report=find(card,"textarea")[0];
   assert.equal(report.readOnly,true);assert.match(report.value,/test-version/);assert.match(report.value,/<script>literal failure/);assert.ok(!report.value.includes("old-log"));
-  assert.ok(report.value.length<18000);api.show(target,error,options);assert.equal(target.next,card);
+  assert.ok(report.value.length<18000);api.show(target,error,options);assert.equal(modal(),card);assert.equal(find(card,"button").at(-1).focused,true);
   await find(card,"button")[0].events.click();assert.equal(copied,report.value);
-  api.clear(target);assert.equal(card.removed,true);
+  api.clear(target);assert.equal(card.removed,true);assert.equal(modal(),undefined);
 });
 test("clipboard denial selects the report for manual copy without losing the error",async()=>{
-  const {api,target}=setup({writeText:async()=>{throw new Error("not permitted");}});api.show(target,new Error("disk full"));
-  const button=find(target.next,"button")[0];await button.events.click();
-  const report=find(target.next,"textarea")[0];assert.equal(report.focused,true);assert.equal(report.selected,true);assert.equal(button.disabled,false);
-  assert.equal(find(target.next,"details")[0].open,true);
+  const {api,target,modal}=setup({writeText:async()=>{throw new Error("not permitted");}});api.show(target,new Error("disk full"));
+  const button=find(modal(),"button")[0];await button.events.click();
+  const report=find(modal(),"textarea")[0];assert.equal(report.focused,true);assert.equal(report.selected,true);assert.equal(button.disabled,false);
+  assert.equal(find(modal(),"details")[0].open,true);
 });
 test("status retries are explicit and errors without a safe retry do not offer one",async()=>{
-  const {api,target}=setup();let retries=0;
+  const {api,target,modal}=setup();let retries=0;
   api.show(target,Object.assign(new Error("Failed to fetch"),{code:"AR_NETWORK"}),{retry:async()=>{retries++;}});assert.equal(retries,0);
-  assert.match(target.next.children[0].textContent,/connection/);
-  await find(target.next,"button")[1].events.click();assert.equal(retries,1);
-  api.show(target,new Error("import failed"));assert.equal(find(target.next,"button").length,1);
+  assert.match(find(modal(),"p")[1].textContent,/connection/);
+  await find(modal(),"button")[1].events.click();assert.equal(retries,1);
+  api.show(target,new Error("import failed"));assert.equal(find(modal(),"button").length,2);
 });
 test("a failed status recheck remains visible without an unhandled rejection",async()=>{
-  const {api,target}=setup();
+  const {api,target,modal}=setup();
   api.show(target,new Error("first failure"),{retry:async()=>{throw new Error("still offline");}});
-  await find(target.next,"button")[1].events.click();
-  assert.match(find(target.next,"textarea")[0].value,/still offline/);
-  assert.equal(find(target.next,"button")[1].disabled,false);
+  await find(modal(),"button")[1].events.click();
+  assert.match(find(modal(),"textarea")[0].value,/still offline/);
+  assert.equal(find(modal(),"button")[1].disabled,false);
 });
 
 test("only fetch failures are classified as network errors; cancellation is retained",async()=>{
-  const {api,target}=setup();
+  const {api,target,modal}=setup();
   await assert.rejects(api.request("status"),error=>error.code==="AR_NETWORK");
   api.show(target,new TypeError("Cannot read properties of undefined"));
-  assert.doesNotMatch(target.next.children[0].textContent,/connection/);
-  assert.match(find(target.next,"textarea")[0].value,/Code: AR_OPERATION/);
+  assert.doesNotMatch(find(modal(),"p")[1].textContent,/connection/);
+  assert.match(find(modal(),"textarea")[0].value,/Code: AR_OPERATION/);
   const abort=Object.assign(new Error("cancelled"),{name:"AbortError"});
   const cancelled=setup(undefined,async()=>{throw abort;});
   await assert.rejects(cancelled.api.request("status"),error=>error===abort);
 });
 
 test("structured errors keep localized guidance, raw details, exact action and partial outcome",async()=>{
-  const {api,target,window}=setup();
+  const {api,target,window,modal}=setup();
   window.workshopI18n={text:(key,args,fallback)=>key==="builder.errors.font_protocol"?"Font check failed":fallback,
     set:(node,key)=>{node.textContent=key;},attribute(){}};
   const error=api.responseError({error:"invalid response: record 2",errorCode:"builder.errors.font_protocol",recoveryKey:"builder.recovery.font_protocol"},500);
@@ -82,10 +86,10 @@ test("structured errors keep localized guidance, raw details, exact action and p
   assert.equal(error.uiKey,"builder.errors.font_protocol");
   error.operation="Install language pack";error.outcome="Project imported; installation failed.";
   api.show(target,error,{operation:"Language editor"});
-  const report=find(target.next,"textarea")[0].value;
+  const report=find(modal(),"textarea")[0].value;
   assert.match(report,/Operation: Install language pack/);assert.match(report,/Outcome: Project imported/);
   assert.match(report,/Code: builder.errors.font_protocol/);assert.match(report,/Details: invalid response: record 2/);
-  assert.equal(target.next.children[0].textContent,"builder.recovery.font_protocol");
+  assert.equal(find(modal(),"p")[1].textContent,"builder.recovery.font_protocol");
   assert.equal(api.responseError({error:"Readable fallback",errorCode:"builder.unknown"},400).uiKey,undefined);
 });
 

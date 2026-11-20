@@ -118,3 +118,21 @@ func Decode(data []byte) ([]Entry, error) {
 }
 
 func Entries() ([]Entry, error) { return Decode(source) }
+
+// Messages returns translations for the interface namespaces used by a renderer.
+func Messages(prefixes ...string) (json.RawMessage, error) {
+	entries, err := Entries()
+	if err != nil {
+		return nil, err
+	}
+	messages := make(map[string][]string)
+	for _, entry := range entries {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(entry.Key, prefix) {
+				messages[entry.Key] = entry.Text
+				break
+			}
+		}
+	}
+	return json.Marshal(messages)
+}

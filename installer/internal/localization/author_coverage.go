@@ -30,6 +30,51 @@ type AuthorCoverageReport struct {
 	Dormant          []string                `json:"dormant"`
 }
 
+type RuntimeCoverageCount struct {
+	Provided int `json:"provided"`
+	Total    int `json:"total"`
+}
+
+type RuntimeSurfaceCoverage struct {
+	Surface string `json:"surface"`
+	RuntimeCoverageCount
+}
+
+type RuntimeTextCoverage struct {
+	RuntimeCoverageCount
+	Surfaces []RuntimeSurfaceCoverage `json:"surfaces"`
+}
+
+var coverageSurfaces = [...]string{"dialogue", "menus", "keyboard", "terms", "hud", "credits"}
+
+// RuntimeTextCoverage measures the installed archive against the live US
+// catalogue. Opening a publication can synthesize editor progress, so this
+// report only checks presence, including aliases and intentional empty entries.
+func (p *AuthorPack) RuntimeTextCoverage() RuntimeTextCoverage {
+	counts := make(map[string]RuntimeCoverageCount, len(coverageSurfaces))
+	var report RuntimeTextCoverage
+	for _, ref := range p.workspace.references {
+		if !ref.NativeInProfile || (ref.USRuntimeUsage != "contract" && ref.USRuntimeUsage != "live_optional") {
+			continue
+		}
+		surface := coverageSurface(ref)
+		count := counts[surface]
+		count.Total++
+		report.Total++
+		if _, present := p.workspace.messageScript[ref.ID]; present {
+			count.Provided++
+			report.Provided++
+		}
+		counts[surface] = count
+	}
+	for _, surface := range coverageSurfaces {
+		if count := counts[surface]; count.Total != 0 {
+			report.Surfaces = append(report.Surfaces, RuntimeSurfaceCoverage{surface, count})
+		}
+	}
+	return report
+}
+
 func coverageSurface(ref AuthorReference) string {
 	switch {
 	case strings.HasPrefix(ref.ID, "credits."):
@@ -68,7 +113,7 @@ func (p *AuthorProject) coverageFor(included map[string]bool) AuthorCoverageRepo
 	r := AuthorCoverageReport{Profile: m.SourceProfile, Runtime: m.Target == "us-runtime" && m.SourceProfile == "us"}
 	refs, _ := AuthorReferences(m.SourceProfile)
 	indices := map[string]int{}
-	for _, surface := range []string{"dialogue", "menus", "keyboard", "terms", "hud", "credits"} {
+	for _, surface := range coverageSurfaces {
 		indices[surface] = len(r.Surfaces)
 		r.Surfaces = append(r.Surfaces, AuthorSurfaceCoverage{Surface: surface})
 	}

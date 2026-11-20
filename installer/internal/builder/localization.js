@@ -104,7 +104,6 @@
     kind: "home",
     phase: "choose",
     reviewPurpose: "install",
-    installPath: "",
     editorTab: "messages",
   };
   const draft = {
@@ -113,6 +112,7 @@
     messageDirty: false,
     detailsDirty: false,
     noticeDirty: false,
+    noticePath: "",
     saveFailure: "",
   };
   const fonts = window.workshopLanguageFonts.create({
@@ -127,31 +127,24 @@
       readonly();
     },
   });
-  const library = window.workshopLanguageLibrary.create({
-    $, ui, label, contentLanguage, run, json, feedbackKey, openProject,
-    isBusy: () => busy, isClosed: () => closed,
-  });
+  const library = window.workshopLanguageLibrary.create({$, ui, label, contentLanguage, openProject});
   const imports = window.workshopLanguageImport.create({
     $, label, raw, feedback, feedbackKey, failure, json, run, submit, discard,
     kind: () => flow.kind, isBusy: () => busy, isClosed: () => closed,
     onPreviewChanged: workflowView,
-    beginInstall: beginImportInstallation,
     onAccepted: adoptImportedProject,
   });
   const expanded = new Set();
   const flowTitles = {
-    install: "builder.language.flow_install",
     create: "builder.language.flow_create",
-    edit: "builder.language.flow_edit",
+    edit: "builder.language.open_backup",
     clone: "builder.language.flow_clone",
     extract: "builder.language.flow_extract"
   };
   function workflowView() {
     const home = flow.kind === "home", choose = flow.phase === "choose",
           editing = flow.phase === "edit";
-    const importing = choose &&
-      (["edit", "clone"].includes(flow.kind) ||
-        flow.kind === "install" && flow.installPath === "import");
+    const importing = choose && ["edit", "clone"].includes(flow.kind);
     panel.dataset.editing = String(!home && editing);
     $("home").hidden = !home;
     $("flow-header").hidden = home || editing;
@@ -161,26 +154,10 @@
       label("flow-title", editing ? "builder.language.edit_pack" : flowTitles[flow.kind]);
     else
       raw("flow-title", "");
-    label("flow-steps",
-      flow.kind === "install" ? flow.installPath === "existing" ?
-                                "builder.language.steps_existing" :
-                                "builder.language.steps_import" :
-        flow.kind === "clone" ? "builder.language.steps_clone" :
-                                "builder.language.steps_edit");
+    $("flow-steps").hidden = !importing;
+    if (importing) label("flow-steps", flow.kind === "clone" ? "builder.language.steps_clone" : "builder.language.steps_edit");
     $("install-state").hidden = flow.phase !== "review";
-    $("install-choice").hidden = home || flow.kind !== "install" || !choose;
-    for (const button of panel.querySelectorAll("[data-loc-install]"))
-      button.setAttribute("aria-pressed", String(button.dataset.locInstall === flow.installPath));
-    $("project-picker").hidden = home || !choose ||
-      !(flow.kind === "install" && flow.installPath === "existing" ||
-        ["edit", "clone"].includes(flow.kind));
-    label("project-picker-label",
-      flow.kind === "install" ? "builder.language.imported_packs" :
-                                "builder.language.choose_saved");
-    label("open",
-      flow.kind === "install" ? "builder.language.review_install" :
-        flow.kind === "clone" ? "builder.language.choose_base" :
-                                "builder.language.open_edit");
+    $("project-picker").hidden = !choose || flow.kind !== "clone";
     $("start").hidden =
       home || !choose || !(importing || ["create", "extract"].includes(flow.kind));
     $("extract").hidden =
@@ -221,7 +198,7 @@
     saveIndicator();
   }
   function projectDestination() {
-    flow.phase = flow.kind === "install" ? "review" : flow.kind === "clone" ? "clone" : "edit";
+    flow.phase = flow.kind === "clone" ? "clone" : "edit";
     flow.reviewPurpose = "install";
     if (flow.phase === "clone")
       $("clone").elements.name.value =
@@ -290,12 +267,10 @@
       {detail: draft.saveFailure});
     $("editor-bar").dataset.dirty = String(hasEdits());
     $("save-progress").disabled = busy || !state.project || native || !hasEdits();
-    $("save").disabled = busy || !state.project || native || !hasEdits();
-    $("save-fonts").disabled = busy || !state.project || native || !hasEdits();
     label("font-check", hasEdits() ? "builder.editor.save_check" : "builder.editor.check_coverage");
   }
   function discard() {
-    return !hasEdits() || window.confirm(ui.text("builder.language.discard_confirm"));
+    return !hasEdits() || window.workshopConfirm("builder.assets.discard", "builder.language.discard_confirm");
   }
   function identity() {
     return {projectID: state.project?.metadata.id, revision: state.project?.revision};
@@ -388,7 +363,7 @@
       return;
     const native = !state.project || state.project.origin === "native-source";
     for (const el of panel.querySelectorAll(
-           "#loc-message-editor button:not([data-playback]), #loc-body, #loc-message-status, #loc-placeholders"))
+           "#loc-message-editor button:not([data-playback]), #loc-body, #loc-message-status"))
       el.disabled = native;
     $("preview").disabled = !draft.message;
     $("independent").disabled = native || !draft.message?.body.trimStart().startsWith("@alias ");
@@ -406,6 +381,7 @@
       return;
     busy = true;
     window.workshopFeedback?.clear($("feedback"));
+    const trigger = document.activeElement;
     const controls =
       [...panel.querySelectorAll("button,input,textarea,select")]
         .filter(el => !el.closest("#loc-playback")).map(el => [el, el.disabled]);
@@ -413,7 +389,7 @@
       el.disabled = true;
     panel.setAttribute("aria-busy", "true");
     try {
-      await action();
+      return await action();
     } catch (error) {
       if (!closed) {
         reportFailure(error);
@@ -424,6 +400,10 @@
       busy = false;
       panel.removeAttribute("aria-busy");
       readonly();
+      if (!closed && document.activeElement === document.body && panel.contains(trigger) && !trigger.disabled) {
+        const disclosure = trigger.closest("details:not([open])");
+        (disclosure?.querySelector("summary") || trigger).focus({preventScroll: true});
+      }
     }
   }
   function option(value, text) {
@@ -434,9 +414,13 @@
   }
   function markDirty() {
     playback?.invalidate();
-    draft.messageDirty = true;
+    const message = draft.message;
+    if (!message) return;
+    draft.messageDirty = $("body").value !== messageBody(message) ||
+      $("message-status").value !== message.status;
     draft.saveFailure = "";
-    label("dirty", "builder.editor.unsaved_message");
+    if (draft.messageDirty) label("dirty", "builder.editor.unsaved_message");
+    else raw("dirty", "");
     panel.querySelector(".loc-preview").hidden = true;
     updateInlineStyleAvailability();
     saveIndicator();
@@ -445,10 +429,9 @@
     const p = state.project;
     if (!p)
       return;
-    for (const [key, value] of Object.entries(p.metadata))
-      if ($("metadata").elements.namedItem(key))
-        $("metadata").elements.namedItem(key).value = value;
-    $("metadata").elements.notes.value = p.notes;
+    $("package-id").textContent = p.metadata.id;
+    for (const field of $("metadata").querySelectorAll("[name]"))
+      field.value = savedDetail(field.name);
     updateContentLanguage();
     label("fonts", "builder.editor.font_summary",
       {fonts: [p.fonts.primary, ...(p.fonts.fallback || [])].join(" → ")});
@@ -457,8 +440,16 @@
     for (const name of Object.keys(p.notices).sort())
       $("notices").append(option(name, name));
     $("notice").reset();
+    draft.noticePath = "";
     draft.detailsDirty = draft.noticeDirty = false;
   }
+  function savedDetail(name) {
+    const project = state.project;
+    return (name === "notes" ? project.notes : project.metadata[name]) ?? "";
+  }
+  $("package-id").addEventListener("focus", event => {
+    window.getSelection().selectAllChildren(event.currentTarget);
+  });
   $("font-check").addEventListener("click", async () => {
     if (hasEdits())
       await saveProgress();
@@ -496,7 +487,7 @@
       state.reference.id :
       "";
     if (flow.kind === "home")
-      await library.refresh();
+      library.show(rows);
   }
   async function adopt(next, preserveMessage = false) {
     playback?.invalidate();
@@ -513,7 +504,6 @@
       return;
     }
     fillMetadata();
-    $("upgrade-v2").elements.newID.value = (p.metadata.id + "-v2").slice(0, 96);
     const totals = p.totals.reduce(
       (a, x) => ({total: a.total + x.total, done: a.done + x.done, wip: a.wip + x.wip}),
       {total: 0, done: 0, wip: 0});
@@ -538,7 +528,7 @@
     }
     await projects();
     await tree();
-    const installed = next.installationUpdate || await json("installation", identity());
+    const installed = next.installationUpdate || await json("installation", {...identity(), asMod: true});
     installedExists = !!installed.installed;
     label("install-state",
       installed.installed ? "builder.language.existing_install" : "builder.language.not_installed");
@@ -607,16 +597,20 @@
     if (fallback)
       button.append(document.createTextNode(" · "), phrase("builder.editor.native_fallback"));
     button.setAttribute("aria-current", String(draft.selected === id));
-    button.addEventListener("click", () => run(async () => {
-      if (discard()) {
-        fillMetadata();
+    button.addEventListener("click", () => {
+      if (draft.selected === id) return;
+      return run(async () => {
+        if (draft.messageDirty && !await window.workshopConfirm("builder.assets.discard", "builder.editor.discard_message")) return;
         await showMessage(id);
-      }
-    }));
+      });
+    });
     return button;
   }
   function emptyBody(ref) {
     return [...ref.anchors.map(id => "@anchor " + id), "@empty", "@end", ""].join("\n");
+  }
+  function messageBody(message) {
+    return message.present ? message.body.replace(/\r\n?/g, "\n") : emptyBody(message.reference);
   }
   function showShape(p) {
     const descriptions = [];
@@ -679,15 +673,22 @@
       draft.message.reference.anchors.length ? "builder.editor.required_anchors" :
                                                "builder.editor.no_anchors",
       {anchors: draft.message.reference.anchors.join(" → ")});
-    $("body").value =
-      draft.message.present ? draft.message.body : emptyBody(draft.message.reference);
+    $("body").value = messageBody(draft.message);
     $("message-status").value = draft.message.status;
-    $("placeholders").replaceChildren(keyedOption("", "builder.editor.choose_value"));
-    for (const p of draft.message.reference.placeholders)
-      $("placeholders")
-        .append(Object.hasOwn(valueKindKeys, p.kind) ?
-            keyedOption(p.name, valueKindKeys[p.kind], {name: p.name}) :
-            option(p.name, p.name + " (" + p.kind + ")"));
+    closeToolMenus();
+    const values = draft.message.reference.placeholders;
+    $("placeholders").replaceChildren(...values.map(({name, kind}) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      if (Object.hasOwn(valueKindKeys, kind))
+        ui.set(button, valueKindKeys[kind], {name});
+      else
+        button.textContent = name + " (" + kind + ")";
+      button.addEventListener("click", () => insert("{" + name + "}"));
+      return button;
+    }));
+    if (!values.length)
+      $("placeholders").append(phrase("builder.editor.no_values", {}, "p"));
     $("message-editor").hidden = false;
     panel.querySelector(".loc-preview").hidden = true;
     draft.messageDirty = false;
@@ -750,6 +751,7 @@
     if (command)
       text = (at && input.value[at - 1] !== "\n" ? "\n" : "") + text + "\n";
     input.setRangeText(text, input.selectionStart, input.selectionEnd, "end");
+    closeToolMenus();
     input.focus();
     markDirty();
   }
@@ -815,6 +817,7 @@
       const input = $("body");
       const edit = window.workshopInlineStyle.wrap(input.value,
         input.selectionStart, input.selectionEnd, ...tags);
+      closeToolMenus();
       input.focus();
       input.setSelectionRange(edit.start, edit.end);
       // insertText participates in the browser's native undo history. The
@@ -834,22 +837,28 @@
     button.addEventListener("click", () => applyInlineStyle(button.dataset.locStyle));
   }
   function publicationOptions() {
-    return {...identity(), confirmRights: $("rights").checked, includeWIP: $("wip").checked};
+    return {...identity(), confirmRights: $("rights").checked, includeWIP: $("wip").checked,
+      version: $("release-version").value.trim()};
   }
   async function download(endpoint) {
     if (hasEdits())
       throw failure("builder.language.save_before_export");
     const data = await json(endpoint, {...publicationOptions(), prepareDownload: true});
     const a = $("download");
-    a.href = data.url;
-    a.download = data.name;
-    ui.set(a, "builder.language.download_name", {name: data.name});
-    a.hidden = false;
-    $("editor-actions").open = false;
-    a.scrollIntoView({block: "center"});
-    a.focus();
-    feedbackKey(
-      endpoint === "backup" ? "builder.language.backup_ready" : "builder.language.export_ready");
+    const result = await window.workshopSaveArchive(data, () => {
+      a.href = data.url;
+      a.download = data.name;
+      ui.set(a, "builder.language.download_name", {name: data.name});
+      a.hidden = false;
+      $("editor-actions").open = false;
+      a.scrollIntoView({block: "center"});
+      a.focus();
+      feedbackKey(endpoint === "backup" ? "builder.language.backup_ready" : "builder.language.export_ready");
+    });
+    if (result === "saved") {
+      a.hidden = true;
+      feedbackKey("builder.file.archive_saved", {name: data.name});
+    }
   }
   function submit(id, action) {
     $(id).addEventListener("submit", event => {
@@ -859,12 +868,10 @@
     });
   }
   async function openSelectedProject() {
-    if (!discard())
+    if (!await discard())
       return;
     await adopt(await json("open", {id: $("projects").value}));
     projectDestination();
-    if (flow.phase === "review")
-      await prepareReview("install");
     feedbackKey("builder.language.opened_feedback");
   }
   $("open").addEventListener("click", () => run(openSelectedProject));
@@ -879,7 +886,7 @@
     feedbackKey("builder.editor.reference_extracted");
   });
   async function extractSource(data) {
-    if (!discard())
+    if (!await discard())
       return;
     await adopt(await json("extract", data));
     if (flow.kind === "create") {
@@ -890,38 +897,14 @@
     }
     feedbackKey("builder.language.extracted_feedback");
   }
-  async function beginImportInstallation() {
-    if (window.workshopOpenLanguages && !window.workshopOpenLanguages())
-      return false;
-    if (!loaded)
-      await adopt(await json("state"));
-    clearDraftEdits();
-    flow.kind = "install";
-    flow.phase = "choose";
-    flow.installPath = "import";
-    flow.editorTab = "messages";
-    $("download").hidden = true;
-    return true;
-  }
-  async function adoptImportedProject(next, replaceInstall) {
+  async function adoptImportedProject(next) {
     await adopt(next);
-
     imports.reset();
     projectDestination();
-    if (flow.kind === "install") {
-      try {
-        await installCurrent(replaceInstall);
-      } catch (error) {
-        const uncertain = error.code === "AR_NETWORK" || error.code === "AR_RESPONSE";
-        throw withOutcome(error,
-          uncertain ? "builder.language.import_uncertain" : "builder.language.import_partial",
-          "Project imported into Workshop; installation " + (uncertain ? "could not be confirmed." : "did not complete."));
-      }
-    } else
-      feedbackKey("builder.language.imported_edit");
+    feedbackKey("builder.language.imported_edit");
   }
   async function createProject(data) {
-    if (!discard())
+    if (!await discard())
       return;
     await adopt(await json("create", {
       metadata: {...Object.fromEntries(data), direction: "auto"},
@@ -931,11 +914,10 @@
     feedbackKey("builder.language.created_feedback");
   }
   async function cloneProject(data) {
-    if (!discard())
+    if (!await discard())
       return;
     await adopt(await json("clone", {
       ...identity(),
-      newID: data.get("newID"),
       metadata: {name: data.get("name")},
     }));
     flow.phase = "edit";
@@ -945,9 +927,9 @@
   submit("extract", extractSource);
   submit("create", createProject);
   submit("clone", cloneProject);
-  submit("upgrade-v2", async data => {
-    if (!discard()) return;
-    const upgraded = await json("upgrade-v2", {...identity(), newID: data.get("newID")});
+  submit("upgrade-v2", async () => {
+    if (!await discard()) return;
+    const upgraded = await json("upgrade-v2", identity());
     await adopt(upgraded.state);
     flow.phase = "edit";
     workflowView();
@@ -957,22 +939,26 @@
     });
   });
   $("metadata").addEventListener("input", () => {
-    draft.detailsDirty = true;
+    draft.detailsDirty = [...$("metadata").querySelectorAll("[name]")].some(field =>
+      field.value !== savedDetail(field.name).replace(/\r\n?/g, "\n"));
     draft.saveFailure = "";
     updateContentLanguage();
     saveIndicator();
   });
   $("notice").addEventListener("input", () => {
-    draft.noticeDirty = true;
+    const fields = $("notice").elements;
+    draft.noticeDirty = fields.noticeName.value !== draft.noticePath.replace(/^notices\//, "") ||
+      fields.noticeText.value !== (state.project.notices[draft.noticePath] || "").replace(/\r\n?/g, "\n");
     draft.saveFailure = "";
     saveIndicator();
   });
-  $("notices").addEventListener("change", () => {
-    if (draft.noticeDirty && !window.confirm(ui.text("builder.editor.discard_notice"))) {
-      $("notices").value = "";
+  $("notices").addEventListener("change", async () => {
+    if (draft.noticeDirty && !await window.workshopConfirm("builder.assets.discard", "builder.editor.discard_notice")) {
+      $("notices").value = draft.noticePath;
       return;
     }
     const name = $("notices").value;
+    draft.noticePath = name;
     $("notice").elements.noticeName.value = name.replace(/^notices\//, "");
     $("notice").elements.noticeText.value = state.project.notices[name] || "";
     draft.noticeDirty = false;
@@ -1003,7 +989,7 @@
       id: draft.selected,
       body: $("body").value,
       status: $("message-status").value,
-      metadata: fields,
+      metadata: {...fields, id: state.project.metadata.id},
       notes,
       ...Object.fromEntries(new FormData($("notice")))
     };
@@ -1035,8 +1021,7 @@
         feedbackKey("builder.language.saved_feedback");
     });
   }
-  for (const id of ["save", "save-progress"])
-    $(id).addEventListener("click", saveProgress);
+  $("save-progress").addEventListener("click", saveProgress);
   for (const id of ["metadata", "notice", "font-stack"])
     $(id).addEventListener("submit", event => {
       event.preventDefault();
@@ -1049,21 +1034,43 @@
       saveProgress();
     }
   });
-  $("insert-value").addEventListener("click", () => {
-    if ($("placeholders").value)
-      insert("{" + $("placeholders").value + "}");
+  const toolMenus = [...$("message-tools").querySelectorAll("details")];
+  function closeToolMenus(inside) {
+    for (const menu of toolMenus)
+      if (menu.open && !menu.contains(inside))
+        menu.open = false;
+  }
+  $("message-tools").addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    const menu = toolMenus.find(item => item.open);
+    if (menu) {
+      event.preventDefault();
+      event.stopPropagation();
+      menu.open = false;
+      menu.querySelector("summary").focus();
+    }
   });
+  document.addEventListener("focusin", event => closeToolMenus(event.target));
   for (const el of panel.querySelectorAll("[data-loc-insert]"))
     el.addEventListener("click", () => insert(el.dataset.locInsert, true));
-  $("independent").addEventListener("click", () => run(async () => {
-    if (draft.messageDirty && !window.confirm(ui.text("builder.editor.replace_alias")))
-      return;
-    $("body").value = (await json("materialize", {...identity(), id: draft.selected})).body;
-    markDirty();
-  }));
-  $("empty").addEventListener("click", () => {
-    if (window.confirm(ui.text("builder.editor.clear_confirm"))) {
+  $("independent").addEventListener("click", async () => {
+    const expanded = await run(async () => {
+      if (draft.messageDirty && !await window.workshopConfirm("builder.editor.expand_alias", "builder.editor.replace_alias"))
+        return false;
+      $("body").value = (await json("materialize", {...identity(), id: draft.selected})).body;
+      markDirty();
+      return true;
+    });
+    if (expanded) {
+      closeToolMenus();
+      $("body").focus();
+    }
+  });
+  $("empty").addEventListener("click", async () => {
+    if (await window.workshopConfirm("builder.editor.clear_text", "builder.editor.clear_confirm")) {
       $("body").value = emptyBody(draft.message.reference);
+      closeToolMenus();
+      $("body").focus();
       markDirty();
     }
   });
@@ -1170,7 +1177,7 @@
     raw("publication-report", "");
     renderTextCoverage(null);
     if (purpose === "install") {
-      installedExists = !!(await json("installation", identity())).installed;
+      installedExists = !!(await json("installation", {...identity(), asMod: true})).installed;
       const r = await json("installation-check", identity());
       label("publication-report", "builder.language.install_report",
         {count: r.messages, fallback: r.fallback});
@@ -1185,11 +1192,11 @@
       throw failure("builder.language.save_before_install");
     let data;
     try {
-      data = await json("install", {...identity(), replace});
+      data = await json("install", {...identity(), replace, asMod: true});
     } catch (error) {
       if (error.code === "builder.language.request_conflict") {
         try {
-          installedExists = !!(await json("installation", identity())).installed;
+          installedExists = !!(await json("installation", {...identity(), asMod: true})).installed;
           workflowView();
         } catch {
           // Refreshing the replacement choice is optional. Retain the original
@@ -1213,6 +1220,8 @@
     label("install-state", "builder.language.installed_path", {path: data.path});
     flow.phase = "installed";
     workflowView();
+    if (data.installedType)
+      await window.workshopShowInstalledMods?.(data.installedType, data.catalog);
   }
   $("install").addEventListener("click", () => run(async () => {
     if (installedExists && !$("replace-install").checked)
@@ -1220,12 +1229,11 @@
     await installCurrent($("replace-install").checked);
   }));
   async function startWorkflow(kind) {
-    if (!discard())
+    if (!await discard())
       return;
     clearDraftEdits();
     flow.kind = kind;
     flow.phase = "choose";
-    flow.installPath = kind === "install" ? "import" : "";
     imports.reset();
     flow.editorTab = "messages";
     $("archive-options").open = kind === "edit";
@@ -1234,36 +1242,26 @@
     workflowView();
     await projects();
   }
-  async function chooseInstallPath(path) {
-    flow.installPath = path;
-    imports.reset();
-    feedback("");
-    workflowView();
-    await projects();
-  }
   async function returnToLanguages() {
-    if (!discard())
+    if (!await discard())
       return;
     clearDraftEdits();
     flow.kind = "home";
     $("download").hidden = true;
     feedback("");
     workflowView();
-    await library.refresh();
+    await projects();
     window.scrollTo(0, 0);
     $("title").focus({preventScroll: true});
   }
   for (const button of panel.querySelectorAll("[data-loc-flow]")) {
     button.addEventListener("click", () => run(() => startWorkflow(button.dataset.locFlow)));
   }
-  for (const button of panel.querySelectorAll("[data-loc-install]")) {
-    button.addEventListener("click", () => run(() => chooseInstallPath(button.dataset.locInstall)));
-  }
   function backToLanguages() {
     return run(returnToLanguages);
   }
   $("home-button").addEventListener("click", backToLanguages);
-  $("installed-home").addEventListener("click", backToLanguages);
+  $("installed-home").addEventListener("click", () => window.workshopShowInstalledMods?.("actraiser-language"));
   $("back-projects").addEventListener("click", backToLanguages);
   for (const purpose of ["install", "publish"])
     $("review-" + purpose).addEventListener("click", () => run(async () => {
@@ -1303,6 +1301,7 @@
     }
   });
   document.addEventListener("pointerdown", event => {
+    closeToolMenus(event.target);
     if (!$("editor-actions").contains(event.target))
       $("editor-actions").open = false;
   });
@@ -1310,12 +1309,6 @@
     expanded.clear();
     await tree();
   }));
-  window.addEventListener("beforeunload", event => {
-    if (hasEdits()) {
-      event.preventDefault();
-      event.returnValue = "";
-    }
-  });
   // The surrounding builder handles tab keyboard navigation. Unsaved text is
   // kept when visiting Build/Assets/Manual and guarded before project changes.
   window.localizationActivate = () => run(async () => {
@@ -1325,24 +1318,20 @@
     else {
       await refreshReference(next);
       workflowView();
-      if (flow.kind === "home")
-        await library.refresh();
     }
   });
   // The shell passes only a project ID. It never reads archives or edits pack
   // state; this same guarded Go-backed workflow handles library navigation.
-  function openProject(id, review = false) {
+  function openProject(id) {
     return run(async () => {
-      if (!discard())
+      if (!await discard())
         return;
       await adopt(await json("open", {id}));
       flow.kind = "edit";
-      flow.phase = review ? "review" : "edit";
+      flow.phase = "edit";
       flow.reviewPurpose = "install";
       flow.editorTab = "messages";
       workflowView();
-      if (review)
-        await prepareReview("install");
       window.scrollTo(0, 0);
       feedback("");
     });
@@ -1350,9 +1339,7 @@
   window.localizationOpenProject = openProject;
   window.localizationHasEdits = hasEdits;
   document.addEventListener("workshop:closed", () => {
-    imports.clearDrop();
     closed = true;
-    library.close();
     playback?.invalidate();
     clearDraftEdits();
     for (const control of panel.querySelectorAll("button,input,textarea,select"))

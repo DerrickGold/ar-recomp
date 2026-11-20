@@ -42,7 +42,9 @@ typedef enum HdPlane {
 } HdPlane;
 
 enum {
-  kHdMaxReplacements = 16,
+  kHdMaxLegacyReplacements = 16,
+  kHdTitlePackEntries = 2,
+  kHdMaxReplacements = kHdMaxLegacyReplacements + kHdTitlePackEntries,
   kHdMaxName = 48,
   kHdMaxPath = 512,
 };
@@ -71,6 +73,7 @@ typedef struct HdReplacement {
   int pixels_width, pixels_height;
   /* Game-policy result, rebuilt every emulated frame. */
   bool active;
+  bool from_title_pack;
 } HdReplacement;
 
 extern HdReplacement g_hd_replacements[kHdMaxReplacements];
@@ -79,6 +82,8 @@ extern int g_hd_replacement_count;
 /* Parse a manifest. Returns the number of entries loaded; 0 with no error
  * output if the file simply does not exist. Safe to call once at startup. */
 int HdReplacements_Load(const char *path);
+int HdReplacements_LoadWithOverlay(const char *path, const char *overlay_path);
+bool HdReplacements_IsTitleHook(const HdReplacement *entry);
 
 /* Compatibility for the standard title hooks, whose authored placement was
  * measured against US artwork. JP native lettering extends three pixels

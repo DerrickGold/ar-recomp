@@ -17,7 +17,7 @@
   ],
   "start": {
     "program": ["ActRaiserRecompBuilder.exe"],
-    "args": ["--play-session", "--output-dir={install}/ActRaiserRecomp", "--build-on-first-run",
+    "args": ["--play-session", "--output-dir={install}/ActRaiserRecomp", "--mods-dir={install}/mods", "--build-on-first-run",
       "--rom={input:rom}", "--rom={input:rom-jp}", "--rom={input:rom-eu-en}",
       "--rom={input:rom-de}", "--rom={input:rom-fr}", "--rom={input:rom-ar2-us}"]
   },

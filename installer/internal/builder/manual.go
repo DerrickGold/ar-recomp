@@ -10,15 +10,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 )
 
 // The instruction manual is the player's own file. The builder ships no booklet:
 // a scan of the retail manual is the whole copyrighted work, so this is the one
 // asset whose bytes have to come from whoever is running the build.
 //
-// It lands at game-assets/manual.pdf, which is the path the in-game reader
-// already opens (src/manual/manual_reader.c), so installing one is a plain file
-// write with no manifest record to keep in step.
+// Loose PDF imports live here and serve as the fallback for manual packs.
 const manualRelativePath = "manual.pdf"
 
 const (
@@ -45,8 +46,8 @@ func manualPath(root string) string {
 
 // manualPage mirrors ManualPageEntry: one carved page image.
 type manualPage struct {
-	length        int
-	width, height uint16
+	offset, length int
+	width, height  uint16
 }
 
 // carveManualAlbum is a Go port of ManualPages_CarveAlbum. It exists so the
@@ -74,7 +75,7 @@ func carveManualAlbum(data []byte) []manualPage {
 			at += 2
 			continue
 		}
-		pages = append(pages, manualPage{length: end - at, width: width, height: height})
+		pages = append(pages, manualPage{offset: at, length: end - at, width: width, height: height})
 		at = end // never rescan inside a recorded page
 	}
 	return pages
@@ -207,6 +208,11 @@ type manualAlbumVerdict struct {
 	Reason string
 }
 
+func (v manualAlbumVerdict) validGeometry() bool {
+	return v.OK && v.Pages >= 2 && v.Pages <= manualMaxPages &&
+		v.Width > 0 && v.Width <= 65535 && v.Height > 0 && v.Height <= 65535
+}
+
 // judgeManualAlbum ports ManualPages_LooksLikeAlbum's three tests and explains
 // which one failed. The reader collapses all of them into "needs converting";
 // the builder is the place where a specific answer is actually actionable.
@@ -305,17 +311,59 @@ type manualStatus struct {
 	Height  int   `json:"height,omitempty"`
 	// InGame reports whether the game's own reader will open this file. A manual
 	// can be perfectly readable in the browser and still fail this.
-	InGame  bool   `json:"inGame"`
-	Warning string `json:"warning,omitempty"`
+	InGame        bool   `json:"inGame"`
+	Warning       string `json:"warning,omitempty"`
+	LegacyPresent bool   `json:"legacyPresent"`
+	Revision      string `json:"revision,omitempty"`
+}
+
+var cachedManualPath = regexp.MustCompile(`^mods-cache/[0-9a-f]{64}-0\.pdf$`)
+
+// Resolve the generated manual record. The cached file and its album verdict
+// were published by the mod store; status reads never rescan a packed PDF.
+func activeManualPack(root string) (string, os.FileInfo, manualAlbumVerdict) {
+	assets := filepath.Join(root, "game-assets")
+	overlay, _, err := readBoundedRegularFile(filepath.Join(assets, modOverlayName), maxAssetManifestBytes)
+	if err != nil {
+		return "", nil, manualAlbumVerdict{}
+	}
+	text := string(overlay)
+	file, ok := manifestSectionValue(text, "manual", "file")
+	if !ok || !cachedManualPath.MatchString(file) {
+		return "", nil, manualAlbumVerdict{}
+	}
+	geometry, ok := manifestSectionValue(text, "manual", "album")
+	book := manualAlbumVerdict{OK: true}
+	n, err := fmt.Sscanf(geometry, "%d,%d,%d", &book.Pages, &book.Width, &book.Height)
+	if !ok || err != nil || n != 3 || !book.validGeometry() {
+		return "", nil, manualAlbumVerdict{}
+	}
+	path := filepath.Join(assets, filepath.FromSlash(file))
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxManualBytes {
+		return "", nil, manualAlbumVerdict{}
+	}
+	return path, info, book
 }
 
 func (app *application) manualStatus() manualStatus {
-	path := manualPath(app.options.ProjectRoot)
+	root := app.options.ProjectRoot
+	path := manualPath(root)
 	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
+	legacyPresent := err == nil && info.Mode().IsRegular()
+	if pack, cached, album := activeManualPack(root); cached != nil {
+		return manualStatus{
+			Present: true, LegacyPresent: legacyPresent, InGame: true, Bytes: cached.Size(),
+			Pages: album.Pages, Width: album.Width, Height: album.Height, Revision: filepath.Base(pack),
+		}
+	}
+	if !legacyPresent {
 		return manualStatus{}
 	}
-	status := manualStatus{Present: true, Bytes: info.Size()}
+	status := manualStatus{
+		Present: true, LegacyPresent: true, Bytes: info.Size(),
+		Revision: fmt.Sprintf("%d-%d", info.Size(), info.ModTime().UnixNano()),
+	}
 	// The album probe needs the bytes. Reading 8-100 MB on a tab open is one
 	// read of a file the browser is about to fetch in full anyway, and it only
 	// happens when the Help tab is opened.
@@ -342,6 +390,9 @@ func (app *application) writeManualStatus(response http.ResponseWriter) {
 // keeps the range support the PDF viewer relies on to page through a large scan.
 func (app *application) serveManual(response http.ResponseWriter, request *http.Request) {
 	path := manualPath(app.options.ProjectRoot)
+	if pack, cached, _ := activeManualPack(app.options.ProjectRoot); cached != nil && request.URL.Query().Get("legacy") != "true" {
+		path = pack
+	}
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		http.NotFound(response, request)
@@ -367,6 +418,10 @@ func readManualUpload(header *multipart.FileHeader) ([]byte, error) {
 		return nil, err
 	}
 	defer input.Close()
+	return readManualPDF(input)
+}
+
+func readManualPDF(input io.Reader) ([]byte, error) {
 	content, err := io.ReadAll(io.LimitReader(input, maxManualBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("copy the manual: %w", err)
@@ -386,6 +441,19 @@ func readManualUpload(header *multipart.FileHeader) ([]byte, error) {
 		return nil, errors.New("the manual has no PDF end marker; it may be truncated")
 	}
 	return content, nil
+}
+
+func copyModManual(out io.Writer, source io.Reader) (manualAlbumVerdict, error) {
+	content, err := readManualPDF(source)
+	if err != nil {
+		return manualAlbumVerdict{}, err
+	}
+	album := judgeManualAlbum(content)
+	if !album.OK {
+		return album, fmt.Errorf("the manual %s", album.Reason)
+	}
+	_, err = out.Write(content)
+	return album, err
 }
 
 func (app *application) saveManual(response http.ResponseWriter, request *http.Request) {
@@ -410,6 +478,12 @@ func (app *application) saveManual(response http.ResponseWriter, request *http.R
 		writeJSONError(response, http.StatusBadRequest, err.Error())
 		return
 	}
+	unlock, err := desktop.LockGameData(app.options.ProjectRoot)
+	if err != nil {
+		writeJSONError(response, http.StatusConflict, err.Error())
+		return
+	}
+	defer unlock()
 	staged, err := stageBytes(app.options.ProjectRoot, manualRelativePath, content)
 	if err != nil {
 		writeJSONError(response, http.StatusInternalServerError, err.Error())
@@ -423,17 +497,38 @@ func (app *application) saveManual(response http.ResponseWriter, request *http.R
 	writeJSON(response, http.StatusOK, app.manualStatus())
 }
 
-// removeManual deletes the installed manual. The game and the Help tab both
-// treat absence as a normal state, so this needs no confirmation beyond the
-// one the page already asks for.
+// Keep the former loose PDF recoverable when removing it from discovery.
 func (app *application) removeManual(response http.ResponseWriter) {
 	app.assetMu.Lock()
 	defer app.assetMu.Unlock()
-
-	if err := os.Remove(manualPath(app.options.ProjectRoot)); err != nil &&
-		!errors.Is(err, os.ErrNotExist) {
-		writeJSONError(response, http.StatusInternalServerError,
-			fmt.Sprintf("remove the manual: %v", err))
+	root := app.options.ProjectRoot
+	unlock, err := desktop.LockGameData(root)
+	if err != nil {
+		writeJSONError(response, http.StatusConflict, err.Error())
+		return
+	}
+	defer unlock()
+	path := manualPath(root)
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		writeJSON(response, http.StatusOK, app.manualStatus())
+		return
+	} else if err != nil {
+		writeJSONError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	recovery := filepath.Join(root, "game-assets", legacyModBackupDir)
+	if err := ensureModDir(recovery); err != nil {
+		writeJSONError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	backup, err := os.MkdirTemp(recovery, "manual-")
+	if err != nil {
+		writeJSONError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.Rename(path, filepath.Join(backup, filepath.Base(path))); err != nil {
+		_ = os.Remove(backup)
+		writeJSONError(response, http.StatusInternalServerError, fmt.Sprintf("remove the manual: %v", err))
 		return
 	}
 	writeJSON(response, http.StatusOK, app.manualStatus())

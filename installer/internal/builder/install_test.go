@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -106,6 +109,73 @@ func TestLaunchWorksOnDetectedBuildWithoutBuilding(t *testing.T) {
 		}
 	default:
 		t.Fatal("launch did not reach the host")
+	}
+}
+
+func TestLaunchRecoversFromAnOverfullModDirectory(t *testing.T) {
+	for _, mode := range []string{"prepared", "legacy"} {
+		t.Run(mode, func(t *testing.T) {
+			root, external := t.TempDir(), t.TempDir()
+			overlay := filepath.Join(root, "game-assets", modOverlayName)
+			var before []byte
+			if mode == "prepared" {
+				pack := testMusicMod(t, "working-pack", []modTrack{{Track: "song-00", File: "audio/track.ogg"}}, "")
+				if _, err := updateModCatalog(root, nil, bytes.NewReader(pack), nil); err != nil {
+					t.Fatal(err)
+				}
+				var err error
+				before, err = os.ReadFile(overlay)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := 0; i <= maxDiscoveredMods; i++ {
+				if err := os.WriteFile(filepath.Join(external, fmt.Sprintf("%03d.o2r", i)), nil, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var launched []string
+			app := newApplication(context.Background(), Options{
+				ProjectRoot: root, ModDirectories: []string{external},
+				Detect: func() InstallState { return InstallState{CanLaunch: true, Result: Result{BinaryPath: "game"}} },
+				Launch: func(result Result) error {
+					launched = append(launched, result.ModRecovery)
+					return nil
+				},
+			}, "token")
+			launch := func(body string) *httptest.ResponseRecorder {
+				response := httptest.NewRecorder()
+				app.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/token/launch", strings.NewReader(body)))
+				return response
+			}
+			wantFailure := func(response *httptest.ResponseRecorder) {
+				t.Helper()
+				var body map[string]string
+				if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil ||
+					response.Code != http.StatusConflict || body["errorCode"] != "builder.mods.scan_failed" || body["modRecovery"] != mode {
+					t.Fatalf("expected scan recovery %q, got %d %s (%v)", mode, response.Code, response.Body, err)
+				}
+			}
+			wantFailure(launch(""))
+			if len(launched) != 0 {
+				t.Fatal("game launched without a recovery choice")
+			}
+			response := launch(fmt.Sprintf(`{"modRecovery":%q}`, mode))
+			if response.Code != http.StatusOK || len(launched) != 1 || launched[0] != mode {
+				t.Fatalf("recovery did not launch: %d %s, %q", response.Code, response.Body, launched)
+			}
+			overlayAfter, err := os.ReadFile(overlay)
+			if mode == "prepared" && (err != nil || !bytes.Equal(before, overlayAfter)) ||
+				mode == "legacy" && !os.IsNotExist(err) {
+				t.Fatal("recovery changed the prepared setup", err)
+			}
+			// Retry once the launcher folder is readable within the scan limit.
+			app.options.ModDirectories = nil
+			response = launch("")
+			if response.Code != http.StatusOK || len(launched) != 2 || launched[1] != "" {
+				t.Fatalf("normal retry did not launch: %d %s, %q", response.Code, response.Body, launched)
+			}
+		})
 	}
 }
 

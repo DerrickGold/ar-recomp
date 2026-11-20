@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 )
 
 const maxAssetRequestBytes = 1 << 30
@@ -13,6 +15,14 @@ const maxAssetRequestBytes = 1 << 30
 var errUnknownTitleArtwork = errors.New("select an available title artwork variant")
 
 func (app *application) saveAssets(response http.ResponseWriter, request *http.Request) {
+	app.saveAssetConfiguration(response, request, false)
+}
+
+func musicDraftRoot(root string) string {
+	return filepath.Join(root, "game-assets", "music-workshop")
+}
+
+func (app *application) saveAssetConfiguration(response http.ResponseWriter, request *http.Request, draft bool) {
 	app.assetMu.Lock()
 	defer app.assetMu.Unlock()
 
@@ -29,20 +39,39 @@ func (app *application) saveAssets(response http.ResponseWriter, request *http.R
 	}
 	defer request.MultipartForm.RemoveAll()
 
-	manifest, manifestPath, err := readAssetManifest(app.options.ProjectRoot)
+	unlock, err := desktop.LockGameData(app.options.ProjectRoot)
+	if err != nil {
+		writeJSONError(response, http.StatusConflict, err.Error())
+		return
+	}
+	defer unlock()
+	root := app.options.ProjectRoot
+	if draft {
+		root = musicDraftRoot(root)
+		dirs := []string{filepath.Dir(root), root, filepath.Join(root, "game-assets")}
+		for _, dir := range dirs {
+			if err := ensureModDir(dir); err != nil {
+				writeJSONError(response, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	}
+	manifest, manifestPath, err := readAssetManifest(root)
 	if err != nil {
 		writeJSONError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	plan := assetSavePlan{root: app.options.ProjectRoot, manifest: manifest, manifestPath: manifestPath}
+	plan := assetSavePlan{root: root, manifest: manifest, manifestPath: manifestPath}
 	defer plan.discardStaged()
-	if err := plan.prepareTitle(request); err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, errUnknownTitleArtwork) {
-			status = http.StatusBadRequest
+	if !draft {
+		if err := plan.prepareTitle(request); err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, errUnknownTitleArtwork) {
+				status = http.StatusBadRequest
+			}
+			writeJSONError(response, status, err.Error())
+			return
 		}
-		writeJSONError(response, status, err.Error())
-		return
 	}
 	if err := plan.prepareTracks(request); err != nil {
 		writeJSONError(response, http.StatusBadRequest, err.Error())
@@ -58,7 +87,7 @@ func (app *application) saveAssets(response http.ResponseWriter, request *http.R
 		plan.changed = true
 	}
 	if !plan.changed && !plan.touched {
-		configuration, loadErr := loadAssetConfiguration(plan.root)
+		configuration, loadErr := loadAssetView(root, draft)
 		if loadErr != nil {
 			writeJSONError(response, http.StatusInternalServerError, loadErr.Error())
 			return
@@ -74,13 +103,12 @@ func (app *application) saveAssets(response http.ResponseWriter, request *http.R
 		return
 	}
 
-	configuration, err := loadAssetConfiguration(app.options.ProjectRoot)
+	configuration, err := loadAssetView(root, draft)
 	if err != nil {
 		writeJSONError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
-		"message": "Assets saved. Changes apply the next time the game starts.",
 		"changed": true,
 		"config":  configuration,
 	})

@@ -83,6 +83,13 @@ int main(void) {
                                                strlen(conflict_index), &error));
   CHECK(catalog->count == 0 && catalog->conflict_count == 1);
 
+  snprintf(index, sizeof(index),
+           "actraiser-language-catalog\t1\nreplace\tcommunity.excellent\t%s\n", token);
+  CHECK(ArLanguagePackCatalog_ReadArchiveIndex(catalog, &io, "/packs", index,
+                                             strlen(index), &error));
+  CHECK(catalog->conflict_count == 0 && catalog->count == 1 &&
+        strstr(catalog->entries[0].manifest, token));
+
   /* A library larger than the supported capacity keeps a subset that does not
    * depend on the order the filesystem enumerated it, and says how many it
    * could not offer. */

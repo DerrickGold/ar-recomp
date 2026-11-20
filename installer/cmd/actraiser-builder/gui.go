@@ -35,7 +35,14 @@ func runGUI(args []string) error {
 	playSession := flags.Bool("play-session", false, "close the Builder when the game exits and return its status")
 	bigScreen := flags.Bool("big-screen", false, "show the controller interface")
 	gameWindowMode := flags.String("game-window-mode", "", "window mode for --play-session: saved, windowed, or borderless (default: follow RecompLauncher Big Picture)")
-	var roms []string
+	var roms, modDirectories []string
+	flags.Func("mods-dir", "scan an external mod directory (repeatable)", func(directory string) error {
+		path, err := filepath.Abs(directory)
+		if err == nil {
+			modDirectories = append(modDirectories, path)
+		}
+		return err
+	})
 	flags.Func("rom", "preselect a ROM (repeat for additional supported ROMs)", func(path string) error {
 		roms = append(roms, path)
 		return nil
@@ -132,6 +139,7 @@ func runGUI(args []string) error {
 		BuildOnFirstRun: *firstBuild,
 		ControllerHint:  os.Getenv("RECOMPLAUNCHER_PAD"),
 		ProjectRoot:     dataRoot,
+		ModDirectories:  modDirectories,
 		ImportSearchDir: values.importSearchDir,
 		OpenBrowser:     !values.noOpen,
 		Stdout:          os.Stdout,
@@ -269,6 +277,7 @@ func builtGameCommand(result builder.Result) (*exec.Cmd, error) {
 		}
 		command := exec.Command(path, arguments...)
 		command.Dir = result.WorkingDir
+		command.Env = append(command.Environ(), builder.ModRecoveryEnv+"="+result.ModRecovery)
 		return command, nil
 	}
 	if result.BinaryPath == "" {
@@ -291,6 +300,7 @@ func builtGameCommand(result builder.Result) (*exec.Cmd, error) {
 
 	command := exec.Command(result.BinaryPath, arguments...)
 	command.Dir = result.WorkingDir
+	command.Env = append(command.Environ(), builder.ModRecoveryEnv+"="+result.ModRecovery)
 	return command, nil
 }
 
@@ -308,6 +318,8 @@ func launchViaScript(result builder.Result) error {
 	default:
 		command = exec.Command(result.OutputPath)
 	}
+	command.Env = append(command.Environ(), builder.ModRecoveryEnv+"="+result.ModRecovery)
+	detachFromBuilder(command)
 	if err := command.Start(); err != nil {
 		return fmt.Errorf("launch game: %w", err)
 	}

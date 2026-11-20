@@ -229,14 +229,11 @@ static void ProbeEntryFile(MusicReplacement *entry) {
   entry->has_audio = true;
 }
 
-int MusicReplacements_Load(const char *manifest_path) {
-  MusicReplacements_Shutdown();
-  g_music_replacement_count = 0;
-  memset(g_music_replacements, 0, sizeof(g_music_replacements));
-  s_musiclog = getenv("AR_MUSICLOG") != NULL;
+static void ReadMusicManifest(const char *manifest_path, int capacity) {
   FILE *f = sr_fopen(manifest_path, "r");
-  if (!f) return 0;
+  if (!f) return;
 
+  const int limit = g_music_replacement_count + capacity;
   MusicReplacement pending;
   bool in_entry = false;
   int entry_line = 0;
@@ -245,7 +242,7 @@ int MusicReplacements_Load(const char *manifest_path) {
 
   #define COMMIT_PENDING() do { \
     if (in_entry && EntryComplete(&pending, manifest_path, entry_line) && \
-        g_music_replacement_count < kMusicMaxReplacements) \
+        g_music_replacement_count < limit) \
       g_music_replacements[g_music_replacement_count++] = pending; \
     in_entry = false; \
   } while (0)
@@ -314,6 +311,19 @@ int MusicReplacements_Load(const char *manifest_path) {
   COMMIT_PENDING();
   #undef COMMIT_PENDING
   fclose(f);
+}
+
+int MusicReplacements_LoadWithOverlay(const char *manifest_path,
+                                     const char *overlay_path) {
+  MusicReplacements_Shutdown();
+  g_music_replacement_count = 0;
+  memset(g_music_replacements, 0, sizeof(g_music_replacements));
+  s_musiclog = getenv("AR_MUSICLOG") != NULL;
+
+  /* The existing selector gives gated matches precedence and breaks ties in
+   * file order. Place the overlay first so it wins equally specific matches. */
+  if (overlay_path) ReadMusicManifest(overlay_path, kMusicMaxPackReplacements);
+  ReadMusicManifest(manifest_path, kMusicMaxLegacyReplacements);
 
   int with_audio = 0;
   for (int i = 0; i < g_music_replacement_count; i++) {
@@ -335,6 +345,10 @@ int MusicReplacements_Load(const char *manifest_path) {
       "[music-manifest] %d entries, %d with audio; %d memory-backed (%zu bytes), %d file-backed\n",
       g_music_replacement_count, with_audio, cached, s_encoded_bytes, with_audio - cached);
   return g_music_replacement_count;
+}
+
+int MusicReplacements_Load(const char *manifest_path) {
+  return MusicReplacements_LoadWithOverlay(manifest_path, NULL);
 }
 
 /* ---- selection ---------------------------------------------------------- */

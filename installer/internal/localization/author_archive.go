@@ -62,6 +62,10 @@ func (p *AuthorProject) writeArchive(output io.Writer, kind string) error {
 	if err := validateProjectFiles(files); err != nil {
 		return err
 	}
+	return writeLanguageZIP(output, files)
+}
+
+func writeLanguageZIP(output io.Writer, files map[string][]byte) error {
 	paths := make([]string, 0, len(files))
 	for path := range files {
 		paths = append(paths, path)
@@ -168,6 +172,10 @@ func ReadAuthorArchive(input io.ReaderAt, size int64) (*AuthorProject, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readAuthorIndex(index)
+}
+
+func readAuthorIndex(index *archiveIndex) (*AuthorProject, error) {
 	files := map[string][]byte{}
 	for _, member := range index.ordered {
 		data, err := readArchiveMember(member, member.UncompressedSize64)
@@ -175,6 +183,15 @@ func ReadAuthorArchive(input io.ReaderAt, size int64) (*AuthorProject, error) {
 			return nil, err
 		}
 		files[member.Name] = data
+	}
+	if index.contentID != "" {
+		manifest, err := readArchiveMember(index.modManifest, 64<<10)
+		if err != nil {
+			return nil, err
+		}
+		if index.contentID != languageContentID(manifest, files) {
+			return nil, fmt.Errorf("language mod ID does not match its content")
+		}
 	}
 	header := index.header
 	pack, err := LoadAuthorPack(projectMapFS(files))

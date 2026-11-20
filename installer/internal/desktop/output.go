@@ -64,6 +64,9 @@ func PreparePortableData(source, destination string, embedded ...fs.FS) error {
 		}
 	}
 	if fresh {
+		if err := stageLocalMods(source, filepath.Join(stage, "seed")); err != nil {
+			return err
+		}
 		for _, leaf := range []string{"config.ini", "settings.ini", "diorama-layers.ini", "action-effects.ini", "saves"} {
 			if err := copyMissingTree(filepath.Join(source, leaf), filepath.Join(destination, leaf)); err != nil {
 				return err

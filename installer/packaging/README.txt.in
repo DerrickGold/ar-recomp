@@ -243,11 +243,11 @@ Install a reviewed pack, restart the game, then select its name in the overlay's
 Localization menu. Enhanced text uses the selected source. Native rendering
 keeps original USA text/font. The editor preview is a script preview, not final
 in-game font layout; visually check translations before sharing them.
-Install a new project with Pack actions → Install in game. Once its package ID
+Install a new project with Install or export… → Install in game. Once its package ID
 is installed, saving Workshop edits also refreshes that game copy, preserving
 its enabled/disabled state. Restart the game to load the updated text.
 Local installation keeps all supplied translations; redistribution consent and
-WIP filtering belong to Export for sharing. Under Import new pack, choose an
+WIP filtering belong to Export .o2r…. Under Import new pack, choose an
 .arlang file, or drop one .arlang at a time into the Workshop from any section.
 Review the package, then choose Import & install. Unpacked folders
 remain available under Advanced: unpacked language folder. Install already

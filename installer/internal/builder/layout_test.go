@@ -40,9 +40,9 @@ func TestPageHasTabShellAndHeaderBuildStatus(t *testing.T) {
 	body := renderFrontendSource(t)
 	for _, want := range []string{
 		`role="tablist"`,
-		`id="tab-build"`, `id="tab-assets"`, `id="tab-manual"`,
+		`id="tab-build"`, `id="tab-assets"`, `id="tab-settings"`,
 		`id="tab-localization"`, `id="panel-localization"`,
-		`id="panel-build"`, `id="panel-assets"`, `id="panel-manual"`,
+		`id="panel-build"`, `id="panel-assets"`, `id="panel-settings"`,
 		`id="dock"`, `id="workspace-status"`, `id="dock-pct"`, `id="dock-launch"`,
 	} {
 		if !strings.Contains(body, want) {
@@ -53,32 +53,32 @@ func TestPageHasTabShellAndHeaderBuildStatus(t *testing.T) {
 	if !strings.Contains(body, `id="tab-home" role="tab" aria-selected="true"`) {
 		t.Error("the Home tab should be selected on load")
 	}
-	if !strings.Contains(body, `id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" hidden`) {
-		t.Error("the Manual panel should start hidden")
+	if !strings.Contains(body, `id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden`) {
+		t.Error("the Builder Settings panel should start hidden")
 	}
 	if !strings.Contains(body, `id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden`) {
 		t.Error("the Assets panel should start hidden")
 	}
 }
 
-func TestAssetsTabHasTitleToggleAndIdentifiedTrackPickers(t *testing.T) {
+func TestAssetsTabHasIdentifiedTrackPickers(t *testing.T) {
 	body := renderFrontendSource(t)
 	for _, want := range []string{
-		`id="title-toggle"`, `id="save-assets-top"`, `src="title-logo.png"`,
+		`id="save-assets-top"`,
 		`id="generate-previews"`, `class="original-audio"`,
 		`class="replacement-audio"`,
 		`name="track-title-theme"`, `name="track-song-00"`,
 		`name="track-song-03"`, `name="track-song-06"`,
 		`name="track-song-12"`, `name="track-song-15"`,
 		`name="track-song-08"`, `name="track-song-16"`,
-		`Track 03`, `Manifest [music:song-03]`,
+		`Track 03`, `Slot song-03`,
 		`accept=".ogg,.oga,audio/ogg"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("Assets tab is missing %s", want)
 		}
 	}
-	if !strings.Contains(body, `fetchResponse("assets",{method:"POST",body:new FormData(assetForm)})`) {
+	if !strings.Contains(body, `fetchResponse("music-draft",{method:"POST",body})`) {
 		t.Error("Assets form is not wired to the save endpoint")
 	}
 	if !strings.Contains(body, `fetchResponse(
@@ -98,7 +98,7 @@ func TestAssetsTabCanSaveFromTheTopAndRevertASlot(t *testing.T) {
 	body := renderFrontendSource(t)
 	for _, want := range []string{
 		`id="asset-bar"`, `id="save-assets-top"`, `id="discard-assets"`,
-		`id="asset-bar-note"`, `class="asset-bar"`,
+		`id="asset-bar-note"`, `class="editor-bar"`,
 		`class="asset-clear"`, `name="track-remove-song-00"`,
 		`name="track-remove-title-theme"`, `id="regenerate-previews"`,
 	} {
@@ -107,7 +107,7 @@ func TestAssetsTabCanSaveFromTheTopAndRevertASlot(t *testing.T) {
 		}
 	}
 	// The toolbar is only useful if it follows the reader down the list.
-	if !strings.Contains(body, ".asset-bar {\n  position:sticky;\n  top:var(--workspace-header-h);") {
+	if !strings.Contains(body, ".editor-bar {\n  position:sticky;\n  top:var(--workspace-header-h);") {
 		t.Error("the asset toolbar is not sticky")
 	}
 	for _, id := range []string{"song-00", "song-16", "title-theme"} {
@@ -117,10 +117,10 @@ func TestAssetsTabCanSaveFromTheTopAndRevertASlot(t *testing.T) {
 	}
 }
 
-// Shared atmosphere stays behind every menu and stops when the app is hidden.
+// The Play scene pauses when the app or its panel is hidden.
 func TestSceneIsOptionalAndVisibilityAware(t *testing.T) {
 	body := renderFrontendSource(t)
-	for _, want := range []string{`id="scene-motion"`, `id="palace-scene"`, `id="ambient-scene"`, `id="scene-setting"`, `"visibilitychange",sync`, `"workshop:navigate",sync`, `prefers-reduced-motion: reduce`, `cancelAnimationFrame(raf)`, `"auto", "animated", "still", "off"`} {
+	for _, want := range []string{`id="scene-motion"`, `id="palace-scene"`, `id="scene-setting"`, `"visibilitychange",sync`, `"workshop:navigate",sync`, `prefers-reduced-motion: reduce`, `cancelAnimationFrame(raf)`, `"auto", "animated", "still", "off"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("scene is missing %s", want)
 		}
@@ -136,7 +136,7 @@ func TestHeaderClearanceIsMeasuredNotGuessed(t *testing.T) {
 		t.Fatal("workspace header is missing")
 	}
 	end := strings.Index(body[header:], "</header>") + header
-	for _, id := range []string{`id="dock"`, `id="dock-pct"`, `id="dock-launch"`} {
+	for _, id := range []string{`id="dock"`, `id="dock-pct"`, `id="dock-launch"`, `id="interface-language"`, `id="interface-language-status"`} {
 		if at := strings.Index(body, id); at < header || at > end {
 			t.Errorf("%s is outside the header", id)
 		}
@@ -202,13 +202,14 @@ func TestMusicUsesSearchableDropdown(t *testing.T) {
 	}
 }
 
-// The manual retains the original art without repeating it over every tool.
-func TestCoverArtIsInTheManual(t *testing.T) {
+// Play links to the original box art below its primary actions.
+func TestCoverArtIsBelowPlayActions(t *testing.T) {
 	body := renderFrontendSource(t)
-	manual := strings.Index(body, `id="panel-manual"`)
+	primary := strings.Index(body, `id="home-primary"`)
+	build := strings.Index(body, `id="panel-build"`)
 	art := strings.Index(body, `src="boxart.webp"`)
-	if manual < 0 || art < manual {
-		t.Fatal("cover art should be in the manual panel")
+	if primary < 0 || art < primary || art >= build {
+		t.Fatal("cover art should follow the Play actions")
 	}
 }
 
@@ -231,61 +232,18 @@ func TestExistingBuildResumesProgressOnPageLoad(t *testing.T) {
 	}
 }
 
-/* The manual iframe must be MOUNTED but srcless: mounted so switching tabs
- * cannot refetch 8 MB or lose the reader's page, srcless so a user who never
- * opens the Manual tab never pays for it. */
-func TestManualFrameIsMountedButNotPreloaded(t *testing.T) {
+func TestBuilderSettingsContainsHelpAndUpdates(t *testing.T) {
 	body := renderFrontendSource(t)
-	frame := strings.Index(body, `id="manual-frame"`)
-	if frame < 0 {
-		t.Fatal("manual iframe missing")
-	}
-	tagEnd := strings.Index(body[frame:], ">")
-	tag := body[frame : frame+tagEnd]
-	if strings.Contains(tag, "src=") {
-		t.Errorf("manual iframe is preloaded; it should get its src from the "+
-			"status response: %s", tag)
-	}
-	// It now starts hidden because there may BE no manual -- the builder ships
-	// none. The empty state shows instead, and the frame is revealed only once
-	// the server confirms an installed file, so a tree without one never
-	// requests a 404 into a visible viewer.
-	if !strings.Contains(tag, "hidden") {
-		t.Errorf("manual iframe must start hidden; with no manual installed "+
-			"there is nothing to show: %s", tag)
-	}
-	if !strings.Contains(body, `manualFrame.setAttribute("src",source)`) {
-		t.Error("nothing assigns the manual src from the status response")
-	}
-	// THE PAGE-PRESERVING RULE. paintManualStatus runs on every visit to the
-	// tab, and re-setting src renavigates the frame in some browsers, losing
-	// the page the reader was on. The assignment must be conditional.
-	if !strings.Contains(body, `if(manualFrame.getAttribute("src")!==source)`) {
-		t.Error("the manual src is reassigned unconditionally; a repaint would " +
-			"throw away the reader's page")
-	}
-}
-
-// With no manual installed the tab must offer the install form and the empty
-// state rather than a broken viewer, and must not link out to a file that is
-// not there.
-func TestManualTabOffersInstallAffordances(t *testing.T) {
-	body := renderFrontendSource(t)
-	for _, reference := range []string{
-		`id="manual-form"`, `id="manual-file"`, `id="manual-empty"`,
-		`id="manual-remove"`, `accept=".pdf,application/pdf"`,
-	} {
-		if !strings.Contains(body, reference) {
-			t.Errorf("manual tab is missing %s", reference)
+	start := strings.Index(body, `id="panel-settings"`)
+	end := strings.Index(body[start:], "</main>")
+	for _, want := range []string{`id="settings-help-title"`, `data-project-link="releases"`, `data-project-link="repository"`, `class="workshop-help"`} {
+		if !strings.Contains(body[start:start+end], want) {
+			t.Errorf("Builder Settings is missing %s", want)
 		}
 	}
-	open := strings.Index(body, `id="manual-open"`)
-	if open < 0 {
-		t.Fatal("manual open link missing")
-	}
-	tag := body[open : open+strings.Index(body[open:], ">")]
-	if !strings.Contains(tag, "hidden") {
-		t.Errorf("the Open manual link must start hidden; there may be no "+
-			"manual to open: %s", tag)
+	for _, removed := range []string{`id="tab-manual"`, `id="manual-frame"`, `id="manual-form"`} {
+		if strings.Contains(body, removed) {
+			t.Errorf("obsolete manual page control: %s", removed)
+		}
 	}
 }

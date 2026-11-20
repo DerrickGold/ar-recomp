@@ -1,6 +1,6 @@
 # Language pack authoring format
 
-For direct `.arlang` installation and authoring with an editor or AI, start with
+For `.o2r` and legacy `.arlang` installation and authoring with an editor or AI, start with
 [Install, create and share language packs](language-packs.md). The accompanying
 [machine-readable route reference](language-authoring-reference.json) supplies
 the US contract for every message, including anchors and allowed placeholders.
@@ -9,9 +9,9 @@ ActRaiser language packs are UTF-8 directories designed for ordinary text
 editors and the builder's Languages workspace. A pack contains no ROM
 addresses, dictionary tokens, or font-tile numbers. New packs use **version 2**:
 wording, interpolation, layout and typography are explicit templates. The builder
-can upgrade a v1 pack into a separate v2 project. The game detects a selected v1
-pack and offers upgrade instructions or native text for that session; it never
-infers old styling or converts community files at runtime.
+can upgrade a v1 pack into a separate v2 project. Archive preparation stages a
+v2 copy of legacy translations. A v1 unpacked pack can still prompt the player
+to upgrade it.
 
 The game applies packs to simulation-mode and Sky Palace menus/dialogue/HUD, action
 HUD labels and counters, action stage cards and pause/stage messages, and the
@@ -119,9 +119,10 @@ keeps the native surface. Fixed menu row counts and page limits still apply.
 ## Author backups and sharing archives
 
 The builder uses `.arproject` for private, resumable author backups and
-`.arlang` for publishable translations. Both are bounded ZIP archives with a
-root `package.json` identifying the format, version and archive kind, and the
-same human-editable `pack.ini` and script files described below.
+`.o2r` for published translations. Publications carry `manifest.json`,
+`pack.json` and the existing language files under `language/`. Older
+`.arlang` publications and private backups use a root `package.json` and put
+`pack.ini` at the archive root.
 
 Backups retain progress, comments, notes and the local source template. Do not
 publish ROM-derived backups. A publication contains reviewed translations
@@ -192,25 +193,18 @@ installers also include matching pinned headers and libraries; only source
 checkouts use system development packages. The builder checks for missing
 headers/link libraries and known wrong-architecture binaries before compiling.
 
-Open **Languages** in the builder sidebar. **Add a language pack** accepts a
-shared `.arlang` file directly above the installed library. You can also drop
-one `.arlang` at a time into the Workshop from another sidebar section; this
-opens Languages and a review, not an automatic installation. Build the game
-first to make language tools available. **Install a language pack** and
-**Create a translation** offer the guided workflows; **Open a project or
-backup**, **Clone a language pack**, and **Extract a ROM reference** are below
-them. Choose a workflow to see only its relevant steps. The package library
-combines editable projects and installed packs, is sorted by package name, and
-can be searched by name, locale or ID. Filter to installed packages or workshop
-projects that are not installed. Home also
-offers shortcuts to up to four saved projects (name order, not recency).
-Opening a project or saving edits changes the workshop project only;
-it does **not** install or update the game's copy. **Import & install** explicitly
-does both. Cloning creates a new stable
-package ID, retaining the original contributor credits, progress and content.
-Switching sidebar sections preserves unsaved message text and asset selections;
-closing the workshop or changing projects asks before discarding unsaved work.
-This is not autosave: save messages and details before closing the Workshop.
+Use **Manage Mods** to install `.o2r` and legacy `.arlang` files, preview
+installed translations, choose a release, or enable and uninstall packs.
+The Builder converts legacy publications to `.o2r` during installation.
+Use **Workshop → Languages** to create a translation, open a saved project or
+backup, clone an edition, or extract a ROM reference. Search saved projects by
+name, locale or ID. Cloning creates a new ID and retains contributor credits,
+progress and content.
+
+Open a project to edit it. **Install or export… → Install in game** installs an
+editable project's game copy. Later saves refresh that managed copy and
+preserve its enabled state. Switching Builder sections preserves pending edits.
+Save them before closing or switching projects.
 
 The default tree follows playthrough order: Title, Sky Palace, Fillmore,
 Bloodpool, Kasandora, Aitos, Marahna, Northwall, Death Heim, End Credits.
@@ -227,7 +221,7 @@ Continue → Resume saved game — welcome back after Continue**. Search checks
 translation text, friendly labels, technical IDs and
 your local source reference, even for messages absent from the current pack.
 The extracted native US reference is selected automatically when available.
-Mark messages Not started, WIP or Done as you work. The sticky **Save progress**
+Mark messages Not started, WIP or Done as you work. The sticky **Save**
 button (also Cmd+S / Ctrl+S) saves pending message text/status, metadata, private
 notes and public notices in one validated project save. Invalid input leaves
 the entire pending change unsaved, with an error beside the Save action.
@@ -246,17 +240,16 @@ fallback when needed. Identical extracted references can be reused without
 overwriting projects. The tree includes cross-release/future-phase routes,
 so its total is larger than the number of messages native to one ROM.
 
-Open **Pack actions** for **Download private backup**, or **Export for sharing** →
-**Export language pack** for publication. These prepare an explicit download
-link. **Install a language pack** defaults to **Import new pack**, with an
-`.arlang` file picker and drag-and-drop; no extraction is necessary. **Install
+Open **Install or export…** for **Download private backup**, or choose **Export .o2r…**
+to review the release before exporting. **Install a language pack** defaults to **Import new pack**, with an
+`.o2r` and `.arlang` file picker and drag-and-drop. **Install
 already imported** remains available for saved projects. **Author backup or
 legacy archive** accepts `.arproject` and compatible `.zip` files. **Advanced:
 unpacked language folder** retains the native folder chooser and manual path.
-Selecting or dropping a source does not change the
-workshop or game until confirmed. Imports support a distinct side-by-side ID or
+Legacy and authoring imports show a preview before changing the Workshop.
+Project imports support a distinct side-by-side ID or
 explicit replacement of the project with the incoming ID, never an unrelated
-open project. **Import & install**, or **Pack actions → Install in game** →
+open project. **Import & install**, or **Install or export… → Install in game** →
 **Install for this game**, installs all supplied translations under
 `game-assets/languages/packs/<package-id>/pack.ini`. Restart the game to refresh
 the installed catalog, then select the package by name in the system overlay.
@@ -274,11 +267,11 @@ checkboxes enable or disable packs without deleting translations or authoring
 progress. Updating a disabled pack keeps it disabled. Restart the game after
 changing the installed catalog, then select an enabled pack in the game.
 
-Players can also copy a published `.arlang` directly into that `packs/` directory.
-The game prepares it on startup through the same Go archive reader, with no GUI.
-The archive filename is independent of its ID; unpacked directory names must
-exactly match their manifest ID. Conflicting enabled IDs are unavailable until
-resolved, including folder/archive duplicates. The complete manual workflow,
+Players can copy an `.o2r` into `game-assets/mods/` or use a registered
+launcher directory. Legacy archives can still be copied into `packs/`. The
+game prepares them on startup through the Go helper. The archive filename is
+independent of its ID. Unpacked folder names match the manifest ID exactly.
+Competing releases are resolved in the Languages library. The complete manual workflow,
 CLI commands and cache locations are in the [quickstart](language-packs.md).
 
 The library defaults to an installed-package checklist. Enable/disable choices
@@ -289,8 +282,8 @@ and restores `pack.ini`. Only one of these manifests may exist at a time.
 Updating a disabled pack preserves its disabled state. Original US text remains
 available independently; the game uses one selected language, not a merged stack.
 
-For archives the checklist records disabled IDs in `.arlang-state/` instead of
-modifying the archive. Archive uninstall moves the file to `.uninstalled/` for
+The checklist records `.o2r` availability with the shared mod settings and
+legacy archive availability in `.arlang-state/`. Legacy uninstall moves the file to `.uninstalled/` for
 recovery. Both directories are inside `packs/`; the game ignores them during
 ordinary discovery. Prepared archive snapshots in `.arlang-cache/` are retained
 until explicitly discarded with the game closed.
@@ -390,7 +383,7 @@ keyboards still require their valid interactive grid and cannot be blanked.
 Open an editable project in **Languages → Fonts**. Choose a primary font and
 up to eight ordered fallbacks; use **Move up**, **Move down**, and **Remove** to
 adjust the stack. Choose TTF/OTF files (up to 64 MiB each) or reuse a dependency
-already in the project. **Save progress** copies new files into the project in
+already in the project. **Save** copies new files into the project in
 the same transaction as pending message, metadata and notice edits. Removing
 a dependency does not delete its original file or its notices. Native reference
 projects are read-only: create a translation first.

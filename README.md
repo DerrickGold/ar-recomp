@@ -37,10 +37,11 @@ on an independent decompilation.
 | Area | Status | Details |
 |---|---|---|
 | USA campaign | ✅ Playable end to end | Playtesting covered all six towns, all twelve acts, Death Heim, and the ending. |
-| Action stage graphics | 🔵 Mostly Done | Action stages in all six lands have their own environmental effects. I'm still extending artwork for widescreen and refining Diorama backgrounds, skyboxes, and Voxel rooms. |
+| Action stage graphics | 🔵 Ongoing polish | Action stages in all six lands have their own environmental effects. Widescreen artwork, Diorama backgrounds and skyboxes, and Voxel rooms are still being refined, including Death Heim. |
 | Desktop platforms | ✅ Major platforms tested | Windows, Apple Silicon macOS, and Steam Deck are playable. Builds are also available for Intel macOS and desktop Linux. |
 | Android | 🟡 Preview | Build and install the preview from source. See [Android preview builds](docs/android.md). |
-| Localization | ✅ Available | Create, share, and install translations through the Workshop. See [Language packs](docs/language-packs.md). |
+| Localization | ✅ Available | Create and export translations in Workshop, then install and enable them in Manage Mods. See [Language packs](docs/language-packs.md). |
+| Mod packs | ✅ Asset packs available | Install, preview, and choose music, title artwork, languages, and manuals in `.o2r` packs. Broader mod support is planned. See [Mod packs](#mod-packs). |
 | Regional rules | 🔵 Ready for more testing | US, Japanese, and European rules are implemented. More playtesting across campaigns and settings combinations is needed. |
 | Decompilation | 🟡 In progress | I'm rewriting parts of the game in code that people can read and maintain, with the goal of matching the original behavior. |
 | ActRaiser 2 | 📋 Full campaign planned | You can already [import its Master](docs/builder-workshop.md#actraiser-2-master) from your own ActRaiser 2 (USA) ROM and play as him in the first game's stages. |
@@ -75,16 +76,16 @@ build runs offline on your computer. You supply the ROM separately.
 ### 1. Download and open the Builder
 
 Get the download for your machine from [GitHub Releases](https://github.com/DerrickGold/ar-recomp/releases).
-Extract ZIP and `.tar.xz` downloads to a writable folder. Download names include
-the release tag. These examples use `v0900`.
+Extract ZIP and `.tar.xz` downloads to a writable folder. In the filenames
+below, `<tag>` stands for the release tag shown on the download page.
 
 | Platform | Download | Open |
 |---|---|---|
-| macOS (Apple Silicon or Intel) | `ActRaiserRecompBuilder-v0900-macos-arm64-portable.zip` or `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder.app` |
-| Windows (x64 or ARM64) | `ActRaiserRecompBuilder-v0900-windows-x64-portable.zip` or `-windows-arm64-portable.zip` | `ActRaiserRecompBuilder.exe` |
-| Linux x64, including Steam Deck | `ActRaiserRecompBuilder-v0900-linux-x64.AppImage` | Open the AppImage. On Steam Deck, use Desktop Mode for a manual install. |
-| Linux ARM64 | `ActRaiserRecompBuilder-v0900-linux-arm64.AppImage` | Open the AppImage on Ubuntu 26.04 LTS or a system that meets the [Linux AppImage requirements](docs/desktop-packaging.md#linux-appimage-requirements). |
-| Linux browser Builder fallback (x64 or ARM64) | `ActRaiserRecompBuilder-v0900-linux-x64.tar.xz` or `-linux-arm64.tar.xz` | Run `./run-build.sh` in the extracted folder. It opens the Workshop in your browser. |
+| macOS (Apple Silicon or Intel) | `ActRaiserRecompBuilder-<tag>-macos-arm64-portable.zip` or `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder.app` |
+| Windows (x64 or ARM64) | `ActRaiserRecompBuilder-<tag>-windows-x64-portable.zip` or `-windows-arm64-portable.zip` | `ActRaiserRecompBuilder.exe` |
+| Linux x64, including Steam Deck | `ActRaiserRecompBuilder-<tag>-linux-x64.AppImage` | Open the AppImage. On Steam Deck, use Desktop Mode for a manual install. |
+| Linux ARM64 | `ActRaiserRecompBuilder-<tag>-linux-arm64.AppImage` | Open the AppImage on Ubuntu 26.04 LTS or a system that meets the [Linux AppImage requirements](docs/desktop-packaging.md#linux-appimage-requirements). |
+| Linux browser Builder fallback (x64 or ARM64) | `ActRaiserRecompBuilder-<tag>-linux-x64.tar.xz` or `-linux-arm64.tar.xz` | Run `./run-build.sh` in the extracted folder. It opens the Workshop in your browser. |
 
 Older releases label the Linux x64 AppImage `steam-deck`. Keep the portable
 Builder beside its `.portable` file. On first launch, the Builder may take a
@@ -104,9 +105,15 @@ few minutes to check and prepare its tools.
 ### 2. Choose a game folder and build
 
 The desktop Builder asks where to put the game. It suggests an
-`ActRaiserRecomp` folder next to the Builder. Open **Build & play**, select
+`ActRaiserRecomp` folder next to the Builder. Open **Setup**, select
 your USA ROM, and click **Build game**. You can explore the Workshop while
 the build runs.
+
+The sidebar separates **Play**, **Workshop**, **Setup**, **Manage Mods**, and
+**Builder Settings**. Use Workshop to create content and Manage Mods to choose
+what your game uses. Press **F8** or your controller's **Menu / Options** button
+to switch to **Big Screen** for controller navigation. You can also build and
+launch through [RecompLauncher](docs/desktop-packaging.md#recomplauncher).
 
 ![The Builder after selecting a ROM, during the build, and when the game is ready](/assets/builder-build.gif)
 
@@ -122,7 +129,7 @@ settings. See the [controls guide](docs/manual.md#controls) to change bindings.
 
 ### 4. Update or import an existing installation
 
-Use **Check for updates** in the Builder sidebar to find newer downloads.
+Open **Builder Settings → Check for updates** to find newer downloads.
 
 > [!IMPORTANT]
 > Close the game and back up your `saves/` folder before rebuilding.
@@ -132,6 +139,11 @@ settings, language packs, and custom assets carry over. If the update
 replaces bundled Diorama scenery, it keeps a backup of your previous edits.
 For per-user macOS or Linux installs, replace the generated app and keep your
 existing data folder.
+
+After rebuilding, **Manage Mods → Review legacy customizations…** can move
+compatible music assignments, title artwork, and manuals into `.o2r` packs.
+The review explains what will move and keeps backups. You can choose **Later**
+to keep your current setup. See [moving legacy customizations](docs/builder-workshop.md#move-legacy-customizations-to-manage-mods).
 
 If you're moving from another installation, use **Import previous
 installation…** in the Builder before you launch the game. On first launch,
@@ -180,6 +192,11 @@ Diorama is the default 3D option. **Dynamic Cam** moves with the action.
 **Free Cam** lets you orbit and zoom, and keeps the room centered when you
 zoom far out. Switch back to Diorama to use your saved background and layer
 settings. See [Action 3D modes](docs/manual.md#action-3d-modes).
+
+Voxel scenery across the six lands includes shaped terrain, recessed walls,
+rounded tree passages, and water surfaces. Mist and other environmental
+effects follow the modeled space. Room preparation runs in the background
+while settings remain responsive. Room-by-room visual polish is ongoing.
 
 ![Voxel 3D in Northwall Act 1, with a sloped ice bridge and icicles hanging from the cave ceiling](/assets/voxel-northwall.png)
 
@@ -308,7 +325,7 @@ has a section for fixes to the original game. [Enhancements](docs/manual.md#enha
 | **Android touch controls** | Rebind the preview's on-screen buttons. They hide when a physical controller is connected. [Android controls](docs/android.md#playing) |
 | **Xbox One USB on macOS** | Use an original Xbox One controller over USB in a macOS source build. Set `AR_XBOX_USB_ROOT` to the separate bridge module when configuring CMake. [Build from source](#build-from-source) |
 | **Settings overlay** | Open settings with `Esc`, `F1`, or L3, including after the ending. Changes save automatically, and you can reset defaults by section. |
-| **In-game manual** | Install your manual through the Workshop and read it from the settings overlay. [Install your own manual](docs/builder-workshop.md#install-your-own-manual) |
+| **In-game manual** | Install a manual pack or compatible PDF in Manage Mods and read it from the settings overlay. [Manual guide](docs/builder-workshop.md#install-and-share-manuals) |
 | **Enhanced text** | Adjust font size, choose Crisp or Smooth rendering, or give enhanced text a low-resolution pixel look. [Language packs](docs/language-packs.md) |
 
 See the [controls reference](docs/manual.md#controls) and the
@@ -388,6 +405,31 @@ See the [audio settings](docs/manual.md#audio) and
 
 </details>
 
+#### Builder and mods
+
+<details>
+<summary>Mod packs, previews, controller navigation, and build reports</summary>
+
+| Feature | What you can do |
+|---|---|
+| **Mod catalog** | Install, enable, disable, and preview music, title artwork, language, and manual packs in Manage Mods. Filter the list by type. |
+| **Multiple pack imports** | Drop several packs on the Builder and see the installation result for each file. |
+| **Replacement choices** | Choose which pack to use when several replace the same track, region, or other content. Disabling and re-enabling a selected pack restores its preference. |
+| **Music previews** | Browse the original soundtrack and active replacements. Play, pause, or seek ten seconds at a time. Desktop previews also have a volume control. |
+| **Language previews and search** | Check sample text, coverage, and US fallback entries. Find installed packs by name, locale, ID, or filename. |
+| **Pack creation and export** | Create music, title artwork, language, and manual packs in Workshop. Install them in your game or export `.o2r` archives. |
+| **Legacy customization import** | Review existing music, title artwork, and manual replacements and convert compatible entries to packs with backups. Legacy `.arlang` releases convert when installed. |
+| **Big Screen** | Use a controller to set up, build, manage mods, and launch. Switch between desktop and Big Screen with F8 or Menu / Options. |
+| **RecompLauncher support** | Build, update, and launch through RecompLauncher using your own ROM. The Builder also discovers packs in the launcher's mod folder. |
+| **Workshop draft protection** | Keep drafts while moving between sections and check for unsaved changes before leaving or quitting. Save editable projects separately from exported packs. |
+| **Build logs and reports** | Review the last build log from Setup or save a report after a failed build. |
+| **Close Builder after launch** | Let the standalone Builder close when the game starts. Unsaved Workshop work and pending mod writes keep it open. |
+
+See the [Builder and Workshop guide](docs/builder-workshop.md) and
+[Big Screen controls](docs/desktop-packaging.md#builder-big-screen).
+
+</details>
+
 #### Randomizer
 
 <details>
@@ -441,24 +483,48 @@ Use the offline [action editor](tools/action_editor/README.md) to paint tiles,
 extend a room for widescreen, or change how its layers and effects look.
 In the Voxel preview, click a tile or a whole object. Try changes to its
 shape or artwork before applying them together. **Save project** keeps
-your scenery and effects in one archive. The guide explains how to load
-the edited room in your game.
+your scenery and effects in one archive. Copy tile selections between rooms
+that share the same background graphics, palettes, and animations. The guide
+explains how to load the edited room in your game.
+
+Source builds also produce a [mobile level viewer](tools/action_editor/README.md#mobile-level-audits)
+with touch pan, orbit, and zoom. Compare against the original 2D view, pin a
+visual issue, and save an annotated screenshot and report.
+
+### Mod packs
+
+Open **Manage Mods** in the Builder or drop an `.o2r` pack onto it. Supported
+packs contain music, title artwork, languages, or manuals. Preview a pack
+before enabling it, and choose which replacement to use when packs overlap.
+Desktop and Big Screen share the same catalog and selections.
+
+Use **Workshop** to create a pack, then choose **Install in game** to use it
+locally or **Export .o2r…** to save an archive. For translations, keep an editable
+project for future changes as well as the exported pack. Existing
+customizations can move into packs through the
+[legacy customization review](docs/builder-workshop.md#move-legacy-customizations-to-manage-mods).
+These asset packs are the foundation for broader mod support.
 
 ### Asset and music replacements
 
-In the Workshop, replace the title logo or pick your own music for a stage.
-The title art can follow the original Mode 7 rotation and zoom at higher
-resolution. Preview the original tracks from your ROM in the Workshop, then
-choose your own OGG files and set loop points if needed. **Split by level**
+Choose the included English or Japanese HD title in **Manage Mods → Title
+artwork**, or create your own title pack in Workshop. New installations use
+the original ROM title until you enable a replacement. The title art can
+follow the original Mode 7 rotation and zoom at higher resolution.
+
+In **Workshop → Music**, preview the original tracks from your ROM, choose
+your own Ogg Vorbis files, and set loop points if needed. **Split by level**
 lets Bloodpool and Kasandora use different files even when they share an
-original song. The original sound effects still play.
+original song. Export your selections as a music pack or install them in your
+game. The original sound effects still play.
 [Workshop guide](docs/builder-workshop.md) · [Music loop settings](docs/manual.md#music-musicname-entries-files-under-game-assetsaudio)
 
 ### Languages and enhanced text
 
-Install a translation in the Workshop and select it under **Settings →
-Localization**. You can also use the Workshop to check how your own translation
-looks in the game and export it as an `.arlang` pack for others to install.
+Install and enable a translation in **Manage Mods → Languages**, then restart
+the game and select it under **Localization → Text source**. In **Workshop →
+Languages**, create or edit your own translation and export it as an `.o2r`
+pack for others to install. Legacy `.arlang` releases convert on installation.
 You can adjust font size and use fallback fonts for characters your main font
 lacks. The original US text remains available with its original font.
 See the [language pack guide](docs/language-packs.md).
@@ -471,8 +537,10 @@ Build with the USA ROM, then open **Settings → Regions**. Choose US,
 Japanese, or European rules, or mix them. For example, you can use US stages
 with Japanese boss behavior. Your campaign remembers its choices. The USA ROM
 is enough to use the gameplay rules. To add regional art and music from your
-own regional ROMs, use **Assets → Regional media** in the Workshop. Your text
-language is a separate choice.
+own regional ROMs, select them in **Setup → ROM checklist** and choose
+**Import selected extras**, or include them with your first build. To use an
+existing `.armedia` file, open **Import a private regional media archive** in
+Setup. Your text language is a separate choice.
 See [regional rules](docs/actraiser-1/regional-settings.md) and
 [regional artwork and music](docs/actraiser-1/regional-media.md).
 

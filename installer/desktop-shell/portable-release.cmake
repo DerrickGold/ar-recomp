@@ -19,6 +19,7 @@ endfunction()
 # Wrap one already-built desktop artifact and its BuilderData marker in a
 # portable release archive. This function only copies and compresses; callers
 # remain responsible for building and validating the source artifact once.
+# Windows releases can also supply the already built console CLI companion.
 function(builder_create_portable_release kind platform artifact stage out_artifact out_filename)
     if(NOT kind MATCHES "^(macos|linux|windows)$")
         message(FATAL_ERROR "Unknown portable release kind: ${kind}")
@@ -66,6 +67,9 @@ function(builder_create_portable_release kind platform artifact stage out_artifa
     file(WRITE "${_copy}.portable" "BuilderData\n")
     file(COPY_FILE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PORTABLE-README.txt" "${_root}/README.txt")
     if(kind STREQUAL "windows")
+        if(ARGC GREATER 6)
+            file(COPY_FILE "${ARGV6}" "${_root}/actraiser-builder.exe")
+        endif()
         file(COPY_FILE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/recomplauncher.json" "${_root}/recomplauncher.json")
     elseif(kind STREQUAL "macos")
         builder_stage_macos_launcher_profile("${_copy}")

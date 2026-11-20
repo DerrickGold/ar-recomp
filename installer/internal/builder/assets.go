@@ -27,10 +27,8 @@ import (
 //go:embed assets/boxart.webp
 var boxArtWebP []byte
 
-// The project's current high-resolution title treatment. It stays inside the
-// builder until a player enables it on the Assets tab, so a fresh install still
-// presents the authentic ROM title. Saving the toggle materializes these bytes
-// under game-assets/hd/builder/ and points both title hooks at that copy.
+// The English high-resolution title treatment, packaged as an included mod.
+// A fresh install presents the ROM title until a player enables a title pack.
 //
 //go:embed assets/title-logo.png
 var titleLogoPNG []byte

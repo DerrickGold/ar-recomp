@@ -15,6 +15,9 @@ Apple notarization.
 
 ## Develop from a checkout
 
+For changes to the desktop UI, Big Screen, or first-run chooser, use the
+[Builder UI style guide](UI-STYLE.md).
+
 Build and test both modules independently from the repository root:
 
 ```sh

@@ -16,6 +16,7 @@ import (
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/host"
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/winbundle"
 	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
+	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -26,6 +27,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "mods" {
+		os.Exit(builder.RunMods(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if err := runDesktop(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, errAlreadyRunning) {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) && exit.ExitCode() > 0 {
@@ -63,7 +67,14 @@ func runDesktop() error {
 	playSession := flag.Bool("play-session", false, "return to the calling launcher when the game exits")
 	bigScreen := flag.Bool("big-screen", defaultBigScreen(runtime.GOOS, os.Getenv), "open the fullscreen controller interface")
 	gameWindowMode := flag.String("game-window-mode", "", "window mode for --play-session: saved, windowed, or borderless (default: follow RecompLauncher Big Picture)")
-	var roms []string
+	var roms, modDirectories []string
+	flag.Func("mods-dir", "scan an external mod directory (repeatable)", func(directory string) error {
+		path, err := filepath.Abs(directory)
+		if err == nil {
+			modDirectories = append(modDirectories, path)
+		}
+		return err
+	})
 	flag.Func("rom", "preselect a ROM (repeat for additional supported ROMs)", func(rom string) error {
 		extension := strings.ToLower(filepath.Ext(rom))
 		if extension != ".sfc" && extension != ".smc" {
@@ -107,7 +118,6 @@ func runDesktop() error {
 	var mu sync.Mutex
 	var backend *host.Backend
 	var unlock func()
-	var closeGuard host.CloseGuard
 	var startup sync.WaitGroup
 	startup.Add(1)
 	appMenu := menu.NewMenu()
@@ -133,6 +143,13 @@ func runDesktop() error {
 		},
 		// No frontend Go bindings, remote content, telemetry, or updater.
 		OnStartup: func(appctx context.Context) {
+			bridge.SetSavePicker(func(name, title string) (string, error) {
+				extension := filepath.Ext(name)
+				return wruntime.SaveFileDialog(appctx, wruntime.SaveDialogOptions{
+					Title: title, DefaultFilename: name, CanCreateDirectories: true,
+					Filters: []wruntime.FileFilter{{DisplayName: extension, Pattern: "*" + extension}},
+				})
+			})
 			bridge.SetFullscreenHandler(func(fullscreen bool) {
 				if fullscreen {
 					wruntime.WindowFullscreen(appctx)
@@ -213,7 +230,7 @@ func runDesktop() error {
 					bridge.Progress("Starting the local Workshop… Game output: " + output)
 					b, err = host.StartBundledBackend(ctx, work, *payload, inputID, output, *jobs, host.BackendOptions{
 						ArtifactDirectory: filepath.Dir(artifact), PlaySession: *playSession, BigScreen: *bigScreen,
-						GameWindowMode: *gameWindowMode, ROMs: roms, BuildOnFirstRun: *firstBuild,
+						GameWindowMode: *gameWindowMode, ROMs: roms, BuildOnFirstRun: *firstBuild, ModDirectories: modDirectories,
 					})
 					if err == nil {
 						break
@@ -246,21 +263,11 @@ func runDesktop() error {
 				}()
 			}()
 		},
-		OnBeforeClose: func(appctx context.Context) bool {
+		OnBeforeClose: func(context.Context) bool {
 			mu.Lock()
 			b := backend
 			mu.Unlock()
-			return closeGuard.BeforeClose(b, func() (string, error) {
-				// Linux/Windows Wails question dialogs use native Yes/No buttons
-				// and ignore custom labels. Use that same contract on macOS.
-				return wruntime.MessageDialog(appctx, wruntime.MessageDialogOptions{
-					Type: wruntime.QuestionDialog, Title: "Close Workshop?",
-					Message: "Close the Workshop? Save any editor changes first. A running build must finish before closing.",
-					Buttons: []string{host.CloseNegative, host.CloseAffirmative}, DefaultButton: host.CloseNegative, CancelButton: host.CloseNegative})
-			}, func(err error) {
-				_, _ = wruntime.MessageDialog(appctx, wruntime.MessageDialogOptions{
-					Type: wruntime.WarningDialog, Title: "Workshop could not close", Message: err.Error()})
-			})
+			return bridge.BeforeClose(b)
 		},
 		OnShutdown: func(context.Context) {
 			// Cancel initialization, not the running backend: Stop owns its

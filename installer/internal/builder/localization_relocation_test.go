@@ -149,8 +149,9 @@ func TestLocalizationRelocatedBuilderGameWorkflow(t *testing.T) {
 	locJSON(t, app, "edit", q, 200)
 	q = locIdentity(app)
 	q.ConfirmRights, q.IncludeWIP = true, true
+	q.Version = "1.0.0"
 	publication := locJSON(t, app, "publish", q, 200).Body.Bytes() // Real C/SDL font gate, not a fake coverage result.
-	locJSON(t, app, "install", q, 200)
+	locJSON(t, app, "install", locIdentity(app), 200)
 	locUpload(t, app, "import", publication, map[string]string{"newID": "test.encore"}, 200)
 	q = locIdentity(app)
 	q.Metadata = app.localization.current.Pack().Manifest().Metadata()

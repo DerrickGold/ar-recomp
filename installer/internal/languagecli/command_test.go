@@ -118,7 +118,7 @@ func TestCommandHelpAndOptionBoundaries(t *testing.T) {
 	if err := Run(context.Background(), []string{"install", "--help"}, &out); !errors.Is(err, flag.ErrHelp) {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "--replace") || !strings.Contains(out.String(), "publication .arlang file") ||
+	if !strings.Contains(out.String(), "--replace") || !strings.Contains(out.String(), "publication .o2r or legacy .arlang file") ||
 		strings.Contains(out.String(), "--confirm-rights") || strings.Contains(out.String(), ".arproject") {
 		t.Fatal("install help should only describe installation options", out.String())
 	}
@@ -209,16 +209,20 @@ func TestDesktopArchiveDiscoveryRelocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var secondArchive bytes.Buffer
-	if err := second.WriteArchive(&secondArchive, "publication"); err != nil {
+	if err := second.WriteLanguageMod(&secondArchive, "1.0.0"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(packs, "Same locale, second package.arlang"), secondArchive.Bytes(), 0644); err != nil {
+	mods := filepath.Join(bundle, "utils/game-assets/mods")
+	if err := os.MkdirAll(mods, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mods, "Same locale, second package.o2r"), secondArchive.Bytes(), 0644); err != nil {
 		t.Fatal(err)
 	}
 	run := func() string {
 		t.Helper()
 		cmd := exec.Command(filepath.Join(bundle, "game"+suffix), filepath.Join(bundle, "utils/game-assets/languages/packs"))
-		cmd.Dir = base
+		cmd.Dir = filepath.Join(bundle, "utils")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatal(err, string(out))
@@ -236,17 +240,23 @@ func TestDesktopArchiveDiscoveryRelocation(t *testing.T) {
 	if out := run(); !strings.Contains(out, "example.fr-ca\t") || !strings.Contains(out, "example.fr-ca.alternate\t") {
 		t.Fatal("relocated discovery failed", out)
 	}
+	if err := os.RemoveAll(filepath.Join(bundle, "utils/game-assets/languages/packs")); err != nil {
+		t.Fatal(err)
+	}
+	if out := run(); strings.Contains(out, "example.fr-ca\t") || !strings.Contains(out, "example.fr-ca.alternate\t") {
+		t.Fatal("direct game discovery with just an O2R pack failed", out)
+	}
 	// A missing helper must not reuse an earlier successful but now stale index.
 	helper = filepath.Join(bundle, "utils/tools/actraiser-builder"+suffix)
 	if err := os.Rename(helper, helper+".away"); err != nil {
 		t.Fatal(err)
 	}
-	if out := run(); strings.Contains(out, "example.fr-ca\t") || !strings.Contains(out, "need the installed ActRaiser Builder helper") {
+	if out := run(); strings.Contains(out, "example.fr-ca.alternate\t") || !strings.Contains(out, "need the installed ActRaiser Builder helper") {
 		t.Fatal(out)
 	}
 }
 
-func TestInstallUpgradesV1CopyAndReportsIt(t *testing.T) {
+func TestLegacyImportKeepsOriginalAndPreparesV2(t *testing.T) {
 	project, err := lk.OpenAuthorInput("../../../tests/fixtures/language-pack-v1")
 	if err != nil {
 		t.Fatal(err)
@@ -268,30 +278,36 @@ func TestInstallUpgradesV1CopyAndReportsIt(t *testing.T) {
 	if err := Run(context.Background(), []string{"install", "--root", root, "--pack", source}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Automatically upgraded the installed copy from v1 to v2") {
+	if !strings.Contains(out.String(), "prepare a v2 copy in its language cache") {
 		t.Fatal("missing CLI upgrade notice", out.String())
 	}
 	installedPath := filepath.Join(root, "game-assets", "languages", "packs", project.Pack().Manifest().Metadata().ID+".arlang")
 	installed, err := lk.OpenAuthorInput(installedPath)
-	if err != nil || installed.Pack().Manifest().Version() != 2 || installed.Pack().Manifest().Metadata() != project.Pack().Manifest().Metadata() {
-		t.Fatal("installed archive was not upgraded with its identity intact", err)
+	if err != nil || installed.Pack().Manifest().Version() != 1 || installed.Pack().Manifest().Metadata() != project.Pack().Manifest().Metadata() {
+		t.Fatal("installed archive lost its original format or identity", err)
 	}
 	before, err := os.ReadFile(source)
 	if err != nil || !bytes.Equal(before, archive.Bytes()) {
 		t.Fatal("original archive changed", err)
 	}
-	// Reinstalling v2 copies its bytes as-is and does not report another upgrade.
-	out.Reset()
-	secondRoot := t.TempDir()
-	if err := Run(context.Background(), []string{"install", "--root", secondRoot, "--pack", installedPath}, &out); err != nil {
+	copied, err := os.ReadFile(installedPath)
+	if err != nil || !bytes.Equal(before, copied) {
+		t.Fatal("legacy archive was rewritten", err)
+	}
+	if err := Run(context.Background(), []string{"prepare", "--root", root}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out.String(), "upgraded") {
-		t.Fatal("v2 was reported as upgraded", out.String())
+	cache := filepath.Join(filepath.Dir(installedPath), ".arlang-cache")
+	catalog, err := os.ReadFile(filepath.Join(cache, "catalog-v1.tsv"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	first, _ := os.ReadFile(installedPath)
-	second, err := os.ReadFile(filepath.Join(secondRoot, "game-assets", "languages", "packs", filepath.Base(installedPath)))
-	if err != nil || !bytes.Equal(first, second) {
-		t.Fatal("v2 archive was rewritten", err)
+	fields := strings.Split(strings.TrimSpace(strings.TrimPrefix(string(catalog), lk.ArchiveCatalogHeader)), "\t")
+	if len(fields) != 3 {
+		t.Fatal(string(catalog))
+	}
+	prepared, err := lk.OpenAuthorPack(filepath.Join(cache, filepath.FromSlash(fields[2])))
+	if err != nil || prepared.Manifest().Version() != 2 || prepared.Manifest().Metadata() != project.Pack().Manifest().Metadata() {
+		t.Fatal("runtime did not prepare the v2 copy with its ID intact", err)
 	}
 }

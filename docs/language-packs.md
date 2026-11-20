@@ -5,24 +5,17 @@ language editor to install one, write a translation, or publish your work.
 This guide is the short workflow; [the format reference](language-pack-format.md)
 defines the complete script syntax and game constraints.
 
-## Install a shared `.arlang` file
+## Install a shared `.o2r` language pack
 
-The recommended Workshop flow is the same on macOS, Linux and Windows:
+1. Open **Manage Mods** and choose the `.o2r`, or drop it onto the Builder.
+2. Use the **Languages** filter to preview, enable or uninstall packs.
+3. Restart the game and choose the enabled pack under **Localization → Text source**.
 
-1. Build the game, then close it before changing its installed languages.
-2. Open **Languages → Add a language pack** and choose the `.arlang` file, or
-   drop it into the Workshop. Add one package at a time; **do not unzip it**.
-3. Review its language, credits and any conflicts, then choose **Import & install**.
-   For v1 packs, a notice explains that the installed copy will automatically
-   upgrade to v2. Your original archive and saved project stay unchanged.
-   Importing over a saved project or installed pack requires explicit confirmation.
-4. Use the installed-pack checklist in **Languages** to toggle packs on or off
-   without deleting them.
-5. Restart the game and select the enabled package in the system overlay's
-   Localization settings.
+The same picker converts legacy `.arlang` publications to `.o2r`.
+Installing v1 content prepares a v2 game copy.
 
 Private `.arproject` backups and compatible legacy ZIPs remain under **Author
-backup or legacy archive** in the import workflow. Unpacked authoring folders
+backup or legacy archive** in **Workshop → Languages → Open a project or backup**. Unpacked authoring folders
 are available under **Advanced: unpacked language folder**.
 
 ### Manual installation
@@ -30,8 +23,8 @@ are available under **Advanced: unpacked language folder**.
 Use the game's writable data directory, not the inside of an application bundle:
 
 1. Close the game.
-2. Copy the `.arlang` file into `game-assets/languages/packs/` under that
-   directory. Create `packs/` if needed. **Do not unzip it.**
+2. Copy the `.o2r` archive into `game-assets/mods/` or a registered external mods
+   folder. For a legacy `.arlang`, use `game-assets/languages/packs/`.
 3. Start the game normally. Older `utils/` bundles still use their `run-game`
    script.
 4. Open the system overlay → Localization → Game text and select its package name.
@@ -42,11 +35,11 @@ Discovery is at startup, not live file watching. Already discovered languages
 can be switched during play. External packs automatically use enhanced fonts;
 Native US still offers original rendering or enhanced rendering of US text.
 
-Multiple translations of the same language are supported and sorted by package
-name. Identity comes from `id` inside the manifest, not the locale. Two enabled
-copies of the same ID conflict; neither should be selected until the duplicate
-is removed or disabled. This also applies to a folder and archive with the same
-ID. Do not keep an older `.arlang` beside its replacement under a different name.
+Multiple translations of the same locale appear separately by name. The
+language ID in `pack.ini` identifies the translation across releases. For one
+ID, the highest declared `.o2r` release takes priority. If the latest releases
+have different content and the same version, or an enabled legacy copy has
+different content, choose which copy to use in the Languages library.
 
 The game prepares archives through its bundled `actraiser-builder` helper;
 it never opens the editor. Native game apps carry the helper inside the app;
@@ -123,7 +116,8 @@ Paths below are relative to that data directory.
 
 | Artifact | Purpose and location |
 | --- | --- |
-| `.arlang` | Reviewed publication; put directly in `game-assets/languages/packs/`. |
+| `.o2r` | Reviewed publication in `game-assets/mods/` or a registered external mods folder. |
+| `.arlang` | Legacy publication accepted for import and discovery in `game-assets/languages/packs/`. |
 | Unpacked pack | `game-assets/languages/packs/<exact-package-id>/pack.ini` plus its declared files. |
 | Native US source | Generated locally by the game build under `game-assets/languages/native-us/`; retain it for fallback. |
 | `.arproject` / `projects/` | Private workshop backups, source templates and progress; not an installed game translation. |
@@ -139,14 +133,20 @@ subdirectories: copy all referenced files, not just the outer manifest.
 
 ## Update, disable or remove
 
-Close the game before manually replacing/removing files. Replace an archive in
-place with its new version. A changed archive gets a new cache snapshot;
-previous snapshots remain intact for running processes. Disabled archive IDs
-remain disabled after replacement or filename changes.
+Installing a newer Builder-managed `.o2r` replaces the previous release and
+preserves its enabled state. The Builder selects among launcher-managed releases
+and the launcher manages the source files. A changed archive gets a new snapshot
+so a running game can finish using its current copy.
 
-The builder's Languages checklist can enable/disable or recoverably uninstall
-archives as well as folders. Alternatively, use the helper and data directory
-described under [command-line setup](#command-line-setup):
+For installed `.o2r` packages, use **Languages** or the shared `mods` commands:
+
+```sh
+"$BUILDER_CLI" mods list --output-dir "$GAME_DATA"
+"$BUILDER_CLI" mods disable --output-dir "$GAME_DATA" language-example.fr-ca
+"$BUILDER_CLI" mods enable --output-dir "$GAME_DATA" language-example.fr-ca
+```
+
+Legacy archives and folders have their own commands:
 
 ```sh
 "$BUILDER_CLI" language disable --root "$GAME_DATA" --installed my-pack.arlang
@@ -161,14 +161,15 @@ Editable projects and the Native US source are untouched. With the game closed,
 you may remove `.arlang-cache/` to reclaim space; needed snapshots regenerate.
 Do not remove `.arlang-state/` unless you intend to reset archive availability.
 
-Workshop's first installation creates an unpacked snapshot. After that,
-**Save progress** (including Cmd+S / Ctrl+S) automatically updates the installed
-copy with the same package ID, whether it is a folder or an archive. Disabled
+Workshop's **Install in game** creates an unpacked snapshot for testing a
+project. **Save** (including Cmd+S / Ctrl+S) automatically updates that
+unpacked copy with the same package ID. Disabled
 packs stay disabled; uninstalled packs are not reinstalled. All supplied draft
 messages are retained. Restart the game to load the new copy. A failed update
 leaves your Workshop progress saved and shows an explanation.
 
-To distribute an update, use **Export for sharing** to create a reviewed `.arlang`.
+To distribute an update, use **Export .o2r…** to create a reviewed `.o2r`
+with the same language ID and a higher release version.
 Installing someone else's publication does not
 ask you to claim redistribution rights or filter its WIP content again.
 
@@ -183,7 +184,7 @@ Use these public resources together:
   constraints for a US-runtime translation. `required_for_complete` distinguishes
   required routes from optional additions. Generated from the shared Go registry.
 - [Example source pack](../examples/language-pack/pack.ini) and
-  [example publication](../examples/example.fr-ca.arlang): two independently authored
+  [example publication](../examples/example.fr-ca.o2r): two independently authored
   French example messages, not a full translation or an extracted retail script.
 - Your own locally extracted US source script for the messages you are translating.
   Follow `[scripts] source` paths in `native-us/pack.ini`; do not edit that baseline.
@@ -197,8 +198,10 @@ Create a separate directory, copy the example layout, and choose your own stable
 ID, locale, name, authorship and license. Use `version = 2`, `target = us-runtime`,
 `source_profile = us`, `fallback = native-us`, and usually `coverage = partial`.
 Omit untranslated messages so the game uses its local US fallback. If you use an
-alias, its target must also be included in the same pack. Regional extracts are
-reference-only: use US route contracts even when translating into Japanese.
+alias, its target must also be included in the same pack. The Builder keeps a
+regional ROM's full extraction as a reference and installs a separate local
+`.o2r` with messages that fit the US route contracts. Use those US contracts
+when authoring a translation.
 
 A useful instruction to give an AI is:
 
@@ -286,11 +289,11 @@ relative to `--root` resolve from the selected game data directory.
 
 # Publish all supplied messages after explicitly reviewing them.
 "$BUILDER_CLI" language package --pack /path/to/my-pack \
-  --root "$GAME_DATA" --game "$GAME_EXE" --out /path/to/my-translation.arlang \
+  --root "$GAME_DATA" --game "$GAME_EXE" --out /path/to/my-translation.o2r --version 1.0.0 \
   --all-messages --confirm-rights
 
 # Optional validated copy into this installation (no publishing consent needed).
-"$BUILDER_CLI" language install --root "$GAME_DATA" --pack /path/to/my-translation.arlang
+"$BUILDER_CLI" mods install --output-dir "$GAME_DATA" /path/to/my-translation.o2r
 
 # Export a fresh ROM-free machine-readable reference for external tools.
 "$BUILDER_CLI" language reference --out /path/to/authoring-reference.json
@@ -307,8 +310,8 @@ with no progress file. Without it, packaging includes Done messages and optional
 WIP with `--include-wip`. Not started messages and unchanged recorded source
 templates are excluded. `--confirm-rights` is the publisher's declaration, not a
 legal determination. A downloaded pack can be installed without that declaration.
-`language install --replace` updates a same-ID archive, retaining disabled state;
-it will not silently replace an unpacked folder.
+`language package` accepts release versions in `MAJOR.MINOR.PATCH` form.
+`language install` can also import a legacy publication.
 
 The bundled primary font covers broad Latin/Greek/Cyrillic text, not all Unicode.
 Declare and include appropriately licensed TTF/OTF dependencies for other scripts
@@ -324,8 +327,13 @@ missing lists. The builder shows the same inventory during install/export review
 
 ## Archive format
 
-`.arlang` is a ZIP with `pack.ini` and dependencies at its root, not inside an
-extra enclosing folder. Its `package.json` is:
+A language `.o2r` is a ZIP containing `manifest.json` with the release version,
+`pack.json` with type `actraiser-language`, and `language/pack.ini` with its
+declared scripts, fonts, and notices under `language/`. The Builder generates
+the launcher ID and preserves the exact language ID inside `pack.ini`.
+
+A legacy `.arlang` keeps `pack.ini` and its dependencies at the ZIP root.
+Its `package.json` is:
 
 ```json
 {"format":"actraiser-language-archive","version":1,"kind":"publication"}

@@ -1,38 +1,106 @@
 (() => {
   "use strict";
 
-  window.workshopROMChecklist = (request, browse, onImported, onUploadsChanged) => {
+  window.workshopROMChecklist = (request, browse, {onImported, onSelectionChanged, onSelecting}) => {
     const rows = document.querySelector("#rom-checklist-rows");
     const report = document.querySelector("#rom-checklist-feedback");
     const unavailableNote = document.querySelector("#rom-checklist-unavailable");
     const importButton = document.querySelector("#rom-import-selected");
+    const picker = document.querySelector("#rom-picker");
     const ui = window.workshopI18n;
-    let inventory = [], unavailable = [], uploaded = [], unavailableUploads = [], operationStatus = null, inventoryError = null;
-    let loading = 0, inspecting = 0, canPlay = false, busy = false, importing = false;
+    let inventory = [], unavailable = [], operationStatus = null;
+    let loading = 0, canPlay = false, busy = false, importing = false, selecting = false, slot = "";
+    const bigScreen = () => document.body.dataset.bigScreen === "true";
 
     function browseEntry(entry) {
-      browse({...entry, label: ui.text("builder.roms.name_" + entry.id.replaceAll("-", "_"))});
+      if (busy || importing || selecting) return;
+      if (bigScreen()) {
+        browse({...entry, label: ui.text("builder.roms.name_" + entry.id.replaceAll("-", "_"))});
+      } else {
+        slot = entry.id;
+        picker.value = "";
+        picker.click();
+      }
     }
 
+    async function select(options) {
+      if (busy || importing || selecting) return;
+      selecting = true;
+      report.hidden = false;
+      ui.set(report, "builder.roms.checking_files");
+      onSelecting();
+      try {
+        const result = await request("rom-selection", options);
+        operationStatus = null;
+        await Promise.all([load(), onSelectionChanged()]);
+        if (result.unavailable?.length) {
+          const args = {names: result.unavailable.join(", ")};
+          fail(new Error(ui.text("builder.roms.unavailable", args)), "Select ROMs");
+        }
+        return result;
+      } finally {
+        selecting = false;
+        onSelecting();
+        render();
+      }
+    }
+
+    async function selectAndReport(action, id) {
+      try {
+        await action();
+      } catch (error) {
+        fail(error, "Select ROMs");
+      } finally {
+        if (id && document.activeElement === document.body) document.getElementById("rom-slot-" + id)?.focus();
+      }
+    }
+
+    const selectLocal = values => select({
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(values),
+    });
+
+    function fail(error, operation) {
+      operationStatus = null;
+      window.workshopFeedback?.show(report, error, {operation});
+    }
+
+    function upload(files, id = "") {
+      if (!files.length) return;
+      const body = new FormData();
+      if (id) body.set("id", id);
+      for (const file of files) body.append("rom", file);
+      return selectAndReport(() => select({method: "POST", body}), id);
+    }
+    picker.addEventListener("change", () => upload(picker.files, slot));
+
     function updateActions() {
-      for (const row of rows.querySelectorAll("button")) row.disabled = busy || importing;
+      for (const control of rows.querySelectorAll("button")) {
+        control.disabled = busy || importing;
+        if (selecting) control.setAttribute("aria-disabled", "true");
+        else control.removeAttribute("aria-disabled");
+      }
       const pending = inventory.some(entry => entry.selected && entry.id !== "us" &&
         (entry.id === "ar2-us" ? entry.world !== "installed" || entry.master !== "installed" :
-          entry.media !== "installed" || !entry.textReference));
+          entry.media !== "installed" || !entry.languagePack));
       importButton.hidden = !canPlay || !pending;
-      importButton.disabled = busy || importing;
+      importButton.disabled = busy || importing || selecting;
     }
 
     function render() {
-      const focused = document.activeElement?.dataset.romSlot;
-      const buttons = inventory.map(entry => {
+      const focused = document.activeElement;
+      const restoreFocus = focused && rows.contains(focused);
+      const browseID = restoreFocus && focused.closest(".rom-slot-card")?.querySelector(".rom-slot").id;
+      const cards = inventory.map(entry => {
         const label = ui.text("builder.roms.name_" + entry.id.replaceAll("-", "_"));
         const purpose = entry.id === "us" ? "main" : entry.id === "ar2-us" ? "sequel" : "region";
+        const card = document.createElement("div");
+        card.className = "rom-slot-card";
+        card.dataset.bigRow = "";
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "secondary rom-slot";
+        button.className = "rom-slot";
         button.id = "rom-slot-" + entry.id;
-        button.dataset.romSlot = entry.id;
+        button.dataset.romAction = "browse";
         const title = document.createElement("strong");
         title.textContent = label;
         const help = document.createElement("small");
@@ -40,14 +108,13 @@
         const status = document.createElement("small");
         status.className = "rom-slot-status";
         const states = [];
-        const uploads = uploaded.filter(file => file.id === entry.id);
-        for (const file of uploads) states.push(ui.text("builder.roms.selected_for_build", {name: file.name}));
         if (entry.selected) states.push(ui.text(entry.origin === "launcher" ?
           "builder.roms.from_launcher" : "builder.roms.selected", {name: entry.selected}));
         if (entry.found && entry.found !== entry.selected) states.push(ui.text("builder.roms.found", {name: entry.found}));
         if (entry.saved) states.push(ui.text("builder.roms.saved"));
         if (entry.media === "installed" && entry.id !== "us") states.push(ui.text("builder.roms.media_ready"));
-        if (entry.textReference) states.push(ui.text("builder.roms.text_ready"));
+        if (entry.languagePack) states.push(ui.text("builder.roms.language_ready"));
+        else if (entry.textReference) states.push(ui.text("builder.roms.text_ready"));
         if (entry.master === "installed") states.push(ui.text("builder.roms.master_ready"));
         if (entry.world === "installed") states.push(ui.text("builder.roms.world_ready"));
         const invalidImport = [entry.media, entry.master, entry.world].includes("invalid");
@@ -57,18 +124,41 @@
         button.dataset.available = String(states.length > 0);
         button.dataset.invalid = String(invalidImport);
         button.append(title, help, status);
-        button.addEventListener("click", () => browseEntry(entry));
-        return button;
+        button.addEventListener("click", () => {
+          if (bigScreen()) button.focus();
+          browseEntry(entry);
+        });
+        card.append(button);
+        const actions = document.createElement("div");
+        actions.className = "rom-slot-actions";
+        const action = (kind, key, values) => {
+          const control = document.createElement("button");
+          control.type = "button";
+          control.className = "quiet";
+          control.id = button.id + "-" + kind;
+          control.dataset.romAction = kind;
+          ui.set(control, key, values);
+          control.setAttribute("aria-label", label + " · " + control.textContent);
+          control.addEventListener("click", () => selectAndReport(
+            () => selectLocal({id: entry.id, [kind]: true}), entry.id,
+          ));
+          actions.append(control);
+        };
+        if (!bigScreen() && entry.found && entry.found !== entry.selected) action("found", "builder.roms.use_found", {name: entry.found});
+        if (entry.selected) action("clear", "builder.roms.clear");
+        if (actions.childElementCount) card.append(actions);
+        return card;
       });
-      rows.replaceChildren(...buttons);
+      rows.replaceChildren(...cards);
       updateActions();
-      if (focused) buttons.find(button => button.dataset.romSlot === focused && !button.disabled)?.focus({preventScroll: true});
-      const invalid = [...unavailable, ...unavailableUploads];
-      unavailableNote.hidden = !invalid.length;
-      if (invalid.length) ui.set(unavailableNote, "builder.roms.unavailable", {names: invalid.join(", ")});
-      const feedback = inventoryError || operationStatus;
-      report.hidden = !feedback;
-      if (feedback) ui.set(report, feedback.key, feedback.values);
+      if (restoreFocus) {
+        const target = document.getElementById(focused.id) || (browseID && document.getElementById(browseID));
+        if (target && !target.disabled) target.focus({preventScroll: true});
+      }
+      unavailableNote.hidden = !unavailable.length;
+      if (unavailable.length) ui.set(unavailableNote, "builder.roms.unavailable", {names: unavailable.join(", ")});
+      report.hidden = !operationStatus;
+      if (operationStatus) ui.set(report, operationStatus.key, operationStatus.values);
     }
 
     async function load() {
@@ -78,16 +168,18 @@
         if (requestID !== loading) return;
         inventory = data.roms || [];
         unavailable = data.unavailable || [];
-        inventoryError = null;
+        render();
+        window.workshopFeedback?.clear(rows);
       } catch (error) {
         if (requestID !== loading) return;
-        inventoryError = {key: "builder.request_failed", values: {detail: error.message}};
+        window.workshopFeedback?.show(rows, error, {
+          operation: "Load ROM checklist", retry: load, deduplicate: true,
+        });
       }
-      render();
     }
 
     importButton.addEventListener("click", async () => {
-      if (importing || busy) return;
+      if (importing || busy || selecting) return;
       importing = true;
       updateActions();
       try {
@@ -95,7 +187,7 @@
         operationStatus = {key: "builder.roms.imported"};
         await onImported();
       } catch (error) {
-        operationStatus = {key: "builder.request_failed", values: {detail: error.message}};
+        fail(error, "Import selected ROMs");
       } finally {
         importing = false;
         await load();
@@ -111,32 +203,10 @@
       chooseCore() {
         browseEntry(inventory.find(entry => entry.id === "us") || {id: "us"});
       },
-      async inspect(files) {
-        const requestID = ++inspecting;
-        uploaded = [];
-        unavailableUploads = [];
-        onUploadsChanged({checking: files.length !== 0});
-        render();
-        if (!files.length) {
-          return;
-        }
-        const body = new FormData();
-        for (const file of files) body.append("rom", file);
-        try {
-          const data = await request("rom-inspect", {method: "POST", body});
-          if (requestID !== inspecting) return;
-          uploaded = data.selected;
-          unavailableUploads = data.unavailable;
-        } catch (error) {
-          if (requestID !== inspecting) return;
-          unavailableUploads = Array.from(files, file => file.name);
-        }
-        render();
-        onUploadsChanged({
-          core: uploaded.find(file => file.id === "us")?.name,
-          invalid: unavailableUploads.length !== 0,
-        });
-      },
+      upload,
+      selectLocal,
+      render,
+      isSelecting: () => selecting,
       availability(play, locked) { canPlay = play; busy = locked; updateActions(); },
     };
   };

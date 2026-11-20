@@ -96,10 +96,10 @@ const SnesRunnerApi *sr_runner_get_api(uint32_t requested_abi_version) {
 
 /* ---- helpers ------------------------------------------------------------ */
 
-static const char *WriteManifest(const char *body) {
+static const char *WriteNamedManifest(const char *name, const char *body) {
   static char path[512];
   const char *dir = getenv("TMPDIR");
-  snprintf(path, sizeof(path), "%s/hd_manifest_test.ini", dir ? dir : "/tmp");
+  snprintf(path, sizeof(path), "%s/%s", dir ? dir : "/tmp", name);
   FILE *f = fopen(path, "w");
   if (!f) {
     fprintf(stderr, "cannot write %s\n", path);
@@ -108,6 +108,10 @@ static const char *WriteManifest(const char *body) {
   fputs(body, f);
   fclose(f);
   return path;
+}
+
+static const char *WriteManifest(const char *body) {
+  return WriteNamedManifest("hd_manifest_test.ini", body);
 }
 
 static void ResetRuntime(void) {
@@ -146,6 +150,29 @@ static const char kTitleManifest[] =
     "when = wram[0018]==0x00, wram[0019]==0x00, mode==7, m7==identity\n";
 
 /* ---- tests -------------------------------------------------------------- */
+
+static void TestTitlePackOverlay(void) {
+  char legacy[512];
+  snprintf(legacy, sizeof(legacy), "%s", WriteManifest(kTitleManifest));
+  const char *overlay = WriteNamedManifest("hd_overlay_test.ini",
+      "[music:title-theme]\nsrc = 1A:94B8\nfile = active.ogg\n"
+      "[replace:title-logo]\nplane = screen\nlayer = bg1\n"
+      "rect = 11,27,248,122\nimage = pack.png\nwhen = mode==7, m7==identity\n"
+      "[replace:title-swirl]\nplane = mode7\ncanvas_rect = 139,156,376,251\n"
+      "image = pack.png\nwhen = mode==7, m7!=identity\n");
+  CHECK(HdReplacements_LoadWithOverlay(legacy, overlay) == 3);
+  CHECK(g_hd_replacements[0].from_title_pack && g_hd_replacements[1].from_title_pack);
+  CHECK(!g_hd_replacements[2].from_title_pack);
+  CHECK(HdReplacements_IsTitleHook(&g_hd_replacements[2]));
+  CHECK(!strcmp(g_hd_replacements[0].image, g_hd_replacements[1].image));
+  CHECK(strstr(g_hd_replacements[2].image, "title-logo.png") != NULL);
+
+  /* An incomplete overlay cannot suppress either legacy title hook. */
+  overlay = WriteNamedManifest("hd_overlay_test.ini", kTitleManifest);
+  CHECK(HdReplacements_LoadWithOverlay(legacy, overlay) == 1);
+  CHECK(!g_hd_replacements[0].from_title_pack);
+  remove(overlay);
+}
 
 static void TestParseTitleEntry(void) {
   const char *path = WriteManifest(kTitleManifest);
@@ -427,6 +454,7 @@ static void TestCapturedReplacementLifetime(void) {
 
 int main(void) {
   TestParseTitleEntry();
+  TestTitlePackOverlay();
   TestParseRejections();
   TestReservedPlanesParseButStayInert();
   TestMode7Entries();

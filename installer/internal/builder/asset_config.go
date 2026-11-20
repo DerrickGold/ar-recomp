@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // assetSplitStatus is one region offered for a slot, and whether that slot
@@ -186,6 +187,27 @@ func loadAssetConfiguration(root string) (assetConfiguration, error) {
 	return configuration, nil
 }
 
+func loadAssetView(root string, draft bool) (assetConfiguration, error) {
+	config, err := loadAssetConfiguration(root)
+	if draft && err == nil {
+		config.ManifestPath = ""
+		draftURL := func(url string) string {
+			if url == "" {
+				return url
+			}
+			return "music-draft-audio/" + strings.TrimPrefix(url, "asset-audio/")
+		}
+		for i := range config.Tracks {
+			track := &config.Tracks[i]
+			track.URL = draftURL(track.URL)
+			for j := range track.Variants {
+				track.Variants[j].URL = draftURL(track.Variants[j].URL)
+			}
+		}
+	}
+	return config, err
+}
+
 // serveInstalledAudio plays back a replacement that is already installed. The
 // id is looked up in the manifest on every request rather than cached: the
 // manifest can change under a long-lived builder session -- by hand or by a
@@ -193,12 +215,16 @@ func loadAssetConfiguration(root string) (assetConfiguration, error) {
 // name.
 func (app *application) serveInstalledAudio(response http.ResponseWriter,
 	request *http.Request, id string) {
+	app.serveAssetAudio(response, request, id, app.options.ProjectRoot)
+}
+
+func (app *application) serveAssetAudio(response http.ResponseWriter, request *http.Request, id, root string) {
 	if !safeManifestTrackID.MatchString(id) || !managedTrackID(id) {
 		http.NotFound(response, request)
 		return
 	}
 	app.assetMu.Lock()
-	manifest, manifestPath, err := readAssetManifest(app.options.ProjectRoot)
+	manifest, manifestPath, err := readAssetManifest(root)
 	app.assetMu.Unlock()
 	if err != nil {
 		http.NotFound(response, request)
@@ -209,7 +235,7 @@ func (app *application) serveInstalledAudio(response http.ResponseWriter,
 		http.NotFound(response, request)
 		return
 	}
-	path, ok := installedAudioPath(app.options.ProjectRoot, manifestPath, value)
+	path, ok := installedAudioPath(root, manifestPath, value)
 	if !ok {
 		http.NotFound(response, request)
 		return
@@ -231,8 +257,8 @@ func (app *application) serveInstalledAudio(response http.ResponseWriter,
 	http.ServeContent(response, request, id+".ogg", info.ModTime(), file)
 }
 
-func (app *application) writeAssets(response http.ResponseWriter) {
-	configuration, err := loadAssetConfiguration(app.options.ProjectRoot)
+func (app *application) writeAssets(response http.ResponseWriter, root string, draft bool) {
+	configuration, err := loadAssetView(root, draft)
 	if err != nil {
 		writeJSONError(response, http.StatusInternalServerError, err.Error())
 		return

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
 	"github.com/DerrickGold/ar-recomp/installer/internal/languagecli"
 	"github.com/DerrickGold/ar-recomp/installer/internal/tooling"
 )
@@ -22,6 +23,9 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "mods" {
+		os.Exit(builder.RunMods(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if err := run(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
@@ -94,7 +98,8 @@ Commands:
   gui                    Open the ActRaiser Recomp Builder and Workshop
   package                Create a local .app, AppImage, or AppDir from a built game
   app-launch             Launch an application (--portable, --global, --data-dir)
-  language               Validate, author, package, install, or prepare .arlang packs
+  mods                   Inspect, install, list, or activate asset mods
+  language               Validate, author, publish, or import language packs
   localization-extract   Extract a private source pack or localization evidence
   localization-graphics  Extract regional graphical references to a private ZIP
   game-import            Import a supported content set from a local game ROM

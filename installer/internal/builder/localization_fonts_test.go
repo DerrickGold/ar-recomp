@@ -96,6 +96,9 @@ func TestLocalizationCoverageGatesPublicationAndInstallation(t *testing.T) {
 	q = locIdentity(app)
 	for _, endpoint := range []string{"install", "installation-check", "publish", "publication-check"} {
 		q.ConfirmRights = endpoint == "publish" || endpoint == "publication-check"
+		if q.ConfirmRights {
+			q.Version = "1.0.0"
+		}
 		if body := locJSON(t, app, endpoint, q, 422).Body.String(); !strings.Contains(body, "U+65E5") {
 			t.Fatal(endpoint, body)
 		}
@@ -124,6 +127,7 @@ func TestLocalizationCoverageGatesPublicationAndInstallation(t *testing.T) {
 	locJSON(t, app, "edit", q, 200)
 	q = locIdentity(app)
 	q.ConfirmRights = true
+	q.Version = "1.0.0"
 	locJSON(t, app, "publication-check", q, 200)
 	locJSON(t, app, "installation-check", locIdentity(app), 422)
 	q.IncludeWIP = true

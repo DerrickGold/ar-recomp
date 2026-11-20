@@ -81,6 +81,7 @@ function setupEditor(){
   const s=setup();
   const root=parseMarkup(readFileSync(new URL("../localization.html",import.meta.url),"utf8"),s.doc);
   s.doc.children.push(root);
+  s.doc.body=root;
   const originalGet=s.doc.getElementById;
   s.doc.getElementById=id=>root.querySelector("#"+id)||originalGet(id);
   s.doc.createElement=tag=>{const node=new Element(tag);node.focus=()=>{s.doc.activeElement=node;};return node;};
@@ -91,7 +92,7 @@ function setupEditor(){
   let reply=async()=>{throw Error("unexpected request");};
   s.context.window.addEventListener=()=>{};
   s.context.window.scrollTo=()=>{};
-  s.context.window.confirm=message=>{confirmations.push(message);return true;};
+  s.context.window.workshopConfirm=async(action,message,args)=>{confirmations.push(s.ui.text(message,args));return true;};
   class FormData {
     constructor(form){this.fields=new Map();if(form)for(const [name,node] of Object.entries(form.elements))if(name!=="namedItem"&&!node.disabled&&(node.getAttribute("type")!=="checkbox"||node.checked))this.fields.set(name,node.value);}
     set(key,value){this.fields.set(key,value);}
@@ -100,6 +101,7 @@ function setupEditor(){
   }
   Object.assign(s.context,{URL,location:{href:"http://127.0.0.1:1/test/"},FormData,fetch:async(url,options)=>{
     if(String(url)==="interface/preferences")return {ok:true,json:async()=>JSON.parse(options.body)};
+    if(String(url)==="__shell/save-archive")return {status:404};
     const endpoint=new URL(url).pathname.split("/").at(-1);
     const data=typeof options?.body==="string"?JSON.parse(options.body):options?.body;
     requests.push({endpoint,data,query:Object.fromEntries(new URL(url).searchParams)});
@@ -107,6 +109,7 @@ function setupEditor(){
   }});
   s.ui.apply(root);
   runInNewContext(readFileSync(new URL("../../workshopui/feedback.js",import.meta.url),"utf8"),s.context);
+  runInNewContext(readFileSync(new URL("../web/archive-save.js",import.meta.url),"utf8"),s.context);
   runInNewContext(readFileSync(new URL("../localization_styling.js",import.meta.url),"utf8"),s.context);
   for (const name of ["localization_font_editor.js", "localization_library.js", "localization_import_editor.js", "localization.js"])
     runInNewContext(readFileSync(new URL("../" + name,import.meta.url),"utf8"),s.context);
@@ -116,8 +119,12 @@ const packageInfo={key:"edition-folder",id:"community.same-locale",name:"França
 const snapshot={sourceAvailable:true,root:"/tmp/My translations",project:null};
 const sharedPack={name:"Community 日本語.ARLANG",size:128};
 const sharedPreview={token:"shared-preview",metadata:{...packageInfo,author:"Community team",license:"CC-BY-4.0"},messages:2};
-function dragEvent(s,files=[sharedPack],extra={}){
-  return {target:s.root,dataTransfer:{types:["Files"],files},prevented:false,preventDefault(){this.prevented=true;},...extra};
+async function openImport(s, files=[sharedPack]){
+  await s.context.window.localizationActivate();
+  await s.root.querySelector('[data-loc-flow="edit"]').fire("click");
+  const input=s.node("import").elements.file;
+  input.files=files;
+  await input.fire("change");
 }
 function importResponder(s,preview=sharedPreview){
   s.respond(endpoint=>{
@@ -128,255 +135,67 @@ function importResponder(s,preview=sharedPreview){
   });
 }
 
-test("install starts with arlang and keeps folder/backup sources secondary",async()=>{
-  const s=setupEditor();importResponder(s);
-  await s.context.window.localizationActivate();
-  assert.equal(s.node("library-section").hidden,false);
-  assert.equal(s.node("quick-import").elements.file.getAttribute("accept"),".arlang");
-  await s.root.querySelector('[data-loc-flow="install"]').fire("click");
-  assert.equal(s.node("import-source").hidden,false);
-  assert.equal(s.node("import").elements.file.getAttribute("accept"),".arlang");
-  assert.equal(s.root.querySelector('[data-loc-install="import"]').getAttribute("aria-pressed"),"true");
-  assert.equal(!!s.node("folder-options").open,false);
-  assert.equal(!!s.node("archive-options").open,false);
-  assert.equal(s.node("import-backup").elements.file.getAttribute("accept"),".arproject,.zip");
-  assert.ok(!s.requests.some(r=>["choose-directory","directory","import"].includes(r.endpoint)));
-});
-
-test("quick picker and global drop open the same detached preview before any install",async()=>{
-  for(const method of ["picker","drop"]){
+test("Workshop opens packed translations as editable projects",async()=>{
+  for(const file of [sharedPack,{name:"translation.o2r",size:200}]){
     const s=setupEditor();importResponder(s);
-    let navigations=0;s.context.window.workshopOpenLanguages=()=>{navigations++;return true;};
-    if(method==="picker"){
-      const input=s.node("quick-import").elements.file;
-      input.files=[sharedPack];input.value="C:\\fakepath\\Community.ARLANG";
-      await input.fire("change");assert.equal(input.value,"");
-    }else{
-      const event=dragEvent(s);
-      await s.doc.fire("dragenter",event);assert.equal(s.node("drop-overlay").hidden,false);
-      await s.doc.fire("drop",event);
-    }
-    assert.equal(navigations,1);
-    assert.deepEqual(s.requests.map(r=>r.endpoint),["state","projects","catalog","import"]);
-    const upload=s.requests.at(-1).data;
-    assert.equal(upload.get("file"),sharedPack);assert.equal(upload.get("intent"),"preview");
+    await openImport(s,[file]);
     assert.equal(s.node("import-preview").hidden,false);
     assert.equal(s.node("import-name").textContent,packageInfo.name);
-    assert.equal(s.doc.activeElement,s.node("import-name"));
-    assert.equal(s.node("accept-import").disabled,false);
-    assert.equal(s.node("drop-overlay").hidden,true);
+    assert.equal(s.requests.find(r=>r.endpoint==="import").data.get("file"),file);
+    s.respond((endpoint,data)=>{
+      if(endpoint==="accept-import"){
+        assert.equal(data.importToken,sharedPreview.token);
+        return projectSnapshot();
+      }
+      if(endpoint==="projects"||endpoint==="tree")return [];
+    if(endpoint==="installation")return {installed:false};
+      throw Error(endpoint);
+    });
+    await s.node("accept-import").fire("click");
+    assert.equal(s.node("workspace").hidden,false);
+    assert.equal(s.node("installed").hidden,true);
+    assert.ok(!s.requests.some(r=>r.endpoint==="install"));
   }
 });
 
-test("dropped conflicts require explicit choices; installed packs remain toggleable",async()=>{
-  const s=setupEditor();importResponder(s,{...sharedPreview,existingProject:{name:"Previous edition",revision:"prior-project"},installed:true});
-  await s.doc.fire("drop",dragEvent(s));
+test("author import requires an explicit decision when a project already exists",async()=>{
+  const s=setupEditor();
+  importResponder(s,{...sharedPreview,existingProject:{name:"Previous",revision:"old"}});
+  await openImport(s);
   assert.equal(s.node("accept-import").disabled,true);
-  s.node("replace-project").checked=true;await s.node("replace-project").fire("input");
-  assert.equal(s.node("accept-import").disabled,true);
-  s.node("import-replace-installed").checked=true;await s.node("import-replace-installed").fire("input");
+  s.node("import-keep-both").checked=true;
+  await s.node("import-keep-both").fire("input");
   assert.equal(s.node("accept-import").disabled,false);
   s.respond((endpoint,data)=>{
     if(endpoint==="accept-import"){
-      assert.deepEqual(data,{importToken:sharedPreview.token,newID:"",replace:true,expected:"prior-project"});return projectSnapshot();
+      assert.deepEqual(data,{importToken:sharedPreview.token,keepBoth:true,replace:false,expected:"old"});
+      return projectSnapshot();
     }
     if(endpoint==="projects"||endpoint==="tree")return [];
-    if(endpoint==="installation")return {installed:true};
-    if(endpoint==="install"){
-      assert.equal(data.replace,true);return {path:"/game/languages/packs/edition",enabled:false,report:{messages:2}};
-    }
-    if(endpoint==="catalog")return [{...packageInfo,enabled:false}];
+    if(endpoint==="installation")return {installed:false};
     throw Error(endpoint);
   });
   await s.node("accept-import").fire("click");
-  assert.equal(s.node("installed").hidden,false);
-  assert.equal(s.node("installed-title").textContent,s.ui.text("builder.language.updated_disabled"));
-  await s.node("installed-home").fire("click");
-  let enabled=false;
-  s.respond((endpoint,data)=>{
-    if(endpoint==="set-enabled"){
-      assert.deepEqual(data,{id:packageInfo.id,directory:packageInfo.key,expected:packageInfo.installedRevision,enabled:!enabled});
-      enabled=data.enabled;return {enabled};
-    }
-    assert.equal(endpoint,"catalog");return [{...packageInfo,enabled}];
-  });
-  for(const checked of [true,false]){
-    const toggle=s.node("library").querySelector("input");toggle.checked=checked;await toggle.fire("change");
-    await new Promise(resolve=>setImmediate(resolve));
-    assert.equal(enabled,checked);assert.equal(s.node("library").querySelector("input").checked,checked);
-  }
-  assert.ok(!s.requests.some(r=>r.endpoint==="uninstall"));
+  assert.ok(!s.requests.some(r=>r.endpoint==="install"));
 });
 
-async function openInstalledLibrary(s,rows=[packageInfo]){
-  s.respond(endpoint=>{
-    if(endpoint==="state")return snapshot;
-    if(endpoint==="projects")return [];
-    if(endpoint==="catalog")return rows;
-    throw Error("unexpected endpoint "+endpoint);
-  });
-  // The desktop webview can silently reject native JavaScript dialogs.
-  s.context.window.confirm=()=>{throw Error("native confirmation is unavailable");};
-  await s.context.window.localizationActivate();
-}
-
-test("uninstall opens a localized in-page review; cancel and dismissal send no request",async()=>{
-  const s=setupEditor();await openInstalledLibrary(s);
-  for(const dismiss of [()=>s.node("uninstall-cancel").fire("click"),()=>s.node("uninstall-dialog").close()]){
-    const before=s.requests.length;
-    await s.node("library").querySelector(".loc-uninstall").fire("click");
-    assert.equal(s.node("uninstall-dialog").open,true);
-    assert.equal(s.doc.activeElement,s.node("uninstall-cancel"));
-    for(const locale of ["fr","de","ja","en"]){
-      s.picker.value=locale;await s.picker.fire("change");
-      assert.equal(s.node("uninstall-question").textContent,s.ui.text("builder.language.uninstall_confirm",{
-        name:packageInfo.installedName,id:packageInfo.id,folder:packageInfo.key
-      }));
-      assert.equal(s.node("uninstall-question").children.length,0,"pack names must remain literal text");
-      assert.equal(s.node("uninstall-confirm").textContent,s.ui.text("builder.language.uninstall_now"));
-    }
-    await dismiss();
-    assert.equal(s.node("uninstall-dialog").open,false);
-    await s.node("uninstall-confirm").fire("click");
-    assert.equal(s.requests.length,before);
-  }
-});
-
-test("confirmed uninstall targets the reviewed installation and refreshes the library",async()=>{
-  const s=setupEditor(),other={...packageInfo,key:"Disabled pack.arlang",enabled:false,installedRevision:"other-revision"};
-  await openInstalledLibrary(s,[packageInfo,other]);
-  await s.node("library").querySelectorAll(".loc-uninstall")[1].fire("click");
-  let release;const pending=new Promise(resolve=>{release=resolve;});
-  s.response(async(endpoint,data)=>{
-    if(endpoint==="uninstall"){
-      assert.deepEqual(data,{id:other.id,directory:other.key,expected:other.installedRevision,confirmUninstall:true});
-      await pending;return {ok:true,json:async()=>({backup:"/packs/.uninstalled/recovery.arlang"})};
-    }
-    assert.equal(endpoint,"catalog");return {ok:true,json:async()=>[packageInfo]};
-  });
-  const uninstall=s.node("uninstall-confirm").fire("click");
-  assert.equal(s.node("uninstall-dialog").open,false);
-  assert.equal(s.node("uninstall-confirm").disabled,true);
-  await s.node("uninstall-confirm").fire("click");
-  await s.node("library").querySelector(".loc-uninstall").fire("click");
-  assert.equal(s.node("uninstall-dialog").open,false);
-  release();await uninstall;
-  assert.equal(s.requests.filter(r=>r.endpoint==="uninstall").length,1);
-  assert.equal(s.node("library").children.length,1);
-  assert.equal(s.node("library").children[0].dataset.packageKey,packageInfo.key);
-  assert.equal(s.node("feedback").textContent,s.ui.text("builder.language.uninstalled",{backup:"/packs/.uninstalled/recovery.arlang"}));
-  assert.equal(s.doc.activeElement,s.node("library-search"));
-});
-
-test("failed uninstall preserves the installed card and allows a new review",async()=>{
-  const s=setupEditor();await openInstalledLibrary(s);
-  await s.node("library").querySelector(".loc-uninstall").fire("click");
-  s.response(async endpoint=>{
-    assert.equal(endpoint,"uninstall");
-    return {ok:false,status:409,json:async()=>({errorCode:"builder.language.request_conflict",error:"Pack changed"})};
-  });
-  await s.node("uninstall-confirm").fire("click");
-  assert.equal(s.node("uninstall-dialog").open,false);
-  assert.equal(s.node("library").children.length,1);
-  assert.equal(s.node("feedback").dataset.error,"true");
-  assert.equal(s.node("feedback").textContent,s.ui.text("builder.language.request_conflict",{detail:"Pack changed"}));
-  const button=s.node("library").querySelector(".loc-uninstall");
-  assert.equal(button.disabled,false);await button.fire("click");
-  assert.equal(s.node("uninstall-dialog").open,true);
-  await s.doc.fire("workshop:closed");
-  assert.equal(s.node("uninstall-dialog").open,false);
-  await s.node("uninstall-confirm").fire("click");
-  assert.equal(s.requests.filter(r=>r.endpoint==="uninstall").length,1);
-});
-
-test("invalid or multiple drops show localized guidance without requests or draft loss",async()=>{
-  const s=setupEditor();await openEditorMessage(s);
-  s.node("body").value="My unsaved draft";await s.node("body").fire("input");
-  const before=s.requests.length;
-  for(const [files,key] of [
-    [[{name:"notes.txt",size:50}],"package_types"],
-    [[{name:"backup.arproject",size:50}],"package_types"],
-    [[{name:"empty.arlang",size:0}],"archive_size"],
-    [[{name:"oversized.arlang",size:257*1024*1024+1}],"archive_size"],
-    [[sharedPack,sharedPack],"one_archive"]
-  ]){
-    await s.doc.fire("drop",dragEvent(s,files));
-    assert.equal(s.node("drop-overlay").hidden,false);
-    for(const locale of ["fr","de","ja","en"]){
-      s.picker.value=locale;await s.picker.fire("change");
-      assert.equal(s.node("drop-message").textContent,s.ui.text("builder.language."+key));
-    }
-    assert.equal(s.requests.length,before);assert.equal(s.confirmations.length,0);
-    assert.equal(s.node("body").value,"My unsaved draft");assert.equal(s.context.window.localizationHasEdits(),true);
-  }
-  await s.node("dismiss-drop").fire("click");assert.equal(s.node("drop-overlay").hidden,true);
-});
-
-test("cancelled draft confirmation and unavailable game data prevent drop import",async()=>{
-  const s=setupEditor();await openEditorMessage(s);
-  s.node("body").value="Keep this";await s.node("body").fire("input");
-  s.context.window.confirm=()=>false;
-  const before=s.requests.length;
-  await s.doc.fire("drop",dragEvent(s));
-  assert.equal(s.requests.length,before);assert.equal(s.node("body").value,"Keep this");
-  assert.equal(s.context.window.localizationHasEdits(),true);
-  s.context.window.confirm=()=>true;s.context.window.workshopOpenLanguages=()=>false;
-  await s.doc.fire("drop",dragEvent(s));
-  assert.equal(s.requests.length,before);assert.equal(s.context.window.localizationHasEdits(),true);
-  assert.equal(s.node("drop-message").textContent,s.ui.text("builder.language.build_required"));
-});
-
-test("busy drops cannot supersede an in-flight preview and the same picker file can retry",async()=>{
-  const s=setupEditor();importResponder(s);await s.context.window.localizationActivate();
-  let release;const pending=new Promise(resolve=>{release=resolve;});
-  s.response(async endpoint=>{assert.equal(endpoint,"import");await pending;return {ok:true,json:async()=>sharedPreview};});
-  const input=s.node("quick-import").elements.file;input.files=[sharedPack];
-  const first=input.fire("change");
-  await s.doc.fire("drop",dragEvent(s,[{...sharedPack,name:"second.arlang"}]));
-  assert.equal(s.node("drop-message").textContent,s.ui.text("builder.language.drop_busy"));
-  release();await first;
-  assert.equal(s.requests.filter(r=>r.endpoint==="import").length,1);
-  importResponder(s);await input.fire("change");
-  assert.equal(s.requests.filter(r=>r.endpoint==="import").length,2);
-  assert.equal(input.value,"");
-});
-
-test("text drags and native file controls are not intercepted; closed sessions do not upload",async()=>{
-  const s=setupEditor();let prevented=0;
-  const event=dragEvent(s,[],{dataTransfer:{types:["text/plain"],files:[]},preventDefault(){prevented++;}});
-  await s.doc.fire("dragover",event);await s.doc.fire("drop",event);assert.equal(prevented,0);
-  const native=dragEvent(s,[sharedPack],{target:s.node("import").elements.file,preventDefault(){prevented++;}});
-  await s.doc.fire("dragenter",dragEvent(s));assert.equal(s.node("drop-overlay").hidden,false);
-  await s.doc.fire("dragover",native);await s.doc.fire("drop",native);
-  assert.equal(prevented,0);assert.equal(s.node("drop-overlay").hidden,true);
-  await s.doc.fire("workshop:closed");
-  await s.doc.fire("drop",dragEvent(s,[sharedPack],{preventDefault(){prevented++;}}));
-  assert.equal(prevented,1);assert.equal(s.requests.length,0);
-});
-
-test("invalid archive contents leave a retryable picker and do not install",async()=>{
-  const s=setupEditor();importResponder(s);await s.context.window.localizationActivate();
-  s.response(async endpoint=>{
-    assert.equal(endpoint,"import");return {ok:false,status:400,json:async()=>({error:"invalid ZIP archive"})};
-  });
-  const input=s.node("quick-import").elements.file;input.files=[sharedPack];input.value="selected.arlang";
+test("invalid author files leave a retryable picker and make no install request",async()=>{
+  const s=setupEditor();importResponder(s);
+  await openImport(s,[{name:"empty.arlang",size:0}]);
+  assert.ok(s.node("feedback").textContent.includes(s.ui.text("builder.language.archive_size")));
+  assert.ok(!s.requests.some(r=>r.endpoint==="import"));
+  const input=s.node("import").elements.file;
+  input.files=[sharedPack];
   await input.fire("change");
-  assert.equal(input.value,"");assert.equal(input.disabled,false);
-  assert.equal(s.node("import-preview").hidden,true);assert.equal(s.node("accept-import").disabled,true);
-  assert.ok(s.node("feedback").textContent.includes("invalid ZIP archive"));
-  importResponder(s);
-  // Some webviews expose the files on drop without a populated types list.
-  let prevented=false;
-  await s.doc.fire("drop",dragEvent(s,[sharedPack],{dataTransfer:{files:[sharedPack]},preventDefault(){prevented=true;}}));
-  assert.equal(prevented,true);assert.equal(s.node("import-preview").hidden,false);
-  assert.equal(s.requests.filter(r=>r.endpoint==="import").length,2);
-  assert.ok(!s.requests.some(r=>["accept-import","install"].includes(r.endpoint)));
+  assert.equal(s.node("import-preview").hidden,false);
+  assert.ok(!s.requests.some(r=>r.endpoint==="install"));
 });
 
 test("backup picker remains available to edit, with no automatic installation",async()=>{
   const s=setupEditor();importResponder(s);await s.context.window.localizationActivate();
   await s.root.querySelector('[data-loc-flow="edit"]').fire("click");
   assert.equal(s.node("archive-options").open,true);
+  assert.equal(s.node("project-picker").hidden,true,"the library already opens saved projects");
   const input=s.node("import-backup").elements.file;input.files=[{name:"work.arproject",size:100}];
   await input.fire("change");
   assert.equal(s.requests.at(-1).endpoint,"import");
@@ -411,43 +230,25 @@ test("create examples translate without replacing entered package identity",asyn
   }
 });
 
-test("real editor catalog translates in place without changing enabled choices or identifiers",async()=>{
+test("the Workshop library lists saved projects and links to Manage Mods",async()=>{
   const s=setupEditor();
-  s.respond(endpoint=>({state:snapshot,projects:[],catalog:[packageInfo]})[endpoint]);
+  s.respond(endpoint=>endpoint==="state"?snapshot:[packageInfo]);
   await s.context.window.localizationActivate();
-  const card=s.node("library").children[0],checkbox=card.querySelector("input"),button=card.querySelector("button");
-  s.doc.activeElement=checkbox;
-  s.node("library-search").value="unsent search";s.node("library-search").selectionStart=3;
-  const before=s.requests.length;
-  for(const locale of ["fr","de","ja","en"]){
-    s.picker.value=locale;await s.picker.fire("change");
-    assert.equal(s.requests.length,before);assert.equal(s.node("library").children[0],card);
-    assert.equal(s.doc.activeElement,checkbox);assert.equal(checkbox.checked,true);
-    assert.equal(checkbox.getAttribute("aria-label"),s.ui.text("builder.language.enable_pack",{name:packageInfo.installedName}));
-    assert.equal(button.textContent,s.ui.text("builder.language.edit_project"));
-    assert.equal(card.querySelector("h3").textContent,packageInfo.name);
-    assert.equal(card.dataset.packageId,packageInfo.id);assert.equal(card.dataset.packageKey,packageInfo.key);
-    assert.equal(s.node("library-search").value,"unsent search");assert.equal(s.node("library-search").selectionStart,3);
-    assert.equal(s.node("library-summary").textContent,s.ui.text("builder.language.library_counts",{enabled:1,disabled:0,projects:1}));
-  }
-  s.node("library-search").value="";
-  s.respond((endpoint,data)=>{
-    if(endpoint==="set-enabled"){assert.deepEqual(data,{id:packageInfo.id,directory:packageInfo.key,expected:packageInfo.installedRevision,enabled:false});return {enabled:false};}
-    assert.equal(endpoint,"catalog");return [{...packageInfo,enabled:false}];
-  });
-  checkbox.checked=false;await checkbox.fire("change");
-  const feedback=s.ui.text("builder.language.availability_saved");
-  // The listener invokes run() asynchronously, as a browser event would.
-  await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(s.node("feedback").textContent,feedback);
+  assert.equal(s.node("library").children.length,1);
+  assert.equal(s.node("library-heading").textContent,"Saved projects (1)");
+  const card=s.node("library").children[0];
+  assert.equal(card.dataset.packageId,packageInfo.id);
+  assert.match(card.textContent,/same-locale/);
+  assert.equal(card.querySelector("input"),null);
+  assert.ok(s.node("manage-mods"));
+  assert.deepEqual(s.requests.map(r=>r.endpoint),["state","projects"]);
 });
 
 test("import preview keeps credit metadata, files and explicit conflict choices across locales",async()=>{
   const s=setupEditor();
   s.respond(endpoint=>({state:snapshot,projects:[],catalog:[]})[endpoint]);
   await s.context.window.localizationActivate();
-  await s.root.querySelector('[data-loc-flow="install"]').fire("click");
-  await s.root.querySelector('[data-loc-install="import"]').fire("click");
+  await s.root.querySelector('[data-loc-flow="edit"]').fire("click");
   const preview={token:"opaque-preview",metadata:{...packageInfo,author:"Élodie & Team {count}",license:"CC-BY-4.0"},messages:1234,existingProject:{name:"Old work",revision:"old-revision"},installed:true};
   s.respond(endpoint=>{assert.equal(endpoint,"directory");return preview;});
   await s.node("directory").fire("submit",{preventDefault(){},currentTarget:s.node("directory")});
@@ -456,17 +257,17 @@ test("import preview keeps credit metadata, files and explicit conflict choices 
   await s.node("directory").elements.directory.fire("change",{target:s.node("directory").elements.directory});
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(s.node("import-name").textContent,packageInfo.name);
-  s.node("replace-project").checked=true;s.node("import-replace-installed").checked=true;
+  s.node("replace-project").checked=true;
   await s.node("replace-project").fire("input");
   const files=[{name:"same locale.arlang"}];s.node("import").elements.file.files=files;
-  s.node("import-new-id").value="community.new-edition";await s.node("import-new-id").fire("input");
+  s.node("import-keep-both").checked=true;await s.node("import-keep-both").fire("input");
   const before=s.requests.length,button=s.node("accept-import");
   for(const locale of ["fr","de","ja","en"]){
     s.picker.value=locale;await s.picker.fire("change");
     assert.equal(s.requests.length,before);assert.equal(s.node("import").elements.file.files,files);
-    assert.equal(s.node("replace-project").checked,true);assert.equal(s.node("import-replace-installed").checked,true);
-    assert.equal(s.node("import-new-id").value,"community.new-edition");
-    assert.equal(button.disabled,false);assert.equal(button.textContent,s.ui.text("builder.language.import_install"));
+    assert.equal(s.node("replace-project").checked,true);
+    assert.equal(s.node("import-keep-both").checked,true);
+    assert.equal(button.disabled,false);assert.equal(button.textContent,s.ui.text("builder.language.import_edit"));
     assert.ok(s.node("import-summary").textContent.includes(preview.metadata.author));
     assert.ok(s.node("import-summary").textContent.includes(preview.metadata.license));
     assert.ok(s.node("import-summary").textContent.includes(new Intl.NumberFormat(locale).format(1234)));
@@ -490,11 +291,11 @@ function projectSnapshot(formatVersion=2){return {...snapshot,project:{formatVer
   notes:"Private <note> {name}",notices:{"notices/CREDITS.txt":"Original contributor"},fonts:{primary:"builtin:actraiser-sans",fallback:[]},
   totals:[{total:1,done:0,wip:1}]}};}
 function editorMessage(){return {message:{present:true,path:"text/translation.artext",body:nativeBody,status:"wip",reference:{anchors:["reset_text_cursor.00","yield.01"],placeholders:[],native_in_profile:true}},reference:{body:nativeBody},referenceMetadata:{id:"native-us",name:"Native US",locale:"en-US"}};}
-async function openEditorMessage(s,view=editorMessage(),select=true,project=projectSnapshot()){
+async function openEditorMessage(s,view=editorMessage(),select=true,project=projectSnapshot(),ids=[messageID]){
   s.respond(endpoint=>{
     if(endpoint==="open")return project;
     if(endpoint==="projects"||endpoint==="catalog")return [];
-    if(endpoint==="tree")return [{id:messageID,label:"Invented message",is_message:true,done:0,wip:1}];
+    if(endpoint==="tree")return ids.map(id=>({id,label:"Invented message",is_message:true,done:0,wip:1}));
     if(endpoint==="installation")return {installed:false};
     if(endpoint==="message")return view;
     throw Error("unexpected endpoint "+endpoint);
@@ -503,6 +304,39 @@ async function openEditorMessage(s,view=editorMessage(),select=true,project=proj
   assert.equal(s.node("feedback").textContent,"",s.node("feedback").textContent);
   if(select)await s.node("tree").querySelector("button").fire("click");
 }
+
+test("message navigation preserves project drafts and only prompts for changed message content",async()=>{
+  const s=setupEditor(),project=projectSnapshot(),ids=[messageID,"second"];
+  await openEditorMessage(s,editorMessage(),true,project,ids);
+  const [first,second]=s.node("tree").querySelectorAll("button");
+  const body=s.node("body"), author=s.node("metadata").elements.author;
+  const notices=s.node("notices"), notice=s.node("notice").elements.noticeText;
+  notices.value="notices/CREDITS.txt";await notices.fire("change");
+  notice.value="Added a contributor";await s.node("notice").fire("input");
+  author.value="New author";await s.node("metadata").fire("input");
+  await s.node("font-add").fire("click");
+  body.value="Changed";await body.fire("input");
+  const before=s.requests.length;
+  await first.fire("click");
+  assert.equal(s.requests.length,before);
+  assert.equal(body.value,"Changed");
+  assert.equal(s.confirmations.length,0);
+  await second.fire("click");
+  assert.deepEqual(s.confirmations,[s.ui.text("builder.editor.discard_message")]);
+  assert.equal(body.value,nativeBody);
+  await first.fire("click");
+  assert.equal(s.confirmations.length,1);
+  assert.equal(author.value,"New author");
+  assert.equal(notice.value,"Added a contributor");
+  const lastFont=s.node("font-list").lastElementChild;
+  await lastFont.querySelectorAll("button").at(-1).fire("click");
+  notice.value=project.project.notices[notices.value];await s.node("notice").fire("input");
+  author.value=project.project.metadata.author;await s.node("metadata").fire("input");
+  body.value="Changed again";await body.fire("input");
+  body.value=nativeBody;await body.fire("input");
+  assert.equal(s.context.window.localizationHasEdits(),false);
+  assert.equal(s.node("save-progress").disabled,true);
+});
 
 test("save adopts progress and reports whether the installed copy was updated",async()=>{
   for(const [update,key] of [
@@ -514,10 +348,20 @@ test("save adopts progress and reports whether the installed copy was updated",a
     const s=setupEditor();await openEditorMessage(s);
     const body=nativeBody.replace("Invented source.","My saved translation.");
     s.node("body").value=body;await s.node("body").fire("input");
+    const projectID=s.node("package-id").textContent;
+    assert.equal(projectID,packageInfo.id);
+    s.node("metadata").elements.author.value="New contributor";await s.node("metadata").fire("input");
     const next=projectSnapshot();next.project.revision="saved-revision";next.installationUpdate=update;
     const view=editorMessage();view.message.body=body;
     s.respond((endpoint,data)=>{
-      if(endpoint==="save"){assert.equal(data.body,body);return next;}
+      if(endpoint==="save"){
+        assert.equal(data.body,body);
+        assert.equal(data.saveDetails,true);
+        assert.equal(data.metadata.id,projectID);
+        assert.equal(data.metadata.author,"New contributor");
+        next.project.metadata.author=data.metadata.author;
+        return next;
+      }
       if(endpoint==="projects"||endpoint==="catalog")return [];
       if(endpoint==="tree")return [{id:messageID,label:"Invented message",is_message:true,done:0,wip:1}];
       if(endpoint==="message")return view;
@@ -604,10 +448,12 @@ test("every authoritative layout shape renders across languages including native
   const shapes=[...new Map(contracts.routes.flatMap(route=>[route.presentation,...Object.values(route.presentation_by_profile||{})]).map(p=>[JSON.stringify(p),p])).values()];
   assert.ok(shapes.some(p=>p?.table?.rules.some(r=>r.native_reserved&&!r.fields)),"must exercise omitted native-row fields");
   assert.ok(shapes.some(p=>p?.keyboard));
-  const s=setupEditor(),view=editorMessage();await openEditorMessage(s,view);
-  for(const shape of shapes){
+  const s=setupEditor(),view=editorMessage();
+  await openEditorMessage(s,view,false,projectSnapshot(),[messageID,"second"]);
+  const buttons=s.node("tree").querySelectorAll("button");
+  for(const [i,shape] of shapes.entries()){
     view.message.reference.presentation=shape;
-    await s.node("tree").querySelector("button").fire("click");
+    await buttons[i%2].fire("click");
     assert.notEqual(s.node("feedback").dataset.error,"true",s.node("feedback").textContent);
     for(const locale of ["fr","de","ja","en"]){
       s.picker.value=locale;await s.picker.fire("change");
@@ -684,8 +530,9 @@ test("script previews translate only framing, preserving controls, values and in
   const s=setupEditor(),view=editorMessage();view.message.reference.placeholders=[{name:"master_name",kind:"localized_text"}];
   await openEditorMessage(s,view);
   s.node("body").selectionStart=s.node("body").selectionEnd=0;
-  s.node("placeholders").value="master_name";
-  s.picker.value="fr";await s.picker.fire("change");await s.node("insert-value").fire("click");
+  const insertValue=s.node("placeholders").querySelector("button");
+  assert.equal(s.context.window.localizationHasEdits(),false);
+  s.picker.value="fr";await s.picker.fire("change");await insertValue.fire("click");
   assert.equal(s.node("body").value,"{master_name}"+nativeBody);
   await s.root.querySelector('[data-loc-insert="@line"]').fire("click");
   assert.ok(s.node("body").value.startsWith("{master_name}\n@line\n"));
@@ -696,8 +543,7 @@ test("script previews translate only framing, preserving controls, values and in
   for(const locale of ["fr","de","ja","en"]){
     s.picker.value=locale;await s.picker.fire("change");
     assert.equal(s.requests.length,before);assert.deepEqual(s.node("preview-content").children,pages);
-    assert.equal(s.node("placeholders").options[1].value,"master_name");
-    assert.equal(s.node("placeholders").options[1].textContent,s.ui.text("builder.editor.value_text",{name:"master_name"}));
+    assert.equal(insertValue.textContent,s.ui.text("builder.editor.value_text",{name:"master_name"}));
     assert.equal(pages[0].textContent,s.ui.text("builder.editor.page_number",{number:1}));
     assert.equal(pages[1].textContent,"Literal {number} <i>日本語⟦master_name:02⟧");
     assert.equal(pages[1].querySelector("span").getAttribute("title"),s.ui.text("builder.editor.runtime_value"));
@@ -709,6 +555,28 @@ test("script previews translate only framing, preserving controls, values and in
   assert.equal(s.confirmations.at(-1),s.ui.text("builder.editor.clear_confirm"));
   assert.equal(s.node("body").value,"@anchor reset_text_cursor.00\n@anchor yield.01\n@empty\n@end\n");
   assert.equal(s.context.window.localizationHasEdits(),true);assert.equal(s.requests.length,before);
+});
+
+test("leaving a dirty translation waits for the in-app decision and keeps cancelled edits",async()=>{
+  const s=setupEditor();await openEditorMessage(s);
+  const page=readFileSync(new URL("../web/index.html",import.meta.url),"utf8");
+  s.root.append(parseMarkup(page.match(/<dialog id="builder-confirm-dialog"[\s\S]*?<\/dialog>/)[0],s.doc));
+  runInNewContext(readFileSync(new URL("../web/confirm.js",import.meta.url),"utf8"),s.context);
+  const dialog=s.doc.getElementById("builder-confirm-dialog"),body=s.node("body");
+  body.value="Edited translation";await body.fire("input");
+  const before=s.requests.length;
+  const cancel=s.node("back-projects").fire("click");
+  assert.equal(dialog.open,true);
+  assert.equal(await s.context.window.workshopConfirm("builder.assets.discard","builder.language.discard_confirm"),false);
+  assert.equal(s.requests.length,before);
+  dialog.close();await cancel;
+  assert.equal(s.context.window.localizationHasEdits(),true);
+  assert.equal(body.value,"Edited translation");
+  assert.equal(s.node("workspace").hidden,false);
+  const accept=s.node("back-projects").fire("click");
+  dialog.returnValue="accept";dialog.close();await accept;
+  assert.equal(s.node("home").hidden,false);
+  assert.equal(s.context.window.localizationHasEdits(),false);
 });
 
 test("content direction follows translation drafts and effective reference, never the UI locale",async()=>{
@@ -826,23 +694,25 @@ test("publication and installation keep rights, WIP and replacement choices inde
   const s=setupEditor();await openEditorMessage(s);
   await s.node("review-publish").fire("click");
   s.node("rights").checked=true;s.node("wip").checked=true;s.node("replace-install").checked=false;
+  s.node("release-version").value="1.10.2";
   for(const locale of ["fr","de","ja"]){
     s.picker.value=locale;await s.picker.fire("change");
     assert.equal(s.node("rights").checked,true);assert.equal(s.node("wip").checked,true);assert.equal(s.node("replace-install").checked,false);
     assert.equal(s.node("review-title").textContent,s.ui.text("builder.language.review_export_title"));
   }
   s.respond((endpoint,data)=>{
+    assert.equal(data.version,"1.10.2");
     if(endpoint==="publication-check"){assert.equal(data.confirmRights,true);assert.equal(data.includeWIP,true);return {included:1234,wip:1,unchangedSource:3,fallback:5};}
     assert.equal(endpoint,"publish");assert.equal(data.confirmRights,true);assert.equal(data.includeWIP,true);assert.equal(data.projectID,packageInfo.id);
-    return {name:"Édition {name}.arlang",url:"localization/download/opaque-archive"};
+    return {name:"Édition {name}.o2r",url:"localization/download/opaque-archive"};
   });
   await s.node("check").fire("click");
   await s.node("publish").fire("click");
   const href=s.node("download").href;
   s.picker.value="de";await s.picker.fire("change");
   assert.equal(s.node("publication-report").textContent,s.ui.text("builder.language.publication_report",{included:1234,wip:1,omitted:3,fallback:5}));
-  assert.equal(s.node("download").textContent,s.ui.text("builder.language.download_name",{name:"Édition {name}.arlang"}));
-  assert.equal(s.node("download").href,href);assert.equal(s.node("download").download,"Édition {name}.arlang");
+  assert.equal(s.node("download").textContent,s.ui.text("builder.language.download_name",{name:"Édition {name}.o2r"}));
+  assert.equal(s.node("download").href,href);assert.equal(s.node("download").download,"Édition {name}.o2r");
   s.respond((endpoint,data)=>{
     if(endpoint==="installation")return {installed:true};
     if(endpoint==="installation-check")return {messages:1234,fallback:5};
@@ -942,47 +812,12 @@ test("v1 upgrade adopts a separate v2 project and hides the upgrade action",asyn
  });
  await s.context.window.localizationOpenProject(packageInfo.id);
  assert.equal(s.node("upgrade-v2").hidden,false);
- s.node("upgrade-v2").elements.newID.value="upgraded.copy";
  await s.node("upgrade-v2").fire("submit",{preventDefault(){},currentTarget:s.node("upgrade-v2")});
- assert.equal(received.projectID,packageInfo.id);assert.equal(received.newID,"upgraded.copy");
+ assert.equal(received.projectID,packageInfo.id);assert.equal(received.newID,undefined);
  assert.equal(s.node("upgrade-v2").hidden,true);
  assert.ok(s.node("feedback").textContent.includes("2 messages"));
 });
 
-
-test("v1 import shows an upgrade notice before installation, not when only editing",async()=>{
-  for(const version of [1,2]){
-    const upgrade=version===1?{fromVersion:1,toVersion:2}:undefined;
-    const s=setupEditor();importResponder(s,{...sharedPreview,upgrade});
-    await s.doc.fire("drop",dragEvent(s));
-    assert.equal(s.node("import-preview").hidden,false);
-    assert.equal(s.node("import-upgrade").hidden,version!==1);
-    assert.ok(!s.requests.some(r=>["accept-import","install"].includes(r.endpoint)));
-    for(const locale of ["fr","de","ja","en"]){
-      s.picker.value=locale;await s.picker.fire("change");
-      assert.equal(s.node("import-upgrade").textContent,s.ui.text("builder.language.install_upgrade"));
-      assert.equal(s.node("import-upgrade").hidden,version!==1);
-    }
-    s.respond(endpoint=>{
-      if(endpoint==="accept-import")return projectSnapshot(version);
-      if(endpoint==="projects"||endpoint==="tree"||endpoint==="catalog")return [];
-      if(endpoint==="installation")return {installed:false};
-      if(endpoint==="install")return {enabled:true,path:"/game/languages/packs/edition",report:{messages:8,upgrade}};
-      throw Error(endpoint);
-    });
-    await s.node("accept-import").fire("click");
-    assert.equal(s.node("installed").hidden,false);
-    assert.equal(s.node("installed-upgrade").hidden,version!==1);
-
-    const editing=setupEditor();importResponder(editing,{...sharedPreview,upgrade});
-    await editing.context.window.localizationActivate();
-    await editing.root.querySelector('[data-loc-flow="edit"]').fire("click");
-    const input=editing.node("import-backup").elements.file;input.files=[{name:"work.arproject",size:100}];
-    await input.fire("change");
-    assert.equal(editing.node("import-preview").hidden,false);
-    assert.equal(editing.node("import-upgrade").hidden,true);
-  }
-});
 
 test("saved v1 installation review explains upgrade and completion confirms it",async()=>{
   for(const version of [1,2]){
@@ -1043,8 +878,28 @@ test("inline style toolbar wraps selections, inserts at the caret, and preserves
   assert.equal(input.value,text);assert.equal(input.selectionStart,start);
   assert.equal(s.node("style-font").value,"hud");assert.equal(s.node("style-treatment").value,"hud");
   assert.equal(s.node("style-scale").value,"80");assert.equal(s.node("style-color").value,"#ff8040");
-  assert.equal(s.root.querySelector('[data-loc-style="upright"]').textContent,s.ui.text("builder.styling.upright"));
+  assert.equal(s.root.querySelector('[data-loc-style="upright"]').getAttribute("aria-label"),s.ui.text("builder.styling.upright"));
  }
+});
+
+test("browsing and dismissing translation tools preserves the draft and its selection",async()=>{
+  const s=setupEditor();await openEditorMessage(s);
+  const tools=s.node("message-tools"),format=s.node("style-font").closest("details"),body=s.node("body");
+  const before=body.value;
+  body.setSelectionRange(2,5);
+  format.open=true;
+  await s.doc.fire("focusin",{target:s.node("style-scale")});
+  assert.equal(format.open,true);
+  s.node("style-scale").value="125";
+  await tools.fire("keydown",{key:"Escape",preventDefault(){},stopPropagation(){}});
+  assert.equal(format.open,false);
+  assert.equal(s.doc.activeElement,format.querySelector("summary"));
+  format.open=true;
+  await s.doc.fire("pointerdown",{target:body});
+  assert.equal(format.open,false);
+  assert.equal(body.value,before);
+  assert.deepEqual([body.selectionStart,body.selectionEnd],[2,5]);
+  assert.equal(s.context.window.localizationHasEdits(),false);
 });
 
 test("inline styling respects format, source, alias and inherited-term restrictions",async()=>{
@@ -1082,30 +937,6 @@ test("invalid styling leaves drafts untouched; unsaved font roles are available"
  assert.ok(!s.node("style-font").options.some(o=>o.value==="quiet"));
 });
 
-test("failed font check preserves imported state, specific code and recovery without a second check",async()=>{
-  const s=setupEditor();importResponder(s);await s.doc.fire("drop",dragEvent(s));
-  const detail="invalid game font-check response: record 2";
-  s.response(async endpoint=>{
-    if(endpoint==="accept-import")return {ok:true,json:async()=>projectSnapshot()};
-    if(endpoint==="projects"||endpoint==="tree")return {ok:true,json:async()=>[]};
-    if(endpoint==="installation")return {ok:true,json:async()=>({installed:false})};
-    if(endpoint==="install")return {ok:false,status:500,json:async()=>({error:detail,errorCode:"builder.errors.font_protocol",recoveryKey:"builder.recovery.font_protocol"})};
-    throw Error("unexpected recovery request: "+endpoint);
-  });
-  await s.node("accept-import").fire("click");
-  assert.equal(s.node("feedback").textContent,s.ui.text("builder.language.import_partial",{detail:s.ui.text("builder.errors.font_protocol")}));
-  assert.equal(s.requests.filter(r=>r.endpoint==="install").length,1);
-  assert.equal(s.requests.filter(r=>r.endpoint==="installation-check").length,0);
-  const report=s.root.querySelector(".workshop-feedback textarea").value;
-  assert.match(report,/Code: builder.errors.font_protocol/);assert.match(report,/Operation: Install language pack/);
-  assert.match(report,/Outcome: Project imported into Workshop/);assert.ok(report.includes(detail));
-  for(const locale of ["fr","de","ja","en"]){
-    s.picker.value=locale;await s.picker.fire("change");
-    assert.equal(s.root.querySelector(".workshop-feedback p").textContent,s.ui.text("builder.recovery.font_protocol"));
-  }
-  assert.equal(s.node("install").disabled,false);
-});
-
 test("language errors retain server codes and malformed responses get a response code",async()=>{
   for(const malformed of [false,true]){
     const s=setupEditor();
@@ -1121,39 +952,22 @@ test("language errors retain server codes and malformed responses get a response
   }
 });
 
-test("connection loss after import reports an uncertain installation without retrying",async()=>{
-  const s=setupEditor();importResponder(s);await s.doc.fire("drop",dragEvent(s));
-  s.response(async endpoint=>{
-    if(endpoint==="accept-import")return {ok:true,json:async()=>projectSnapshot()};
-    if(endpoint==="projects"||endpoint==="tree")return {ok:true,json:async()=>[]};
-    if(endpoint==="installation")return {ok:true,json:async()=>({installed:false})};
-    if(endpoint==="install")throw new TypeError("Failed to fetch");
-    throw Error("unexpected endpoint "+endpoint);
-  });
-  await s.node("accept-import").fire("click");
-  assert.match(s.node("feedback").textContent,/Installation could not be confirmed/);
-  assert.equal(s.requests.filter(r=>r.endpoint==="install").length,1);
-  const report=s.root.querySelector(".workshop-feedback textarea").value;
-  assert.match(report,/Code: AR_NETWORK/);assert.match(report,/Outcome: .*could not be confirmed/);
-  assert.equal(s.node("install").disabled,false);
-});
-
-test("installation conflicts retain their original diagnostic when refreshing choices fails",async()=>{
-  const s=setupEditor();importResponder(s);await s.doc.fire("drop",dragEvent(s));
+test("an install conflict retains its diagnostic when refreshing choices fails",async()=>{
+  const s=setupEditor();
+  await openEditorMessage(s, editorMessage(), false);
   let reads=0;
   s.response(async endpoint=>{
-    if(endpoint==="accept-import")return {ok:true,json:async()=>projectSnapshot()};
-    if(endpoint==="projects"||endpoint==="tree")return {ok:true,json:async()=>[]};
     if(endpoint==="installation"){
       if(++reads>1)throw new TypeError("status refresh lost connection");
       return {ok:true,json:async()=>({installed:false})};
     }
+    if(endpoint==="installation-check")return {ok:true,json:async()=>({messages:2,fallback:1})};
     if(endpoint==="install")return {ok:false,status:409,json:async()=>({error:"Original installation conflict",errorCode:"builder.language.request_conflict",recoveryKey:"builder.recovery.conflict"})};
     throw Error("unexpected endpoint "+endpoint);
   });
-  await s.node("accept-import").fire("click");
+  await s.node("review-install").fire("click");
+  await s.node("install").fire("click");
   const report=s.root.querySelector(".workshop-feedback textarea").value;
-  assert.match(report,/Original installation conflict/);assert.match(report,/Code: builder.language.request_conflict/);
+  assert.match(report,/Original installation conflict/);
   assert.doesNotMatch(report,/lost connection/);
-  assert.equal(s.requests.filter(r=>r.endpoint==="installation-check").length,0);
 });

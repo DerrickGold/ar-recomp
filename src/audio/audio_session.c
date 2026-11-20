@@ -22,9 +22,11 @@ void AudioSession_Begin(void) {
   s_rejected_chunks = 0;
   /* Music uses the manifest's [music:] sections and works headless too. */
   const char *music_manifest = getenv("AR_MUSIC_MANIFEST");
-  if (!music_manifest || !music_manifest[0])
-    music_manifest = "game-assets/manifest.ini";
-  MusicReplacements_Load(music_manifest);
+  if (music_manifest && music_manifest[0])
+    MusicReplacements_Load(music_manifest);
+  else
+    MusicReplacements_LoadWithOverlay("game-assets/manifest.ini",
+                                     "game-assets/mods-active.ini");
   MusicReplacements_InstallHooks();
   NativeAudioExtension_Install();
   NativeAudioMixer_Install();

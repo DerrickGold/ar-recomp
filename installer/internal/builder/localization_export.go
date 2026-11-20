@@ -13,6 +13,7 @@ type localizationExportRequest struct {
 	ConfirmRights   bool   `json:"confirmRights"`
 	IncludeWIP      bool   `json:"includeWIP"`
 	PrepareDownload bool   `json:"prepareDownload"`
+	Version         string `json:"version"`
 }
 
 func (work *localizationWork) exportLocalization(w *localizationReply, r *http.Request, endpoint string, q localizationExportRequest) error {
@@ -24,7 +25,7 @@ func (work *localizationWork) exportLocalization(w *localizationReply, r *http.R
 	}
 	p := work.current
 	var err error
-	kind, extension := "backup", ".arproject"
+	extension := ".arproject"
 	var report lk.PublicationReport
 	if endpoint != "backup" {
 		p, report, err = p.Publication(lk.PublicationOptions{ConfirmRights: q.ConfirmRights, IncludeWIP: q.IncludeWIP})
@@ -34,14 +35,22 @@ func (work *localizationWork) exportLocalization(w *localizationReply, r *http.R
 		if err := work.requireFontCoverage(r.Context(), p); err != nil {
 			return err
 		}
-		kind, extension = "publication", ".arlang"
+		if _, err := lk.ParseLanguageRelease(q.Version); err != nil {
+			return err
+		}
+		extension = ".o2r"
 	}
 	if endpoint == "publication-check" {
 		w.json(200, report)
 		return nil
 	}
 	var archive bytes.Buffer
-	if err := p.WriteArchive(&archive, kind); err != nil {
+	if endpoint == "backup" {
+		err = p.WriteArchive(&archive, "backup")
+	} else {
+		err = p.WriteLanguageMod(&archive, q.Version)
+	}
+	if err != nil {
 		return err
 	}
 	if q.PrepareDownload {

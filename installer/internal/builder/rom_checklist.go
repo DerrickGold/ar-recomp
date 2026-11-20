@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,40 +19,54 @@ import (
 
 type romChoice struct {
 	name, launchPath, location, path string
+	uploaded                         []byte
 }
 
 func (choice romChoice) preferSavedCore(saved string) bool {
 	return saved != "" && choice.launchPath != ""
 }
 
-type inspectedROM struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-func inspectUploadedROMs(w http.ResponseWriter, r *http.Request) {
+func (app *application) selectUploadedROMs(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxROMBytes+(1<<20))
 	if err := r.ParseMultipartForm(maxROMBytes + (1 << 20)); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "could not read the selected ROMs")
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
-	inputs, err := readUploadedROMs(r.MultipartForm.File["rom"])
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+	files := r.MultipartForm.File["rom"]
+	slot := firstFormValue(r.MultipartForm, "id")
+	if len(files) == 0 || (slot != "" && len(files) != 1) {
+		writeJSONError(w, http.StatusBadRequest, "choose a ROM from the checklist")
 		return
 	}
-	selected := []inspectedROM{}
+	if len(files) > len(supportedROMIDs()) {
+		writeJSONError(w, http.StatusBadRequest, "select up to six supported ROMs")
+		return
+	}
+	choices := make(map[string]romChoice)
 	unavailable := []string{}
-	for _, input := range inputs {
+	for _, file := range files {
+		input, err := readUploadedROM(file)
+		if err != nil {
+			unavailable = append(unavailable, file.Filename)
+			continue
+		}
 		id, _, err := romset.Identify(input.Data)
 		if err != nil {
 			unavailable = append(unavailable, input.Name)
 			continue
 		}
-		selected = append(selected, inspectedROM{ID: id, Name: input.Name})
+		if slot != "" && slot != id {
+			writeJSONError(w, http.StatusBadRequest, "the selected ROM belongs to a different entry in the checklist")
+			return
+		}
+		if _, exists := choices[id]; !exists {
+			choices[id] = romChoice{name: input.Name, uploaded: input.Data}
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"selected": selected, "unavailable": unavailable})
+	if app.updateROMChoices(w, choices, "") {
+		writeJSON(w, http.StatusOK, map[string]any{"unavailable": unavailable})
+	}
 }
 
 func (app *application) initializeROMChoices() {
@@ -127,6 +142,7 @@ func (app *application) serveROMChecklist(w http.ResponseWriter) {
 		World         string `json:"world,omitempty"`
 		Saved         bool   `json:"saved,omitempty"`
 		TextReference bool   `json:"textReference,omitempty"`
+		LanguagePack  bool   `json:"languagePack,omitempty"`
 	}
 	found := app.foundROMs()
 	available := make(map[string]string)
@@ -149,10 +165,12 @@ func (app *application) serveROMChecklist(w http.ResponseWriter) {
 		switch id {
 		case "us":
 			item.Saved = savedErr == nil
+			item.LanguagePack = regularFileExists(nativeUSModPath(app.options.ProjectRoot))
 		case romset.SequelID:
 			item.Master = ar2master.Status(app.options.ProjectRoot)
 			item.World = ar2game.Status(app.options.ProjectRoot)
 		default:
+			item.LanguagePack = regularFileExists(regionalROMModPath(app.options.ProjectRoot, id))
 			path := filepath.Join(app.options.ProjectRoot, "game-assets", "languages", "projects", "source."+id+".arproject")
 			if info, err := os.Lstat(path); err == nil {
 				item.TextReference = info.Mode().IsRegular()
@@ -165,11 +183,16 @@ func (app *application) serveROMChecklist(w http.ResponseWriter) {
 }
 
 func (app *application) selectChecklistROM(w http.ResponseWriter, r *http.Request) {
+	contentType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if contentType == "multipart/form-data" {
+		app.selectUploadedROMs(w, r)
+		return
+	}
 	var request struct {
 		ID, Location, Path string
 		Found, Clear       bool
 	}
-	if r.Header.Get("Content-Type") != "application/json" ||
+	if contentType != "application/json" ||
 		json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request) != nil {
 		writeJSONError(w, http.StatusBadRequest, "choose a ROM from the checklist")
 		return
@@ -200,19 +223,33 @@ func (app *application) selectChecklistROM(w http.ResponseWriter, r *http.Reques
 		id = release
 		choice = romChoice{name: input.Name, location: request.Location, path: request.Path}
 	}
-	app.mu.Lock()
-	if app.state == "building" || app.playing {
-		app.mu.Unlock()
-		writeJSONError(w, http.StatusConflict, "wait for the current session to finish before changing ROMs")
-		return
-	}
+	choices := map[string]romChoice{}
+	clear := ""
 	if request.Clear {
-		delete(app.romChoices, id)
+		clear = id
 	} else {
+		choices[id] = choice
+	}
+	if app.updateROMChoices(w, choices, clear) {
+		if choice.location != "" && !request.Found {
+			app.rememberBrowserFolder("ROM", choice.location, choice.path)
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "name": choice.name})
+	}
+}
+
+func (app *application) updateROMChoices(w http.ResponseWriter, choices map[string]romChoice, clear string) bool {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	if app.state == "building" || app.playing {
+		writeJSONError(w, http.StatusConflict, "wait for the current session to finish before changing ROMs")
+		return false
+	}
+	delete(app.romChoices, clear)
+	for id, choice := range choices {
 		app.romChoices[id] = choice
 	}
-	app.mu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]string{"id": id, "name": choice.name})
+	return true
 }
 
 func (app *application) snapshotROMChoices() map[string]romChoice {
@@ -234,9 +271,14 @@ func (app *application) readROMChoices(choices map[string]romChoice) ([]romset.I
 		}
 		var input romset.Input
 		var err error
-		if choice.launchPath != "" {
+		switch {
+		case choice.uploaded != nil:
+			// The server already identified this immutable file on selection.
+			inputs = append(inputs, romset.Input{Name: choice.name, Data: choice.uploaded})
+			continue
+		case choice.launchPath != "":
 			input, err = readLaunchROM(choice.launchPath)
-		} else {
+		default:
 			input, err = app.readBrowsedROM(choice.location, choice.path)
 		}
 		if err != nil {
@@ -271,7 +313,7 @@ func (app *application) importSelectedROMs(w http.ResponseWriter) {
 		var plan *romset.Plan
 		plan, err = romset.Prepare(inputs)
 		if err == nil {
-			err = app.installROMContent(plan)
+			err = app.installROMContent(plan, true)
 		}
 	}
 	if err != nil {

@@ -26,13 +26,13 @@ class Element {
  reset(){this.resets++;input.files=[];}
  emit(name){return this.handlers[name]?.({preventDefault(){}});}
 }
-const ids=['regional-media-form','regional-media-file','regional-media-status','regional-media-donors','regional-media-refresh','panel-assets'];
+const ids=['regional-media-form','regional-media-file','regional-media-status','regional-media-donors','regional-media-refresh','panel-build','setup-regional-archive'];
 const elements=Object.fromEntries(ids.map(id=>[id,new Element()]));
-const form=elements[ids[0]],input=elements[ids[1]],status=elements[ids[2]],donors=elements[ids[3]],refresh=elements[ids[4]],choose=new Element();
+const form=elements[ids[0]],input=elements[ids[1]],status=elements[ids[2]],donors=elements[ids[3]],refresh=elements[ids[4]],choose=elements[ids[6]];choose.open=true;
 const controls=[input,refresh];const docHandlers={};
-global.document={getElementById:id=>elements[id],createElement:()=>new Element(),querySelector:()=>choose,addEventListener:(key,fn)=>docHandlers[key]=fn};
+global.document={getElementById:id=>elements[id],createElement:()=>new Element(),dispatchEvent:()=>{},addEventListener:(key,fn)=>docHandlers[key]=fn};
 let confirms=0,allow=false,feedback=0;const reports=[];const bindings=[];
-global.window={confirm:()=>{confirms++;return allow;},workshopI18n:{set:(el,key,args)=>{el.key=key;el.args=args;bindings.push(key);},text:key=>key},workshopFeedback:{clear(){},show(target,error,options){feedback++;reports.push({error,options});}}};
+global.window={workshopConfirm:async(action,message,args)=>{assert.equal(action,'builder.media.replace_action');assert.equal(message,'builder.media.replace');assert.equal(args.region,'builder.media.jp');confirms++;return allow;},workshopI18n:{set:(el,key,args)=>{el.key=key;el.args=args;bindings.push(key);},text:key=>key},workshopFeedback:{clear(){},show(target,error,options){feedback++;reports.push({error,options});}}};
 global.FormData=class {constructor(){this.values={};}append(k,v){this.values[k]=v;}};
 const requests=[],responses=[];
 global.fetch=async(path,init={})=>{requests.push({path,...init});assert(responses.length,'unexpected request');const [status,body]=responses.shift();return {status,ok:status===200,json:async()=>body};};
@@ -41,7 +41,7 @@ const tick=async()=>{for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate
 `
 	const after = `
 (async()=>{
- responses.push([200,{donors:rows}]);await choose.emit('click');
+ responses.push([200,{donors:rows}]);await choose.emit('toggle');
  assert.equal(donors.children.length,5);assert.equal(status.key,'builder.media.ready');
  input.files=[{name:'private.armedia'}];responses.push([409,{code:'replace_required',release:'jp'}]);form.emit('submit');await tick();
  assert.equal(confirms,1);assert.equal(status.key,'builder.media.cancelled');assert.equal(form.resets,0);assert.equal(input.disabled,false);
@@ -58,7 +58,7 @@ const tick=async()=>{for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate
  assert.equal(reports.at(-1).error.outcome,'Regional media installed; status refresh failed.');
  responses.push([200,{donors:rows}]);await refresh.emit('click');assert.equal(status.key,'builder.media.ready');
  assert(requests.every(r=>r.path==='regional-media'));assert.equal(responses.length,0);
- docHandlers['workshop:closed']();assert(input.disabled);await choose.emit('click');assert.equal(responses.length,0);
+ docHandlers['workshop:closed']();assert(input.disabled);await choose.emit('toggle');assert.equal(responses.length,0);
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
 	cmd := exec.Command(node)

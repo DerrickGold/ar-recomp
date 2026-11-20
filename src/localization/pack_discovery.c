@@ -18,7 +18,7 @@ static bool SamePortableId(const char *a, const char *b) {
   return ComparePortableId(a, b) == 0;
 }
 
-static void ExcludeId(ArLanguagePackCatalog *catalog, const char *id) {
+static void RemoveId(ArLanguagePackCatalog *catalog, const char *id) {
   for (size_t i = 0; i < catalog->count;) {
     if (SamePortableId(catalog->entries[i].metadata.package_id, id)) {
       memmove(catalog->entries + i, catalog->entries + i + 1,
@@ -27,11 +27,25 @@ static void ExcludeId(ArLanguagePackCatalog *catalog, const char *id) {
       ++i;
     }
   }
+}
+
+static void ExcludeId(ArLanguagePackCatalog *catalog, const char *id) {
+  RemoveId(catalog, id);
   for (size_t i = 0; i < catalog->conflict_count; ++i)
     if (SamePortableId(catalog->conflicts[i], id)) return;
   if (catalog->conflict_count < kArLanguagePackCatalogVisitLimit)
     snprintf(catalog->conflicts[catalog->conflict_count++],
              kArLanguagePackageIdCapacity, "%s", id);
+}
+
+static void PreferId(ArLanguagePackCatalog *catalog, const char *id) {
+  RemoveId(catalog, id);
+  for (size_t i = 0; i < catalog->conflict_count; ++i) {
+    if (!SamePortableId(catalog->conflicts[i], id)) continue;
+    memmove(catalog->conflicts + i, catalog->conflicts + i + 1,
+            (--catalog->conflict_count - i) * sizeof(catalog->conflicts[0]));
+    break;
+  }
 }
 
 bool ArLanguagePackCatalog_Add(ArLanguagePackCatalog *catalog,
@@ -140,11 +154,13 @@ bool ArLanguagePackCatalog_ReadArchiveIndex(ArLanguagePackCatalog *catalog,
       ExcludeId(candidate, id);
       continue;
     }
-    if (strcmp(line, "pack") || !token || !CacheToken(token)) goto fail;
+    bool replace = !strcmp(line, "replace");
+    if ((!replace && strcmp(line, "pack")) || !token || !CacheToken(token)) goto fail;
     char path[1024];
     int written = snprintf(path, sizeof(path), "%s/.arlang-cache/%s/pack.ini", root, token);
     if (written < 0 || (size_t)written >= sizeof(path)) goto fail;
     ArLanguagePackError detail = {{0}};
+    if (replace) PreferId(candidate, id);
     if (!ArLanguagePackCatalog_Add(candidate, io, path, id, &detail))
       fprintf(stderr, "[localization] skipping prepared %s: %s\n", id, detail.message);
   }

@@ -110,6 +110,28 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   if (!document.querySelector('#build-form')) return; // Bootstrap reloads us.
   const check = (ok, message) => { if (!ok) throw new Error(message); };
+  const waitFor = async (test, description) => {
+    for (let n = 0; n < 200; n++) {
+      const value = test();
+      if (value) return value;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    throw new Error('Timed out waiting for ' + description);
+  };
+  // A DOM click alone also succeeds on covered or offscreen buttons. Check
+  // the renderer's pointer hit target before exercising each handler.
+  const reachable = async selector => {
+    const el = await waitFor(() => {
+      const node = document.querySelector(selector);
+      return node?.getClientRects().length && !node.matches(':disabled,[aria-disabled=true]') && node;
+    }, selector);
+    el.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    const r = el.getBoundingClientRect();
+    check(el.contains(document.elementFromPoint(r.left+r.width/2, r.top+r.height/2)), 'Covered control: '+selector);
+    return el;
+  };
+  const click = async selector => (await reachable(selector)).click();
   let outcome;
   try {
     check(typeof window.workshopI18n === 'object', 'interface JavaScript did not load');
@@ -121,26 +143,38 @@ window.addEventListener('DOMContentLoaded', async () => {
     for (let i=0; i<100 && document.querySelector('#import-install-open').hidden; i++) await new Promise(resolve=>setTimeout(resolve,25));
     check(!document.querySelector('#import-install-open').hidden, 'import JavaScript did not load');
     check(!document.querySelector('#import-install').open, 'unexpected duplicate startup import dialog');
-    document.querySelector('#import-install-open').click();
+    if (document.body.dataset.bigScreen === 'true') await click('#big-screen-desktop');
+    await click('#tab-build');
+    await click('#import-install-open');
     check(document.querySelector('#import-install').open, 'manual import dialog did not open');
-    document.querySelector('#import-install-skip').click();
+    await click('#import-install-skip');
     check(!document.querySelector('#import-install').open, 'import cancel did not close dialog');
     check((await (await fetch('installation-import/state')).json()).decided === migration.decided, 'cancelling import wrote a decision');
     const status = await (await fetch('status')).json();
     check(status.state === 'idle' && status.install.canRebuild, 'bundled build inputs unavailable');
-    const preferences = await fetch('interface/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({language: window.workshopI18n.locale})});
-    check(preferences.ok, 'interface preferences unavailable');
-    await preferences.json();
-    document.querySelector('#tab-assets').click();
+    const language = await reachable('.workspace-bar #interface-language');
+    const original = language.value;
+    for (const value of [original === 'fr' ? 'en' : 'fr', original]) {
+      language.value = value;
+      language.dispatchEvent(new Event('change', {bubbles:true}));
+      await waitFor(() => document.documentElement.lang === value && !language.disabled, 'saved language '+value);
+    }
+    await click('#tab-workshop');
+    await click('#workshop-overview [data-nav=assets]');
     check(document.querySelector('#tab-assets').getAttribute('aria-selected') === 'true', 'tab navigation did not execute');
-    document.querySelector('#tab-manual').click();
-    check(document.querySelector('#tab-manual').getAttribute('aria-selected') === 'true', 'manual navigation failed');
-    // The bundle ships NO manual, so the tab must open on the empty state with
-    // nothing loaded into the viewer and no request for a file that is absent.
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await click('#asset-track-toggle');
+    await click('#asset-track-list [data-track="song-09"]');
+    check(document.querySelector('#asset-track-options').hidden &&
+      !document.querySelector('.asset-row[data-track="song-09"]').hidden, 'music selection did not change tracks');
+    await click('#tab-mods');
+    const filter = await reachable('#asset-pack-type');
+    filter.value = 'actraiser-manual';
+    filter.dispatchEvent(new Event('change', {bubbles:true}));
+    await waitFor(() => document.querySelector('#asset-pack-list .mod-empty'), 'empty manual pack list');
+    check(document.querySelector('#asset-pack-manual-reader').hidden, 'manual reader offered without an installed manual');
+    await click('#asset-pack-clear-filter');
+    check(filter.value === 'all', 'clearing the filter did not restore all mods');
     check((await (await fetch('manual')).json()).present === false, 'a manual shipped with the bundle');
-    check(!document.querySelector('#manual-frame').getAttribute('src'), 'manual viewer loaded with no manual installed');
-    check(!document.querySelector('#manual-empty').hidden, 'manual empty state not shown');
     check((await fetch('manual.pdf')).status === 404, 'absent manual did not 404');
     // Install one through the real endpoint, which is the whole player-facing
     // path: a two-page synthetic scan album the in-game reader would accept.
@@ -173,8 +207,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     // or build: the backend must reject this empty form with a client error.
     const invalid = await fetch('build', {method: 'POST', body: new FormData()});
     check(invalid.status === 400, 'multipart request did not reach build validation');
-    document.querySelector('#tab-home').click();
-    outcome = 'PASS JavaScript, manual installation import, status, preferences, tabs, manual install/serve/remove, WAV decoding, multipart validation';
+    await click('#tab-home');
+    outcome = 'PASS renderer hit tests, installation import, status, language switching, music selection, mod filtering, manual install/serve/remove, WAV decoding, multipart validation';
     const config = await (await fetch('__shell/smoke-config')).json();
     if (config.fullBuild) {
       const form = new FormData();

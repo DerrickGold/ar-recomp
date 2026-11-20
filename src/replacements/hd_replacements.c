@@ -59,11 +59,10 @@ static bool EntryComplete(const HdReplacement *entry, const char *path,
   return !missing;
 }
 
-int HdReplacements_Load(const char *path) {
-  g_hd_replacement_count = 0;
-  memset(g_hd_replacements, 0, sizeof(g_hd_replacements));
+static void ReadHdManifest(const char *path, int capacity) {
   FILE *f = sr_fopen(path, "r");
-  if (!f) return 0;
+  if (!f) return;
+  const int limit = g_hd_replacement_count + capacity;
 
   HdReplacement pending;
   bool in_entry = false;
@@ -73,7 +72,7 @@ int HdReplacements_Load(const char *path) {
 
   #define COMMIT_PENDING() do { \
     if (in_entry && EntryComplete(&pending, path, entry_line) && \
-        g_hd_replacement_count < kHdMaxReplacements) \
+        g_hd_replacement_count < limit) \
       g_hd_replacements[g_hd_replacement_count++] = pending; \
     in_entry = false; \
   } while (0)
@@ -148,7 +147,32 @@ int HdReplacements_Load(const char *path) {
   COMMIT_PENDING();
   #undef COMMIT_PENDING
   fclose(f);
+}
 
+bool HdReplacements_IsTitleHook(const HdReplacement *entry) {
+  return !strcmp(entry->name, "title-logo") ||
+         !strcmp(entry->name, "title-swirl");
+}
+
+int HdReplacements_LoadWithOverlay(const char *path, const char *overlay_path) {
+  g_hd_replacement_count = 0;
+  memset(g_hd_replacements, 0, sizeof(g_hd_replacements));
+  if (overlay_path) {
+    ReadHdManifest(overlay_path, kHdTitlePackEntries);
+    HdReplacement *logo = &g_hd_replacements[0];
+    HdReplacement *swirl = &g_hd_replacements[1];
+    /* Builder title packs always publish the settled title and swirl together. */
+    if (g_hd_replacement_count == kHdTitlePackEntries &&
+        logo->plane == kHdPlane_Screen && !strcmp(logo->name, "title-logo") &&
+        swirl->plane == kHdPlane_Mode7 && !strcmp(swirl->name, "title-swirl") &&
+        !strcmp(logo->image, swirl->image)) {
+      logo->from_title_pack = true;
+      swirl->from_title_pack = true;
+    } else {
+      g_hd_replacement_count = 0;
+    }
+  }
+  ReadHdManifest(path, kHdMaxLegacyReplacements);
   for (int i = 0; i < g_hd_replacement_count; i++) {
     HdReplacement *entry = &g_hd_replacements[i];
     if (entry->plane == kHdPlane_Tiles)
@@ -156,6 +180,10 @@ int HdReplacements_Load(const char *path) {
               "and not implemented yet; entry inert\n", entry->name);
   }
   return g_hd_replacement_count;
+}
+
+int HdReplacements_Load(const char *path) {
+  return HdReplacements_LoadWithOverlay(path, NULL);
 }
 
 bool HdReplacements_PrepareTitleCoverage(HdReplacement *entry,

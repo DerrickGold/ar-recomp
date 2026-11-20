@@ -26,6 +26,7 @@ import (
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
+	"github.com/DerrickGold/ar-recomp/installer/internal/modconfig"
 )
 
 const (
@@ -48,8 +49,9 @@ type Result struct {
 	// a real failure reaches the user.
 	//
 	// Optional; with these empty the host falls back to the script.
-	BinaryPath string `json:"binaryPath,omitempty"`
-	WorkingDir string `json:"workingDir,omitempty"`
+	BinaryPath  string `json:"binaryPath,omitempty"`
+	WorkingDir  string `json:"workingDir,omitempty"`
+	ModRecovery string `json:"-"`
 }
 
 // Options configures one local GUI session.
@@ -62,6 +64,7 @@ type Options struct {
 	// ControllerHint is the controller family reported by the launcher.
 	ControllerHint string
 	ProjectRoot    string
+	ModDirectories []string
 	OpenBrowser    bool
 	Stdout         io.Writer
 	// ImportSearchDir is the folder containing the outer desktop artifact, never
@@ -128,8 +131,7 @@ func Run(ctx context.Context, options Options) error {
 		return fmt.Errorf("GUI project root %s is unavailable: %w", root, statErr)
 	}
 	// No manual is materialized here. The builder ships none, so game-assets/
-	// manual.pdf stays absent until the player installs their own from the Help
-	// tab; both readers treat that as a normal state.
+	// manual.pdf stays absent until the player imports a legacy PDF.
 	//
 	// The manifest is a different case: an install with none gets the template,
 	// and one that already has a manifest keeps every entry in it.
@@ -142,6 +144,12 @@ func Run(ctx context.Context, options Options) error {
 	}
 	if options.Stdout == nil {
 		options.Stdout = io.Discard
+	}
+	if err := prepareBundledTitles(root, options.ModDirectories); err != nil {
+		fmt.Fprintf(options.Stdout, "Prepare bundled title packs: %v\n", err)
+	}
+	if err := prepareExistingROMMods(root, options.ModDirectories); err != nil {
+		fmt.Fprintf(options.Stdout, "Prepare extracted language mods: %v\n", err)
 	}
 	if options.openURL == nil {
 		options.openURL = openBrowser
@@ -163,6 +171,7 @@ func Run(ctx context.Context, options Options) error {
 	sessionCtx, cancelSession := context.WithCancel(ctx)
 	defer cancelSession()
 	app := newApplication(sessionCtx, options, token)
+	defer app.replaceModDownload(nil)
 	server := &http.Server{
 		Handler:           app,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -276,6 +285,10 @@ type application struct {
 	// same time. Serializing the read/merge/install transaction prevents the
 	// second request from rebuilding a manifest from stale text.
 	assetMu           sync.Mutex
+	modExportMu       sync.Mutex
+	modExport         *modDownload
+	manualPreviewMu   sync.Mutex
+	manualPreview     manualPreview
 	regionalMediaMu   sync.Mutex
 	gameImportMu      sync.Mutex
 	directoryPickerMu sync.Mutex
@@ -445,6 +458,10 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		app.serveLocalization(response, request, strings.TrimPrefix(endpoint, "localization/"))
 		return
 	}
+	if strings.HasPrefix(endpoint, "mods/") {
+		app.serveMods(response, request, strings.TrimPrefix(endpoint, "mods/"))
+		return
+	}
 	if endpoint == "game-imports" {
 		app.serveGameImports(response, request)
 		return
@@ -479,6 +496,7 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 			"{{TITLE}}", html.EscapeString(app.options.Title),
 			"{{BUILDER_VERSION}}", html.EscapeString(app.options.Version),
 			"{{BIG_SCREEN}}", strconv.FormatBool(app.options.BigScreen),
+			"{{DESKTOP_SHELL}}", strconv.FormatBool(request.Header.Get("X-ActRaiser-Desktop-Shell") == "1"),
 			"{{PLAY_SESSION}}", strconv.FormatBool(app.options.LaunchSession != nil),
 			"{{CONTROLLER_HINT}}", html.EscapeString(app.options.ControllerHint),
 			"{{STEPS}}", renderStepList(),
@@ -506,9 +524,17 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 	case endpoint == "scene-atlas.png" && request.Method == http.MethodGet:
 		app.serveScenery(response, request, true)
 	case endpoint == "assets" && request.Method == http.MethodGet:
-		app.writeAssets(response)
+		app.writeAssets(response, app.options.ProjectRoot, false)
 	case endpoint == "assets" && request.Method == http.MethodPost:
 		app.saveAssets(response, request)
+	case endpoint == "music-draft" && request.Method == http.MethodGet:
+		app.assetMu.Lock()
+		app.writeAssets(response, musicDraftRoot(app.options.ProjectRoot), true)
+		app.assetMu.Unlock()
+	case endpoint == "music-draft" && request.Method == http.MethodPost:
+		app.saveAssetConfiguration(response, request, true)
+	case strings.HasPrefix(endpoint, "music-draft-audio/") && request.Method == http.MethodGet:
+		app.serveAssetAudio(response, request, strings.TrimPrefix(endpoint, "music-draft-audio/"), musicDraftRoot(app.options.ProjectRoot))
 	case endpoint == "audio-previews" && request.Method == http.MethodGet:
 		app.writeAudioPreviewStatus(response)
 	case endpoint == "audio-previews" && request.Method == http.MethodPost:
@@ -525,8 +551,6 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		app.browseROMs(response, request)
 	case endpoint == "rom-checklist" && request.Method == http.MethodGet:
 		app.serveROMChecklist(response)
-	case endpoint == "rom-inspect" && request.Method == http.MethodPost:
-		inspectUploadedROMs(response, request)
 	case endpoint == "rom-selection" && request.Method == http.MethodPost:
 		app.selectChecklistROM(response, request)
 	case endpoint == "build" && request.Method == http.MethodPost:
@@ -534,7 +558,7 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 	case endpoint == "build-report" && request.Method == http.MethodPost:
 		app.saveBuildReport(response, request)
 	case endpoint == "launch" && request.Method == http.MethodPost:
-		app.launch(response)
+		app.launch(response, request)
 	case endpoint == "slim" && request.Method == http.MethodPost:
 		app.slim(response)
 	case endpoint == "close" && request.Method == http.MethodPost:
@@ -794,7 +818,29 @@ func (writer *lockedLogWriter) ReportBuildProgress(update BuildProgress) {
 	app.mu.Unlock()
 }
 
-func (app *application) launch(response http.ResponseWriter) {
+const ModRecoveryEnv = "AR_SESSION_MOD_RECOVERY"
+
+func modRecoveryMode(root string) string {
+	overlay := filepath.Join(root, "game-assets", modOverlayName)
+	if _, err := os.Lstat(overlay); errors.Is(err, os.ErrNotExist) {
+		return "legacy"
+	}
+	if _, err := modconfig.Read(overlay); err == nil {
+		return "prepared"
+	}
+	return ""
+}
+
+func (app *application) launch(response http.ResponseWriter, request *http.Request) {
+	var launchOptions struct {
+		ModRecovery string `json:"modRecovery"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 4096))
+	if err := decoder.Decode(&launchOptions); (err != nil && !errors.Is(err, io.EOF)) ||
+		(launchOptions.ModRecovery != "" && launchOptions.ModRecovery != "prepared" && launchOptions.ModRecovery != "legacy") {
+		writeJSONError(response, http.StatusBadRequest, "invalid launch options")
+		return
+	}
 	app.mu.Lock()
 	if app.playing || app.slimming {
 		app.mu.Unlock()
@@ -844,6 +890,28 @@ func (app *application) launch(response http.ResponseWriter) {
 		app.playing = true
 	}
 	app.mu.Unlock()
+	root := app.options.ProjectRoot
+	failModScan := func(detail string) {
+		app.mu.Lock()
+		app.playing = false
+		app.mu.Unlock()
+		writeJSON(response, http.StatusConflict, map[string]string{
+			"error": "The mod setup could not be refreshed.", "errorCode": "builder.mods.scan_failed",
+			"detail": detail, "modRecovery": modRecoveryMode(root),
+		})
+	}
+	if launchOptions.ModRecovery != "" {
+		if modRecoveryMode(root) != launchOptions.ModRecovery {
+			failModScan("The prepared mod setup changed. Retry the scan or review the available launch options.")
+			return
+		}
+		result.ModRecovery = launchOptions.ModRecovery
+	} else if hasModSources(root, app.options.ModDirectories) {
+		if _, err := updateModCatalog(root, app.options.ModDirectories, nil, nil); err != nil {
+			failModScan(err.Error())
+			return
+		}
+	}
 	if session != nil {
 		done, err := session(result)
 		if err != nil {

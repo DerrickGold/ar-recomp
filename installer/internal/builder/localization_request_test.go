@@ -25,6 +25,7 @@ type localizationRequest struct {
 	ConfirmRights    bool                  `json:"confirmRights,omitzero"`
 	IncludeWIP       bool                  `json:"includeWIP,omitzero"`
 	PrepareDownload  bool                  `json:"prepareDownload,omitzero"`
+	Version          string                `json:"version,omitzero"`
 	SaveMessage      bool                  `json:"saveMessage,omitzero"`
 	SaveDetails      bool                  `json:"saveDetails,omitzero"`
 	SaveNotice       bool                  `json:"saveNotice,omitzero"`

@@ -40,6 +40,11 @@ func (work *localizationWork) previewLocalizationImport(w *localizationReply, p 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	if group, err := work.installedLanguageMod(id); err != nil {
+		return err
+	} else if group != nil {
+		result["installed"] = true
+	}
 	if _, report, err := p.Installation(); err != nil {
 		result["installError"] = err.Error()
 	} else if report.Upgrade != nil {
@@ -216,7 +221,11 @@ func (work *localizationWork) commitLocalizationUpload(w *localizationReply, r *
 		}
 	}
 	if upload.pack != nil {
-		if _, err := lk.InstallNativeUSSource(filepath.Join(work.root, "native-us"), upload.pack); err != nil {
+		pack, err := lk.InstallNativeUSSource(filepath.Join(work.root, "native-us"), upload.pack)
+		if err != nil {
+			return err
+		}
+		if err := SaveNativeUSMod(work.modRoot, pack); err != nil {
 			return err
 		}
 		work.refreshNativeLocalizationSource()
@@ -232,6 +241,11 @@ func (work *localizationWork) commitLocalizationUpload(w *localizationReply, r *
 	}
 	if err != nil {
 		return err
+	}
+	if upload.endpoint == "extract" && upload.pack == nil {
+		if err := installRegionalROMMod(work.modRoot, work.modDirs, upload.project); err != nil {
+			return err
+		}
 	}
 	w.json(200, work.localizationState())
 	return nil

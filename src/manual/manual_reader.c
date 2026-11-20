@@ -15,6 +15,7 @@
 #include "manual_pages.h"
 #include "render/render_device.h"
 #include "render/scene3d_math.h"
+#include "replacements/manifest_utils.h"
 #include "app/settings.h"
 /* For the game's own menu font: the overlay owns the atlases. */
 #include "settings_overlay/settings_overlay_render.h"
@@ -35,6 +36,7 @@ enum {
   /* Decodes allowed per presented frame. ONE. See ManualReader_NextDecode. */
   kDecodesPerFrame = 1,
   kMaxFailures = 64,
+  kPackedManualMaxBytes = 128 << 20,
   kPageMaxVerts = (kManualMeshMaxColumns + 1) * (kManualMeshMaxRows + 1),
   kPageMaxIndices = kManualMeshMaxColumns * kManualMeshMaxRows * 6,
 };
@@ -44,6 +46,7 @@ enum {
  * in-tree dev build keeps the working directory authoritative. Same rule the HD
  * art and music manifests already follow. */
 static const char kManualPath[] = "game-assets/manual.pdf";
+static const char kManualOverlayPath[] = "game-assets/mods-active.ini";
 
 typedef struct PageTexture {
   ArRenderTexture texture;
@@ -105,31 +108,68 @@ static void SetStatus(const char *fmt, ...) {
   va_end(args);
 }
 
-bool ManualReader_Load(void) {
-  if (s_reader.load_attempted) return s_reader.index.count > 0;
-  s_reader.load_attempted = true;
+static bool FindPackedManual(char *path, size_t capacity) {
+  FILE *overlay = sr_fopen(kManualOverlayPath, "rb");
+  if (!overlay) return false;
+  static const char prefix[] = "mods-cache/";
+  char line[1024];
+  bool in_manual = false, found = false;
+  while (fgets(line, sizeof line, overlay)) {
+    if (!strchr(line, '\n') && !feof(overlay)) {
+      int byte;
+      while ((byte = fgetc(overlay)) != '\n' && byte != EOF) {}
+      continue;
+    }
+    char *key = Manifest_Trim(line);
+    if (*key == '[') {
+      in_manual = !strcmp(key, "[manual]");
+      continue;
+    }
+    if (!in_manual) continue;
+    char *equals = strchr(key, '=');
+    if (!equals) continue;
+    *equals = 0;
+    if (strcmp(Manifest_Trim(key), "file")) continue;
+    const char *value = Manifest_Trim(equals + 1);
+    if (strncmp(value, prefix, sizeof prefix - 1) != 0) break;
+    const char *digest = value + sizeof prefix - 1;
+    if (strspn(digest, "0123456789abcdef") != 64 ||
+        strcmp(digest + 64, "-0.pdf")) break;
+    Manifest_ResolvePath(kManualOverlayPath, value, path, capacity);
+    found = true;
+    break;
+  }
+  fclose(overlay);
+  return found;
+}
 
-  FILE *file = sr_fopen(kManualPath, "rb");
+static bool LoadManualFile(const char *path, bool packed) {
+  FILE *file = sr_fopen(path, "rb");
   if (!file) {
-    SetStatus("No manual: %s not found.", kManualPath);
+    SetStatus("No manual: %s not found.", path);
     return false;
   }
   if (fseek(file, 0, SEEK_END) != 0) {
     fclose(file);
-    SetStatus("No manual: %s could not be read.", kManualPath);
+    SetStatus("No manual: %s could not be read.", path);
     return false;
   }
   const long size = ftell(file);
   rewind(file);
   if (size <= 0) {
     fclose(file);
-    SetStatus("No manual: %s is empty.", kManualPath);
+    SetStatus("No manual: %s is empty.", path);
+    return false;
+  }
+  if (packed && size > kPackedManualMaxBytes) {
+    fclose(file);
+    SetStatus("No manual: %s exceeds the manual pack size limit.", path);
     return false;
   }
   s_reader.file = (uint8_t *)malloc((size_t)size);
   if (!s_reader.file) {
     fclose(file);
-    SetStatus("No manual: out of memory reading %s.", kManualPath);
+    SetStatus("No manual: out of memory reading %s.", path);
     return false;
   }
   s_reader.file_size = fread(s_reader.file, 1, (size_t)size, file);
@@ -147,7 +187,7 @@ bool ManualReader_Load(void) {
     SetStatus(found == 0
                   ? "No manual: %s holds no page images (needs converting)."
                   : "No manual: %s is not a page album (needs converting).",
-              kManualPath);
+              path);
     free(s_reader.file);
     s_reader.file = NULL;
     s_reader.file_size = 0;
@@ -159,6 +199,15 @@ bool ManualReader_Load(void) {
   ManualPages_NominalGeometry(&s_reader.index, &w, &h);
   SetStatus("%d pages, %dx%d.", s_reader.index.count, w, h);
   return true;
+}
+
+bool ManualReader_Load(void) {
+  if (s_reader.load_attempted) return s_reader.index.count > 0;
+  s_reader.load_attempted = true;
+  char packed[128];
+  if (FindPackedManual(packed, sizeof packed) && LoadManualFile(packed, true))
+    return true;
+  return LoadManualFile(kManualPath, false);
 }
 
 bool ManualReader_Available(void) {

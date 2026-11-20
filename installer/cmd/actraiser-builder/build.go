@@ -336,7 +336,11 @@ func prepareNativeUS(root, romPath string, output io.Writer) error {
 		return fmt.Errorf("close selected ROM: %w", closeErr)
 	}
 	directory := filepath.Join(root, "game-assets", "languages", "native-us")
-	if _, err := localization.EnsureNativeUSSource(directory, data); err != nil {
+	pack, err := localization.EnsureNativeUSSource(directory, data)
+	if err != nil {
+		return err
+	}
+	if err := builder.SaveNativeUSMod(root, pack); err != nil {
 		return err
 	}
 	builder.ReportBuildProgress(output, builder.BuildProgress{

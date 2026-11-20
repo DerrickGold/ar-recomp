@@ -31,6 +31,11 @@ static void Expect(const char *steps) {
   s_order[0] = 0;
 }
 int MusicReplacements_Load(const char *path) { Record('L'); return 0; }
+int MusicReplacements_LoadWithOverlay(const char *path, const char *overlay) {
+  assert(!strcmp(path, "game-assets/manifest.ini"));
+  assert(!strcmp(overlay, "game-assets/mods-active.ini"));
+  return MusicReplacements_Load(path);
+}
 void MusicReplacements_InstallHooks(void) { Record('M'); }
 void NativeAudioExtension_Install(void) { Record('E'); }
 void NativeAudioMixer_Install(void) { Record('X'); }

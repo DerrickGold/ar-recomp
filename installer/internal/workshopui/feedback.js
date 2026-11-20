@@ -3,6 +3,13 @@
 (() => {
   "use strict";
   const cards=new WeakMap();
+  const pending=[];
+  let active, nextID=0, closed=false;
+  document.addEventListener("workshop:closed",()=>{
+    closed=true;
+    pending.length=0;
+    active?.dialog.close();
+  },{once:true});
   const text=(key,fallback)=>window.workshopI18n?.text("builder.feedback."+key,{},fallback)||fallback;
   const label=(node,key,fallback)=>{if(window.workshopI18n)window.workshopI18n.set(node,"builder.feedback."+key);else node.textContent=fallback;};
   function sanitize(value){
@@ -47,11 +54,36 @@
     if(!response.ok&&!acceptedStatuses.includes(response.status))throw responseError(body,response.status);
     return body;
   }
+  function present(entry){
+    if(closed||active===entry||pending.includes(entry))return;
+    if(active){pending.push(entry);return;}
+    active=entry;
+    document.body.append(entry.dialog);
+    entry.dialog.showModal();
+    entry.close.focus();
+  }
+  function finish(entry){
+    if(active!==entry)return;
+    entry.dialog.remove();
+    active=undefined;
+    if(pending.length)present(pending.shift());
+  }
   function clear(target){
-    const prior=cards.get(target);if(prior){prior.card.remove();cards.delete(target);}
+    const prior=cards.get(target);
+    if(!prior)return;
+    cards.delete(target);
+    const index=pending.indexOf(prior);
+    if(index>=0)pending.splice(index,1);
+    if(active===prior)prior.dialog.close();
+  }
+  function reopen(target){
+    const entry=cards.get(target);
+    if(closed||!entry)return false;
+    present(entry);
+    return true;
   }
   function show(target,error,options={}){
-    if(!target)return;
+    if(closed||!target)return;
     const network=error?.code==="AR_NETWORK";
     const detail=sanitize(error?.detail||error?.uiArgs?.detail||error?.message||error||"Unknown error");
     const code=error?.code||error?.status&&"AR_HTTP_"+error.status||(network?"AR_NETWORK":"AR_OPERATION");
@@ -62,9 +94,22 @@
       "Code: "+sanitize(code), error?.status?"HTTP status: "+error.status:"",
       "Client: "+sanitize(navigator.userAgent||"unavailable"), "Details: "+detail,
       options.log?"Recent build log (tail):\n"+sanitize(String(options.log).slice(-16000)):""].filter(Boolean).join("\n");
-    if(cards.get(target)?.report===report)return;
+    const prior=cards.get(target);
+    if(prior?.report===report){
+      if(!options.deduplicate)present(prior);
+      return;
+    }
     clear(target);
-    const card=document.createElement("section");card.className="workshop-feedback";
+    const dialog=document.createElement("dialog");dialog.className="workshop-feedback";
+    const title=document.createElement("h2"), message=document.createElement("p");
+    title.id="workshop-feedback-title-"+(++nextID);
+    message.id=title.id+"-message";
+    dialog.setAttribute("aria-labelledby",title.id);
+    dialog.setAttribute("aria-describedby",message.id);
+    label(title,"failed","Action needed");
+    if(window.workshopI18n&&(options.messageKey||error?.uiKey))
+      window.workshopI18n.set(message,options.messageKey||error.uiKey,options.messageArgs||error.uiArgs);
+    else message.textContent=error?.message||detail;
     const hint=document.createElement("p");label(hint,network?"connection":"help",network
       ?"The connection to the local Builder was interrupted. Check status again; save any open edits before closing or restarting."
       :"Keep your current work open. If the cause is unclear, copy this report for support and describe the action you were taking.");
@@ -72,6 +117,9 @@
       window.workshopI18n.set(hint,error.recoveryKey);
     const details=document.createElement("details"),summary=document.createElement("summary"),reportBox=document.createElement("textarea");
     label(summary,"details","Error details");reportBox.readOnly=true;reportBox.rows=8;reportBox.value="Recorded: "+new Date().toISOString()+"\n"+report;
+    reportBox.tabIndex=0;
+    reportBox.setAttribute("data-big-scroll","");
+    reportBox.setAttribute("data-big-scroll-when-focused","");
     if(window.workshopI18n)window.workshopI18n.attribute(reportBox,"aria-label","builder.feedback.report");
     else reportBox.setAttribute("aria-label",text("report","Error report"));
     reportBox.spellcheck=false;
@@ -98,7 +146,14 @@
       retry.addEventListener("click",async()=>{retry.disabled=true;try{await options.retry();}catch(error){show(target,error,options);}finally{retry.disabled=false;}});
       actions.append(retry);
     }
-    card.append(hint,details,note,actions,status);target.after(card);cards.set(target,{card,report});
+    const close=document.createElement("button");close.type="button";label(close,"close","Close");
+    close.addEventListener("click",()=>dialog.close());
+    actions.append(close);
+    dialog.append(title,message,hint,details,note,actions,status);
+    const entry={dialog,close,report};
+    dialog.addEventListener("close",()=>finish(entry));
+    cards.set(target,entry);
+    present(entry);
   }
-  window.workshopFeedback=Object.freeze({sanitize,request,responseError,readJSON,show,clear});
+  window.workshopFeedback=Object.freeze({sanitize,request,responseError,readJSON,show,clear,reopen});
 })();

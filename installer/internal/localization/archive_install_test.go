@@ -69,7 +69,7 @@ func TestArchiveDistributionLifecycleAndCache(t *testing.T) {
 	}
 	manifest := filepath.Join(root, archiveCacheDirectory, filepath.FromSlash(fields[2]), "pack.ini")
 	pack, err := OpenAuthorPack(filepath.Dir(manifest))
-	if err != nil || pack.Manifest().Metadata().ID != row.Metadata.ID || pack.Manifest().Version() != 1 {
+	if err != nil || pack.Manifest().Metadata().ID != row.Metadata.ID || pack.Manifest().Version() != 2 {
 		t.Fatal(err)
 	}
 	if probe := os.Getenv("AR_AUTHOR_RUNTIME_PROBE"); probe != "" {
@@ -122,8 +122,8 @@ func TestArchiveDistributionLifecycleAndCache(t *testing.T) {
 		t.Fatal(installed, err)
 	}
 	upgraded, err := OpenAuthorInput(newPath)
-	if err != nil || upgraded.Pack().Manifest().Version() != 2 || upgraded.Pack().Manifest().Metadata().ID != row.Metadata.ID {
-		t.Fatal("archive install did not upgrade with the same ID", err)
+	if err != nil || upgraded.Pack().Manifest().Version() != 1 || upgraded.Pack().Manifest().Metadata().ID != row.Metadata.ID {
+		t.Fatal("archive import rewrote the legacy payload", err)
 	}
 	original, err := OpenAuthorInput(updated)
 	if err != nil || original.Pack().Manifest().Version() != 1 {
@@ -248,14 +248,22 @@ func TestShippedExamplePublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	var expected bytes.Buffer
-	if err := p.WriteArchive(&expected, "publication"); err != nil {
+	if err := p.WriteLanguageMod(&expected, "1.0.0"); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile("../../../examples/example.fr-ca.arlang")
-	if err != nil || !bytes.Equal(data, expected.Bytes()) {
-		t.Fatal("regenerate authored example publication", err)
-	}
-	if _, err := ReadAuthorArchive(bytes.NewReader(data), int64(len(data))); err != nil {
+	data, err := os.ReadFile("../../../examples/example.fr-ca.o2r")
+	if err != nil {
 		t.Fatal(err)
+	}
+	shipped, err := ReadLanguageMod(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	authored, err := ReadLanguageMod(bytes.NewReader(expected.Bytes()), int64(expected.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authored.ProjectRevision() != shipped.ProjectRevision() {
+		t.Fatal("the shipped example no longer matches the example source")
 	}
 }
