@@ -2702,6 +2702,7 @@ if(BUILD_TESTING)
         src/platform/sdl/diorama_depth_alpha_sdl.c)
     add_executable(actraiser_diorama_compositor_test
         tests/diorama_compositor_test.c src/render/cloud_material.c ${_diorama_compositor_sources})
+    target_compile_definitions(actraiser_diorama_compositor_test PRIVATE AR_DIORAMA_VOXEL_CACHE_TEST=1)
     target_include_directories(actraiser_diorama_compositor_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})

@@ -112,7 +112,15 @@ const SharedActionPreview = (() => {
     try{return render(room,nativeCamera.x,nativeCamera.y,nativeFrame);}
     catch(error){status=`Shared C baseline unavailable: ${error.message}`;api=null;cache=null;loadedKey='';return null;}
   }
-  return {encode,initialize,load,render,canvas,get status(){return status;},get ready(){return !!api;},
+  function loadConfigured(renderer,packet,text,mode) {
+    const scenery=new TextEncoder().encode(text);
+    const size=packet.length+scenery.length;
+    if(size>=renderer.DioramaPreview_Capacity())throw Error('Room and scenery exceed renderer capacity.');
+    const input=new Uint8Array(renderer.memory.buffer,renderer.DioramaPreview_Input(),size);
+    input.set(packet);input.set(scenery,packet.length);
+    return renderer.RoomPreview_LoadConfigured(packet.length,scenery.length,mode);
+  }
+  return {encode,loadConfigured,initialize,load,render,canvas,get status(){return status;},get ready(){return !!api;},
     hash:()=>api?api.ActionPreview_Hash()>>>0:null};
 })();
 

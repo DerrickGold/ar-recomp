@@ -3,6 +3,12 @@
 #include <stdio.h>
 
 static DioramaGroundCoverCache cache;
+static const DioramaGroundCoverAssociation *TestAssociation(DioramaGroundCoverOwner owner,
+    const ActionGroundCoverBank *bank,const DioramaGroundCoverCap *cap,float tolerance) {
+  const DioramaGroundCoverAssociation *association;
+  assert(DioramaGroundCover_Associate(&cache,owner,bank,cap->from,cap->to,tolerance,cap->receiver,&association));
+  return association;
+}
 static DioramaGroundCoverVertex vertices[8192];
 static void Near(float a,float b) { assert(fabsf(a-b)<.0002f); }
 static ActionEffectInstance Example(void) {
@@ -34,7 +40,7 @@ static void ActualContactAndTriangleSupport(void) {
   const float spans[3][3]={{0,-.24f,-.24f},{-.24f,-.42f,-.24f},{0,.24f,.12f}};
   for(unsigned mode=0;mode<3;++mode) {
     DioramaGroundCoverCap cap=Cap(spans[mode][0],spans[mode][1],spans[mode][2]);
-    unsigned n;assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,&pressure,&cap,0,
+    unsigned n;assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,&pressure,&cap,
         vertices,8192,&n)&&n>0&&n%3==0);
     bool center=false,quiet=false;
     for(unsigned i=0;i<n;++i) {
@@ -56,7 +62,7 @@ static void ActualContactAndTriangleSupport(void) {
   DioramaGroundCoverCap cap=Cap(0,-.24f,-.12f);
   cap.corners[2].position[1]+=12;
   for(unsigned i=0;i<4;++i)cap.corners[i].lift[0]=.25f;
-  unsigned n;assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&n));
+  unsigned n;assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&n));
   for(unsigned i=0;i<n;++i) {
     const DioramaGroundCoverVertex *v=&vertices[i];
     const float t=(v->native_x-48)/64,d=v->position[2]/-.24f;
@@ -70,30 +76,30 @@ static void CacheAndEmptyOwnership(void) {
   assert(ActionGroundCover_Prepare(&e,&bank));
   DioramaGroundCoverOwner owner={.asset=&bank,.revision=10,.kind=1};
   DioramaGroundCoverCap cap=Cap(0,.24f,.12f);unsigned n;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&n)&&n);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&n)&&n);
   assert(cache.misses==1&&cache.hits==0);
   const ActionGroundCoverPressure pressure={.feet={{80,8,.75f},{0}}};
   /* Projection/actual lift changes are not immutable support association. */
   for(unsigned i=0;i<4;++i)cap.corners[i].position[0]+=30;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,&pressure,&cap,0,vertices,8192,&n));
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,&pressure,&cap,vertices,8192,&n));
   assert(cache.misses==1&&cache.hits==1);
   ++owner.revision;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&n));
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&n));
   assert(cache.misses==2);
   ++owner.kind;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&n));
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&n));
   assert(cache.misses==3);
   e.field_style.points[1].y=1;assert(ActionGroundCover_Prepare(&e,&bank));
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&n)&&n==0);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&n)&&n==0);
   assert(cache.misses==4);
   assert(ActionGroundCover_SuppressesFlatTop(ActionGroundCover_ResolveClaim(true,true,true,n)));
   /* A different-height ledge and an absent top are successful emptiness. */
   cap.from.y=cap.to.y=230;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,NULL,0,&n)&&n==0);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,NULL,0,&n)&&n==0);
   e=Example();assert(ActionGroundCover_Prepare(&e,&bank));cap=Cap(0,.24f,.12f);
-  n=123;assert(!DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,3,&n)&&n==0);
+  n=123;assert(!DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,3,&n)&&n==0);
   cap.contact_radius=0;
-  assert(!DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&n)&&n==0);
+  assert(!DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&n)&&n==0);
 }
 static void SplitAndTaperedReceivers(void) {
   ActionEffectInstance e=Example();ActionGroundCoverBank bank;
@@ -104,13 +110,13 @@ static void SplitAndTaperedReceivers(void) {
    * restart the rear feather or compression curve. */
   for(unsigned i=2;i<4;++i){near.corners[i].position[2]=.12f;near.corners[i].depth_fraction=.5f;}
   for(unsigned i=0;i<2;++i){far.corners[i].position[2]=.12f;far.corners[i].depth_fraction=.5f;}
-  unsigned count;assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&near,0,vertices,8192,&count));
+  unsigned count;assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&near,0),&bank,NULL,&near,vertices,8192,&count));
   ActionGroundCoverSample joint={0};bool found=false;
   for(unsigned i=0;i<count;++i)if(fabsf(vertices[i].native_x-80)<.0001f&&fabsf(vertices[i].position[2]-.12f)<.0001f) {
     joint=vertices[i].sample;found=true;break;
   }
   assert(found);found=false;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&far,0,vertices,8192,&count));
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&far,0),&bank,NULL,&far,vertices,8192,&count));
   for(unsigned i=0;i<count;++i)if(fabsf(vertices[i].native_x-80)<.0001f&&fabsf(vertices[i].position[2]-.12f)<.0001f) {
     Near(vertices[i].sample.alpha,joint.alpha);Near(vertices[i].sample.height,joint.height);found=true;
   }
@@ -118,7 +124,7 @@ static void SplitAndTaperedReceivers(void) {
   /* A side-hall join collapses at one end, widening toward the outside. */
   DioramaGroundCoverCap taper=Cap(-.24f,-.42f,-.24f);
   taper.corners[3].position[2]=-.24f;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&taper,0,vertices,8192,&count));
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&taper,0),&bank,NULL,&taper,vertices,8192,&count));
   for(unsigned i=0;i<count;++i) {
     const float t=(vertices[i].native_x-48)/64;
     assert(vertices[i].position[2]>=-.24f-.18f*t-.0001f&&vertices[i].position[2]<=-.24f+.0001f);
@@ -130,9 +136,9 @@ static void SplitAndTaperedReceivers(void) {
     left.corners[i].position[0]=(i==1||i==2)?70:48;
     right.corners[i].position[0]=(i==1||i==2)?112:90;
   }
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&left,0,vertices,8192,&count));
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&left,0),&bank,NULL,&left,vertices,8192,&count));
   for(unsigned i=0;i<count;++i)assert(vertices[i].native_x<=70.0001f);
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&right,0,vertices,8192,&count));
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&right,0),&bank,NULL,&right,vertices,8192,&count));
   for(unsigned i=0;i<count;++i)assert(vertices[i].native_x>=89.9999f);
 }
 static float MaskArea(unsigned count,const uint16_t pixels[256],bool nonplanar) {
@@ -160,22 +166,22 @@ static void AuthoredAlphaHoles(void) {
   const float uv[8]={.0001f,.0001f,15.9999f,.0001f,15.9999f,15.9999f,.0001f,15.9999f};
   memcpy(cap.top_uv,uv,sizeof(uv));
   for(unsigned i=0;i<256;++i)pixels[i]=0x8000; /* Authored black is opaque. */
-  unsigned n;assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&n)&&n);
+  unsigned n;assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&n)&&n);
   Near(MaskArea(n,pixels,false),1);
   for(unsigned y=4;y<12;++y)for(unsigned x=4;x<12;++x)pixels[y*16+x]=0;
   cap.corners[2].position[1]+=12; /* Painted hole on a nonplanar actual cap. */
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&n)&&n);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&n)&&n);
   Near(MaskArea(n,pixels,true),1-(8/15.9998f)*(8/15.9998f));
   memset(pixels,0,sizeof(pixels));
   for(unsigned x=0;x<16;++x)pixels[x]=0xffff;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&n)&&n);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&n)&&n);
   Near(MaskArea(n,pixels,true),(1-.0001f)/15.9998f); /* Thin one-pixel rim. */
   memset(pixels,0,sizeof(pixels));
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,NULL,0,&n)&&n==0);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,NULL,0,&n)&&n==0);
   for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)pixels[y*16+x]=((x+y)&1)?0xffff:0;
-  n=999;assert(!DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,3,&n)&&n==0);
+  n=999;assert(!DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,3,&n)&&n==0);
   cap.top_uv[0]=NAN;
-  assert(!DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&n)&&n==0);
+  assert(!DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&n)&&n==0);
 
   /* Two separately repeated16px artwork pieces use their real UVs, while
    * the snow feather retains a single full-depth physical material span. */
@@ -185,7 +191,7 @@ static void AuthoredAlphaHoles(void) {
   for(unsigned piece=0;piece<2;++piece) {
     pieces[piece].top_pixels=pixels;memcpy(pieces[piece].top_uv,uv,sizeof(uv));
     for(unsigned j=0;j<4;++j)pieces[piece].corners[j].depth_fraction=piece*.5f+(j>=2?.5f:0);
-    assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&pieces[piece],0,vertices,8192,&n)&&n);
+    assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&pieces[piece],0),&bank,NULL,&pieces[piece],vertices,8192,&n)&&n);
     for(unsigned i=0;i<n;i+=3) {
       float t[3],d[3];
       for(unsigned j=0;j<3;++j) {
@@ -220,22 +226,22 @@ static void ReviewedNativeRunOwnership(void) {
   cap.from.y=cap.to.y=200;
   for(unsigned i=0;i<4;++i)cap.corners[i].position[1]=cap.from.y;
   unsigned count;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,1.01f,vertices,8192,&count)&&count);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,1.01f),&bank,NULL,&cap,vertices,8192,&count)&&count);
   for(unsigned i=0;i<count;++i) {
     Near(vertices[i].sample.native_floor_y,200);
     Near(vertices[i].position[1]+vertices[i].sample.height,200);
   }
   const unsigned queries=fixture.queries;
   assert(queries==64);
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,1.01f,vertices,8192,&count)&&count);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,1.01f),&bank,NULL,&cap,vertices,8192,&count)&&count);
   assert(fixture.queries==queries); /* No native ink rescans while rotating. */
   cap.receiver=NULL;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,1.01f,vertices,8192,&count)&&!count);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,1.01f),&bank,NULL,&cap,vertices,8192,&count)&&!count);
   cap.receiver=SnowRun;cap.from.y=cap.to.y=184;
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,1.01f,vertices,8192,&count)&&!count);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,1.01f),&bank,NULL,&cap,vertices,8192,&count)&&!count);
   cap.from.y=cap.to.y=200;fixture.gap=true;
   DioramaGroundCoverOwner changed=owner;++changed.revision;
-  assert(DioramaGroundCover_BuildCap(&cache,changed,&bank,NULL,&cap,1.01f,vertices,8192,&count)&&count);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(changed,&bank,&cap,1.01f),&bank,NULL,&cap,vertices,8192,&count)&&count);
   for(unsigned i=0;i<count;i+=3) {
     const float middle=(vertices[i].native_x+vertices[i+1].native_x+vertices[i+2].native_x)/3;
     assert(middle<=72||middle>=88);
@@ -249,7 +255,7 @@ static void ReviewedNativeRunOwnership(void) {
   cap.receiver=SnowRun;
   for(unsigned i=0;i<4;++i)cap.corners[i].position[0]=(i==1||i==2)?49:48;
   for(unsigned i=0;i<4;++i)cap.corners[i].position[1]=195;
-  assert(DioramaGroundCover_BuildCap(&cache,changed,&bank,NULL,&cap,1.01f,vertices,8192,&count)&&count);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(changed,&bank,&cap,1.01f),&bank,NULL,&cap,vertices,8192,&count)&&count);
   float right=48;for(unsigned i=0;i<count;++i)right=fmaxf(right,vertices[i].native_x);Near(right,49);
 }
 static void PressureFollowsActualReceiver(void) {
@@ -356,8 +362,8 @@ static void ReceiverOwnedLip(void) {
   unsigned count,top_count;
   for(unsigned mode=0;mode<3;++mode) {
     DioramaGroundCoverCap cap=Cap(spans[mode][0],spans[mode][1],spans[mode][2]);
-    assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,&pressure,&cap,0,tops,8192,&top_count));
-    assert(DioramaGroundCover_BuildLip(&cache,owner,&bank,&pressure,&cap,0,vertices,8192,&count)&&count);
+    assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,&pressure,&cap,tops,8192,&top_count));
+    assert(DioramaGroundCover_BuildLip(TestAssociation(owner,&bank,&cap,0),&bank,&pressure,&cap,vertices,8192,&count)&&count);
     unsigned crests=0,base=0,feather=0;
     for(unsigned i=0;i<count;++i) {
       const DioramaGroundCoverVertex *v=&vertices[i];
@@ -379,8 +385,8 @@ static void ReceiverOwnedLip(void) {
   DioramaGroundCoverCap cap=Cap(0,.24f,.12f),near=cap,far=cap;
   for(unsigned i=2;i<4;++i){near.corners[i].position[2]=.12f;near.corners[i].depth_fraction=.5f;}
   for(unsigned i=0;i<2;++i){far.corners[i].position[2]=.12f;far.corners[i].depth_fraction=.5f;}
-  assert(DioramaGroundCover_BuildLip(&cache,owner,&bank,NULL,&near,0,vertices,8192,&count)&&count);
-  assert(DioramaGroundCover_BuildLip(&cache,owner,&bank,NULL,&far,0,NULL,0,&count)&&!count);
+  assert(DioramaGroundCover_BuildLip(TestAssociation(owner,&bank,&near,0),&bank,NULL,&near,vertices,8192,&count)&&count);
+  assert(DioramaGroundCover_BuildLip(TestAssociation(owner,&bank,&far,0),&bank,NULL,&far,NULL,0,&count)&&!count);
   /* Move and rotate the actual front without moving its native support. */
   cap=Cap(-.24f,-.42f,-.24f);
   for(unsigned i=0;i<4;++i) {
@@ -388,7 +394,7 @@ static void ReceiverOwnedLip(void) {
     cap.corners[i].position[0]=30+1.2f*x;cap.corners[i].position[1]=250+.4f*x;
     cap.corners[i].lift[0]=.6f;cap.corners[i].lift[1]=-.8f;
   }
-  assert(DioramaGroundCover_BuildLip(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&count)&&count);
+  assert(DioramaGroundCover_BuildLip(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&count)&&count);
   for(unsigned i=0;i<count;++i) {
     const DioramaGroundCoverVertex *v=&vertices[i];
     const float lift=v->sample.alpha==0?-1.5f:v->sample.height;
@@ -403,18 +409,18 @@ static void ReceiverOwnedLip(void) {
   const float uv[8]={0,.5f,15.9999f,.5f,15.9999f,15.9999f,0,15.9999f};
   memcpy(cap.top_uv,uv,sizeof(uv));
   for(unsigned x=6;x<10;++x)pixels[x]=0;
-  assert(DioramaGroundCover_BuildLip(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&count)&&count);
+  assert(DioramaGroundCover_BuildLip(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&count)&&count);
   for(unsigned i=0;i<count;i+=3) {
     const float source=(vertices[i].native_x+vertices[i+1].native_x+vertices[i+2].native_x)/3;
     assert(source<=72.001f||source>=87.999f);
   }
   memset(pixels,0,16*sizeof(*pixels));
-  assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,NULL,&cap,0,vertices,8192,&count)&&count);
-  assert(DioramaGroundCover_BuildLip(&cache,owner,&bank,NULL,&cap,0,NULL,0,&count)&&!count);
+  assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,8192,&count)&&count);
+  assert(DioramaGroundCover_BuildLip(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,NULL,0,&count)&&!count);
   cap.top_pixels=NULL;cap.from.y=cap.to.y=230;
-  assert(DioramaGroundCover_BuildLip(&cache,owner,&bank,NULL,&cap,0,NULL,0,&count)&&!count);
+  assert(DioramaGroundCover_BuildLip(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,NULL,0,&count)&&!count);
   cap=Cap(0,.24f,.12f);count=123;
-  assert(!DioramaGroundCover_BuildLip(&cache,owner,&bank,NULL,&cap,0,vertices,11,&count)&&!count);
+  assert(!DioramaGroundCover_BuildLip(TestAssociation(owner,&bank,&cap,0),&bank,NULL,&cap,vertices,11,&count)&&!count);
 }
 #include "diorama_snow_closing_riser_pure.inc"
 int main(void) {

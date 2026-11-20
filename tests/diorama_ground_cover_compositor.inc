@@ -223,7 +223,7 @@ static unsigned GroundCoverFixture(unsigned scenario) {
   const DioramaDepthSink sink={.submit=DepthGeometry,.userdata=&r};
   DioramaScene scene={.render=&options,.depth_sink=shared?&sink:NULL,.map_group=kind>=2?6:1,
       .map_number=kind>=2?6:1,.voxel_geometry=kind<2?voxel:NULL,.trunk=kind>=2?&trunk:NULL,
-      .trunk_settings=DioramaTrunk_Default(),.trunk_effects=&effects,.trunk_particles=true};
+      .trunk_settings=DioramaTrunk_Default(),.environment_effects=&effects,.environment_particles=true};
   DioramaProjection projection;r.projection=&projection;r.capture=&capture;r.actor_texture=textures[kDioramaPlane_Obj2];
   for(unsigned frame=0;frame<5;++frame) {
     probe.empty=frame==3;probe.unsupported=frame==4;
@@ -234,7 +234,7 @@ static unsigned GroundCoverFixture(unsigned scenario) {
     probe.seen_z0=INFINITY;probe.seen_z1=-INFINITY;
     /* Settled authored cover is scenery; disabling airborne flakes must not
      * erase it or change the actual submitted mesh. */
-    if(frame==1)scene.trunk_particles=false;
+    if(frame==1)scene.environment_particles=false;
     if(frame==3) {
       ReviseVoxelFixture(voxel);++trunk.revision;
       if(kind==0)voxel->edge_count=voxel->pass_counts[0]=0;
@@ -324,7 +324,7 @@ static unsigned GroundCoverSnowFixture(unsigned scenario) {
       .voxel_observe_ground_cover=GroundCoverObserve,.voxel_observer_userdata=&probe};
   const DioramaDepthSink sink={.submit=DepthGeometry,.userdata=&r};
   DioramaScene scene={.render=&options,.depth_sink=shared?&sink:NULL,.map_group=6,.map_number=5,
-      .voxel_geometry=voxel,.trunk_effects=&effects,.trunk_particles=false};
+      .voxel_geometry=voxel,.environment_effects=&effects,.environment_particles=false};
   DioramaProjection projection;r.projection=&projection;r.capture=&capture;r.actor_texture=textures[kDioramaPlane_Obj2];
   for(unsigned frame=0;frame<5;++frame) {
     const bool negative=!transformed&&frame==4;const int ox=negative?-96:0,oy=negative?-128:0;

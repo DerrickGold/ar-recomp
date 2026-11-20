@@ -144,6 +144,18 @@ typedef struct ActionRoomSceneFrameState {
   ActionRoomRasterEffect raster_effect;
 } ActionRoomSceneFrameState;
 
+/* Decode a pixel within one 8x8 4bpp character, using the tile word's flips.
+ * The caller supplies the character from the bank it owns. */
+static inline unsigned ActionRoomScene_Decode4bppPixel(const uint8_t *character,
+    uint16_t word, unsigned x, unsigned y) {
+  if (word & 0x4000) x = 7 - x;
+  if (word & 0x8000) y = 7 - y;
+  const uint8_t *row = character + y * 2;
+  const unsigned bit = 7 - x;
+  return ((row[0] >> bit) & 1) | (((row[1] >> bit) & 1) << 1) |
+      (((row[16] >> bit) & 1) << 2) | (((row[17] >> bit) & 1) << 3);
+}
+
 /* Replays the cumulative action asset script through the selected room and
  * resolves its command-3 video profile. A legacy/synthetic graphics script
  * without command 3 may still load, but have_video_profile remains false. */

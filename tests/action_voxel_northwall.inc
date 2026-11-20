@@ -6,8 +6,6 @@ static void NorthwallAnimation(const ActionRoomScene *source,ActionVoxelGeometry
     ActionVoxelGeometry *b,ActionVoxelSettings settings) {
   static ActionRoomScene live;
   size_t offset,bytes;
-  assert(ActionVoxel_AnimationCacheCandidate(kActionVoxelProfile_NorthwallSnow));
-  assert(!ActionVoxel_AnimationCacheCandidate(kActionVoxelProfile_NorthwallIce));
   assert(ActionVoxel_AnimationMatches(source,source->characters,&offset,&bytes));
   assert(!offset && bytes==128 && ActionRoomScene_CharacterAnimationPhaseCount(source)==4);
   assert(ActionRoomScene_CharacterAnimationCadence(source)==8);

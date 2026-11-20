@@ -58,6 +58,10 @@ static ActionVoxelSpriteFrame s_voxel_sprites_previous, s_voxel_sprites_current;
 static uint64_t s_voxel_sprite_timestamp, s_voxel_sprite_revision;
 static bool s_voxel_sprite_pair;
 static uint32_t *s_voxel_obj_pixels[4], *s_voxel_obj_attributes[4];
+static uint8_t s_voxel_obj_attribute_rows[4][SR_PPU_SURFACE_MAX_HEIGHT];
+static uint64_t s_voxel_obj_attribute_revision;
+static unsigned s_voxel_obj_attribute_bands;
+static int s_voxel_obj_attribute_width, s_voxel_obj_attribute_height;
 static void ResetVoxelSprites(ArRenderDevice *device) {
   ArRenderDevice_DestroyTexture(device, s_voxel_sprite_atlas);
   s_voxel_sprite_atlas = ArRenderTexture_Invalid();
@@ -65,6 +69,7 @@ static void ResetVoxelSprites(ArRenderDevice *device) {
   s_voxel_sprite_timestamp = s_voxel_sprite_revision = 0;
   s_voxel_sprites_current.count = s_voxel_sprites_previous.count = 0;
   s_voxel_sprite_pair = false;
+  s_voxel_obj_attribute_bands = 0;
   for(unsigned i=0;i<4;++i) {
     free(s_voxel_obj_pixels[i]);s_voxel_obj_pixels[i]=NULL;
     free(s_voxel_obj_attributes[i]);s_voxel_obj_attributes[i]=NULL;
@@ -76,13 +81,27 @@ static void ResetVoxelSprites(ArRenderDevice *device) {
  * native priority. Normalize receiver attributes before upload/interpolation,
  * including when capture or atlas upload failed and no prop was handed off. */
 static bool MaterializeVoxelActors(const FrameSlot *slot,
-    const uint8_t *pixels[kDioramaPlane_Count],size_t pitches[kDioramaPlane_Count]) {
+    const uint8_t *pixels[kDioramaPlane_Count],size_t pitches[kDioramaPlane_Count],
+    PresentationUploadChanges changes[4], uint8_t changed_rows[4][SR_PPU_SURFACE_MAX_HEIGHT]) {
+  unsigned previous_bands = s_voxel_obj_attribute_bands;
+  s_voxel_obj_attribute_bands = 0;
   if(!slot->diorama_obj_owner_tags)return true;
   const int width=slot->snes_width+2*slot->obj_apron;
   const int height=slot->snes_height+slot->ws_extra_top+slot->ws_extra_bottom;
   if(width<=0 || width>(int)SR_PPU_SURFACE_MAX_WIDTH ||
       height<=0 || height>(int)SR_PPU_SURFACE_MAX_HEIGHT)
     return false;
+  uint64_t previous_revision = s_voxel_obj_attribute_revision;
+  if (++s_voxel_obj_attribute_revision == 0) {
+    s_voxel_obj_attribute_revision = 1;
+    previous_bands = 0;
+  }
+  if (width != s_voxel_obj_attribute_width || height != s_voxel_obj_attribute_height)
+    previous_bands = 0;
+  s_voxel_obj_attribute_width = width;
+  s_voxel_obj_attribute_height = height;
+  const size_t row_bytes = (size_t)width * sizeof(uint32_t);
+  unsigned materialized_bands = 0;
   for(unsigned band=0;band<4;++band) {
     const unsigned plane=DioramaPlaneForObjectPriority(band),attr=kDioramaPlane_ObjAttributes0+band;
     if(!pixels[attr])continue;
@@ -109,15 +128,39 @@ static bool MaterializeVoxelActors(const FrameSlot *slot,
       ActionVoxelSprite_RemoveNative(prop,width,height,s_voxel_obj_pixels[band],
           SR_PPU_SURFACE_MAX_WIDTH,source_attributes,attribute_pitch);
     }
-    for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
-      const uint32_t a=source_attributes[(size_t)y*attribute_pitch+x];
-      const bool removed=copied && !s_voxel_obj_pixels[band][y*SR_PPU_SURFACE_MAX_WIDTH+x];
-      s_voxel_obj_attributes[band][y*SR_PPU_SURFACE_MAX_WIDTH+x]=
-          (a>>24) && !removed ? a|0xff000000u : 0;
+    static const uint32_t empty_row[SR_PPU_SURFACE_MAX_WIDTH];
+    const bool retained = (previous_bands & (1u << band)) != 0;
+    /* An empty source row stays empty after normalization and prop handoff.
+     * Include previously populated rows so moving or disappearing sprites
+     * clear their old attributes in the texture. */
+    for (int y = 0; y < height; ++y) {
+      const uint32_t *source_row = source_attributes + (size_t)y * attribute_pitch;
+      uint32_t *output = s_voxel_obj_attributes[band] + y * SR_PPU_SURFACE_MAX_WIDTH;
+      const bool populated = memcmp(source_row, empty_row, row_bytes) != 0;
+      const bool needs_write = !retained || s_voxel_obj_attribute_rows[band][y] || populated;
+      s_voxel_obj_attribute_rows[band][y] = populated;
+      changed_rows[band][y] = needs_write;
+      if (!needs_write) continue;
+      if (!populated) {
+        memset(output, 0, row_bytes);
+      } else if (copied) {
+        const uint32_t *native = s_voxel_obj_pixels[band] + y * SR_PPU_SURFACE_MAX_WIDTH;
+        for (int x = 0; x < width; ++x)
+          output[x] = (source_row[x] >> 24) && native[x] ? source_row[x] | 0xff000000u : 0;
+      } else {
+        for (int x = 0; x < width; ++x)
+          output[x] = (source_row[x] >> 24) ? source_row[x] | 0xff000000u : 0;
+      }
     }
+    changes[band] = (PresentationUploadChanges){
+      .previous_revision = retained ? previous_revision : 0,
+      .revision = s_voxel_obj_attribute_revision,
+      .changed_rows = changed_rows[band], .row_count = (unsigned)height};
+    materialized_bands |= 1u << band;
     pixels[attr]=(const uint8_t *)s_voxel_obj_attributes[band];
     pitches[attr]=SR_PPU_SURFACE_MAX_WIDTH*4;
   }
+  s_voxel_obj_attribute_bands = materialized_bands;
   return true;
 }
 
@@ -543,8 +586,14 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   const DioramaPerformanceScope gpu_capture_scope =
       DioramaPerformance_Begin(kDioramaPerformance_Upload);
   ArRenderTexture gpu_skybox = ArRenderTexture_Invalid();
+  OwnedBgPacket *retained_packet = NULL;
   uint32_t gpu_mask = DioramaBgGpu_ResolveOwned(device,
-      slot->background_packet, slot->diorama_voxel_mode ? slot->background_owner : NULL, upload_mask & ~castle_planes, s_resolved_textures, &gpu_skybox, &gpu_changed);
+      slot->background_packet, slot->diorama_voxel_mode ? slot->background_owner : NULL,
+      upload_mask & ~castle_planes, s_resolved_textures, &gpu_skybox, &gpu_changed,
+      slot->diorama_voxel_mode && castle_planes ? &retained_packet : NULL);
+  if (!retained_packet && slot->background_owner &&
+      slot->background_packet == &slot->background_owner->packet)
+    retained_packet = slot->background_owner;
   if (ArRenderTexture_IsValid(gpu_skybox)) {
     skybox_changed = (gpu_changed & (1u << kDioramaPlane_Count)) != 0;
     if (skybox_changed) ++s_diorama_skybox_view.revision;
@@ -630,9 +679,15 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   const uint8_t *pixels[kDioramaPlane_Count];
   size_t pitch_bytes[kDioramaPlane_Count];
   CaptureDioramaPpuSurfaces(slot, pixels, pitch_bytes);
-  if(!MaterializeVoxelActors(slot,pixels,pitch_bytes)) {
+  PresentationUploadChanges actor_changes[4] = {0};
+  uint8_t actor_rows[4][SR_PPU_SURFACE_MAX_HEIGHT];
+  if(!MaterializeVoxelActors(slot,pixels,pitch_bytes,actor_changes,actor_rows)) {
     SessionFatal_Request("Cannot prepare owned Voxel sprite surfaces");return;
   }
+  const PresentationUploadChanges *upload_changes[kDioramaPlane_Count] = {0};
+  for (unsigned band = 0; band < 4; ++band)
+    if (actor_changes[band].revision)
+      upload_changes[kDioramaPlane_ObjAttributes0 + band] = &actor_changes[band];
   const uint32_t owned_mask = DioramaPlanes_GpuOwnedMask(slot->background_packet);
   const bool needs_cpu_analysis = slot->interp_setting_enabled &&
       !DioramaFrameGeneration_UsesGpuAnalysis(device, slot);
@@ -688,7 +743,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     const unsigned plane=i==0?SR_PPU_OVERLAY_BG1:i==1?kDioramaPlane_Bg1Hi:kDioramaPlane_Bg1Far;
     gpu_mask&=~(1u<<plane);s_resolved_textures[plane]=s_plane_textures[plane];
   }
-  DioramaUploadChanges voxel_changes = {0};
+  PresentationUploadChanges voxel_changes;
   if (castle) {
     const bool source_materialized = pixels[SR_PPU_OVERLAY_BG1] != NULL;
     /* A failed optional decode must never publish a partially updated split.
@@ -702,14 +757,18 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
       s_voxel_upload_revision = 1;
       previous_revision = 0;
     }
-    voxel_changes = (DioramaUploadChanges){
-      .plane_mask = cache_voxel_source ? castle_planes : 0,
-      .source = {.previous_revision = previous_revision, .revision = s_voxel_upload_revision,
-        .changed_rows = source_materialized && changed_voxel_rows ? changed_voxel_rows->changed : NULL,
-        .row_count = (unsigned)voxel_source_key.height}};
+    voxel_changes = (PresentationUploadChanges){
+      .previous_revision = previous_revision, .revision = s_voxel_upload_revision,
+      .changed_rows = source_materialized && changed_voxel_rows ? changed_voxel_rows->changed : NULL,
+      .row_count = (unsigned)voxel_source_key.height};
+    if (cache_voxel_source) {
+      upload_changes[SR_PPU_OVERLAY_BG1] = &voxel_changes;
+      upload_changes[kDioramaPlane_Bg1Far] = &voxel_changes;
+    }
     if (!reuse_voxel_source && cache_voxel_source && source_materialized)
       DioramaVoxelSourceCache_Retain(&s_voxel_source_cache,
-          slot->background_packet, &voxel_source_key);
+          retained_packet ? &retained_packet->packet : slot->background_packet,
+          &voxel_source_key, retained_packet);
     const unsigned planes[] = {SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Far};
     for (unsigned i=0;i<2;++i) {
       gpu_mask &= ~(1u << planes[i]);
@@ -723,7 +782,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
       slot->snes_width + slot->obj_apron * 2,
       slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
       slot->obj_apron, slot->diorama_bg_apron_mask, upload_mask, gpu_mask, gpu_changed,
-      collect_coverage, &voxel_changes);
+      collect_coverage, upload_changes);
   s_diorama_uploaded_plane_mask = upload.synchronized_plane_mask;
   uint32_t trunk_changed=upload.changed_plane_mask;
   if(gpu_trunk&&!DioramaTrunkGpu_Upload(device,slot,s_resolved_textures,upload.changed_plane_mask,&trunk_changed)) {
@@ -1162,9 +1221,9 @@ retry_projection:;
           s_trunk_guard.view.capture_generation == slot->diorama_trunk_guard.capture_generation &&
           slot->diorama_trunk && s_trunk_guard.view.source_revision == slot->diorama_trunk->revision
           ? &s_trunk_guard.view : NULL,
-      .trunk_effects=slot->action_environmental_effects?&slot->action_scene_effects:NULL,
+      .environment_effects=slot->action_environmental_effects?&slot->action_scene_effects:NULL,
       .ground_cover_light=ActionGroundCover_LightSamples,
-      .trunk_lighting=slot->action_effect_lighting,.trunk_particles=slot->action_effect_particles,
+      .environment_lighting=slot->action_effect_lighting,.environment_particles=slot->action_effect_particles,
       .map_group = slot->diorama_map_group,
       .map_number = slot->diorama_map_number,
       .native_bloom_clock = slot->action_scene_clock,

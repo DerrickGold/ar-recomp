@@ -45,11 +45,11 @@ static unsigned IceFinishFixture(unsigned angle) {
   static ActionSceneEffectFrame frame;frame=(ActionSceneEffectFrame){.game_frame=320};
   IceFinishProbe probe={.recorder=&r};const DioramaDepthSink sink={.submit=IceFinishDepth,.userdata=&probe};
   DioramaScene scene={.render=&options,.map_group=6,.map_number=3,.voxel_geometry=g,
-    .depth_sink=&sink,.trunk_effects=&frame,.trunk_lighting=true,.trunk_particles=true};
+    .depth_sink=&sink,.environment_effects=&frame,.environment_lighting=true,.environment_particles=true};
   uint64_t paused=0,animated=0;
   for(unsigned state=0;state<8;++state) {
     frame.game_frame=state==2?400:320;
-    scene.trunk_lighting=state!=4;scene.trunk_particles=state!=3;
+    scene.environment_lighting=state!=4;scene.environment_particles=state!=3;
     for(unsigned i=0;i<2;++i)g->edges[i].surface_finish=state==5?kVoxelSurfaceFinishNone:kVoxelSurfaceFinishIce;
     options.voxel_inspection=state==6?kDioramaVoxelInspect_Backing:0;
     view.camera.tilt_x=state==7?-.5f:.5f;

@@ -26,6 +26,8 @@ unsigned EditorRoomScene_DefaultGuideCount(EditorRoomScene *room, unsigned index
 bool EditorRoomScene_DefaultGuide(EditorRoomScene *room, unsigned index, unsigned guide,
                                   ArRenderRectF *bounds);
 EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets);
+EditorRoomScene *EditorRoomScene_CreateConfigured(const ActionSceneSnapshot *assets,
+    const char *scenery,Action3DMode mode,char *error,size_t error_size);
 void EditorRoomScene_SetEvent(EditorRoomScene *room,const ActionEffectPreviewEvent *event);
 /* Offline tools start in Voxel 3D; flat scanout remains a separate path. */
 void EditorRoomScene_Set3DMode(EditorRoomScene *room, Action3DMode mode);
@@ -34,6 +36,8 @@ void EditorRoomScene_Destroy(EditorRoomScene *room);
 /* Complete selected-room INI text; parser/terrain resolution are production C.
  * Bad edits leave the previous configuration intact. */
 bool EditorRoomScene_Configure(EditorRoomScene *room, const char *text);
+/* Leave the active geometry available while preparing an atomic room load. */
+void EditorRoomScene_TrimVoxelAnimationCache(EditorRoomScene *room);
 /* Failed edits retain the previous scene; empty after a successful configure. */
 const char *EditorRoomScene_SceneryError(const EditorRoomScene *room);
 /* Query the production planner before/after saved overrides at this camera. */

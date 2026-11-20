@@ -548,7 +548,12 @@ static void AuthoredFixture(const char *path) {
       .front=.03f,.back=.3f,.width=8,.offset_x=2,.backing=kDioramaVoxelBacking_Replace};
   edit->top_art=(DioramaVoxelArt){.words={512,512,512,512},.bg=1,.x=8,.y=8,.size=8,.set=true};
   edit->side_art=edit->backing_art=edit->top_art;
-  assert(ActionVoxel_Build(edited,s,&terrain,settings));
+  ActionVoxelAuthoredLayout *layout = NULL;
+  const ActionVoxelBuildSource source = {.scene = s, .terrain = &terrain, .authored = &layout};
+  ActionVoxelCharacterSources characters;
+  assert(ActionVoxel_CollectCharacterSources(&source, &characters) && characters.extra[0]);
+  const ActionVoxelAuthoredLayout *planned = layout;
+  assert(planned && ActionVoxel_BuildFromSource(edited, &source, settings) && layout == planned);
   assert(ActionVoxel_CellGeometry(edited,0,0,&after));
   assert(after.authored && after.width==8 && after.offset_x==2);
   unsigned count;const VoxelAuthoredCell *cells=ActionVoxel_AuthoredCells(edited,&count);
@@ -567,6 +572,16 @@ static void AuthoredFixture(const char *path) {
   const ActionRoomSceneFrameState frame={.brightness=15};
   assert(ActionVoxel_Split(edited,0,0,16,16,16,&frame,low,16,rear,front));
   for(unsigned i=0;i<256;++i)assert(!front[i] && rear[i]==0xffff0000);
+  /* A later Auto record masks the original edit for both dependency tracking
+   * and geometry compilation. It must not resurrect the cropped donor. */
+  terrain.voxel.cell_count = 2;
+  terrain.voxel.cells[1] = (DioramaVoxelCell){0};
+  ActionVoxelAuthoredLayout_Clear(&layout);
+  assert(ActionVoxel_CollectCharacterSources(&source, &characters) && !characters.extra[0]);
+  assert(ActionVoxel_BuildFromSource(edited, &source, settings));
+  assert(!ActionVoxel_AuthoredCellAt(edited, 0, 0));
+  ActionVoxelAuthoredLayout_Clear(&layout);
+  terrain.voxel.cell_count = 1;
   /* Backing repair alone must retain every semantic front depth/contour and
    * native source pixel; it does not turn the tile into an authored prism. */
   edit->fields=kDioramaVoxelCell_Backing|kDioramaVoxelCell_BackArt;

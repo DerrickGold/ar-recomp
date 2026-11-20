@@ -50,11 +50,11 @@ static bool GroundCoverPrepare(const DioramaScene *scene,DioramaProjection *proj
   if(projection)memset(projection->voxel_ground_cover_claims,0,sizeof(projection->voxel_ground_cover_claims));
   /* Dense cover is authored scenery. Disabling flakes/loose grains must not
    * restore the old flat top or remove this receiving-surface layer. */
-  if(!scene->trunk_effects||
+  if(!scene->environment_effects||
       (!HollowPlaySpace(scene)&&!ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number)))return true;
-  const ActionSceneEffectFrame *frame=scene->trunk_effects;
+  const ActionSceneEffectFrame *frame=scene->environment_effects;
   if(frame->authored_count>kActionAuthoredMaxInstances||frame->actor_count>kActionEffectActorMax)return false;
-  s_ground_cover.frame=frame;s_ground_cover.lighting=scene->trunk_lighting;
+  s_ground_cover.frame=frame;s_ground_cover.lighting=scene->environment_lighting;
   s_ground_cover.light=scene->ground_cover_light;
   s_ground_cover.fade=fmaxf(0,fminf(1,1-scene->native_bloom_dimming));
   memset(s_ground_cover.bank_caps,0,sizeof(s_ground_cover.bank_caps));
@@ -171,8 +171,7 @@ static bool GroundCoverGather(const DioramaCapture *capture,const DioramaViewGeo
     if(!association->count)continue;
     unsigned count;ActionGroundCoverPressure pressure;
     if(!DioramaGroundCover_PrepareCapPressure(b,s_ground_cover.frame,cap,&pressure))return false;
-    if(!DioramaGroundCover_BuildCap(&s_ground_cover_associations,owner,b,
-        &pressure,cap,ACTION_GROUND_COVER_MAX_CONTACT_TOLERANCE,
+    if(!DioramaGroundCover_BuildCap(association,b,&pressure,cap,
         s_ground_cover_cap,kGroundCoverCapVertices,&count))return false;
     if(count)++s_ground_cover.bank_caps[bank];
     const unsigned first_overlay=count;
@@ -200,13 +199,12 @@ static bool GroundCoverGather(const DioramaCapture *capture,const DioramaViewGeo
       }
     }
     unsigned lip_count=0;
-    if(!DioramaGroundCover_BuildLip(&s_ground_cover_associations,owner,b,&pressure,cap,
-        ACTION_GROUND_COVER_MAX_CONTACT_TOLERANCE,s_ground_cover_cap+count,
+    if(!DioramaGroundCover_BuildLip(association,b,&pressure,cap,s_ground_cover_cap+count,
         kGroundCoverCapVertices-count,&lip_count))return false;
     count+=lip_count;
     unsigned riser_count=0;
-    if(!DioramaGroundCover_BuildClosingRisers(&s_ground_cover_associations,owner,b,
-        s_ground_cover.frame,&pressure,cap,ACTION_GROUND_COVER_MAX_CONTACT_TOLERANCE,
+    if(!DioramaGroundCover_BuildClosingRisers(&s_ground_cover_associations,association,b,
+        s_ground_cover.frame,&pressure,cap,
         s_ground_cover_cap+count,kGroundCoverCapVertices-count,&riser_count))return false;
     count+=riser_count;
     for(unsigned i=0;i<count;i+=3) {

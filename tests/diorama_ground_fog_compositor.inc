@@ -38,7 +38,7 @@ static unsigned GroundFogFixture(unsigned scenario) {
   const DioramaRenderOptions options={.visible_planes=(1u<<kDioramaPlane_Count)-1};
   const DioramaDepthSink sink={.submit=DepthGeometry,.userdata=&r};
   const DioramaScene scene={.render=&options,.depth_sink=&sink,.map_group=1,.map_number=2,
-      .voxel_geometry=voxel,.trunk_effects=&effects};
+      .voxel_geometry=voxel,.environment_effects=&effects};
   DioramaProjection projection;r.projection=&projection;r.capture=&capture;
   assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
   assert(projection.voxel_fog_claims&kDioramaFog_Floor);

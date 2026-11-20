@@ -11,7 +11,7 @@ static void SnowRiserPure(void) {
     for(unsigned j=0;j<4;++j){cap.corners[j].position[0]=(j==1||j==2)?cap.to.x:cap.from.x;cap.corners[j].position[1]=280;}
     ActionSceneEffectFrame frame={0};if(actor){frame.actor_count=1;frame.actors[0]=(ActionEffectActor){.visible=true,.player=true,.x=80,.feet_y=280,.body_radius=8};}
     ActionGroundCoverPressure pressure;assert(DioramaGroundCover_PrepareCapPressure(&bank,&frame,&cap,&pressure));
-    unsigned n;assert(DioramaGroundCover_BuildClosingRisers(&cache,owner,&bank,&frame,&pressure,&cap,1.01f,vertices,8192,&n)&&n);
+    unsigned n;assert(DioramaGroundCover_BuildClosingRisers(&cache,TestAssociation(owner,&bank,&cap,1.01f),&bank,&frame,&pressure,&cap,vertices,8192,&n)&&n);
     DioramaGroundCoverCap lower=cap;lower.closing_riser[0]=lower.closing_riser[1]=0;
     lower.from=(ActionGroundCoverPoint){end?80:79,282};lower.to=(ActionGroundCoverPoint){end?81:80,282};
     for(unsigned j=0;j<4;++j){lower.corners[j].position[0]=(j==1||j==2)?lower.to.x:lower.from.x;lower.corners[j].position[1]=282;}
@@ -24,21 +24,21 @@ static void SnowRiserPure(void) {
       Near(v->position[1],known.position[1]);Near(v->sample.alpha,known.sample.alpha);Near(v->sample.height,known.sample.height);Near(v->sample.compression,known.sample.compression);Near(v->sample.crest_mix,known.sample.crest_mix);
       if(down)++lower_count;else++upper_count;
     }assert(upper_count&&lower_count);
-    unsigned m;assert(DioramaGroundCover_BuildCap(&cache,owner,&bank,&pressure,&cap,1.01f,expected,8192,&m)&&m);
+    unsigned m;assert(DioramaGroundCover_BuildCap(TestAssociation(owner,&bank,&cap,1.01f),&bank,&pressure,&cap,expected,8192,&m)&&m);
     unsigned matches=0;for(unsigned i=0;i<m;++i)if(fabsf(expected[i].native_x-80)<.00001f)for(unsigned j=0;j<n;++j)
       if(fabsf(expected[i].position[2]-vertices[j].position[2])<.00001f&&vertices[j].sample.native_floor_y==280){Near(expected[i].position[1],vertices[j].position[1]);Near(expected[i].sample.alpha,vertices[j].sample.alpha);++matches;break;}
     assert(matches);
-    cap.closing_riser[end]=0;assert(DioramaGroundCover_BuildClosingRisers(&cache,owner,&bank,&frame,&pressure,&cap,1.01f,NULL,0,&n)&&!n);
-    cap.closing_riser[end]=3;assert(DioramaGroundCover_BuildClosingRisers(&cache,owner,&bank,&frame,&pressure,&cap,1.01f,NULL,0,&n)&&!n);
-    cap.closing_riser[end]=2;assert(!DioramaGroundCover_BuildClosingRisers(&cache,owner,&bank,&frame,&pressure,&cap,1.01f,vertices,2,&n)&&!n);
+    cap.closing_riser[end]=0;assert(DioramaGroundCover_BuildClosingRisers(&cache,TestAssociation(owner,&bank,&cap,1.01f),&bank,&frame,&pressure,&cap,NULL,0,&n)&&!n);
+    cap.closing_riser[end]=3;assert(DioramaGroundCover_BuildClosingRisers(&cache,TestAssociation(owner,&bank,&cap,1.01f),&bank,&frame,&pressure,&cap,NULL,0,&n)&&!n);
+    cap.closing_riser[end]=2;assert(!DioramaGroundCover_BuildClosingRisers(&cache,TestAssociation(owner,&bank,&cap,1.01f),&bank,&frame,&pressure,&cap,vertices,2,&n)&&!n);
     /* The upper contact alone cannot close a bank that terminates exactly at
      * the step: the lower endpoint must belong to this same bank too. */
     ActionEffectInstance stopped=e;
     if(end){stopped.field_style.points[1].x=80;stopped.field_style.points[1].y=80;}
     else {stopped.field_style.points[0].x=80;stopped.field_style.points[0].y=80;}
     assert(ActionGroundCover_Prepare(&stopped,&bank));
-    assert(DioramaGroundCover_BuildClosingRisers(&cache,owner,&bank,&frame,&pressure,&cap,1.01f,NULL,0,&n)&&!n);
-    e.world_y+=30;assert(ActionGroundCover_Prepare(&e,&bank));assert(DioramaGroundCover_BuildClosingRisers(&cache,owner,&bank,&frame,&pressure,&cap,1.01f,NULL,0,&n)&&!n);
+    assert(DioramaGroundCover_BuildClosingRisers(&cache,TestAssociation(owner,&bank,&cap,1.01f),&bank,&frame,&pressure,&cap,NULL,0,&n)&&!n);
+    e.world_y+=30;assert(ActionGroundCover_Prepare(&e,&bank));assert(DioramaGroundCover_BuildClosingRisers(&cache,TestAssociation(owner,&bank,&cap,1.01f),&bank,&frame,&pressure,&cap,NULL,0,&n)&&!n);
   }
   puts("PASS Snow closing-riser endpoint pressure/alpha/phase and negative ownership controls");
 }

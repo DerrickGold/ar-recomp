@@ -1,14 +1,12 @@
 /* Bounded, room-owned native artwork for editor-authored surfaces. This is
  * compiled after semantic classification; no camera-dependent donor sampling. */
 static unsigned AuthoredPixel(const ActionRoomScene *s,unsigned word,int x,int y) {
-  unsigned tile=word&1023;
-  if(tile<512)return Pixel(s,word,x,y);
-  if(tile>=768 || !s->have_extra_characters)return 0;
-  if(word&0x4000)x=7-x;if(word&0x8000)y=7-y;
-  const uint8_t *p=s->extra_characters+(tile-512)*32;
-  const unsigned bit=7-x;
-  return ((p[y*2]>>bit)&1)|(((p[y*2+1]>>bit)&1)<<1)|
-      (((p[y*2+16]>>bit)&1)<<2)|(((p[y*2+17]>>bit)&1)<<3);
+  const unsigned tile = word & 1023;
+  if (tile < 0x200) return Pixel(s, word, x, y);
+  const unsigned extra = tile - 0x200;
+  if (extra >= kActionVoxelExtraCharacters || !s->have_extra_characters) return 0;
+  return ActionRoomScene_Decode4bppPixel(
+      s->extra_characters + extra * kActionVoxelCharacterBytes, word, x, y);
 }
 static uint16_t AuthoredArtPixel(const ActionRoomScene *s,const uint16_t palette[128],
     const DioramaVoxelArt *art,int x,int y) {
@@ -79,6 +77,52 @@ static bool KeepOwnedArt(ActionVoxelGeometry *c,bool used[kVoxelAuthoredArtMax],
 static const VoxelAuthoredCell *AuthoredPixelOwner(const ActionVoxelGeometry *c,int x,int y) {
   return ActionVoxel_AuthoredCellAt(c,(int)floorf(x/16.f),(int)floorf(y/16.f));
 }
+
+static uint16_t NativeArtColor(const ActionRoomScene *scene, const uint16_t palette[128],
+    const CastleMaterial *material, const DioramaPixelEdit *edit, unsigned x, unsigned y) {
+  const unsigned bit = 1u << (15 - x);
+  if (edit && (edit->transparent[y] & bit)) return 0;
+  if (edit && (edit->black[y] & bit)) return 0x8000;
+  if (material->cutouts[y] & bit) return 0;
+  const unsigned word = material->words[(y / 8) * 2 + x / 8];
+  const unsigned pixel = AuthoredPixel(scene, word, x & 7, y & 7);
+  return pixel ? 0x8000 | palette[((word >> 10) & 7) * 16 + pixel] : 0;
+}
+
+/* A patch covers at most four metatiles. Resolve each material and its paint
+ * masks once, even when the patch crosses a tile boundary. */
+static bool SampleNativeArtPatch(const ActionRoomScene *scene, const DioramaRoomOverride *terrain,
+    const DioramaStampLayerOverride *stamps, const CastleMaterial native[256],
+    const uint16_t palette[128], const uint16_t *tiles, size_t pitch,
+    int ox, int oy, int size, bool require_full_patch, uint16_t pixels[256], bool *priority) {
+  memset(pixels, 0, 256 * sizeof(*pixels));
+  if (priority) memset(priority, 0, 256 * sizeof(*priority));
+  for (int y0 = 0; y0 < size;) {
+    const int wy = oy + y0, cy = (int)floorf(wy / 16.f);
+    int y1 = y0 + 16 - (wy & 15);
+    if (y1 > size) y1 = size;
+    for (int x0 = 0; x0 < size;) {
+      const int wx = ox + x0, cx = (int)floorf(wx / 16.f);
+      int x1 = x0 + 16 - (wx & 15);
+      if (x1 > size) x1 = size;
+      CastleMaterial material;
+      uint8_t metatile;
+      if (LookupMaterial(scene, stamps, native, cx, cy, &material, &metatile, tiles, pitch)) {
+        const DioramaPixelEdit *edit = DioramaLayerOrder_PixelEditAt(terrain, 0, cx, cy, metatile);
+        for (int y = y0; y < y1; ++y) for (int x = x0; x < x1; ++x) {
+          const unsigned mx = (ox + x) & 15, my = (oy + y) & 15;
+          const unsigned at = y * 16 + x;
+          pixels[at] = NativeArtColor(scene, palette, &material, edit, mx, my);
+          if (priority) priority[at] = (material.words[(my / 8) * 2 + mx / 8] & 0x2000) != 0;
+        }
+      } else if (require_full_patch) return false;
+      x0 = x1;
+    }
+    y0 = y1;
+  }
+  return true;
+}
+
 /* Native affine faces keep the reviewed split and its source priority, but
  * own those pixels so moving them never samples outside the captured view. */
 static bool NativeSourcePatch(ActionVoxelGeometry *c,const ActionRoomScene *s,
@@ -86,21 +130,10 @@ static bool NativeSourcePatch(ActionVoxelGeometry *c,const ActionRoomScene *s,
     const CastleMaterial native[256],const uint16_t palette[128],const uint16_t *tiles,
     size_t pitch,int ox,int oy,bool high,bool rear_source,uint16_t pixels[256]) {
   uint32_t source[256],front[256],rear[256];uint16_t original[256];bool priority[256];
-  for(int y=0;y<16;++y)for(int x=0;x<16;++x) {
-    const unsigned at=y*16+x;const int wx=ox+x,wy=oy+y;
-    const int cx=(int)floorf(wx/16.f),cy=(int)floorf(wy/16.f);
-    CastleMaterial m;uint8_t metatile;
-    original[at]=0;priority[at]=false;source[at]=0;
-    if(!LookupMaterial(s,stamps,native,cx,cy,&m,&metatile,tiles,pitch))continue;
-    const unsigned word=m.words[((wy&15)/8)*2+(wx&15)/8],p=AuthoredPixel(s,word,wx&7,wy&7);
-    const DioramaPixelEdit *edit=DioramaLayerOrder_PixelEditAt(terrain,0,cx,cy,metatile);
-    const unsigned bit=1u<<(15-(wx&15));const bool black=edit && (edit->black[wy&15]&bit);
-    uint16_t color=p?0x8000|palette[((word>>10)&7)*16+p]:0;
-    if(black)color=0x8000;
-    if((!black && (m.cutouts[wy&15]&bit)) || (edit && (edit->transparent[wy&15]&bit)))color=0;
-    original[at]=color;priority[at]=!!(word&0x2000);
-    if(!priority[at])source[at]=ActionVoxel_AuthoredColor(color,NULL);
-  }
+  SampleNativeArtPatch(s, terrain, stamps, native, palette, tiles, pitch, ox, oy, 16,
+      false, original, priority);
+  for (unsigned i = 0; i < 256; ++i)
+    source[i] = priority[i] ? 0 : ActionVoxel_AuthoredColor(original[i], NULL);
   /* This private build has not published pixel pointers yet. Request only
    * its native split, never a partially compiled authored replacement. */
   const unsigned authored_count=c->authored_count;c->authored_count=0;
@@ -217,21 +250,13 @@ static bool BuildOwnedCapArt(ActionVoxelGeometry *c,const ActionRoomScene *s,
       survives=!ActionVoxel_AuthoredSurfaceAt(c,e->x+x,e->y);
     if(!survives)continue;
     uint16_t pixels[256];
-    for(int y=0;y<16;++y)for(int x=0;x<16;++x) {
-      const int wx=e->top_sample_x+x%size,wy=e->top_sample_y+y%size;
-      const int cx=(int)floorf(wx/16.f),cy=(int)floorf(wy/16.f);
-      CastleMaterial m;uint8_t metatile;
-      if(!LookupMaterial(s,stamps,native,cx,cy,&m,&metatile,tiles,pitch)) {
-        c->build_error=4;return false;
-      }
-      const unsigned word=m.words[((wy&15)/8)*2+(wx&15)/8],p=AuthoredPixel(s,word,wx&7,wy&7);
-      const DioramaPixelEdit *edit=DioramaLayerOrder_PixelEditAt(terrain,0,cx,cy,metatile);
-      const unsigned bit=1u<<(15-(wx&15));const bool black=edit && (edit->black[wy&15]&bit);
-      uint16_t color=p?0x8000|palette[((word>>10)&7)*16+p]:0;
-      if(black)color=0x8000;
-      if((!black && (m.cutouts[wy&15]&bit)) || (edit && (edit->transparent[wy&15]&bit)))color=0;
-      pixels[y*16+x]=color;
+    if (!SampleNativeArtPatch(s, terrain, stamps, native, palette, tiles, pitch,
+        e->top_sample_x, e->top_sample_y, size, true, pixels, NULL)) {
+      c->build_error = 4;
+      return false;
     }
+    if (size < 16) for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x)
+      pixels[y * 16 + x] = pixels[(y % size) * 16 + x % size];
     uint32_t id;if(!InternAuthoredArt(c,slots,pixels,&id))return false;
     e->top_owned_art=id+1;
     if(!KeepOwnedArt(c,used,id))return false;
@@ -241,58 +266,43 @@ static bool BuildOwnedCapArt(ActionVoxelGeometry *c,const ActionRoomScene *s,
 static bool BuildAuthoredCells(ActionVoxelGeometry *c,const ActionRoomScene *s,
     const DioramaRoomOverride *terrain,const DioramaStampLayerOverride *stamps,
     const CastleMaterial native[256],const uint16_t palette[128],
-    const uint16_t *tiles,size_t pitch) {
-  if(!terrain || !terrain->voxel.cell_count)return true;
-  const int columns=c->width/16,rows=c->height/16,x0=c->origin_x/16,y0=c->origin_y/16;
-  if((size_t)columns*rows>kVoxelAuthoredCellMax){c->build_error=1;return false;}
-  c->authored_at=ActionVoxel_RecordOwners(&terrain->voxel,x0,y0,columns,rows);
-  if(!c->authored_at){c->build_error=3;return false;}
-  unsigned count=0;bool used[kDioramaVoxelCellMax]={0};
-  for(int i=0;i<columns*rows;++i)if(c->authored_at[i]) {
-    const DioramaVoxelCell *edit=&terrain->voxel.cells[c->authored_at[i]-1];
-    /* Showing every native face is a semantic no-op, not a request to
-     * replace a reviewed curved/profile model with an authored prism.
-     * Keep record ownership resolved first so it also resets older ranges. */
-    const unsigned fields=DioramaVoxelCell_EffectiveFields(edit) & ~((edit->faces==kDioramaVoxelFaceMask_All)?kDioramaVoxelCell_Faces:0u);
-    if(fields){++count;used[c->authored_at[i]-1]=true;}
-  }
-  if(!count){memset(c->authored_at,0,(size_t)columns*rows*sizeof(*c->authored_at));return true;}
-  c->authored=calloc(count,sizeof(*c->authored));
+    const uint16_t *tiles,size_t pitch,const ActionVoxelAuthoredLayout *layout) {
+  if (!layout || !layout->count) return true;
+  const int columns = layout->columns, rows = layout->rows;
+  c->authored_at = calloc((size_t)columns * rows, sizeof(*c->authored_at));
+  if (!c->authored_at) { c->build_error = 3; return false; }
+  c->authored=calloc(layout->count,sizeof(*c->authored));
   uint32_t *slots=calloc(kAuthoredHashSlots,sizeof(*slots));
   /* One resolved donor image per record/face. UINT32_MAX means automatic. */
-  uint32_t (*donors)[7]=malloc((size_t)terrain->voxel.cell_count*sizeof(*donors));
+  uint32_t (*donors)[kDioramaVoxelArtSlotCount]=malloc((size_t)terrain->voxel.cell_count*sizeof(*donors));
   if(!c->authored || !slots || !donors){free(slots);free(donors);c->build_error=3;return false;}
   bool ok=true;
   for(unsigned i=0;ok && i<terrain->voxel.cell_count;++i) {
     const DioramaVoxelCell *e=&terrain->voxel.cells[i];
-    const DioramaVoxelArt *art[]={&e->front_art,&e->top_art,&e->side_art,&e->backing_art,
-        &e->left_art,&e->right_art,&e->bottom_art};
-    const unsigned fields[]={kDioramaVoxelCell_FrontArt,kDioramaVoxelCell_TopArt,kDioramaVoxelCell_SideArt,
-        kDioramaVoxelCell_BackArt,kDioramaVoxelCell_LeftArt,kDioramaVoxelCell_RightArt,kDioramaVoxelCell_BottomArt};
-    for(unsigned face=0;face<7;++face) {
+    for (unsigned face = 0; face < kDioramaVoxelArtSlotCount; ++face) {
       donors[i][face]=UINT32_MAX;
-      if(used[i] && (e->fields&fields[face]) && art[face]->set) {
-        if((art[face]->size!=8 && art[face]->size!=16) || art[face]->x+art[face]->size>16 ||
-            art[face]->y+art[face]->size>16){c->build_error=4;ok=false;break;}
-        uint16_t pixels[256];for(int y=0;y<16;++y)for(int x=0;x<16;++x)
-          pixels[y*16+x]=AuthoredArtPixel(s,palette,art[face],x,y);
-        if(!InternAuthoredArt(c,slots,pixels,&donors[i][face])){ok=false;break;}
-      }
+      const DioramaVoxelArt *art = layout->records[i].used ? AuthoredFaceArt(e, face) : NULL;
+      if (!art) continue;
+      if((art->size!=8 && art->size!=16) || art->x+art->size>16 ||
+          art->y+art->size>16){c->build_error=4;ok=false;break;}
+      uint16_t pixels[256];for(int y=0;y<16;++y)for(int x=0;x<16;++x)
+        pixels[y*16+x]=AuthoredArtPixel(s,palette,art,x,y);
+      if(!InternAuthoredArt(c,slots,pixels,&donors[i][face])){ok=false;break;}
     }
   }
-  count=0;
+  unsigned count = 0;
   for(int row=0;ok && row<rows;++row)for(int col=0;ok && col<columns;++col) {
-    const unsigned record=c->authored_at[row*columns+col];
-    c->authored_at[row*columns+col]=0;
+    const unsigned record = layout->owners[row * columns + col];
     if(!record)continue;
     const DioramaVoxelCell *edit=&terrain->voxel.cells[record-1];
-    const unsigned fields=DioramaVoxelCell_EffectiveFields(edit) & ~((edit->faces==kDioramaVoxelFaceMask_All)?kDioramaVoxelCell_Faces:0u);
+    const VoxelAuthoredRecord *resolved = &layout->records[record - 1];
+    const unsigned fields = resolved->fields;
     if(!fields)continue;
     if((fields&kDioramaVoxelCell_Transform) && (fields&(kDioramaVoxelCell_Backing|kDioramaVoxelCell_BackArt)) &&
         !(fields&~(kDioramaVoxelCell_Transform|kDioramaVoxelCell_Faces|kDioramaVoxelCell_Backing|kDioramaVoxelCell_BackArt))) {
       c->build_error=10;ok=false;break;
     }
-    const int cx=x0+col,cy=y0+row;
+    const int cx = layout->x + col, cy = layout->y + row;
     VoxelCellGeometry shape;CastleMaterial m;uint8_t metatile;
     if(!ActionVoxel_CellGeometry(c,cx,cy,&shape) ||
         !LookupMaterial(s,stamps,native,cx,cy,&m,&metatile,tiles,pitch)) {
@@ -306,11 +316,10 @@ static bool BuildAuthoredCells(ActionVoxelGeometry *c,const ActionRoomScene *s,
     /* Hiding only the original front must not remodel native stepped sides,
      * curved trunks or caps. Keep their captured artwork available and omit
      * the front's projected cells instead of erasing the shared texture. */
-    const bool native_identity=ActionVoxel_CellKeepsNativeIdentity(edit);
-    a->native_front_hidden=fields && !ActionVoxel_CellOwnsArtwork(edit) &&
-        (!native_identity || !(a->faces&kDioramaVoxelFaceMask_Front));
-    a->native_transform_requested=ActionVoxel_CellUsesNativeTransform(edit);
-    a->native_transform=a->native_transform_requested && !native_identity;
+    a->native_front_hidden = !resolved->owns_artwork &&
+        (!resolved->native_identity || !(a->faces & kDioramaVoxelFaceMask_Front));
+    a->native_transform_requested = resolved->native_transform;
+    a->native_transform = resolved->native_transform && !resolved->native_identity;
     if(a->native_transform_requested)a->surface=false;
     if(a->native_transform){a->surface=false;a->native_front_hidden=true;++c->native_transform_count;}
     if(a->native_front_hidden){a->surface=false;++c->hidden_native_front_count;}
@@ -348,19 +357,21 @@ static bool BuildAuthoredCells(ActionVoxelGeometry *c,const ActionRoomScene *s,
     if(!ok)break;
     const DioramaPixelEdit *pixel_edit=DioramaLayerOrder_PixelEditAt(terrain,0,cx,cy,metatile);
     uint16_t face_pixels[256],back_pixels[256];uint32_t source[256],rear[256],front[256];
+    const uint32_t front_donor = donors[record - 1][0];
     for(int y=0;y<16;++y)for(int x=0;x<16;++x) {
-      const unsigned at=y*16+x,q=(y/8)*2+x/8,word=m.words[q],p=AuthoredPixel(s,word,x&7,y&7);
-      const bool black=pixel_edit && (pixel_edit->black[y]&(1u<<(15-x)));
-      uint16_t original=p?0x8000|palette[((word>>10)&7)*16+p]:0;
-      if(black)original=0x8000;
-      if((!black && (m.cutouts[y]&(1u<<(15-x)))) ||
-          (pixel_edit && (pixel_edit->transparent[y]&(1u<<(15-x)))))original=0;
+      const unsigned at=y*16+x,q=(y/8)*2+x/8;
+      const uint16_t original = NativeArtColor(s, palette, &m, pixel_edit, x, y);
       source[at]=a->priority[q]?0:ActionVoxel_AuthoredColor(original,NULL);
       /* Explicit front artwork owns its silhouette. Native authored pixel
        * masks still apply, while an automatic matte must not erase new art. */
-      face_pixels[at]=donors[record-1][0]!=UINT32_MAX?c->authored_art[donors[record-1][0]][at]:original;
-      if(black)face_pixels[at]=0x8000;
-      if(pixel_edit && (pixel_edit->transparent[y]&(1u<<(15-x))))face_pixels[at]=0;
+      face_pixels[at] = original;
+      if (front_donor != UINT32_MAX) {
+        const unsigned bit = 1u << (15 - x);
+        uint16_t color = c->authored_art[front_donor][at];
+        if (pixel_edit && (pixel_edit->black[y] & bit)) color = 0x8000;
+        if (pixel_edit && (pixel_edit->transparent[y] & bit)) color = 0;
+        face_pixels[at] = color;
+      }
     }
     const ActionRoomSceneFrameState frame={.brightness=15};
     if(!ActionVoxel_Split(c,a->x,a->y,16,16,16,&frame,source,16,rear,front)){ok=false;break;}
@@ -389,7 +400,7 @@ static bool BuildAuthoredCells(ActionVoxelGeometry *c,const ActionRoomScene *s,
     for(int y=0;y<16;++y)for(int x=0;x<16;++x) {
       const unsigned at=y*16+x,q=(y/8)*2+x/8;
       bool owned_rear=false;
-      if((edit->fields&kDioramaVoxelCell_Transform) && !native_identity &&
+      if((edit->fields&kDioramaVoxelCell_Transform) && !resolved->native_identity &&
           !(fields&(kDioramaVoxelCell_Backing|kDioramaVoxelCell_BackArt))) {
         const int mx=a->x+x-c->origin_x,my=a->y+y-c->origin_y;
         const size_t world_at=(size_t)my*c->width+mx;

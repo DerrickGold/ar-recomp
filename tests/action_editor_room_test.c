@@ -31,16 +31,17 @@ static void CameraPolicy(EditorRoomScene *room, const ActionSceneSnapshot *asset
           EditorRoomScene_Scene(room)->voxel_geometry;
       /* Fillmore BG2 has an explicit 128px extent, so it must not grow an
        * apron even when the ordinary live-world BG1 does. */
-      assert(camera.bg_apron_mask == (wide || voxel ? 1 : 0));
-      /* Resolve travel with the original camera policy. The additional Voxel
-       * pixels must be a capture-only change even at finite room edges. */
+      const uint8_t apron = wide || voxel ? 1 : 0;
+      assert(camera.bg_apron_mask == apron);
+      /* The editor's stop and projection must use the same drawable columns,
+       * including the Voxel apron at a narrow aspect. */
       ActionBgPlan plan;assert(EditorRoomScene_BgPolicy(room,positions[i],300,37,false,&plan,NULL));
-      DioramaCapture old_capture=DioramaCameraPolicy_Capture(&plan,NULL,
-          positions[i],300,120,64,wide?1:0);
-      DioramaScene old_scene=*EditorRoomScene_Scene(room);
-      DioramaRenderOptions options=*old_scene.render;options.skybox=kDioramaSky_Only;old_scene.render=&options;
+      DioramaCapture expected_capture=DioramaCameraPolicy_Capture(&plan,NULL,
+          positions[i],300,120,64,apron);
+      DioramaScene scene=*EditorRoomScene_Scene(room);
+      DioramaRenderOptions options=*scene.render;options.skybox=kDioramaSky_Only;scene.render=&options;
       int lo,hi;
-      if(Diorama_ResolveCaptureCameraRange(&old_capture,&view,&old_scene,positions[i],&lo,&hi)) {
+      if(Diorama_ResolveCaptureCameraRange(&expected_capture,&view,&scene,positions[i],&lo,&hi)) {
         ActionCameraAxisBounds expected;
         assert(ActionCameraAxisBounds_Resolve(EditorRoomScene_Width(room),256,
             lo>0?lo:0,(int)EditorRoomScene_Width(room)-256-hi>0?(int)EditorRoomScene_Width(room)-256-hi:0,&expected));
@@ -163,7 +164,7 @@ static uint32_t FlatHash(const EditorRoomScene *room) {
     hash=(hash^surface->backdrop[(size_t)y*surface->pitch_pixels+x])*16777619u;
   return hash;
 }
-static void CastleAnimation(EditorRoomScene *room,const ActionSceneSnapshot *assets) {
+static void CastleAnimation(EditorRoomScene *room,const ActionSceneSnapshot *assets, const char *scenery) {
   assert(assets->scene.group==2 && (assets->scene.map==3 || assets->scene.map==5));
   assert(ActionRoomScene_CharacterAnimationPhaseCount(&assets->scene)==4);
   assert(assets->frame.animation_phase<0);
@@ -249,6 +250,24 @@ static void CastleAnimation(EditorRoomScene *room,const ActionSceneSnapshot *ass
       "[layers:02:05]\nbg1-pixels = invalid\n"));
   assert(EditorRoomScene_Render(room,x,y,2*cadence,120,64,NULL));
   assert(EditorRoomScene_Scene(room)->voxel_geometry==saved[2]);
+  const size_t framing_size = strlen(scenery) + 128;
+  char *framing = malloc(framing_size); assert(framing);
+  snprintf(framing, framing_size, "%s\n[layers:%02x:%02x]\nframing:us+jp+eu = x:0 y:-7\n",
+      scenery, assets->scene.group, assets->scene.map);
+  assert(EditorRoomScene_Configure(room, framing)); free(framing);
+  assert(EditorRoomScene_Render(room,x,y,3*cadence,120,64,NULL));
+  assert(EditorRoomScene_Scene(room)->voxel_geometry==saved[3]);
+  assert(EditorRoomScene_Capture(room)->framing_y==-7);
+  assert(EditorRoomScene_Render(room,x,y,2*cadence,120,64,NULL));
+  assert(EditorRoomScene_Scene(room)->voxel_geometry==saved[2]);
+  EditorRoomScene_TrimVoxelAnimationCache(room);
+  assert(atomic_load(&saved[2]->references)==3);
+  for (unsigned phase = 0; phase < 4; ++phase)
+    if (phase != 2) assert(atomic_load(&saved[phase]->references)==1);
+  assert(EditorRoomScene_Render(room,x,y,2*cadence,120,64,NULL));
+  assert(EditorRoomScene_Scene(room)->voxel_geometry==saved[2]);
+  assert(EditorRoomScene_Render(room,x,y,cadence,120,64,NULL));
+  assert(EditorRoomScene_Scene(room)->voxel_geometry!=saved[1]);
   /* Applying an actual pixel edit invalidates all four retained variants.
    * The saved old frames remain immutable and safe until their final release. */
   char edit[512];
@@ -283,7 +302,7 @@ static void CastleAnimation(EditorRoomScene *room,const ActionSceneSnapshot *ass
   assert(unknown);
   assert(EditorRoomScene_Render(room,x,y,7*cadence,120,64,NULL));
   const ActionVoxelGeometry *again=EditorRoomScene_Scene(room)->voxel_geometry;
-  assert(again && again!=unknown && ActionVoxel_Revision(again)!=ActionVoxel_Revision(unknown));
+  assert(again==unknown);
   source=malloc(sizeof(*source));assert(source);*source=extended->scene;
   assert(ActionRoomScene_BuildCharacters(&extended->scene,7*cadence,-1,source->characters,sizeof(source->characters)));
   ActionVoxelGeometry *fresh=ActionVoxel_Create();assert(fresh);
@@ -308,8 +327,9 @@ int main(int argc, char **argv) {
   assert(bytes && ActionSceneSnapshot_Decode((const uint8_t *)bytes, n, &assets)); free(bytes);
   EditorRoomScene *room = EditorRoomScene_Create(&assets); assert(room);
   if(diorama)EditorRoomScene_Set3DMode(room,kAction3D_Diorama);
-  char *ini = Read(argv[2], &n); assert(ini && EditorRoomScene_Configure(room, ini)); free(ini);
-  if(castle_animation) {CastleAnimation(room,&assets);return 0;}
+  char *ini = Read(argv[2], &n); assert(ini && EditorRoomScene_Configure(room, ini));
+  if(castle_animation) {CastleAnimation(room,&assets,ini);free(ini);return 0;}
+  free(ini);
   const uint32_t catalogue_before = EditorRoomScene_EffectHash(room);
   const clock_t catalogue_start = clock();
   const unsigned catalogue_count = EditorRoomScene_DefaultSourceCount(room);

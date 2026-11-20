@@ -149,35 +149,37 @@ static void TransactionsAndSourceRevisions(void) {
     Artwork(art[i],i,0);textures[planes[i]]=(ArRenderTexture){i+1};
     pixels[planes[i]]=(const uint8_t *)art[i];pitches[planes[i]]=Pitch*4;
   }
-  DioramaUploadChanges changes={.plane_mask=mask,.source={.revision=1,.row_count=H}};
+  PresentationUploadChanges source={.revision=1,.row_count=H};
+  const PresentationUploadChanges *changes[kDioramaPlane_Count]={0};
+  changes[planes[0]]=changes[planes[1]]=&source;
 #define UPLOAD(m) Diorama_UploadResolvedWithChanges(&device,textures,pixels,pitches, \
-    W,H,0,0,(m),0,0,false,&changes)
+    W,H,0,0,(m),0,0,false,changes)
   DioramaUploadResult r=UPLOAD(mask);
   assert(r.synchronized_plane_mask==mask && r.changed_plane_mask==mask);
   assert(backend.updates==2 && backend.begins==1 && backend.ends==1 && !backend.open);
   CheckBatchPixels(&backend,art);
-  changes.source.previous_revision=1;
+  source.previous_revision=1;
   r=UPLOAD(mask);
   assert(r.synchronized_plane_mask==mask && !r.changed_plane_mask && !backend.updates);
 
   /* A failed later copy must discard the earlier one and invalidate both
    * speculative mirrors. Same-revision hints cannot suppress the retry. */
   art[0][Pitch+3]=0xff112233u;art[1][5*Pitch+7]=0xff456789u;
-  rows[1]=rows[5]=1;changes.source.changed_rows=rows;changes.source.revision=2;
+  rows[1]=rows[5]=1;source.changed_rows=rows;source.revision=2;
   backend.fail_update=2;
   r=UPLOAD(mask);
   assert(!r.synchronized_plane_mask && !r.changed_plane_mask && !backend.open);
   assert(backend.pixels[0][W+3]!=art[0][Pitch+3]);
-  backend.fail_update=0;changes.source.previous_revision=2;
+  backend.fail_update=0;source.previous_revision=2;
   r=UPLOAD(mask);
   assert(r.synchronized_plane_mask==mask && r.changed_plane_mask==mask && backend.updates==2);
   CheckBatchPixels(&backend,art);
 
   art[0][Pitch+3]^=0xff;art[1][5*Pitch+7]^=0xff;
-  changes.source.revision=3;backend.fail_end=true;
+  source.revision=3;backend.fail_end=true;
   r=UPLOAD(mask);
   assert(!r.synchronized_plane_mask && !r.changed_plane_mask && !backend.open);
-  backend.fail_end=false;changes.source.previous_revision=3;
+  backend.fail_end=false;source.previous_revision=3;
   r=UPLOAD(mask);
   assert(r.synchronized_plane_mask==mask && backend.updates==2);
   CheckBatchPixels(&backend,art);
@@ -192,19 +194,36 @@ static void TransactionsAndSourceRevisions(void) {
   /* The rear plane misses revision four. Its next changed-row hint only
    * describes four-to-five, so its older mirror must compare every row. */
   art[0][5*Pitch+2]=0xffabcdefu;art[1][5*Pitch+2]=0xff234567u;
-  memset(rows,0,sizeof(rows));rows[5]=1;changes.source.revision=4;
+  memset(rows,0,sizeof(rows));rows[5]=1;source.revision=4;
   r=UPLOAD(1u<<planes[0]);assert(r.synchronized_plane_mask==(1u<<planes[0]));
   art[1][9*Pitch+4]=0xff987654u;
   memset(rows,0,sizeof(rows));rows[9]=1;
-  changes.source.previous_revision=4;changes.source.revision=5;
+  source.previous_revision=4;source.revision=5;
   r=UPLOAD(mask);assert(r.synchronized_plane_mask==mask);
   CheckBatchPixels(&backend,art);
   art[1][11*Pitch+3]=0xff102938u;
   memset(rows,0,sizeof(rows));rows[11]=1;
-  changes.source.previous_revision=5;changes.source.revision=6;
+  source.previous_revision=5;source.revision=6;
   r=UPLOAD(1u<<planes[0]);assert(r.synchronized_plane_mask==(1u<<planes[0]));
-  changes.source.previous_revision=6; /* Entire source is now unchanged. */
+  source.previous_revision=6; /* Entire source is now unchanged. */
   r=UPLOAD(mask);assert(r.synchronized_plane_mask==mask);
+  CheckBatchPixels(&backend,art);
+
+  /* Independent row hints must preserve both the new footprint and the
+   * transparent rows vacated by a moving sprite, even in the same batch. */
+  uint8_t moved[2][H]={{0}};
+  PresentationUploadChanges independent[2];
+  for (unsigned i=0;i<2;++i) {
+    const unsigned row=14+i;
+    art[i][i]=0;
+    art[i][row*Pitch+i]=0xff112233u;
+    moved[i][0]=moved[i][row]=1;
+    independent[i]=(PresentationUploadChanges){.previous_revision=6,.revision=7,
+        .changed_rows=moved[i],.row_count=H};
+    changes[planes[i]]=&independent[i];
+  }
+  r=UPLOAD(mask);
+  assert(r.synchronized_plane_mask==mask && r.changed_plane_mask==mask);
   CheckBatchPixels(&backend,art);
 #undef UPLOAD
   DioramaUpload_Reset();

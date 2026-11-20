@@ -112,6 +112,9 @@ typedef struct DioramaDepthSink {
    * queued draws on success, discard them on failure, and release any scoped
    * backend registration. A failed finish makes the composite unusable. */
   bool (*finish)(void *userdata, struct ArRenderDevice *, bool success);
+  /* Publish ordered draws when a logical texture update reused identical
+   * pixels. Keeps the existing depth of the active target. */
+  bool (*flush)(void *userdata, struct ArRenderDevice *);
 } DioramaDepthSink;
 
 #endif

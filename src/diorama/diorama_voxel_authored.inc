@@ -11,19 +11,26 @@ static uint32_t s_voxel_authored_color_key;
 static int16_t s_voxel_authored_slot[kVoxelAuthoredArtMax];
 static uint32_t s_voxel_authored_owner[kVoxelAuthoredVisibleArtMax];
 static unsigned s_voxel_authored_next_slot;
+/* Slot bindings follow the geometry revision. The resident texels can survive
+ * a revision change when the newly bound art has identical RGB555 content. */
+static uint16_t s_voxel_authored_pixels[kVoxelAuthoredVisibleArtMax][16*16];
+static uint64_t s_voxel_atlas_row_generation[kAuthoredAtlasHeight/16];
+static uint64_t s_voxel_atlas_bindings=1;
 enum { kVoxelCrispPageTiles=1024,kVoxelCrispPages=kVoxelAuthoredVisibleArtMax/kVoxelCrispPageTiles };
 static ArRenderTexture s_voxel_crisp_pages[kVoxelCrispPages];
 static unsigned s_voxel_crisp_rows[kVoxelCrispPages];
 static uint64_t s_voxel_art_upload_generation,s_voxel_crisp_generation[kVoxelCrispPages];
 static uint32_t s_voxel_crisp_pixels[2048*64];
-static const VoxelAuthoredCell *s_voxel_authored_visible[kAuthoredVisibleCells];
 typedef struct VoxelAuthoredQuery {
-  uint64_t revision;
+  uint64_t revision,last_use,reservation;
   int x, y, width, height;
   float depth_pixels;
-  unsigned count;
+  unsigned count,color_key;
+  const VoxelAuthoredCell *visible[kAuthoredVisibleCells];
 } VoxelAuthoredQuery;
-static VoxelAuthoredQuery s_voxel_authored_query;
+/* A composite alternates between the native, extended, and guard captures. */
+static VoxelAuthoredQuery s_voxel_authored_queries[4],*s_voxel_authored_query;
+static uint64_t s_voxel_authored_query_use;
 static uint64_t s_voxel_authored_bounds_revision;
 static float s_voxel_authored_motion[3];
 static bool s_voxel_authored_has_transform;
@@ -33,7 +40,9 @@ static void ResetVoxelAuthoredAtlas(ArRenderDevice *device) {
   ArRenderDevice_DestroyTexture(device,s_voxel_authored_atlas);
   s_voxel_authored_atlas=ArRenderTexture_Invalid();s_voxel_authored_revision=0;
   s_voxel_authored_bounds_revision=0;
-  s_voxel_authored_query.revision=0;
+  for(unsigned i=0;i<sizeof(s_voxel_authored_queries)/sizeof(*s_voxel_authored_queries);++i)
+    s_voxel_authored_queries[i].revision=s_voxel_authored_queries[i].last_use=0;
+  s_voxel_authored_query=NULL;s_voxel_authored_query_use=0;
   ArRenderDevice_DestroyTexture(device,s_voxel_empty_source);s_voxel_empty_source=ArRenderTexture_Invalid();
   s_voxel_owned_high_revision=0;s_voxel_owned_high=false;
   for(unsigned i=0;i<kVoxelCrispPages;++i) {
@@ -41,6 +50,7 @@ static void ResetVoxelAuthoredAtlas(ArRenderDevice *device) {
     s_voxel_crisp_rows[i]=0;s_voxel_crisp_generation[i]=0;
   }
   s_voxel_art_upload_generation=0;
+  memset(s_voxel_atlas_row_generation,0,sizeof(s_voxel_atlas_row_generation));
 }
 static bool VoxelOwnsHighArt(const ActionVoxelGeometry *geometry) {
   const uint64_t revision=ActionVoxel_Revision(geometry);
@@ -74,18 +84,25 @@ static bool CollectVoxelAuthored(const DioramaCapture *capture,const DioramaView
   const float depth_pixels=2*fmaxf((g->u1-g->u0)*SR_PPU_SURFACE_MAX_WIDTH/fmaxf(.01f,g->aspect_x),
       (g->v1-g->v0)*SR_PPU_SURFACE_MAX_HEIGHT/fmaxf(.01f,g->height_scale));
   const uint64_t revision=ActionVoxel_Revision(geometry);
-  if(revision && s_voxel_authored_query.revision==revision &&
-      s_voxel_authored_query.x==ox && s_voxel_authored_query.y==oy &&
-      s_voxel_authored_query.width==capture->width && s_voxel_authored_query.height==capture->height &&
-      s_voxel_authored_query.depth_pixels==depth_pixels) {
-    *count=s_voxel_authored_query.count;
-    return true;
+  VoxelAuthoredQuery *query=&s_voxel_authored_queries[0];
+  for(unsigned i=0;i<sizeof(s_voxel_authored_queries)/sizeof(*s_voxel_authored_queries);++i) {
+    VoxelAuthoredQuery *cached=&s_voxel_authored_queries[i];
+    if(revision && cached->revision==revision && cached->x==ox && cached->y==oy &&
+        cached->width==capture->width && cached->height==capture->height &&
+        cached->depth_pixels==depth_pixels) {
+      cached->last_use=++s_voxel_authored_query_use;s_voxel_authored_query=cached;
+      *count=cached->count;return true;
+    }
+    if(cached->last_use<query->last_use)query=cached;
   }
-  s_voxel_authored_query.revision=0;
+  COUNT_VOXEL_CACHE_WORK(authored_queries);
+  query->revision=query->reservation=0;
+  query->last_use=++s_voxel_authored_query_use;
+  s_voxel_authored_query=query;
+  unsigned cells;const VoxelAuthoredCell *compiled=ActionVoxel_AuthoredCells(geometry,&cells);
   if(s_voxel_authored_bounds_revision!=revision) {
     memset(s_voxel_authored_motion,0,sizeof(s_voxel_authored_motion));
     s_voxel_authored_has_transform=false;
-    unsigned cells;const VoxelAuthoredCell *compiled=ActionVoxel_AuthoredCells(geometry,&cells);
     for(unsigned i=0;i<cells;++i) {
       s_voxel_authored_has_transform|=ActionVoxel_TransformValid(&compiled[i].transform);
       if(!compiled[i].bend.axis)continue;
@@ -116,7 +133,6 @@ static bool CollectVoxelAuthored(const DioramaCapture *capture,const DioramaView
   /* An affine pivot can bring a distant source into view. Walk only the
    * bounded authored list in that case, never a giant expanded source grid. */
   if(s_voxel_authored_has_transform) {
-    unsigned cells;const VoxelAuthoredCell *compiled=ActionVoxel_AuthoredCells(geometry,&cells);
     for(unsigned i=0;i<cells;++i) {
       const VoxelAuthoredCell *a=&compiled[i];if(!a->surface&&!a->native_transform)continue;
       const VoxelAuthoredBounds *box=&s_voxel_authored_bounds[i];
@@ -124,9 +140,9 @@ static bool CollectVoxelAuthored(const DioramaCapture *capture,const DioramaView
       if(box->x1+guard<ox || box->x0-guard>ox+capture->width ||
           box->y1+guard<oy || box->y0-guard>oy+capture->height)continue;
       if(*count==kAuthoredVisibleCells)return false;
-      s_voxel_authored_visible[(*count)++]=a;
+      query->visible[(*count)++]=a;
     }
-  } else {
+  } else if(cells) {
     const float guard_x=s_voxel_authored_motion[0]+s_voxel_authored_motion[2]*depth_pixels;
     const float guard_y=s_voxel_authored_motion[1]+s_voxel_authored_motion[2]*depth_pixels;
     const int x0=(int)floorf((ox-64-guard_x)/16.f),x1=(int)ceilf((ox+capture->width+64+guard_x)/16.f);
@@ -139,14 +155,21 @@ static bool CollectVoxelAuthored(const DioramaCapture *capture,const DioramaView
           a->x+8+a->offset_x-a->width*.5f+fminf(0,a->bend.dx)-zguard>ox+capture->width ||
           a->y+16+fmaxf(0,a->bend.dy)+zguard<oy || a->y+fminf(0,a->bend.dy)-zguard>oy+capture->height)continue;
       if(*count==kAuthoredVisibleCells)return false;
-      s_voxel_authored_visible[(*count)++]=a;
+      query->visible[(*count)++]=a;
     }
   }
-  s_voxel_authored_query=(VoxelAuthoredQuery){revision,ox,oy,capture->width,capture->height,depth_pixels,*count};
+  query->revision=revision;query->x=ox;query->y=oy;
+  query->width=capture->width;query->height=capture->height;
+  query->depth_pixels=depth_pixels;query->count=*count;
   return true;
 }
 static bool EnsureVoxelAuthoredAtlas(ArRenderDevice *device,const ActionVoxelGeometry *geometry,
-    const ActionRoomSceneFrameState *frame,unsigned visible) {
+    const ActionRoomSceneFrameState *frame,const DioramaDepthSink *sink,unsigned visible) {
+  VoxelAuthoredQuery *query=s_voxel_authored_query;
+  const uint32_t color_key=frame?frame->brightness|((uint32_t)frame->fixed_color<<4)|
+      ((uint32_t)frame->cgadsub<<19)|((uint32_t)(frame->cgwsel&3)<<27):15;
+  if(query->reservation==s_voxel_atlas_bindings&&query->color_key==color_key)return true;
+  COUNT_VOXEL_CACHE_WORK(authored_reservations);
   const unsigned total=ActionVoxel_AuthoredArtCount(geometry);
   if(total>kVoxelAuthoredArtMax)return false;
   bool needed[kVoxelAuthoredArtMax]={0},pinned[kVoxelAuthoredVisibleArtMax]={0};
@@ -154,7 +177,7 @@ static bool EnsureVoxelAuthoredAtlas(ArRenderDevice *device,const ActionVoxelGeo
   const unsigned faces[]={kDioramaVoxelFaceMask_Front,kDioramaVoxelFaceMask_Top,0,0,
       kDioramaVoxelFaceMask_Left,kDioramaVoxelFaceMask_Right,kDioramaVoxelFaceMask_Bottom};
   for(unsigned i=0;i<visible;++i)for(unsigned face=0;face<7;++face) {
-    const VoxelAuthoredCell *a=s_voxel_authored_visible[i];
+    const VoxelAuthoredCell *a=s_voxel_authored_query->visible[i];
     if(!(a->faces&faces[face]) && !(a->native_transform&&face==0) &&
         !(face==3 && ActionVoxel_TransformValid(&a->transform) && (a->faces&kDioramaVoxelFaceMask_Back)))continue;
     const unsigned id=a->art_id[face];if(id>=total)return false;
@@ -168,15 +191,21 @@ static bool EnsureVoxelAuthoredAtlas(ArRenderDevice *device,const ActionVoxelGeo
   /* Reserve the complete view before drawing. There is no partial geometry
    * fallback when a malformed/oversized capture exceeds the fixed budget. */
   if(wanted>kVoxelAuthoredVisibleArtMax)return false;
-  if(!wanted)return true;
-  const uint32_t color_key=frame?frame->brightness|((uint32_t)frame->fixed_color<<4)|
-      ((uint32_t)frame->cgadsub<<19)|((uint32_t)(frame->cgwsel&3)<<27):15;
+  if(!wanted) {
+    query->reservation=s_voxel_atlas_bindings;query->color_key=color_key;
+    return true;
+  }
   const uint64_t revision=ActionVoxel_Revision(geometry);
+  bool bindings_changed=false;
+  if(color_key!=s_voxel_authored_color_key || !ArRenderTexture_IsValid(s_voxel_authored_atlas))
+    memset(s_voxel_atlas_row_generation,0,sizeof(s_voxel_atlas_row_generation));
   if(revision!=s_voxel_authored_revision || color_key!=s_voxel_authored_color_key ||
       !ArRenderTexture_IsValid(s_voxel_authored_atlas)) {
     memset(s_voxel_authored_slot,0xff,sizeof(s_voxel_authored_slot));
     memset(s_voxel_authored_owner,0xff,sizeof(s_voxel_authored_owner));s_voxel_authored_next_slot=0;
     s_voxel_authored_revision=revision;s_voxel_authored_color_key=color_key;
+    /* Any previously published reservation becomes obsolete immediately. */
+    ++s_voxel_atlas_bindings;
   }
   if(!ArRenderTexture_IsValid(s_voxel_authored_atlas)) {
     const ArRenderTextureDesc desc={kAuthoredAtlasWidth,kAuthoredAtlasHeight,kArRenderPixelFormat_Argb8888,
@@ -192,27 +221,44 @@ static bool EnsureVoxelAuthoredAtlas(ArRenderDevice *device,const ActionVoxelGeo
     const unsigned slot=s_voxel_authored_next_slot;
     if(s_voxel_authored_owner[slot]!=UINT32_MAX)s_voxel_authored_slot[s_voxel_authored_owner[slot]]=-1;
     s_voxel_authored_owner[slot]=id;s_voxel_authored_slot[id]=slot;pinned[slot]=true;
-    dirty[slot/32]=true;s_voxel_authored_next_slot=(slot+1)%kVoxelAuthoredVisibleArtMax;
+    bindings_changed=true;
+    dirty[slot/32]=true;
+    s_voxel_authored_next_slot=(slot+1)%kVoxelAuthoredVisibleArtMax;
   }
+  if(bindings_changed)++s_voxel_atlas_bindings;
+  uint16_t art[32][16*16];
   uint32_t pixels[kAuthoredAtlasWidth*16];
+  bool uploaded=false;
   for(unsigned row=0;row<kAuthoredAtlasHeight/16;++row)if(dirty[row]) {
     for(unsigned tile=0;tile<32;++tile) {
       const uint16_t *source=ActionVoxel_AuthoredArt(geometry,s_voxel_authored_owner[row*32+tile]);
-      for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)
-        pixels[y*kAuthoredAtlasWidth+tile*16+x]=source?ActionVoxel_AuthoredColor(source[y*16+x],frame):0;
+      if(source)memcpy(art[tile],source,sizeof(art[tile]));
+      else memset(art[tile],0,sizeof(art[tile]));
     }
+    uint16_t (*resident)[16*16]=s_voxel_authored_pixels+row*32;
+    if(s_voxel_atlas_row_generation[row]&&!memcmp(resident,art,sizeof(art)))continue;
+    for(unsigned tile=0;tile<32;++tile)
+      for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)
+        pixels[y*kAuthoredAtlasWidth+tile*16+x]=ActionVoxel_AuthoredColor(art[tile][y*16+x],frame);
     const ArRenderRectI rect={0,(int)row*16,kAuthoredAtlasWidth,16};
     if(!ArRenderDevice_UpdateTexture(device,s_voxel_authored_atlas,&rect,pixels,kAuthoredAtlasWidth*sizeof(*pixels))) {
+      s_voxel_atlas_row_generation[row]=0;
       s_voxel_authored_revision=0;return false;
     }
-    ++s_voxel_art_upload_generation;
+    memcpy(resident,art,sizeof(art));
+    s_voxel_atlas_row_generation[row]=++s_voxel_art_upload_generation;
+    uploaded=true;
   }
+  /* Texture uploads close the hybrid depth batch. Retain that ordering even
+   * when phase/slot bindings change with no physical texture writes. */
+  if(bindings_changed&&!uploaded&&sink&&sink->flush&&!sink->flush(sink->userdata,device))return false;
+  query->reservation=s_voxel_atlas_bindings;query->color_key=color_key;
   return true;
 }
 static bool PrepareVoxelAuthoredAtlas(ArRenderDevice *device,const DioramaCapture *capture,
     const DioramaViewGeometry *g,const ActionVoxelGeometry *geometry) {
   unsigned visible;return CollectVoxelAuthored(capture,g,geometry,&visible) &&
-      EnsureVoxelAuthoredAtlas(device,geometry,capture->voxel_frame,visible);
+      EnsureVoxelAuthoredAtlas(device,geometry,capture->voxel_frame,g->depth_sink,visible);
 }
 static ArRenderTexture VoxelAuthoredAtlas(void) { return s_voxel_authored_atlas; }
 static DioramaHeatOwned VoxelOwnedHeat(unsigned crisp,bool finite) {
@@ -229,8 +275,8 @@ static ArRenderPointF VoxelOwnedArtUv(unsigned id,float u,float v) {
  * sampling. Cache that same source once per native-art upload. Pages remain
  * within 2048x2048 and grow only to their occupied rows, rather than creating
  * an 8192px-high copy of the entire shared cap atlas. */
-static bool PrepareVoxelCrispPage(ArRenderDevice *device,const ActionVoxelGeometry *geometry,
-    const ActionRoomSceneFrameState *frame,unsigned page,unsigned needed_rows) {
+static bool PrepareVoxelCrispPage(ArRenderDevice *device,const ActionRoomSceneFrameState *frame,
+    unsigned page,unsigned needed_rows) {
   if(page>=kVoxelCrispPages || !needed_rows || needed_rows>32)return false;
   if(s_voxel_crisp_rows[page]<needed_rows || !ArRenderTexture_IsValid(s_voxel_crisp_pages[page])) {
     unsigned rows=1;while(rows<needed_rows)rows*=2;
@@ -242,13 +288,14 @@ static bool PrepareVoxelCrispPage(ArRenderDevice *device,const ActionVoxelGeomet
   }
   if(s_voxel_crisp_generation[page]==s_voxel_art_upload_generation)return true;
   for(unsigned row=0;row<s_voxel_crisp_rows[page];++row) {
+    if(s_voxel_crisp_generation[page] &&
+        s_voxel_atlas_row_generation[page*32+row]<=s_voxel_crisp_generation[page])continue;
     for(unsigned y=0;y<16;++y) {
       uint32_t *out=s_voxel_crisp_pixels+y*4*2048;
       for(unsigned tile=0;tile<32;++tile) {
-        const unsigned id=s_voxel_authored_owner[page*kVoxelCrispPageTiles+row*32+tile];
-        const uint16_t *source=ActionVoxel_AuthoredArt(geometry,id);
+        const uint16_t *source=s_voxel_authored_pixels[page*kVoxelCrispPageTiles+row*32+tile];
         for(unsigned x=0;x<16;++x) {
-          const uint32_t color=source?ActionVoxel_AuthoredColor(source[y*16+x],frame):0;
+          const uint32_t color=ActionVoxel_AuthoredColor(source[y*16+x],frame);
           const unsigned at=tile*64+x*4;out[at]=out[at+1]=out[at+2]=out[at+3]=color;
         }
       }
@@ -260,10 +307,10 @@ static bool PrepareVoxelCrispPage(ArRenderDevice *device,const ActionVoxelGeomet
   s_voxel_crisp_generation[page]=s_voxel_art_upload_generation;return true;
 }
 static bool PrepareVoxelCrispFronts(ArRenderDevice *device,const DioramaCapture *capture,
-    const DioramaLayerDraw *layer,unsigned visible) {
+    unsigned visible) {
   unsigned needed[kVoxelCrispPages]={0};
   for(unsigned i=0;i<visible;++i) {
-    const VoxelAuthoredCell *a=s_voxel_authored_visible[i];
+    const VoxelAuthoredCell *a=s_voxel_authored_query->visible[i];
     if(!(a->faces&kDioramaVoxelFaceMask_Front) || (!a->native_transform&&!a->native_front_art))continue;
     const int slot=s_voxel_authored_slot[a->art_id[0]];if(slot<0)return false;
     const unsigned page=(unsigned)slot/kVoxelCrispPageTiles,rows=((unsigned)slot%kVoxelCrispPageTiles)/32+1;
@@ -272,7 +319,7 @@ static bool PrepareVoxelCrispFronts(ArRenderDevice *device,const DioramaCapture 
   /* Resolve every page extent before submitting any faces. A later source
    * tile must never resize a texture already referenced by queued draws. */
   for(unsigned page=0;page<kVoxelCrispPages;++page)if(needed[page] &&
-      !PrepareVoxelCrispPage(device,layer->voxel_geometry,capture->voxel_frame,page,needed[page]))return false;
+      !PrepareVoxelCrispPage(device,capture->voxel_frame,page,needed[page]))return false;
   return true;
 }
 /* Match the piecewise surface used by front triangles. New actor/depth cuts
@@ -454,10 +501,10 @@ static bool DrawVoxelNativeTransformedBacking(ArRenderDevice *device,const Diora
     const DioramaViewGeometry *g,const DioramaLayerDraw *layer) {
   if(!ActionVoxel_HasTransformedBacks(layer->voxel_geometry))return true;
   unsigned visible;if(!CollectVoxelAuthored(capture,g,layer->voxel_geometry,&visible) ||
-      !EnsureVoxelAuthoredAtlas(device,layer->voxel_geometry,capture->voxel_frame,visible))return false;
+      !EnsureVoxelAuthoredAtlas(device,layer->voxel_geometry,capture->voxel_frame,g->depth_sink,visible))return false;
   unsigned count=0;
   for(unsigned i=0;i<visible;++i) {
-    const VoxelAuthoredCell *a=s_voxel_authored_visible[i];
+    const VoxelAuthoredCell *a=s_voxel_authored_query->visible[i];
     if(!ActionVoxel_TransformValid(&a->transform) || !(a->faces&kDioramaVoxelFaceMask_Back))continue;
     bool ink=false;for(unsigned row=0;row<16;++row)ink|=a->native_rear_rows[row]!=0;
     if(!ink)continue;
@@ -538,9 +585,9 @@ static bool DrawVoxelAuthored(ArRenderDevice *device,const DioramaCapture *captu
   if(g->options->voxel_inspection==kDioramaVoxelInspect_Backing)return true;
   unsigned total=0;if(!ActionVoxel_AuthoredCells(layer->voxel_geometry,&total) || !total)return true;
   unsigned visible;if(!CollectVoxelAuthored(capture,g,layer->voxel_geometry,&visible) ||
-      !EnsureVoxelAuthoredAtlas(device,layer->voxel_geometry,capture->voxel_frame,visible))return false;
+      !EnsureVoxelAuthoredAtlas(device,layer->voxel_geometry,capture->voxel_frame,g->depth_sink,visible))return false;
   if(!front_phase && g->options->voxel_inspection!=kDioramaVoxelInspect_Cutaway &&
-      !PrepareVoxelCrispFronts(device,capture,layer,visible))return false;
+      !PrepareVoxelCrispFronts(device,capture,visible))return false;
   const bool high=layer->description->plane==kDioramaPlane_Bg1Hi;
   const float split=fmaxf(0,layer->voxel_recess-.01f);
   const float unit=16*g->aspect_x/((g->u1-g->u0)*SR_PPU_SURFACE_MAX_WIDTH);
@@ -548,7 +595,7 @@ static bool DrawVoxelAuthored(ArRenderDevice *device,const DioramaCapture *captu
   unsigned count=0;
   GroundCoverBeginBatch();
   for(unsigned i=0;i<visible;++i) {
-    const VoxelAuthoredCell *a=s_voxel_authored_visible[i];
+    const VoxelAuthoredCell *a=s_voxel_authored_query->visible[i];
     if(a->native_transform) {
       if(!front_phase && !DrawVoxelNativeTransformedFront(device,capture,g,layer,a,high,&count))return false;
       continue;

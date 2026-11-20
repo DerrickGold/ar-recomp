@@ -1,3 +1,51 @@
+/* A strip's texture and lighting share one source domain across all meshes.
+ * Shade in primary UV before remapping into the filtered strip or atlas. */
+typedef struct HollowGuardSource {
+  float origin_x, origin_y, width, height, atlas_y;
+  const DioramaTrunkGuardStrip *strip;
+  DioramaSceneryLightEffectParams light;
+} HollowGuardSource;
+
+static HollowGuardSource PrepareHollowGuardSource(const DioramaCapture *capture,
+    const DioramaLayerDraw *layer,const DioramaTrunkGuardStrip *strip,bool filtered) {
+  HollowGuardSource source={
+    .origin_x=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron,
+    .origin_y=capture->camera_y-capture->authentic_y0+1,
+    .width=filtered?strip->width:kDioramaTrunkGuardWidth,
+    .height=filtered?kDioramaTrunkGuardRows:kDioramaTrunkGuardHeight,
+    .atlas_y=filtered?0:strip->atlas_y,.strip=strip,.light=layer->lighting,
+  };
+  source.light.mode=0;
+  source.light.blur_radius=0;
+  source.light.attributes_uv=(ArRenderRectF){
+    (strip->world_x-source.origin_x)/SR_PPU_SURFACE_MAX_WIDTH,
+    (strip->world_y-source.origin_y-source.atlas_y)/SR_PPU_SURFACE_MAX_HEIGHT,
+    source.width/SR_PPU_SURFACE_MAX_WIDTH,source.height/SR_PPU_SURFACE_MAX_HEIGHT,
+  };
+  const float scale=filtered?kDioramaSupersample:1;
+  source.light.texel_width=1.f/(source.width*scale);
+  source.light.texel_height=1.f/(source.height*scale);
+  return source;
+}
+
+static bool SubmitHollowGuardMesh(ArRenderDevice *device,ArRenderTexture texture,
+    const DioramaLayerDraw *layer,const HollowGuardSource *source,DioramaLayerMesh *mesh) {
+  if(!mesh->vertex_count)return true;
+  ShadeDioramaVertices(layer,mesh->vertices,mesh->vertex_count);
+  for(int i=0;i<mesh->vertex_count;++i) {
+    ArRenderPointF *uv=&mesh->vertices[i].tex_coord;
+    const float world_x=source->origin_x+uv->x*SR_PPU_SURFACE_MAX_WIDTH;
+    const float world_y=source->origin_y+uv->y*SR_PPU_SURFACE_MAX_HEIGHT;
+    *uv=(ArRenderPointF){(world_x-source->strip->world_x)/source->width,
+        (world_y-source->strip->world_y+source->atlas_y)/source->height};
+  }
+  const bool perspective=layer->hollow_voxel&&mesh->has_depth;
+  return RenderShadedDioramaDepthGeometryWithW(device,texture,mesh->vertices,mesh->depths,
+      perspective?mesh->clip_w:NULL,mesh->vertex_count,mesh->indices,mesh->index_count,
+      layer->blend,layer->exposure,source->light.attributes_uv,&source->light,
+      layer->depth_sink,layer->description->plane,false);
+}
+
 /* Carve the foreground under native standing contacts. The same source mesh
  * generator serves primary and guard captures; captured RGBA is never edited. */
 typedef struct HollowFrontSource {
@@ -6,64 +54,24 @@ typedef struct HollowFrontSource {
   const DioramaViewGeometry *geometry;
   const DioramaLayerDraw *layer;
   DioramaFaceSource *primary;
-  const DioramaTrunkGuardStrip *strip;
+  const HollowGuardSource *guard;
   ArRenderTexture texture;
-  bool filtered;
   PresentationOutcome outcome;
 } HollowFrontSource;
 static bool FlushHollowFront(HollowFrontSource *source,DioramaLayerMesh *mesh) {
   if(!mesh->vertex_count)return true;
   const DioramaCapture *capture=source->capture;const DioramaLayerDraw *layer=source->layer;
-  ShadeDioramaVertices(layer,mesh->vertices,mesh->vertex_count);
-  if(!source->strip) {
+  if(source->guard) {
+    if(!SubmitHollowGuardMesh(source->device,source->texture,layer,source->guard,mesh))
+      source->outcome=kPresentationOutcome_CoreFailure;
+  } else {
+    ShadeDioramaVertices(layer,mesh->vertices,mesh->vertex_count);
     DioramaAttachedMesh attached={0};
     source->outcome=PresentationOutcome_Combine(source->outcome,
         DrawDioramaLayerFace(source->device,capture,source->geometry,layer,mesh,&attached,source->primary));
-  } else {
-    const DioramaTrunkGuardStrip *strip=source->strip;
-    const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
-    const float oy=capture->camera_y-capture->authentic_y0+1;
-    const float width=source->filtered?strip->width:kDioramaTrunkGuardWidth;
-    const float height=source->filtered?kDioramaTrunkGuardRows:kDioramaTrunkGuardHeight;
-    const float atlas_y=source->filtered?0:strip->atlas_y;
-    for(int i=0;i<mesh->vertex_count;++i) {
-      ArRenderPointF *uv=&mesh->vertices[i].tex_coord;
-      const float x=ox+uv->x*SR_PPU_SURFACE_MAX_WIDTH,y=oy+uv->y*SR_PPU_SURFACE_MAX_HEIGHT;
-      *uv=(ArRenderPointF){(x-strip->world_x)/width,(y-strip->world_y+atlas_y)/height};
-    }
-    const ArRenderRectF uv={(strip->world_x-ox)/SR_PPU_SURFACE_MAX_WIDTH,
-        (strip->world_y-oy-atlas_y)/SR_PPU_SURFACE_MAX_HEIGHT,
-        width/SR_PPU_SURFACE_MAX_WIDTH,height/SR_PPU_SURFACE_MAX_HEIGHT};
-    DioramaSceneryLightEffectParams light=layer->lighting;light.mode=0;light.blur_radius=0;light.attributes_uv=uv;
-    light.texel_width=1.f/(width*(source->filtered?kDioramaSupersample:1));
-    light.texel_height=1.f/(height*(source->filtered?kDioramaSupersample:1));
-    if(!RenderShadedDioramaDepthGeometryWithW(source->device,source->texture,mesh->vertices,mesh->depths,
-        mesh->has_depth?mesh->clip_w:NULL,mesh->vertex_count,mesh->indices,mesh->index_count,
-        layer->blend,layer->exposure,uv,&light,layer->depth_sink,layer->description->plane,false))
-      source->outcome=kPresentationOutcome_CoreFailure;
   }
   mesh->vertex_count=mesh->index_count=0;
   return PresentationOutcome_IsUsable(source->outcome);
-}
-/* -1 needs pixel contours; 0 is native unknown/high art; 1 is recessed body.
- * The contact map is immutable and only a small native neighborhood is read. */
-static int HollowFrontCell(int x,int y) {
-  const int pitch=kActionTrunkSideWidth/8,byte=x/8,cy=y/8;
-  bool body=false;
-  for(int yy=cy*8;yy<cy*8+8&&(unsigned)yy<s_trunk_assets->height;++yy) {
-    const uint8_t *solid=ActionTrunk_SideMaskRow(s_trunk_assets,yy,kActionTrunkSideSolid);
-    const uint8_t *high=ActionTrunk_SideMaskRow(s_trunk_assets,yy,kActionTrunkSidePriority);
-    body|=!!(solid[byte]&~high[byte]);
-  }
-  if(!body)return 0;
-  const uint8_t *grid=s_trunk_assets->side_clearance_grid+cy*(pitch+1)+byte;
-  if(grid[0]!=grid[1]||grid[0]!=grid[pitch+1]||grid[0]!=grid[pitch+2])return -1;
-  if(!grid[0])return 0;
-  if(s_trunk_assets->side_detail_cells[cy*pitch+byte])return -1;
-  for(int yy=cy*8-7;yy<cy*8+8;++yy)
-    if(yy>=0&&(unsigned)yy<s_trunk_assets->height&&
-        s_trunk_assets->side_contacts[yy*kActionTrunkSideMaskPitch+byte])return -1;
-  return 1;
 }
 static bool AppendHollowFrontQuad(HollowFrontSource *source,DioramaLayerMesh *mesh,
     float x0,float y0,float x1,float y1,int kind,int owner_x,int owner_y) {
@@ -94,9 +102,9 @@ static bool DrawHollowCarvedFront(HollowFrontSource *source,float left,float rig
   for(float y=top;y<bottom;) {
     const float y1=fminf(bottom,(floorf(y/8)+1)*8);
     for(float x=left;x<right;) {
-      float x1=fminf(right,(floorf(x/8)+1)*8);const int kind=HollowFrontCell((int)floorf(x),(int)floorf(y));
+      float x1=fminf(right,(floorf(x/8)+1)*8);const int kind=ActionTrunk_SideFrontCell(s_trunk_assets,(int)floorf(x),(int)floorf(y));
       if(kind>=0) {
-        while(x1<right&&x1!=288&&x1!=736&&HollowFrontCell((int)x1,(int)floorf(y))==kind)
+        while(x1<right&&x1!=288&&x1!=736&&ActionTrunk_SideFrontCell(s_trunk_assets,(int)x1,(int)floorf(y))==kind)
           x1=fminf(right,x1+8);
         if(!AppendHollowFrontQuad(source,&mesh,x,y,x1,y1,kind,0,0))return false;
       } else {

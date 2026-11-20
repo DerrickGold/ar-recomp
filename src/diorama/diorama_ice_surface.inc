@@ -1,16 +1,23 @@
 /* Ice is a material finish on the actual cap, never a screen-space particle
  * field. The shared thin-film batch preserves depth, cut pieces and actor order. */
-static struct { bool sheen,glints;float clock,fade; } s_ice_surface;
-static void IceSurfacePrepare(const DioramaScene *scene,const DioramaViewGeometry *g) {
+static struct { bool sheen,glints;float clock,fade,grazing,centre; } s_ice_surface;
+static void IceSurfacePrepare(const DioramaScene *scene,const DioramaCapture *capture,
+    const DioramaViewGeometry *g) {
   memset(&s_ice_surface,0,sizeof(s_ice_surface));
-  if(!g->depth_sink || !scene->trunk_effects ||
+  if(!g->depth_sink || !scene->environment_effects ||
       scene->render->voxel_inspection==kDioramaVoxelInspect_Backing ||
       !ActionVoxel_Active(scene->voxel_geometry,scene->map_group,scene->map_number))return;
-  s_ice_surface.sheen=scene->trunk_lighting;
-  s_ice_surface.glints=scene->trunk_lighting && scene->trunk_particles;
-  const ActionSceneEffectFrame *frame=scene->trunk_effects;
+  s_ice_surface.sheen=scene->environment_lighting;
+  s_ice_surface.glints=scene->environment_lighting && scene->environment_particles;
+  const ActionSceneEffectFrame *frame=scene->environment_effects;
   s_ice_surface.clock=frame->game_frame;
-  s_ice_surface.fade=1-scene->native_bloom_dimming;
+  s_ice_surface.fade=(1-scene->native_bloom_dimming)*
+      (capture->voxel_frame?capture->voxel_frame->brightness/15.f:1);
+  if(s_ice_surface.sheen&&s_ice_surface.fade>0) {
+    const float tilt=sinf(g->camera.tilt_x);
+    s_ice_surface.grazing=powf(1-fminf(1,fabsf(tilt)),3);
+    s_ice_surface.centre=.48f+.14f*sinf(g->camera.tilt_y*2)+.08f*tilt;
+  }
 }
 /* Clip in native X and complete material depth. Splitting a top at an atlas
  * boundary, slope step or actor band must not restart a reflection stripe. */
@@ -33,10 +40,9 @@ static void IceSurfaceQuad(const DioramaCapture *capture,const DioramaViewGeomet
 static void IceSurfaceGather(const DioramaCapture *capture,const DioramaViewGeometry *g,
     const DioramaGroundCoverCap *cap) {
   if(!s_ice_surface.sheen && !s_ice_surface.glints)return;
-  const float fade=s_ice_surface.fade*(capture->voxel_frame?capture->voxel_frame->brightness/15.f:1);
+  const float fade=s_ice_surface.fade;
   if(fade<=0)return;
-  const float grazing=powf(1-fminf(1,fabsf(sinf(g->camera.tilt_x))),3);
-  const float centre=.48f+.14f*sinf(g->camera.tilt_y*2)+.08f*sinf(g->camera.tilt_x);
+  const float grazing=s_ice_surface.grazing,centre=s_ice_surface.centre;
   const float one[]={1,1},up[]={0,1},down[]={1,0};
   if(s_ice_surface.sheen) {
     IceSurfaceQuad(capture,g,cap,cap->from.x,cap->to.x,0,1,one,(float[2]){.6f,1},

@@ -18,6 +18,7 @@
 
 static int failures;
 static uint8_t voxel_terrain;
+static bool animation_audit;
 uint8_t g_ram[kActRaiserWramSize];
 #define CHECK(e) do { if (!(e)) { \
   fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #e); failures++; \
@@ -2266,6 +2267,8 @@ static void TestLiveCastleAnimation(Ppu *ppu,const ActionRoomScene *scene,
   CHECK(ActionRoomScene_CharacterAnimationPhaseCount(scene)==4);if(!bytes)return;
   const ActionVoxelGeometry *phases[4]={0};ActionVoxelGeometry *fresh[4]={0};
   uint64_t revisions[4]={0};uint8_t characters[kActionRoomSceneCharacterBytes];
+  const ActRaiserActionBgDiagnostics *diagnostics = ActRaiserActionBg_GetDiagnostics();
+  const uint64_t warm_plans = diagnostics->voxel_character_plan_builds;
   for(unsigned cycle=0;cycle<2;++cycle)for(unsigned phase=0;phase<4;++phase) {
     CHECK(ActionRoomScene_BuildCharacters(scene,0,phase,characters,sizeof(characters)));
     for(size_t i=offset;i<offset+bytes;i+=2)ppu->vram[i/2]=characters[i]|(characters[i+1]<<8);
@@ -2277,6 +2280,7 @@ static void TestLiveCastleAnimation(Ppu *ppu,const ActionRoomScene *scene,
     } else {CHECK(geometry==phases[phase]);CHECK(revision==revisions[phase]);}
     SameCastlePhase(geometry,fresh[phase]);
   }
+  CHECK(diagnostics->voxel_character_plan_builds == warm_plans);
   CHECK(phases[0]==initial);
   CHECK(memcmp(phases[0]->front,phases[1]->front,(size_t)phases[0]->width*phases[0]->height));
   /* A live doorway/visible ring publication invalidates all four entries. */
@@ -2301,8 +2305,11 @@ static void TestLiveCastleAnimation(Ppu *ppu,const ActionRoomScene *scene,
   INVALIDATE_AND_RESTORE(ppu->vram[offset/2]^=0xff); /* Unknown/partial animation. */
   INVALIDATE_AND_RESTORE(ppu->cgram[1]^=1);
   INVALIDATE_AND_RESTORE(ppu->vram[128*16]^=1); /* Used art outside the animation. */
+  const uint64_t before_map_change = diagnostics->voxel_character_plan_builds;
   INVALIDATE_AND_RESTORE(g_ram[kActRaiserWram_Bg1Map]^=1);
+  CHECK(diagnostics->voxel_character_plan_builds == before_map_change + 2);
   INVALIDATE_AND_RESTORE(g_ram[kActRaiserWram_Bg1MetatileDefinitions+1]^=2);
+  CHECK(diagnostics->voxel_character_plan_builds == before_map_change + 4);
 #undef INVALIDATE_AND_RESTORE
   DioramaRoomOverride terrain={.used=true,.map_group=group,.map_number=room};
   CHECK(DioramaLayerOrder_ParseLine(&terrain,
@@ -2313,6 +2320,7 @@ static void TestLiveCastleAnimation(Ppu *ppu,const ActionRoomScene *scene,
   revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);CHECK(revision!=changed);
   CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain)==revision);
   CHECK(PrepareVoxelWithoutChangingNativeArt(ppu,group,room,NULL)!=revision);
+  CHECK(diagnostics->voxel_character_plan_builds == before_map_change + 7);
   DioramaLayerOrder_ClearRoom(&terrain);
   ppu->inidisp=0x80;ActRaiserActionBg_PrepareVoxel(true,NULL);
   CHECK(!ActRaiserActionBg_VoxelGeometry(group,room));ppu->inidisp=15;
@@ -2340,8 +2348,8 @@ static void TestLivePresentationAnimation(Ppu *ppu, const ActionRoomScene *scene
   const uint64_t initial_revision=ActionVoxel_Revision(initial);
   uint8_t characters[kActionRoomSceneCharacterBytes];
   bool animated=false;
-  /* Geometry owns a canonical private copy. Native VRAM and palette must
-   * retain every phase, including all bytes outside the animation window. */
+  /* Geometry can share these phases. Native VRAM and palette must retain
+   * every phase, including all bytes outside the animation window. */
   for(unsigned cycle=0;cycle<2;++cycle)
     for(unsigned phase=0;phase<ActionRoomScene_CharacterAnimationPhaseCount(scene);++phase) {
       CHECK(ActionRoomScene_BuildCharacters(scene,0,phase,characters,sizeof(characters)));
@@ -2464,11 +2472,27 @@ static void TestLiveVoxelAuthoringCache(Ppu *ppu, const ActionRoomScene *scene) 
       "voxel-cell = cell:0,0 width:8 backing:fill top-art:1,0200,0200,0200,0200,0,0,16", NULL));
   revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
   CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == revision);
+  const ActRaiserActionBgDiagnostics *diagnostics = ActRaiserActionBg_GetDiagnostics();
+  /* A rejected donor still consumes the published inputs. Only an actual
+   * edit should trigger the next geometry build. */
+  DioramaVoxelArt *donor = &terrain.voxel.cells[terrain.voxel.cell_count - 1].top_art;
+  donor->size = 7;
+  const uint64_t before_rejection = diagnostics->voxel_geometry_build_attempts;
+  for (unsigned frame = 0; frame < 3; ++frame) {
+    ActRaiserActionBg_PrepareVoxel(true, &terrain);
+    CHECK(!ActRaiserActionBg_VoxelGeometry(group, room));
+    CHECK(diagnostics->voxel_geometry_build_attempts == before_rejection + 1);
+  }
+  donor->size = 16;
+  revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
+  CHECK(diagnostics->voxel_geometry_build_attempts == before_rejection + 2);
+  const uint64_t warm_plans = diagnostics->voxel_character_plan_builds;
   ppu->vram[0x3000] ^= 1;
   next = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
   CHECK(next != revision);
   ppu->vram[0x3000] ^= 1;
   CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) != next);
+  CHECK(diagnostics->voxel_character_plan_builds == warm_plans);
 
   /* A group transform is persisted presentation state: each change must
    * publish new immutable geometry while queued frames retain their pivot. */
@@ -2476,6 +2500,7 @@ static void TestLiveVoxelAuthoringCache(Ppu *ppu, const ActionRoomScene *scene) 
       "voxel-cell = cell:0,0 width:8 top-art:1,0200,0200,0200,0200,0,0,16 "
       "transform:8,8,.3,4,-2,.1,.5,2,1.5",NULL));
   revision=PrepareVoxelWithoutChangingNativeArt(ppu,group,room,&terrain);
+  CHECK(diagnostics->voxel_character_plan_builds == warm_plans + 1);
   const ActionVoxelGeometry *retained_transform=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,room));
   VoxelCellGeometry transformed;
   CHECK(ActionVoxel_CellGeometry(retained_transform,0,0,&transformed));
@@ -2529,6 +2554,12 @@ static void TestLiveVoxelAuthoringCache(Ppu *ppu, const ActionRoomScene *scene) 
         ppu->vram[i / 2] = characters[i] | (characters[i + 1] << 8);
       next = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
       CHECK(next != revision);
+      CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == next);
+      for (size_t i = offset; i < offset + bytes; i += 2)
+        ppu->vram[i / 2] = scene->characters[i] | (scene->characters[i + 1] << 8);
+      CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == revision);
+      for (size_t i = offset; i < offset + bytes; i += 2)
+        ppu->vram[i / 2] = characters[i] | (characters[i + 1] << 8);
       CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == next);
       changed = true;
       break;
@@ -2618,15 +2649,58 @@ static void TestLiveVoxelAuthoringCache(Ppu *ppu, const ActionRoomScene *scene) 
 
 /* Optional stock-ROM integration oracle. The normal CTest run stays ROM-free. */
 #include "actraiser_jungle_water_cache.inc"
+static void TestWarmVoxelAnimation(Ppu *ppu, const ActionRoomScene *scene) {
+  ActionVoxelAnimation animation;
+  CHECK(ActionVoxel_DescribeAnimation(scene, &animation));
+  CHECK(animation.phases <= kActionVoxelCachedPhases);
+  if (animation.phases > kActionVoxelCachedPhases) return;
+  const ActionVoxelGeometry *cached[kActionVoxelCachedPhases] = {0};
+  uint8_t characters[kActionRoomSceneCharacterBytes];
+  const ActRaiserActionBgDiagnostics *diagnostics = ActRaiserActionBg_GetDiagnostics();
+  const uint64_t plans = diagnostics->voxel_character_plan_builds;
+  unsigned revisions = 0;
+  for (unsigned cycle = 0; cycle < 2; ++cycle) {
+    const uint64_t builds = diagnostics->voxel_geometry_build_attempts;
+    for (unsigned phase = 0; phase < animation.phases; ++phase) {
+      CHECK(ActionRoomScene_BuildCharacters(scene, 0, phase, characters, sizeof(characters)));
+      for (size_t i = animation.offset; i < animation.offset + animation.bytes; i += 2)
+        ppu->vram[i / 2] = characters[i] | (characters[i + 1] << 8);
+      ActRaiserActionBg_PrepareVoxel(true, NULL);
+      const ActionVoxelGeometry *actual = ActRaiserActionBg_VoxelGeometry(scene->group, scene->map);
+      CHECK(actual);
+      if (!cycle) {
+        bool first = true;
+        for (unsigned earlier = 0; earlier < phase; ++earlier) first &= cached[earlier] != actual;
+        revisions += first;
+        cached[phase] = ActionVoxel_Retain(actual);
+      } else {
+        CHECK(actual == cached[phase]);
+      }
+      for (size_t i = animation.offset; i < animation.offset + animation.bytes; i += 2)
+        CHECK(ppu->vram[i / 2] == (characters[i] | (characters[i + 1] << 8)));
+    }
+    if (cycle) CHECK(diagnostics->voxel_geometry_build_attempts == builds);
+  }
+  CHECK(diagnostics->voxel_character_plan_builds == plans);
+  for (unsigned phase = 0; phase < animation.phases; ++phase) ActionVoxel_Release(cached[phase]);
+  fprintf(stderr, "[voxel-animation-audit] %02x:%02x terrain=%u phases=%u geometry=%u\n",
+      scene->group, scene->map, voxel_terrain, animation.phases, revisions);
+}
+
 static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t map_number) {
-  fprintf(stderr,"[voxel-publication] %02x:%02x terrain=%u\n",group,map_number,voxel_terrain);
+  if (animation_audit && !ActionVoxel_Room(group, map_number)) return;
   FILE *file=fopen(path,"rb");CHECK(file);if(!file)return;
   CHECK(!fseek(file,0,SEEK_END));const long size=ftell(file);rewind(file);
   uint8_t *rom=size>0?malloc((size_t)size):NULL;CHECK(rom);if(!rom){fclose(file);return;}
   CHECK(fread(rom,1,(size_t)size,file)==(size_t)size);fclose(file);
   ActionRoomScene *scene=calloc(1,sizeof(*scene));Ppu *ppu=calloc(1,sizeof(*ppu));
   CHECK(scene&&ppu);if(!scene||!ppu){free(scene);free(ppu);free(rom);return;}
-  CHECK(ActionRoomScene_Load(scene,rom,(size_t)size,group,map_number));
+  const bool loaded = ActionRoomScene_Load(scene,rom,(size_t)size,group,map_number);
+  if (animation_audit && (!loaded || !ActionRoomScene_HasCharacterAnimation(scene))) {
+    free(ppu);free(scene);free(rom);return;
+  }
+  CHECK(loaded);
+  fprintf(stderr,"[voxel-publication] %02x:%02x terrain=%u\n",group,map_number,voxel_terrain);
   CHECK(ActionRoomTerrain_Project(scene,voxel_terrain));
   ActionRoomSceneFrameState frame;
   const ActionRoomSceneFrameRequest request={.animation_phase=-1,.page_phase=-1};
@@ -2655,6 +2729,11 @@ static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t ma
   BindFakePpu(ppu);
   ActRaiserActionBg_PrepareVoxel(true,NULL);
   const ActionVoxelGeometry *closed=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,map_number));CHECK(closed);
+  if (animation_audit) {
+    if (closed) TestWarmVoxelAnimation(ppu, scene);
+    ActionVoxel_Release(closed);
+    goto cleanup;
+  }
   if(closed && group==5 && map_number<=3) {
     TestJungleWaterColorCache(ppu,scene);
     ActionVoxel_Release(closed);
@@ -2850,8 +2929,35 @@ static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t ma
     closed=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,map_number));CHECK(closed);
     unsigned count;ActionVoxel_WaterSurfaces(closed,&count);CHECK(count==3);
     ActRaiserActionBg_PrepareVoxel(true,NULL);CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
-    ppu->vram[0x1000]^=1; /* Water phases update texture data, not pool topology. */
-    ActRaiserActionBg_PrepareVoxel(true,NULL);CHECK(ActRaiserActionBg_VoxelGeometry(group,map_number)==closed);
+    size_t offset = 0, bytes = 0;
+    CHECK(ActionVoxel_AnimationMatches(scene, scene->characters, &offset, &bytes));
+    CHECK(ActionRoomScene_CharacterAnimationPhaseCount(scene) == 4);
+    uint8_t characters[kActionRoomSceneCharacterBytes];
+    for (unsigned phase = 0; phase < 4 && bytes; ++phase) {
+      CHECK(ActionRoomScene_BuildCharacters(scene, 0, phase, characters, sizeof(characters)));
+      for (size_t i = offset; i < offset + bytes; i += 2)
+        ppu->vram[i / 2] = characters[i] | (characters[i + 1] << 8);
+      ActRaiserActionBg_PrepareVoxel(true, NULL);
+      CHECK(ActRaiserActionBg_VoxelGeometry(group, map_number) == closed);
+    }
+    /* An edited upload outside the exact ROM phases still invalidates the
+     * proof. Restoring a known phase must allow subsequent reuse again. */
+    if (bytes) {
+      ppu->vram[offset / 2] ^= 1;
+      ActRaiserActionBg_PrepareVoxel(true, NULL);
+      CHECK(ActRaiserActionBg_VoxelGeometry(group, map_number) != closed);
+      ppu->vram[offset / 2] ^= 1;
+      ActRaiserActionBg_PrepareVoxel(true, NULL);
+      const ActionVoxelGeometry *restored = ActionVoxel_Retain(
+          ActRaiserActionBg_VoxelGeometry(group, map_number));
+      CHECK(restored);
+      for (size_t i = offset; i < offset + bytes; i += 2)
+        ppu->vram[i / 2] = scene->characters[i] | (scene->characters[i + 1] << 8);
+      ActRaiserActionBg_PrepareVoxel(true, NULL);
+      CHECK(ActRaiserActionBg_VoxelGeometry(group, map_number) == restored);
+      ActionVoxel_Release(closed);
+      closed = restored;
+    }
     const unsigned cell=(19/16*scene->bg[1].pages_wide+70/16)*256+(19%16)*16+70%16;
     g_ram[kActRaiserWram_Bg2Map+cell]=0;
     ActRaiserActionBg_PrepareVoxel(true,NULL);
@@ -2877,6 +2983,7 @@ static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t ma
     ActionVoxel_Release(split);ActionVoxel_Release(closed);
   }
   if (group == 3 && map_number == 1) TestLiveVoxelAuthoringCache(ppu, scene);
+cleanup:
   ActRaiserActionBg_Shutdown();BindFakePpu(NULL);free(ppu);free(scene);free(rom);
 }
 
@@ -2920,6 +3027,12 @@ int main(int argc, char **argv) {
     for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain) {
       TestLiveVoxelPublication(argv[1],2,3);TestLiveVoxelPublication(argv[1],2,5);
     }
+  if (argc == 3 && !strcmp(argv[2], "--animation-cache")) {
+    animation_audit = true;
+    for (voxel_terrain = 0; voxel_terrain < kDioramaTerrainProfileCount; ++voxel_terrain)
+      for (unsigned group = 1; group <= 7; ++group)
+        for (unsigned room = 1; room <= 8; ++room) TestLiveVoxelPublication(argv[1], group, room);
+  }
   /* Scene loading uses canonical US ROM offsets. Regional layouts follow
    * the same explicit terrain projection and publication setup as the game;
    * this synthetic PPU check is not a native gameplay traversal. */

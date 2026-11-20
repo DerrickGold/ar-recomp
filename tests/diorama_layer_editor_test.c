@@ -151,6 +151,7 @@ static void TestEachStrategyResolvesToItself(void) {
     default:
       break;
     }
+    DioramaLayerOrder_ClearTable(&table);
   }
 }
 
@@ -204,6 +205,7 @@ static void TestAuthoredStrategyIsNonZero(void) {
     const bool visible = layer->rake != 0.0f || layer->bow != 0.0f || layer->thickness > 0.0f ||
                          (layer->stack > 0.0f && layer->stack_copies > 1);
     CHECK(visible);
+    DioramaLayerOrder_ClearTable(&table);
   }
 }
 
@@ -291,6 +293,7 @@ static void TestStrategyRoundTripsThroughManifest(void) {
     CHECK(back->voxel == plane->voxel);
     CHECK(back->stack_copies == plane->stack_copies);
     CHECK(back->voxel_copies == plane->voxel_copies);
+    DioramaLayerOrder_ClearTable(&table);
   }
 }
 
@@ -336,6 +339,7 @@ static void TestUndoLeavesRoomInactive(void) {
     CHECK(out[i].thickness == 0.0f);
     CHECK(out[i].stack == 0.0f);
   }
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* Clearing a shape's magnitude removes the SHAPE, not just the number. A stack
@@ -617,6 +621,7 @@ static void TestParamRowsFollowTheActiveShape(void) {
   /* Only ONE plane expands: no other plane contributes parameter rows. */
   for (int i = 0; i < n; i++)
     if (rows[i].nested) CHECK(rows[i].plane == kDioramaPlane_Bg2Hi);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* An unauthored knob shows a dash, not the built-in number -- otherwise every
@@ -697,6 +702,7 @@ static void TestBackdropSourceIsScopedAndEditable(void) {
     CHECK(source && !strcmp(source->value, "ROM-06-08-BG1"));
     CHECK(source && source->effective_source == DioramaLayerOrder_ActionBgSource(0x06, 0x08, 1));
   }
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* The row array must never overflow, whatever the shape. The header promises a
@@ -729,6 +735,7 @@ static void TestRowsFitTheDocumentedMaximum(void) {
     CHECK(n > 0);
     CHECK(n <= kDioramaEditorRowMax);
   }
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* Level tabs cover exactly the action groups: Diorama_IsActiveThisFrame rejects
@@ -925,6 +932,7 @@ static void TestSteppingNeverDisagreesWithTheRenderer(void) {
             break;
           }
         }
+        DioramaLayerOrder_ClearTable(&table);
       }
     }
   }
@@ -963,6 +971,7 @@ static void TestSteppingToZeroClearsTheShape(void) {
       char text[512];
       CHECK(DioramaLayerOrder_FormatRoom(room, text, sizeof(text)) == 0);
     }
+    DioramaLayerOrder_ClearTable(&table);
   }
 }
 

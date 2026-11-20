@@ -10,10 +10,12 @@ uint32_t DioramaBgGpu_Resolve(ArRenderDevice *device, const SrPpuBgPacket *packe
     uint32_t requested_mask, ArRenderTexture textures[kDioramaPlane_Count],
     ArRenderTexture *skybox, uint32_t *changed_mask);
 struct OwnedBgPacket;
+/* An optional retained result borrows the exact input snapshot from this
+ * resolve. Take a reference before keeping it beyond the current upload. */
 uint32_t DioramaBgGpu_ResolveOwned(ArRenderDevice *device, const SrPpuBgPacket *packet,
     struct OwnedBgPacket *owned,
     uint32_t requested_mask, ArRenderTexture textures[kDioramaPlane_Count],
-    ArRenderTexture *skybox, uint32_t *changed_mask);
+    ArRenderTexture *skybox, uint32_t *changed_mask, struct OwnedBgPacket **retained);
 /* Builds the capture decode pipeline ahead of the first stage. Repeat calls
  * are free; false leaves the CPU path in use. */
 bool DioramaBgGpu_Prepare(ArRenderDevice *device);

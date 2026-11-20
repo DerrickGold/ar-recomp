@@ -17,7 +17,7 @@ DioramaUploadResult Diorama_UploadResolvedWithChanges(
     const size_t pitch_bytes[kDioramaPlane_Count],
     int snes_width, int snes_height, int obj_apron, unsigned bg_apron_mask,
     uint32_t plane_mask, uint32_t gpu_mask, uint32_t gpu_changed,
-    bool collect_coverage, const DioramaUploadChanges *changes) {
+    bool collect_coverage, const PresentationUploadChanges *const changes[kDioramaPlane_Count]) {
   DioramaUploadResult upload = {0};
   /* Do this before device/source validation too. A disabled-coverage capture
    * may fail to upload; its next unchanged successful capture must still
@@ -57,12 +57,10 @@ DioramaUploadResult Diorama_UploadResolvedWithChanges(
       s_upload_mirrors[plane].valid = false;
       plane_upload.changed = (gpu_changed & (1u << plane)) != 0;
     }
-    const PresentationUploadChanges *known = changes && (changes->plane_mask & (1u << plane))
-        ? &changes->source : NULL;
     const bool synchronized = on_gpu || PresentationUploadMirror_UploadArgb8888WithChanges(
         &s_upload_mirrors[plane], device, textures[plane], source,
         region.width, region.height, (int)pitch_bytes[plane],
-        region.x, 0, known, &plane_upload);
+        region.x, 0, changes ? changes[plane] : NULL, &plane_upload);
     DioramaPerformance_AddPlaneSync(
         synchronized, synchronized && plane_upload.changed,
         plane_upload.uploaded_bytes);

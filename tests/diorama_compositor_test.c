@@ -22,6 +22,9 @@
 static float s_trace[TRACE_CAPACITY];
 static unsigned s_count;
 static DioramaLayerOrderTable s_layers;
+#ifdef AR_DIORAMA_VOXEL_CACHE_TEST
+static bool s_check_voxel_cache;
+#endif
 static bool s_depth_fixture;
 static bool s_jungle_water_fixture;
 static void (*s_waterfall_cloud_observe)(const DioramaSceneryLightEffectParams *);
@@ -100,7 +103,7 @@ typedef struct Recorder {
   unsigned periodic_cloud_bindings;
   unsigned batch_begins, batch_ends;
   bool baked_uploads;
-  unsigned uploads, fail_create_at, fail_upload_at;
+  unsigned uploads, fail_create_at, fail_upload_at, depth_flushes;
   bool batch_open, fail_light, fail_submit;
   SkyBatchProbe sky_batch;
   DioramaSkyboxProjection light_skybox;
@@ -2674,7 +2677,7 @@ static void SkyBandEffect(void *context,int plane,const DioramaProjection *proje
   if(p->fail_draw==2 && projection->bg2_skybox.active_band==3)p->failed=true;
 }
 static unsigned SkyBatchFixture(unsigned scenario) {
-  s_count=0;memset(&s_layers,0,sizeof(s_layers));
+  s_count=0;DioramaLayerOrder_ClearTable(&s_layers);
   Recorder r={.width=976,.height=620,.bound_effect=-1};
   ArRenderDevice device;
   assert(ArRenderDevice_Init(&device,&kOps,&r,(ArRenderCapabilities){.flags=UINT64_MAX}));
@@ -2895,7 +2898,7 @@ unsigned DioramaFixture_Run(unsigned scenario) {
   if(scenario>=134)return VoxelWaterFixture(scenario-134);
   if (scenario>=120) return AstralFixture(scenario-120);
   s_count = 0;
-  memset(&s_layers, 0, sizeof(s_layers));
+  DioramaLayerOrder_ClearTable(&s_layers);
   const int widths[] = {640,960,960}, heights[] = {480,540,600};
   const int extension[] = {0,32,64,128};
   const unsigned aspect = scenario % 3, ext = (scenario / 3) % 4;
@@ -2935,27 +2938,6 @@ unsigned DioramaFixture_Run(unsigned scenario) {
     .source_effect_batch = SourceBatch,
   };
   if (scenario % 4 == 0) options.visible_planes &= ~(1u << kDioramaPlane_Bg1Far);
-  s_layers.count = 1;
-  DioramaRoomOverride *room = &s_layers.rooms[0];
-  room->map_group = death_heim ? 7 : 1;
-  room->map_number = death_heim ? 1 : 2;
-  room->section = completion ? kDioramaLayerSection_DeathHeimCompletion :
-      kDioramaLayerSection_Room;
-  DioramaPlaneOverride *bg1 = &room->planes[SR_PPU_OVERLAY_BG1];
-  bg1->set_rake = bg1->set_bow = true;
-  bg1->rake = scenario % 2 ? 0 : 0.17f;
-  bg1->bow = scenario % 2 ? 0 : -0.09f;
-  room->planes[kDioramaPlane_Bg1Hi] = *bg1;
-  room->planes[kDioramaPlane_Bg1Hi].set_z = true;
-  room->planes[kDioramaPlane_Bg1Hi].z = 0.5f;
-  DioramaPlaneOverride *bg2 = &room->planes[SR_PPU_OVERLAY_BG2];
-  bg2->set_stack = bg2->set_stack_copies = true;
-  bg2->stack = 0.12f;
-  bg2->stack_copies = 3;
-  if (!death_heim && scenario % 9 == 0) {
-    room->planes[kDioramaPlane_Backdrop].set_source = true;
-    room->planes[kDioramaPlane_Backdrop].source = kDioramaLayerSource_AitosSky;
-  }
   DioramaCapture capture = {
     .width = ext == 3 ? 576 : (ext ? 384 : 256),
     .height = 224 + (ext == 3 ? extension[ext] : 2 * extension[ext]),
@@ -2997,8 +2979,8 @@ unsigned DioramaFixture_Run(unsigned scenario) {
       capture.skybox->periodic && sky != kDioramaSky_Off && scenario % 9 != 0;
   if (periodic_lighting) r.shaders = true;
   DioramaScene scene = {.render = &options,
-    .map_group = room->map_group, .map_number = room->map_number,
-    .layer_section = room->section,
+    .map_group = death_heim ? 7 : 1, .map_number = death_heim ? 1 : 2,
+    .layer_section = completion ? kDioramaLayerSection_DeathHeimCompletion : kDioramaLayerSection_Room,
     .bg1_dimming = 0.23f, .bg1_dimming_ramp = {0.1f,0.2f,0.2f,0.1f},
     .scenery_exposure = scenario==0?&exposure:NULL,
     .effect_obj_priority_mask = 15, .effect_bg_plane_mask = 3,
@@ -3214,6 +3196,10 @@ unsigned DioramaFixture_Run(unsigned scenario) {
 int main(int argc, char **argv) {
   FILE *stream = argc == 2 ? fopen(argv[1], "wb") : NULL;
   assert(argc == 1 || stream);
+#ifdef AR_DIORAMA_VOXEL_CACHE_TEST
+  /* Keep the native/WASM geometry trace on the same draw sequence. */
+  s_check_voxel_cache = !stream;
+#endif
   for (unsigned test = 0; test < DioramaFixture_Count(); ++test) {
     unsigned count = DioramaFixture_Run(test);
     if (!stream) continue;

@@ -72,6 +72,7 @@ static void TestOverrideIsScopedToItsRoom(void) {
   CHECK(n == kDefaultCount);
   for (int i = 0; i < n; i++)
     CHECK(out[i].plane == kDefaults[i].plane);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* Fillmore Act 2's case: get the water plane painting in FRONT of the rock
@@ -102,6 +103,7 @@ static void TestOrderEditReordersPaint(void) {
   /* z is untouched by an order-only edit: BG2 keeps its default 0.20, so its
    * DOF blur is unchanged. */
   CHECK(out[bg2_at].z == 0.20f);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* Planes the override does not name must keep their built-in relative order.
@@ -129,6 +131,7 @@ static void TestSortIsStableForUnnamedPlanes(void) {
   CHECK(seen[1] == kDioramaPlane_Obj1);
   CHECK(seen[2] == kDioramaPlane_Obj2);
   CHECK(seen[3] == kDioramaPlane_Bg1Hi);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* THE regression this design exists for. An edit that authors only z or only
@@ -148,8 +151,7 @@ static void TestNonOrderEditDoesNotReorder(void) {
       {"both", kDioramaPlane_Bg2Hi, true, true},
   };
   for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
-    /* Large fixed room manifests must not double this test's stack frame. */
-    static DioramaLayerOrderTable table;
+    DioramaLayerOrderTable table;
     memset(&table, 0, sizeof(table));
     DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
     DioramaPlaneOverride *o = &room->planes[cases[c].plane];
@@ -171,6 +173,7 @@ static void TestNonOrderEditDoesNotReorder(void) {
              DioramaLayerOrder_PlaneToken(out[i].plane));
       s_failures++;
     }
+    DioramaLayerOrder_ClearTable(&table);
   }
 
   /* An order authored to the plane's OWN built-in slot is also a no-op. */
@@ -183,6 +186,7 @@ static void TestNonOrderEditDoesNotReorder(void) {
   int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount, out, 16);
   for (int i = 0; i < n; i++)
     CHECK(out[i].plane == kDefaults[i].plane);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* Alpha must reach the output, and an un-authored plane stays opaque. */
@@ -201,6 +205,7 @@ static void TestAlphaOverride(void) {
     else
       CHECK(out[i].alpha == 255);
   }
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* Reset must be a true undo: the room becomes inactive and Resolve returns to
@@ -220,6 +225,7 @@ static void TestResetRoomRestoresDefaults(void) {
   int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount, out, 16);
   for (int i = 0; i < n; i++)
     CHECK(out[i].plane == kDefaults[i].plane);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* A reset slot must be recycled rather than leaking table capacity. */
@@ -236,6 +242,7 @@ static void TestResetSlotIsRecycled(void) {
   CHECK(b->map_group == 0x02 && b->map_number == 0x02);
   /* And the recycled slot carries none of the old room's edits. */
   CHECK(!b->planes[SR_PPU_OVERLAY_BG1].set_order);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestSectionParsing(void) {
@@ -310,6 +317,7 @@ static void TestScopedSourceInheritsBaseRoom(void) {
   CHECK(DioramaLayerOrder_FormatRoom(waterfall, text, sizeof(text)) > 0);
   CHECK(strstr(text, "[layers:04:02:waterfall]") != NULL);
   CHECK(strstr(text, "source:rom-04-01-bg2") != NULL);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestRomSourceCatalogue(void) {
@@ -483,6 +491,7 @@ static void TestFormatRoundTrips(void) {
   /* BG1 never authored order or alpha, so the re-import must not invent them. */
   CHECK(!reparsed.planes[SR_PPU_OVERLAY_BG1].set_order);
   CHECK(!reparsed.planes[SR_PPU_OVERLAY_BG1].set_alpha);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* An inactive room emits nothing, so a manifest never gains empty sections. */
@@ -514,6 +523,7 @@ static void TestRakeAndThicknessResolve(void) {
   /* A rake alone must not reorder anything: paint order is keyed on `order`. */
   for (int i = 0; i < n; i++)
     CHECK(out[i].plane == kDefaults[i].plane);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* STACK: a third shape for the same void. The reason it exists is that a rake
@@ -555,6 +565,7 @@ static void TestStackResolve(void) {
   n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount, out, 16);
   for (int i = 0; i < n; i++)
     if (out[i].plane == kDioramaPlane_Bg2Hi) CHECK(out[i].stack_copies == 6);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* A stack-only room is a real override: "Reset room" must have something to undo
@@ -720,6 +731,7 @@ static void TestStackDensityAndDirection(void) {
       s_failures++;
     }
   }
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* VOXEL resolves onto the stack fields plus the solid flag, with its own higher
@@ -773,7 +785,7 @@ static void TestVoxelResolve(void) {
 
   /* A voxel authored alongside a stack WINS -- it is the more specific intent,
    * and silently blending the two would give neither. */
-  memset(&table, 0, sizeof(table));
+  DioramaLayerOrder_ClearTable(&table);
   room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
   room->planes[SR_PPU_OVERLAY_BG1].set_stack = true;
   room->planes[SR_PPU_OVERLAY_BG1].stack = 0.50f;
@@ -820,7 +832,7 @@ static void TestVoxelResolve(void) {
 
   /* `slices:` with no `voxel:` is inert rather than inventing a depth -- but it
    * still marks the room active so the value survives a round trip. */
-  static DioramaLayerOrderTable lone;
+  DioramaLayerOrderTable lone;
   memset(&lone, 0, sizeof(lone));
   DioramaRoomOverride *r2 = DioramaLayerOrder_FindOrAdd(&lone, 0x02, 0x01);
   r2->planes[SR_PPU_OVERLAY_BG1].set_voxel_copies = true;
@@ -831,6 +843,8 @@ static void TestVoxelResolve(void) {
     CHECK(!out[i].stack_solid);
     CHECK(out[i].stack == 0.0f);
   }
+  DioramaLayerOrder_ClearTable(&lone);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* The STRATEGY enum is what the layer editor will cycle a plane through, so it has
@@ -955,6 +969,7 @@ static void TestBowResolveAndRoundTrip(void) {
       s_failures++;
     }
   }
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* A rake-only room is a real override, so "Reset room" has something to undo and
@@ -991,6 +1006,7 @@ static void TestRakeOnlyRoomIsActiveAndRoundTrips(void) {
   CHECK(DioramaLayerOrder_ParseLine(&reparsed, "bg2 = rake:0.3 thick:0.125", &error));
   CHECK(reparsed.planes[SR_PPU_OVERLAY_BG2].rake == 0.3f);
   CHECK(reparsed.planes[SR_PPU_OVERLAY_BG2].thickness == 0.125f);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestRakeAndThicknessRejectBadValues(void) {
@@ -1127,6 +1143,7 @@ static void TestTableCapacity(void) {
   CHECK(DioramaLayerOrder_FindOrAdd(&table, 0x7F, 0x7F) == NULL);
   /* An existing room is still findable when full. */
   CHECK(DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x00) != NULL);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* ── merge: the save path must preserve everything the editor does not own ──
@@ -1185,6 +1202,7 @@ static void TestMergePreservesUnownedContent(void) {
   /* No default preamble was injected, because the file already had content. */
   CHECK(strstr(out, "THERE IS AN IN-GAME EDITOR") == NULL);
   free(out);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestMergeRegeneratesManagedSectionInPlace(void) {
@@ -1215,6 +1233,7 @@ static void TestMergeRegeneratesManagedSectionInPlace(void) {
   CHECK(tail != NULL);
   CHECK(bow != NULL && tail != NULL && bow < tail);
   free(out);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestMergeAppendsNewRooms(void) {
@@ -1244,6 +1263,7 @@ static void TestMergeAppendsNewRooms(void) {
   CHECK(first != NULL && second != NULL && first < second); /* appended AFTER */
   CHECK(strstr(out, "bg1 = thick:0.2") != NULL);
   free(out);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestMergeSeedsPreambleOnlyForANewFile(void) {
@@ -1271,6 +1291,7 @@ static void TestMergeSeedsPreambleOnlyForANewFile(void) {
     CHECK(strstr(kept, "# the user's own header") != NULL);
     free(kept);
   }
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestMergeKeepsAnInactiveSectionsText(void) {
@@ -1333,6 +1354,7 @@ static void TestMergeKeepsAnInactiveSectionsText(void) {
   CHECK(!DioramaLayerOrder_RoomIsActive(&reloaded));
   free(scratch);
   free(out);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 /* A COMMENT MID-BODY MUST NOT RESURRECT STALE OVERRIDES.
@@ -1396,6 +1418,7 @@ static void TestMergeDropsStalePlaneLinesAfterAComment(void) {
   CHECK(!back.planes[SR_PPU_OVERLAY_BG3].set_alpha);
   free(scratch);
   free(out);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestMergeIsIdempotentAndRoundTrips(void) {
@@ -1444,6 +1467,7 @@ static void TestMergeIsIdempotentAndRoundTrips(void) {
   CHECK(back->set_stack_copies && back->stack_copies == 4);
   free(scratch);
   free(first);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestMergeSizingContract(void) {
@@ -1499,6 +1523,7 @@ static void TestMergeSizingContract(void) {
     CHECK(strstr(new_out, "whose exact length must be counted") != NULL);
     free(new_out);
   }
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestVirtualLayerParseResolveAndRoundTrip(void) {
@@ -1619,6 +1644,7 @@ static void TestInGamePlaneResetPreservesVirtualLayers(void) {
   CHECK(strstr(text, "bg1 =") == NULL);
   CHECK(strstr(text, "bg1-virtual = z:0.27 order:1 alpha:128") != NULL);
   CHECK(strstr(text, "bg1-virtual = metatile:23 band:0") != NULL);
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestDeathHeimHubFaceBandStopsBeforeWater(void) {
@@ -1674,6 +1700,7 @@ static void TestTransparentFillInheritsAndRefines(void) {
   CHECK(kind == kDioramaTransparentFill_None && cgram == 0);
   CHECK(!DioramaLayerOrder_ResolveTransparentFill(&table, 0x04, 0x05, kDioramaLayerSection_Room,
                                                   kDioramaPlane_Bg2Hi, &kind, &cgram));
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void TestPixelMasksRoundTrip(void) {
@@ -1720,6 +1747,10 @@ static void TestTransparentPixelMasks(void) {
   CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
   snprintf(line, sizeof(line), "bg1-pixels:us+eu = cell:-1,2 transparent:0001%s", zero + 4);
   CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+  snprintf(line, sizeof(line), "bg1-pixels:eu = cell:511,2 transparent:0002%s", zero + 4);
+  CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+  snprintf(line, sizeof(line), "bg1-pixels:eu = metatile:23 black:2000%s", zero + 4);
+  CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
   DioramaLayerOrder_ForTerrain(&room, 0, &resolved);
   const DioramaPixelEdit *edit = DioramaLayerOrder_PixelEditAt(&resolved, 0, 1, 2, 0x23);
   CHECK(edit && edit->black[0] == 0x8000 && edit->transparent[0] == 0x4000);
@@ -1730,6 +1761,9 @@ static void TestTransparentPixelMasks(void) {
   CHECK(!DioramaLayerOrder_PixelEditAt(&resolved, 0, -1, 2, 0x23));
   DioramaLayerOrder_ForTerrain(&room, 2, &resolved);
   CHECK(DioramaLayerOrder_PixelEditAt(&resolved, 0, -1, 2, 0x23)->transparent[0] == 1);
+  CHECK(DioramaLayerOrder_PixelEditAt(&resolved, 0, 511, 2, -1)->transparent[0] == 2);
+  CHECK(DioramaLayerOrder_PixelEditAt(&resolved, 0, 1023, 2, 0x23)->black[0] == 0x2000);
+  CHECK(!DioramaLayerOrder_PixelEditAt(&resolved, 0, 1023, 2, -1));
   const DioramaPixelLayerOverride saved = room.pixel_layers[0];
   snprintf(line, sizeof(line), "bg1-pixels = cell:0,0 black:8000%s transparent:8000%s", zero + 4, zero + 4);
   CHECK(!DioramaLayerOrder_ParseLine(&room, line, &error));
@@ -1929,8 +1963,10 @@ static void TestRegionalTileKeys(void) {
   DioramaLayerOrderTable *table = calloc(1, sizeof(*table));
   CHECK(table != NULL);
   if (!table) return;
-  table->rooms[0] = room;
-  table->count = 1;
+  DioramaRoomOverride *entry = DioramaLayerOrder_FindOrAdd(table, 3, 4);
+  CHECK(entry != NULL);
+  if (!entry) { free(table); return; }
+  *entry = room;
   CHECK(DioramaLayerOrder_MergeManifest(table, "# keep\n[layers:03:04]\n"
       "bg1-pixels:jp = obsolete\n", NULL, text, sizeof(text)) < sizeof(text));
   CHECK(strstr(text, "# keep") && !strstr(text, "obsolete"));
@@ -2194,14 +2230,49 @@ static void TestVoxelAuthoringCodec(void) {
     CHECK(!DioramaLayerOrder_ParseLine(&copy, invalid[i], &error));
     CHECK(error != NULL && !memcmp(&room.voxel, &copy.voxel, sizeof(room.voxel)));
   }
-  const uint64_t hash = DioramaVoxelEdits_Hash(1, &copy.voxel);
+  const uint64_t hash = DioramaLayerOrder_VoxelGeometryKey(&copy, false);
   copy.voxel.cells[0].side_art.words[0] = 0x9999; /* auto art has no latent dependency. */
-  CHECK(DioramaVoxelEdits_Hash(1, &copy.voxel) == hash);
+  CHECK(DioramaLayerOrder_VoxelGeometryKey(&copy, false) == hash);
+  CHECK(DioramaLayerOrder_VoxelGeometryInputsEqual(&room, &copy, false));
   copy.voxel.cells[0].backing_art.words[0] ^= 1;
-  CHECK(DioramaVoxelEdits_Hash(1, &copy.voxel) != hash);
+  CHECK(DioramaLayerOrder_VoxelGeometryKey(&copy, false) != hash);
+  CHECK(!DioramaLayerOrder_VoxelGeometryInputsEqual(&room, &copy, false));
+  copy.voxel = room.voxel;
+  copy.voxel.cells[0].fields &= ~kDioramaVoxelCell_SideArt;
+  CHECK(DioramaLayerOrder_VoxelGeometryKey(&copy, false) != hash);
+  CHECK(!DioramaLayerOrder_VoxelGeometryInputsEqual(&room, &copy, false));
   copy.voxel = room.voxel;
   copy.voxel.objects[0].width_scale = 1;
-  CHECK(DioramaVoxelEdits_Hash(1, &copy.voxel) != hash);
+  CHECK(DioramaLayerOrder_VoxelGeometryKey(&copy, false) != hash);
+  CHECK(!DioramaLayerOrder_VoxelGeometryInputsEqual(&room, &copy, false));
+
+  copy.voxel = room.voxel;
+  CHECK(DioramaLayerOrder_ParseLine(&copy,
+      "bg2-stamp = cell:1,2 metatile:03 words:0010,0011,0012,0013 bands:1,1,1,1", NULL));
+  CHECK(DioramaLayerOrder_VoxelGeometryInputsEqual(&room, &copy, false));
+  CHECK(DioramaLayerOrder_VoxelGeometryKey(&room, false) == DioramaLayerOrder_VoxelGeometryKey(&copy, false));
+  CHECK(!DioramaLayerOrder_VoxelGeometryInputsEqual(&room, &copy, true));
+  CHECK(DioramaLayerOrder_VoxelGeometryKey(&room, true) != DioramaLayerOrder_VoxelGeometryKey(&copy, true));
+
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg1-pixels = cell:1,2 transparent:"
+      "8000000000000000000000000000000000000000000000000000000000000000", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&copy, "bg1-pixels = cell:1,2 transparent:"
+      "8000000000000000000000000000000000000000000000000000000000000000", NULL));
+  CHECK(DioramaLayerOrder_VoxelGeometryInputsEqual(&room, &copy, false));
+  CHECK(DioramaLayerOrder_VoxelGeometryKey(&room, false) == DioramaLayerOrder_VoxelGeometryKey(&copy, false));
+  copy.pixel_layers[0].edits[0].transparent[0] ^= 1;
+  CHECK(!DioramaLayerOrder_VoxelGeometryInputsEqual(&room, &copy, false));
+  CHECK(DioramaLayerOrder_VoxelGeometryKey(&room, false) != DioramaLayerOrder_VoxelGeometryKey(&copy, false));
+  copy.pixel_layers[0].edits[0].transparent[0] ^= 1;
+
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-map = bounds:-2,0,4,6", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&copy,
+      "bg1-map = bounds:-1,0,4,6", NULL));
+  CHECK(!DioramaLayerOrder_VoxelGeometryInputsEqual(&room, &copy, false));
+  CHECK(DioramaLayerOrder_VoxelGeometryKey(&room, false) != DioramaLayerOrder_VoxelGeometryKey(&copy, false));
+  DioramaLayerOrder_ClearRoom(&copy);
+  DioramaLayerOrder_ClearRoom(&room);
 }
 
 static void TestVoxelAuthoringRegionsAndLimits(void) {
@@ -2302,10 +2373,10 @@ static void TestVoxelCompactRegionsAndShapes(void) {
     CHECK(!DioramaLayerOrder_ParseLine(&copy, invalid[i], NULL));
     CHECK(!memcmp(&room.voxel, &copy.voxel, sizeof(room.voxel)));
   }
-  const uint64_t hash = DioramaVoxelEdits_Hash(1, &room.voxel);
+  const uint64_t hash = DioramaLayerOrder_VoxelGeometryKey(&room, false);
 #define CHECK_VOXEL_HASH_CHANGE(field, value) do { \
     copy.voxel = room.voxel; copy.voxel.cells[0].field = (value); \
-    CHECK(DioramaVoxelEdits_Hash(1, &copy.voxel) != hash); \
+    CHECK(DioramaLayerOrder_VoxelGeometryKey(&copy, false) != hash); \
   } while (0)
   CHECK_VOXEL_HASH_CHANGE(w, 31);
   CHECK_VOXEL_HASH_CHANGE(h, 23);
@@ -2346,7 +2417,8 @@ static void TestVoxelCompactRegionsAndShapes(void) {
   CHECK(!room.voxel.cells[0].faces && !room.voxel.cells[0].shape);
   copy.voxel = room.voxel;
   copy.voxel.cells[0].w = copy.voxel.cells[0].h = 0;
-  CHECK(DioramaVoxelEdits_Hash(1, &copy.voxel) == DioramaVoxelEdits_Hash(1, &room.voxel));
+  CHECK(DioramaLayerOrder_VoxelGeometryKey(&copy, false) == DioramaLayerOrder_VoxelGeometryKey(&room, false));
+  CHECK(DioramaLayerOrder_VoxelGeometryInputsEqual(&room, &copy, false));
   DioramaLayerOrder_ClearRoom(&room);
   DioramaLayerOrder_ClearRoom(&copy);
   DioramaLayerOrder_ClearRoom(&resolved);
@@ -2386,15 +2458,15 @@ static void TestVoxelAnchoredBendCodec(void) {
     CHECK(!DioramaLayerOrder_ParseLine(&copy,text,NULL));
     CHECK(!memcmp(&room.voxel,&copy.voxel,sizeof(room.voxel)));
   }
-  const uint64_t hash=DioramaVoxelEdits_Hash(1,&room.voxel);
+  const uint64_t hash=DioramaLayerOrder_VoxelGeometryKey(&room, false);
 #define CHECK_BEND_HASH(field,value) do { copy.voxel=room.voxel; \
-    copy.voxel.cells[0].bend.field=value;CHECK(DioramaVoxelEdits_Hash(1,&copy.voxel)!=hash); } while(0)
+    copy.voxel.cells[0].bend.field=value;CHECK(DioramaLayerOrder_VoxelGeometryKey(&copy, false)!=hash); } while(0)
   CHECK_BEND_HASH(axis,kDioramaVoxelBend_Y);CHECK_BEND_HASH(anchor,31);CHECK_BEND_HASH(tip,95);
   CHECK_BEND_HASH(dx,23);CHECK_BEND_HASH(dy,-11);CHECK_BEND_HASH(dz,-.2f);
 #undef CHECK_BEND_HASH
   copy.voxel=room.voxel;copy.voxel.cells[0].fields=0;
-  const uint64_t inactive=DioramaVoxelEdits_Hash(1,&copy.voxel);
-  copy.voxel.cells[0].bend.dx=200;CHECK(DioramaVoxelEdits_Hash(1,&copy.voxel)==inactive);
+  const uint64_t inactive=DioramaLayerOrder_VoxelGeometryKey(&copy, false);
+  copy.voxel.cells[0].bend.dx=200;CHECK(DioramaLayerOrder_VoxelGeometryKey(&copy, false)==inactive);
   DioramaLayerOrder_ClearRoom(&room);DioramaLayerOrder_ClearRoom(&copy);DioramaLayerOrder_ClearRoom(&regional);
 }
 
@@ -2434,16 +2506,16 @@ static void TestVoxelGroupTransformCodec(void) {
     CHECK(!DioramaLayerOrder_ParseLine(&copy,text,NULL));
     CHECK(!memcmp(&room.voxel,&copy.voxel,sizeof(room.voxel)));
   }
-  const uint64_t hash=DioramaVoxelEdits_Hash(1,&room.voxel);
+  const uint64_t hash=DioramaLayerOrder_VoxelGeometryKey(&room, false);
 #define CHECK_TRANSFORM_HASH(field,value) do { copy.voxel=room.voxel; \
-    copy.voxel.cells[0].transform.field=value;CHECK(DioramaVoxelEdits_Hash(1,&copy.voxel)!=hash); } while(0)
+    copy.voxel.cells[0].transform.field=value;CHECK(DioramaLayerOrder_VoxelGeometryKey(&copy, false)!=hash); } while(0)
   CHECK_TRANSFORM_HASH(px,63);CHECK_TRANSFORM_HASH(py,63);CHECK_TRANSFORM_HASH(pz,.1f);
   CHECK_TRANSFORM_HASH(dx,23);CHECK_TRANSFORM_HASH(dy,-11);CHECK_TRANSFORM_HASH(dz,-.2f);
   CHECK_TRANSFORM_HASH(sx,1);CHECK_TRANSFORM_HASH(sy,1);CHECK_TRANSFORM_HASH(sz,1);
 #undef CHECK_TRANSFORM_HASH
   copy.voxel=room.voxel;copy.voxel.cells[0].fields=0;
-  const uint64_t inactive=DioramaVoxelEdits_Hash(1,&copy.voxel);
-  copy.voxel.cells[0].transform.dx=200;CHECK(DioramaVoxelEdits_Hash(1,&copy.voxel)==inactive);
+  const uint64_t inactive=DioramaLayerOrder_VoxelGeometryKey(&copy, false);
+  copy.voxel.cells[0].transform.dx=200;CHECK(DioramaLayerOrder_VoxelGeometryKey(&copy, false)==inactive);
   CHECK(DioramaLayerOrder_ParseLine(&room,"voxel-cell:jp = cell:3,3 auto:1",NULL));
   CHECK(DioramaLayerOrder_ForTerrain(&room,1,&regional));
   CHECK(!DioramaVoxelEdits_Cell(&regional.voxel,3,3)->fields);

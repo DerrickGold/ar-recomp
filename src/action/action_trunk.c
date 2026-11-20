@@ -1,19 +1,16 @@
 #include "action_trunk.h"
+#include "action_trunk_front.h"
 #include "action/action_bg_metatile.h"
+#include "action/action_native_contact.h"
 #include "diorama/diorama_layer_order.h"
 #include "byte_order.h"
 #include "snes_bgr555.h"
 #include <string.h>
 
 static unsigned Pixel(const ActionRoomScene *s, uint16_t word, int x, int y) {
-  const unsigned tile=word&1023;
-  if(tile>=512)return 0;
-  x=(word&0x4000)?7-(x&7):(x&7);
-  y=(word&0x8000)?7-(y&7):(y&7);
-  const uint8_t *c=s->characters+tile*32;
-  const unsigned shift=7-x;
-  return ((c[y*2]>>shift)&1)|(((c[y*2+1]>>shift)&1)<<1)|
-      (((c[y*2+16]>>shift)&1)<<2)|(((c[y*2+17]>>shift)&1)<<3);
+  const unsigned tile = word & 1023;
+  if (tile >= sizeof(s->characters) / 32) return 0;
+  return ActionRoomScene_Decode4bppPixel(s->characters + tile * 32, word, x & 7, y & 7);
 }
 
 static bool Sample(const ActionRoomScene *s,const DioramaRoomOverride *edits,
@@ -40,11 +37,11 @@ typedef struct TrunkSideProfile {
   uint64_t key;
   uint16_t rooms;
   uint8_t native_slope,opening;
-  uint16_t solid[4],rear[4],snow[4],snow_face[4];
+  uint16_t solid[4],rear[4],snow[4],snow_face[4],passage[4];
 } TrunkSideProfile;
 #include "action_trunk_side_materials.inc"
 typedef struct TrunkSideMaterial {
-  uint16_t words[4],solid[4],rear[4],snow[4],snow_face[4];
+  uint16_t words[4],solid[4],rear[4],snow[4],snow_face[4],passage[4];
   uint8_t pixels[256],collision,native_slope,opening;
   uint64_t key;
 } TrunkSideMaterial;
@@ -86,6 +83,7 @@ static void SideMaterial(const ActionRoomScene *s,const uint16_t words[4],
       m->solid[q]=p->solid[q^flip];m->rear[q]=p->rear[q^flip];
       m->snow[q]=p->snow[q^flip];
       m->snow_face[q]=p->snow_face[q^flip];
+      m->passage[q]=p->passage[q^flip];
     }
     /* A vertical artwork reflection is not a native walking-ramp contract. */
     m->native_slope=p->native_slope&&!(flip&2);
@@ -124,6 +122,7 @@ static unsigned SideCollision(const ActionRoomScene *s,const DioramaRoomOverride
   TrunkSideMaterial m;
   return SideCell(s,edits,native,cx,cy,&m,NULL)?m.collision:0;
 }
+
 static bool BuildSides(ActionTrunkAssets *out,const ActionRoomScene *s,
     const DioramaRoomOverride *edits,const uint32_t palette[128]) {
   const unsigned width=ActionRoomScene_TileWidth(s,1)*8;
@@ -178,20 +177,16 @@ static bool BuildSides(ActionTrunkAssets *out,const ActionRoomScene *s,
       const bool high=!!(word&0x2000);
       bool solid=!painted_black&&!!(m.solid[q]&bit);
       bool rear=!painted_black&&!!(m.rear[q]&bit);
-      /* Reviewed decorated entrances and complete noncolliding native black
-       * quarters identify passages. Outlines, foliage and sky are not holes. */
+      /* Reviewed entrances and complete opaque matte quarters identify
+       * passages. RGB palette edits cannot change this material ownership. */
       if(m.opening&&!high&&!(m.collision&(1u<<q)))
         passage[cy*2+y/8][cx*2+x/8]=64;
-      else if(rear&&!high&&!(m.collision&(1u<<q))&&!(palette[((word>>10)&7)*16+p]&0xffffff))
+      else if(rear&&!high&&!(m.collision&(1u<<q))&&(m.passage[q]&bit))
         ++passage[cy*2+y/8][cx*2+x/8];
-      if(solid&&m.native_slope&&(m.collision==6||m.collision==9)) {
+      if(solid&&m.native_slope&&ActionNativeContact_IsRamp(m.collision)) {
         /* Match the native $90A9/$9084 adjacent-ramp rule, also used by the
          * generic voxel compiler. Fringe above contact is real rear art. */
-        const unsigned phase=m.collision==6?(x&14):((~x)&14);
-        const bool upper=m.collision==6?left==6:right==9;
-        const bool lower=m.collision==6?right==6:left==9;
-        const unsigned height=upper?8+phase/2:lower?phase/2:phase;
-        if(y<16-height){solid=false;rear=true;}
+        if(y<ActionNativeContact_Top(m.collision,left,right,x)){solid=false;rear=true;}
       }
       if(solid)out->side_masks[kActionTrunkSideSolid][at]|=(uint8_t)mask;
       if(!solid&&!rear&&!high)
@@ -223,23 +218,15 @@ static bool BuildSides(ActionTrunkAssets *out,const ActionRoomScene *s,
     const unsigned left=SideCollision(s,edits,native,(int)cx-1,cy);
     const unsigned right=SideCollision(s,edits,native,(int)cx+1,cy);
     for(unsigned x=0;x<16;++x) {
-      unsigned top=16;
-      if(m.collision==6||m.collision==9) {
-        const unsigned phase=m.collision==6?(x&14):((~x)&14);
-        const bool upper=m.collision==6?left==6:right==9,lower=m.collision==6?right==6:left==9;
-        top=16-(upper?8+phase/2:lower?phase/2:phase);
-      } else if(m.collision&(1u<<(x/8)))top=0;
-      else if(m.collision&(1u<<(2+x/8)))top=8;
+      const unsigned top=ActionNativeContact_Top(m.collision,left,right,x);
       if(top==16)continue;
       bool blocked=top==0&&have_above&&!!(above.collision&(1u<<(2+x/8)));
       /* A preceding ramp's last sample can be empty even in an occupied
        * native quarter; retain its existing solid footer endpoint. */
-      if(blocked&&(above.collision==6||above.collision==9)) {
+      if(blocked&&ActionNativeContact_IsRamp(above.collision)) {
         const unsigned al=SideCollision(s,edits,native,(int)cx-1,(int)cy-1);
         const unsigned ar=SideCollision(s,edits,native,(int)cx+1,(int)cy-1);
-        const unsigned phase=above.collision==6?(x&14):((~x)&14);
-        const bool upper=above.collision==6?al==6:ar==9,lower=above.collision==6?ar==6:al==9;
-        blocked=(upper?8+phase/2:lower?phase/2:phase)>0;
+        blocked=ActionNativeContact_Top(above.collision,al,ar,x)<16;
       }
       const unsigned wx=cx*16+x,wy=cy*16+top;
       bool crown=false;
@@ -262,6 +249,7 @@ static bool BuildSides(ActionTrunkAssets *out,const ActionRoomScene *s,
     out->side_clearance_grid[gy*grid_pitch+gx]=near?255:0;
   }
   out->side_clearance=true;
+  ActionTrunk_PrepareSideFronts(out);
   return true;
 }
 

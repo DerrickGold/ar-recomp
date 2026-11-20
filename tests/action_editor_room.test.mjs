@@ -28,9 +28,10 @@ function roomConfiguration(base) {
    return keep;
  }).join('\n');
 }
-const encoder=vm.createContext({window:{},Uint8Array,Uint32Array,DataView});
+const encoder=vm.createContext({window:{},Uint8Array,Uint32Array,DataView,TextEncoder});
 vm.runInContext(fs.readFileSync('tools/action_editor/shared_preview.js','utf8'),encoder);
 const encode=vm.runInContext('SharedActionPreview.encode',encoder);
+const loadConfigured=vm.runInContext('SharedActionPreview.loadConfigured',encoder);
 const blobs=data.blobs.map(s=>Uint8Array.from(Buffer.from(s,'base64')));
 const textures=new Map();let api,target=0,creates=0,draws=0,effect=-1,updates=0;
 let shaftMotes=null;
@@ -82,8 +83,16 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  const roomIni=roomConfiguration(base);
  fs.writeFileSync(iniFile,roomIni);
  const room={...base,bg:[terrain.bg1,base.bg[1]],terrainProfile:terrain.profile};
- const packet=encode(data,blobs,room);assert.equal(send(packet,api.RoomPreview_Load),1);
- assert.equal(send(Buffer.from(roomIni),api.RoomPreview_Configure),1,`configuration ${base.group}:${base.map}`);
+ const packet=encode(data,blobs,room);
+ const loaded=loadConfigured(api,packet,roomIni,2);
+ assert.equal(loaded,1,`configuration ${base.group}:${base.map}/${terrain.profile}${loaded?'':`: ${cstring(api.RoomPreview_SceneryError())}`}`);
+ if(base.group===3&&[4,5].includes(base.map)) {
+   // Transformed panels elsewhere in the room can reference unreserved art.
+   // They must not abort the frame when they are outside the camera.
+   for(const [distance,yaw,pitch] of [[1,0,0],[1,.42,.2],[1.6,-.5,.25]])
+     assert.equal(api.RoomPreview_Render(0,0,320,120,64,960,600,distance,yaw,pitch,1,0),1,
+       `Kassandora 03-0${base.map}/${terrain.profile} origin at yaw ${yaw}`);
+ }
  // Measurement must be cheap and independent of render history. Cover real
  // room policies/edits at native, wide and capped ultrawide monitor shapes.
  const untouched=[api.RoomPreview_Hash(),creates,updates,draws];
@@ -215,6 +224,7 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  assert.equal(hashes[1],hashes[3],'reverse time is deterministic');
  const hash=hashes.at(-1), live=textures.size;
  assert.equal(send(Buffer.from('[bad'),api.RoomPreview_Configure),0);
+ assert.equal(loadConfigured(api,packet,'[bad',2),0,'invalid scenery preserves the open room');
  const broken=Uint8Array.from(packet);broken[0]^=1;
  assert.equal(send(broken,api.RoomPreview_Load),0);
  assert.equal(api.RoomPreview_Hash()>>>0,hash);assert.equal(textures.size,live);
@@ -778,6 +788,20 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  frames+=requests.length;scenes++;
 }
 assert.equal(presetChecks,data.rooms.reduce((n,r)=>n+stagePresets.filter(p=>p.rooms.some(([g,m])=>g===r.group&&m===r.map)).length,0)*3);assert.equal(scenes,150);assert.equal(api.memory.buffer,memory);
+// Warm every chain phase, then load the next terrain profile while the
+// previous rendered room is still alive in the fixed WASM heap.
+const chainShaft=data.rooms.find(r=>r.group===2&&r.map===5);
+for(const terrain of chainShaft.terrainVariants) {
+ const room={...chainShaft,bg:[terrain.bg1,chainShaft.bg[1]],terrainProfile:terrain.profile};
+ assert.equal(loadConfigured(api,encode(data,blobs,room),roomConfiguration(chainShaft),2),1,
+   `warmed chain shaft switches to terrain ${terrain.profile}`);
+ const hashes=[];
+ for(let i=0;i<8;i++) {
+   assert.equal(api.RoomPreview_Render(1408,128,(i%4)*2,120,64,960,600,1,0,0,1,0),1);
+   hashes.push(api.RoomPreview_Hash()>>>0);
+ }
+ assert.deepEqual(hashes.slice(0,4),hashes.slice(4));
+}
 // Freeze animation during the last part of Fillmore's boss-pit descent. Once
 // the world camera stops, shaft dust must stop too, in every backdrop mode.
 const forest=data.rooms.find(r=>r.group===1&&r.map===1);

@@ -1,6 +1,5 @@
-/* Connected enclosure: closed native-pixel silhouette edges, never stacked sheets.
- * Contours are cached across stationary animation/orbit frames. The rendered
- * faces share exact endpoints and sort far-to-near before one batch submission. */
+/* Connected enclosure silhouette. World-space contours survive scrolling;
+ * each draw projects and sorts the edges inside its current capture. */
 static ArRenderTexture s_hollow_bark_material;
 static ArRenderTexture s_hollow_side_material;
 static uint32_t s_trunk_material_revision;
@@ -34,15 +33,43 @@ static bool HollowEnsureSideMaterial(ArRenderDevice *device) {
   s_hollow_side_material=ArRenderTexture_Invalid();return false;
 }
 enum { kHollowMaxEdges=16384 };
-typedef struct HollowEdge {int16_t x,y;uint8_t side,snow_riser,front_step;} HollowEdge;
+enum {
+  kHollowEdgeSnowRiser=1, kHollowEdgeFrontStep=2, kHollowEdgeSnow=4, kHollowEdgeHigh=8,
+};
+typedef struct HollowEdge {int16_t x,y;uint8_t side,flags;} HollowEdge;
+typedef struct HollowEdgeDepth {float front[2],back[2];} HollowEdgeDepth;
+static const int kHollowEdgeCorners[4][2][2]={
+  {{0,0},{1,0}},{{1,0},{1,1}},{{1,1},{0,1}},{{0,1},{0,0}},
+};
+enum { kHollowRoomEdgeLimit=131072 };
 typedef struct HollowContour {
-  uint32_t revision;
-  bool valid,column,clearance;int map,x,y,left,right,height,count;
-  HollowEdge edges[kHollowMaxEdges];
+  HollowEdge *edges;
+  HollowEdgeDepth *depths; /* Only recessed passage edges require a depth profile. */
+  unsigned count, capacity;
 } HollowContour;
+typedef struct HollowRoomContour {
+  HollowContour contour;
+  unsigned rows[kActionTrunkMaxHeight+1];
+  uint32_t revision;
+  unsigned room;
+  bool attempted, ready, column, clearance;
+} HollowRoomContour;
+typedef struct HollowContourView {
+  const HollowEdge *edges;
+  const HollowEdgeDepth *depths;
+  unsigned count;
+  int left, right;
+} HollowContourView;
 typedef struct HollowSide {ArRenderVertex2D v[4];float depths[4],distance;uint16_t ground_cover;} HollowSide;
-/* Primary and two supplemental strips keep independent camera-stable caches. */
-static HollowContour s_hollow_contours[3][3];
+static HollowRoomContour s_hollow_contours[3];
+static HollowEdge s_hollow_window_edges[kHollowMaxEdges];
+static void HollowResetContours(void) {
+  for(unsigned i=0;i<3;++i) {
+    free(s_hollow_contours[i].contour.edges);
+    free(s_hollow_contours[i].contour.depths);
+  }
+  memset(s_hollow_contours,0,sizeof(s_hollow_contours));
+}
 static HollowSide s_hollow_sides[kHollowMaxEdges];
 static ArRenderVertex2D s_hollow_side_vertices[kHollowMaxEdges*4];
 static float s_hollow_side_depths[kHollowMaxEdges*4];
@@ -131,19 +158,62 @@ static unsigned HollowPassageMaskByte(int y,int byte,bool clearance) {
   const uint8_t *row=ActionTrunk_SideMaskRow(s_trunk_assets,y,kActionTrunkSideSolid);
   return row&&byte>=0&&byte<kActionTrunkSideMaskPitch?row[byte]:0;
 }
-static bool HollowContourBuild(HollowContour *out,int map,int x,int y,
-    int left,int right,int height,int kind,bool clearance) {
-  if(out->valid&&out->column==s_trunk_column&&out->clearance==clearance&&out->revision==s_trunk_assets->revision&&out->map==map&&out->x==x&&out->y==y&&out->left==left&&
-      out->right==right&&out->height==height)return true;
-  out->valid=false;out->count=0;out->revision=s_trunk_assets->revision;
+static bool AppendHollowEdge(HollowContour *out,HollowEdge edge,const HollowEdgeDepth *depth,bool grow) {
+  if(out->count==out->capacity) {
+    if(!grow||out->capacity==kHollowRoomEdgeLimit)return false;
+    const unsigned capacity=out->capacity?out->capacity*2:1024;
+    HollowEdge *edges=realloc(out->edges,capacity*sizeof(*edges));
+    if(!edges)return false;
+    out->edges=edges;
+    if(depth) {
+      HollowEdgeDepth *depths=realloc(out->depths,capacity*sizeof(*depths));
+      if(!depths)return false;
+      out->depths=depths;
+    }
+    out->capacity=capacity;
+  }
+  if(depth) {
+    if(!out->depths) {
+      out->depths=malloc(out->capacity*sizeof(*out->depths));
+      if(!out->depths)return false;
+    }
+    out->depths[out->count]=*depth;
+  }
+  out->edges[out->count++]=edge;
+  return true;
+}
+
+static void SampleHollowEdgeDepth(int x,int y,unsigned side,bool neighbor,float fractions[2]) {
+  static const int dx[]={0,1,0,-1},dy[]={-1,0,1,0};
+  const int owner_x=x+(neighbor?dx[side]:0),owner_y=y+(neighbor?dy[side]:0);
+  for(unsigned end=0;end<2;++end) {
+    const int *corner=kHollowEdgeCorners[side][end];
+    fractions[end]=ActionTrunk_SideFrontFraction(s_trunk_assets,owner_x,owner_y,x+corner[0],y+corner[1]);
+  }
+}
+
+static unsigned HollowPassageEdgeFlags(int x,int y,int side,bool step) {
+  const bool riser=HollowSideSnowRiser(x,y,side);
+  const bool snow=riser || ((side&1)&&ActionTrunk_SideSolid(s_trunk_assets,x,y,kActionTrunkSideSnowFace)) ||
+      (side==0&&(ActionTrunk_SideSolid(s_trunk_assets,x,y,kActionTrunkSideSnow) ||
+          (ActionTrunk_SideContact(s_trunk_assets,x,y)&&ActionTrunk_SideSolid(s_trunk_assets,x,y+1,kActionTrunkSideSnow))));
+  const bool high=ActionTrunk_SideSolid(s_trunk_assets,x,y,kActionTrunkSidePriority);
+  return (riser?kHollowEdgeSnowRiser:0)|(step?kHollowEdgeFrontStep:0)|
+      (snow?kHollowEdgeSnow:0)|(high?kHollowEdgeHigh:0);
+}
+
+static bool ScanHollowContour(HollowContour *out,unsigned *rows,int first_x,int last_x,
+    int first_y,int last_y,int kind,bool clearance) {
   const int room_height=(int)s_trunk_assets->height;
   const bool passage=kind==2;
   const int mask_left=passage?0:kActionTrunkLeft;
   const int mask_right=passage?(int)s_trunk_assets->side_width:kActionTrunkLeft+kActionTrunkWidth;
   const int mask_pitch=passage?kActionTrunkSideMaskPitch:kActionTrunkMaskPitch;
-  const int first_y=y>0?y:0,last_y=y+height<room_height?y+height:room_height;
-  const int first_x=x+left>mask_left?x+left:mask_left,last_x=x+right<mask_right?x+right:mask_right;
-  for(int yy=first_y;yy<last_y&&first_x<last_x;++yy) {
+  if(first_x<mask_left)first_x=mask_left;
+  if(last_x>mask_right)last_x=mask_right;
+  for(int yy=first_y;yy<last_y;++yy) {
+    if(rows)rows[yy]=out->count;
+    if(first_x>=last_x)continue;
     for(int byte=(first_x-mask_left)>>3;byte<=((last_x-mask_left-1)>>3);++byte) {
       const unsigned filled=passage?HollowPassageMaskByte(yy,byte,clearance):HollowCoreMaskByte((unsigned)kind,yy,byte);
       if(!filled)continue;
@@ -155,7 +225,15 @@ static bool HollowContourBuild(HollowContour *out,int map,int x,int y,
           filled&~((filled>>1)|((after&1)<<7)),filled&~lower,
           filled&~((filled<<1)|(before>>7))};
       unsigned exposed=flags[0]|flags[1]|flags[2]|flags[3];
+      bool can_step=false;
       if(clearance) {
+        /* Adjacent pixels share the same clearance field at their border.
+         * A zero-clearance cell cannot contain an internal clearance step. */
+        const unsigned stride=kActionTrunkSideWidth/8+1;
+        const uint8_t *grid=s_trunk_assets->side_clearance_grid+(yy/8)*stride+byte;
+        can_step=grid[0]||grid[1]||grid[stride]||grid[stride+1];
+      }
+      if(can_step) {
         unsigned nearby=0;
         for(int sy=yy-8;sy<=yy+1;++sy)if(sy>=0&&sy<room_height) {
           const uint8_t *contacts=s_trunk_assets->side_contacts+sy*mask_pitch;
@@ -176,35 +254,82 @@ static bool HollowContourBuild(HollowContour *out,int map,int x,int y,
         if(wx<first_x||wx>=last_x)continue;
         for(int side=0;side<4;++side) {
           const bool boundary=!!(flags[side]&(1u<<bit));bool step=false;
-          if(!boundary&&clearance) {
+          HollowEdgeDepth depth={.back={1,1}};
+          if(!boundary&&can_step) {
             const int dx[]={0,1,0,-1},dy[]={-1,0,1,0};
             const int nx=wx+dx[side],ny=yy+dy[side];
             if(!ActionTrunk_SideCrown(s_trunk_assets,nx,ny))continue;
-            const float y0=yy+(side==2),y1=y0+(side&1);
-            const float x0=wx+(side==1),x1=x0+!(side&1);
-            const float a0=ActionTrunk_SideFrontFraction(s_trunk_assets,wx,yy,x0,y0);
-            const float a1=ActionTrunk_SideFrontFraction(s_trunk_assets,wx,yy,x1,y1);
-            const float b0=ActionTrunk_SideFrontFraction(s_trunk_assets,nx,ny,x0,y0);
-            const float b1=ActionTrunk_SideFrontFraction(s_trunk_assets,nx,ny,x1,y1);
-            step=a0<=b0&&a1<=b1&&(a0<b0||a1<b1);
+            SampleHollowEdgeDepth(wx,yy,side,false,depth.front);
+            SampleHollowEdgeDepth(wx,yy,side,true,depth.back);
+            step=depth.front[0]<=depth.back[0]&&depth.front[1]<=depth.back[1]&&
+                (depth.front[0]<depth.back[0]||depth.front[1]<depth.back[1]);
+          } else if(boundary&&can_step&&rows) {
+            SampleHollowEdgeDepth(wx,yy,side,false,depth.front);
           }
           if(!boundary&&!step)continue;
-          if(out->count==kHollowMaxEdges)return false;
-          out->edges[out->count++]=(HollowEdge){(int16_t)(wx-x),(int16_t)(yy-y),(uint8_t)side,
-              passage&&HollowSideSnowRiser(wx,yy,side),step};
+          const unsigned material=passage?HollowPassageEdgeFlags(wx,yy,side,step):0;
+          if(!AppendHollowEdge(out,(HollowEdge){(int16_t)wx,(int16_t)yy,(uint8_t)side,(uint8_t)material},
+              rows&&clearance?&depth:NULL,rows!=NULL))return false;
         }
       }
     }
   }
-  out->map=map;out->x=x;out->y=y;out->left=left;out->right=right;out->column=s_trunk_column;
-  out->height=height;out->clearance=clearance;out->valid=true;return true;
+  if(rows)rows[last_y]=out->count;
+  return true;
+}
+
+static bool ResolveHollowContour(int left,int right,int top,int height,int kind,bool clearance,
+    HollowContourView *view) {
+  *view=(HollowContourView){.left=left,.right=right};
+  const int room_height=(int)s_trunk_assets->height;
+  const int first_y=top>0?top:0, last_y=top+height<room_height?top+height:room_height;
+  const int mask_left=kind==2?0:kActionTrunkLeft;
+  const int mask_right=kind==2?(int)s_trunk_assets->side_width:kActionTrunkLeft+kActionTrunkWidth;
+  if(first_y>=last_y||left>=right||left>=mask_right||right<=mask_left)return true;
+  HollowRoomContour *cache=&s_hollow_contours[kind];
+  const bool column=kind==1&&s_trunk_column;
+  if(!cache->attempted||cache->revision!=s_trunk_assets->revision||cache->room!=s_trunk_assets->room||
+      cache->column!=column||cache->clearance!=clearance) {
+    cache->contour.count=0;
+    cache->attempted=true;
+    cache->revision=s_trunk_assets->revision;
+    cache->room=s_trunk_assets->room;
+    cache->column=column;
+    cache->clearance=clearance;
+    if(!clearance) {
+      free(cache->contour.depths);
+      cache->contour.depths=NULL;
+    }
+    cache->ready=ScanHollowContour(&cache->contour,cache->rows,mask_left,mask_right,
+        0,room_height,kind,clearance);
+    if(!cache->ready) {
+      free(cache->contour.edges);
+      free(cache->contour.depths);
+      cache->contour=(HollowContour){0};
+    }
+  }
+  if(cache->ready) {
+    const unsigned start=cache->rows[first_y];
+    view->count=cache->rows[last_y]-start;
+    if(view->count)view->edges=cache->contour.edges+start;
+    if(view->count&&cache->contour.depths)view->depths=cache->contour.depths+start;
+    return true;
+  }
+
+  /* A complex user edit or allocation failure still gets the same bounded
+   * per-window extraction the renderer used before the room cache. */
+  HollowContour window={.edges=s_hollow_window_edges,.capacity=kHollowMaxEdges};
+  if(!ScanHollowContour(&window,NULL,left,right,first_y,last_y,kind,clearance))return false;
+  view->edges=window.edges;
+  view->count=window.count;
+  return true;
 }
 
 /* Native standing lips retain actor contact; recessed bodies and internal
  * steps share their endpoints with the source sheets and silhouette caps. */
 static bool DrawHollowPassageEdges(ArRenderDevice *device,const DioramaCapture *capture,
-    const DioramaViewGeometry *g,const DioramaLayerDraw *layer,int room,bool high,
-    const DioramaTrunkGuardStrip *guard,unsigned guard_slot) {
+    const DioramaViewGeometry *g,const DioramaLayerDraw *layer,bool high,
+    const DioramaTrunkGuardStrip *guard) {
   if(layer->hollow_recess<=0||!s_trunk_assets->side_width||
       (high&&!s_trunk_assets->side_high_pixels))return true;
   const int ox=capture->bg1_camera_x-(capture->width-256)/2-capture->obj_apron;
@@ -212,64 +337,62 @@ static bool DrawHollowPassageEdges(ArRenderDevice *device,const DioramaCapture *
   const int left=guard?guard->world_x+guard->valid.x-ox:(int)lroundf(g->u0*SR_PPU_SURFACE_MAX_WIDTH);
   const int right=guard?left+guard->valid.width:(int)lroundf(g->u1*SR_PPU_SURFACE_MAX_WIDTH);
   const int contour_y=guard?guard->world_y+guard->valid.y:oy;
-  HollowContour *contour=&s_hollow_contours[2][guard_slot];
+  HollowContourView contour;
   const bool clearance=layer->hollow_voxel&&s_trunk_assets->side_clearance;
-  if(!HollowContourBuild(contour,room,ox,contour_y,left,right,
-      guard?guard->valid.height:capture->height,2,clearance))return false;
-  if(!contour->count)return true;
+  if(!ResolveHollowContour(ox+left,ox+right,contour_y,
+      guard?guard->valid.height:capture->height,2,clearance,&contour))return false;
+  if(!contour.count)return true;
   if(!HollowEnsureSideMaterial(device))return false;
   const float du=g->u1-g->u0,dv=g->v1-g->v0;
   const float front=-layer->hollow_recess;
-  const int corners[4][4]={{0,0,1,0},{1,0,1,1},{1,1,0,1},{0,1,0,0}};
+  const float max_span=DioramaTrunk_SideDepth(layer->hollow_recess,0,layer->hollow_voxel);
+  const float contact_radius=6*g->aspect_x/(du*SR_PPU_SURFACE_MAX_WIDTH);
   int count=0;
   GroundCoverBeginBatch();
-  for(int e=0;e<contour->count;++e) {
-    const HollowEdge edge=contour->edges[e];
-    const int world_x=ox+edge.x,world_y=contour_y+edge.y;
-    if(ActionTrunk_SideSolid(s_trunk_assets,world_x,world_y,kActionTrunkSidePriority)!=high)continue;
-    const bool snow=edge.snow_riser || ((edge.side&1)&&
-        ActionTrunk_SideSolid(s_trunk_assets,world_x,world_y,kActionTrunkSideSnowFace)) ||
-        (edge.side==0&&(ActionTrunk_SideSolid(s_trunk_assets,world_x,world_y,kActionTrunkSideSnow)||
-          (ActionTrunk_SideContact(s_trunk_assets,world_x,world_y)&&
-           ActionTrunk_SideSolid(s_trunk_assets,world_x,world_y+1,kActionTrunkSideSnow))));
-    const int *c=corners[edge.side];HollowSide next={0};bool ok=true;
+  for(unsigned e=0;e<contour.count;++e) {
+    const HollowEdge edge=contour.edges[e];
+    const int world_x=edge.x,world_y=edge.y;
+    if(world_x<contour.left||world_x>=contour.right)continue;
+    const int local_x=world_x-ox;
+    if(!!(edge.flags&kHollowEdgeHigh)!=high)continue;
+    const bool snow=edge.flags&kHollowEdgeSnow;
+    HollowEdgeDepth fallback={.back={1,1}};
+    const HollowEdgeDepth *depth=contour.depths?&contour.depths[e]:&fallback;
+    if(!contour.depths&&clearance) {
+      SampleHollowEdgeDepth(world_x,world_y,edge.side,false,fallback.front);
+      if(edge.flags&kHollowEdgeFrontStep)SampleHollowEdgeDepth(world_x,world_y,edge.side,true,fallback.back);
+    }
+    const int (*corners)[2]=kHollowEdgeCorners[edge.side];
+    const float spans[2]={DioramaTrunk_SideDepth(layer->hollow_recess,world_x+corners[0][0],layer->hollow_voxel),
+        DioramaTrunk_SideDepth(layer->hollow_recess,world_x+corners[1][0],layer->hollow_voxel)};
+    HollowSide next={0};bool ok=true;
     const bool cover_top=s_ground_cover.active_count&&edge.side==0;
     DioramaGroundCoverCap cover={.from={world_x,world_y},.to={world_x+1,world_y},
-        .actor_z=-layer->hollow_recess,.contact_radius=6*g->aspect_x/(du*SR_PPU_SURFACE_MAX_WIDTH)};
+        .actor_z=-layer->hollow_recess,.contact_radius=contact_radius};
     if(snow)cover.receiver=HollowSnowGroundReceiver;
     for(int i=0;i<4;++i) {
-      const int end=(i==1||i==2)?2:0;
-      const float u=(edge.x+c[end])/(float)SR_PPU_SURFACE_MAX_WIDTH;
-      const float v=(world_y-oy+c[end+1])/(float)SR_PPU_SURFACE_MAX_HEIGHT;
+      const int end=i==1||i==2;
+      const int *c=corners[end];
+      const float u=(local_x+c[0])/(float)SR_PPU_SURFACE_MAX_WIDTH;
+      const float v=(world_y-oy+c[1])/(float)SR_PPU_SURFACE_MAX_HEIGHT;
       const float wx=((u-g->u0)/du-.5f)*g->aspect_x;
       const float wy=(.5f-(v-g->v0)/dv)*g->height_scale;
-      const float span=DioramaTrunk_SideDepth(layer->hollow_recess,world_x+c[end],layer->hollow_voxel);
-      const float near_fraction=clearance?ActionTrunk_SideFrontFraction(s_trunk_assets,world_x,world_y,world_x+c[end],world_y+c[end+1]):0;
-      const int dx[]={0,1,0,-1},dy[]={-1,0,1,0};
-      const float far_fraction=edge.front_step?ActionTrunk_SideFrontFraction(s_trunk_assets,
-          world_x+dx[edge.side],world_y+dy[edge.side],world_x+c[end],world_y+c[end+1]):1;
-      const float fraction=i>=2?far_fraction:near_fraction;
-      const float z=front-span*fraction;
+      const float fraction=i>=2?depth->back[end]:depth->front[end];
+      const float z=front-spans[end]*fraction;
       if(cover_top)cover.corners[i]=(DioramaGroundCoverCorner){
-          .position={world_x+c[end],world_y+c[end+1],z},.lift={0,-1,0},.depth_fraction=fraction};
+          .position={world_x+c[0],world_y+c[1],z},.lift={0,-1,0},.depth_fraction=fraction};
       Scene3DClipPoint clip;
       ok=ok&&Scene3D_TransformToClip(g->matrix,wx,wy,z,&clip)&&
-          ProjectWorldPoint(g->matrix,wx,wy,z,g->width,g->height,&next.v[i].position);
+          ProjectHollowClip(g,&clip,&next.v[i].position,g->depth_sink?next.depths+i:NULL);
       if(!ok)break;
-      if(g->depth_sink)next.depths[i]=clip.z/clip.w*.5f+.5f;
       next.distance+=clip.w*.25f;
       /* Native two-dimensional grain, anchored along the source contour.
        * Neither its world phase nor the selected snow/bark changes on orbit. */
-      const float depth_sample=span*fraction/DioramaTrunk_SideDepth(layer->hollow_recess,0,layer->hollow_voxel);
-      next.v[i].tex_coord=(edge.side&1)&&!edge.snow_riser
+      const float depth_sample=spans[end]*fraction/max_span;
+      next.v[i].tex_coord=(edge.side&1)&&!(edge.flags&kHollowEdgeSnowRiser)
           ?(ArRenderPointF){(.5f+31*depth_sample)/32.f,
-              (snow?.5f:0)+fminf(31.5f,(world_y&31)+c[end+1]+.5f)/64.f}
-          :(ArRenderPointF){((world_x&31)+c[end])/32.f,(snow?.5f:0)+(.5f+31*depth_sample)/64.f};
-      const ArRenderPointF source_uv={(edge.x+.5f)/SR_PPU_SURFACE_MAX_WIDTH,(world_y-oy+.5f)/SR_PPU_SURFACE_MAX_HEIGHT};
-      float shade=(edge.side==0||snow?(i>=2?.86f:1.f):edge.side==2?(i>=2?.5f:.66f):(i>=2?.65f:.84f))*s_trunk_fade;
-      if(layer->dimming>0)shade*=1-SceneryDimming_Amount(layer->dimming,layer->dimming_ramp,source_uv.x,source_uv.y);
-      if(layer->exposure&&layer->exposure->sample)shade*=layer->exposure->sample(layer->exposure->userdata,source_uv.x,source_uv.y,source_uv.x,source_uv.y);
-      next.v[i].color=(ArRenderColorF){layer->shade.r*shade,layer->shade.g*shade,layer->shade.b*shade,layer->shade.a};
+              (snow?.5f:0)+fminf(31.5f,(world_y&31)+c[1]+.5f)/64.f}
+          :(ArRenderPointF){((world_x&31)+c[0])/32.f,(snow?.5f:0)+(.5f+31*depth_sample)/64.f};
     }
     if(!ok)continue;
     const ArRenderPointF a=next.v[0].position,b=next.v[1].position,cross=next.v[2].position,d=next.v[3].position;
@@ -282,6 +405,15 @@ static bool DrawHollowPassageEdges(ArRenderDevice *device,const DioramaCapture *
       continue;
     }
     if(count==kHollowMaxEdges)return false;
+    const ArRenderPointF uv={(local_x+.5f)/SR_PPU_SURFACE_MAX_WIDTH,(world_y-oy+.5f)/SR_PPU_SURFACE_MAX_HEIGHT};
+    const float dimming=layer->dimming>0?1-SceneryDimming_Amount(layer->dimming,layer->dimming_ramp,uv.x,uv.y):1;
+    const float exposure=layer->exposure&&layer->exposure->sample
+        ?layer->exposure->sample(layer->exposure->userdata,uv.x,uv.y,uv.x,uv.y):1;
+    for(int i=0;i<4;++i) {
+      const float shade=(edge.side==0||snow?(i>=2?.86f:1.f):edge.side==2?(i>=2?.5f:.66f):(i>=2?.65f:.84f))
+          *s_trunk_fade*dimming*exposure;
+      next.v[i].color=(ArRenderColorF){layer->shade.r*shade,layer->shade.g*shade,layer->shade.b*shade,layer->shade.a};
+    }
     s_hollow_sides[count++]=next;
     if(cover_top&&!GatherHollowGroundCover(capture,g,layer,&cover,2,&count))return false;
   }
@@ -291,8 +423,8 @@ static bool DrawHollowPassageEdges(ArRenderDevice *device,const DioramaCapture *
   return SubmitHollowEdges(device,g,layer,s_hollow_side_material,&light,count);
 }
 static bool DrawHollowSolidEdges(ArRenderDevice *device,const DioramaCapture *capture,
-    const DioramaViewGeometry *g,const DioramaLayerDraw *layer,int room,int kind,
-    const DioramaTrunkGuardStrip *guard,unsigned guard_slot) {
+    const DioramaViewGeometry *g,const DioramaLayerDraw *layer,int kind,
+    const DioramaTrunkGuardStrip *guard) {
   if(layer->hollow_recess<=0)return true;
   if(kind==0&&!HollowEnsureMaterial(device))return false;
   const int origin_x=capture->bg1_camera_x-(capture->width-256)/2-capture->obj_apron;
@@ -300,9 +432,9 @@ static bool DrawHollowSolidEdges(ArRenderDevice *device,const DioramaCapture *ca
   const int left=guard?guard->world_x+guard->valid.x-origin_x:(int)lroundf(g->u0*SR_PPU_SURFACE_MAX_WIDTH);
   const int right=guard?left+guard->valid.width:(int)lroundf(g->u1*SR_PPU_SURFACE_MAX_WIDTH);
   const int contour_y=guard?guard->world_y+guard->valid.y:origin_y;
-  HollowContour *contour=&s_hollow_contours[kind][guard_slot];
-  if(!HollowContourBuild(contour,room,origin_x,contour_y,left,right,
-      guard?guard->valid.height:capture->height,kind,false))return false;
+  HollowContourView contour;
+  if(!ResolveHollowContour(origin_x+left,origin_x+right,contour_y,
+      guard?guard->valid.height:capture->height,kind,false,&contour))return false;
   const float front=layer->authored->z-.5f;
   const float depth=kind==0?DioramaTrunk_RimDepth(layer->hollow_recess,layer->hollow_voxel):
       DioramaTrunk_BranchDepth(layer->hollow_recess);
@@ -310,39 +442,40 @@ static bool DrawHollowSolidEdges(ArRenderDevice *device,const DioramaCapture *ca
   const int corners[4][4]={{0,0,1,0},{1,0,1,1},{1,1,0,1},{0,1,0,0}};
   int count=0;
   GroundCoverBeginBatch();
-  for(int e=0;e<contour->count;++e) {
-    const HollowEdge edge=contour->edges[e];const int *c=corners[edge.side];
-    const int world_y=contour_y+edge.y;
+  for(unsigned e=0;e<contour.count;++e) {
+    const HollowEdge edge=contour.edges[e];
+    if(edge.x<contour.left||edge.x>=contour.right)continue;
+    const int *c=corners[edge.side];
+    const int world_y=edge.y,local_x=edge.x-origin_x;
     HollowSide next={0};
     const bool cover_top=s_ground_cover.active_count&&edge.side==0;
-    DioramaGroundCoverCap cover={.from={origin_x+edge.x,world_y},
-        .to={origin_x+edge.x+1,world_y},.actor_z=-layer->hollow_recess,
+    DioramaGroundCoverCap cover={.from={edge.x,world_y},
+        .to={edge.x+1,world_y},.actor_z=-layer->hollow_recess,
         .contact_radius=6*g->aspect_x/(du*SR_PPU_SURFACE_MAX_WIDTH)};
-    const ArRenderColorF bounce=kind==1&&edge.side==2?LifeBranchColor(origin_x+edge.x,world_y):(ArRenderColorF){1,1,1,1};
+    const ArRenderColorF bounce=kind==1&&edge.side==2?LifeBranchColor(edge.x,world_y):(ArRenderColorF){1,1,1,1};
     bool ok=true;
     for(int i=0;i<4;++i) {
       const int end=(i==1||i==2)?2:0;
-      const float u=(edge.x+c[end])/(float)SR_PPU_SURFACE_MAX_WIDTH;
+      const float u=(local_x+c[end])/(float)SR_PPU_SURFACE_MAX_WIDTH;
       const float v=(world_y-origin_y+c[end+1])/(float)SR_PPU_SURFACE_MAX_HEIGHT;
       const float wx=((u-g->u0)/du-.5f)*g->aspect_x;
       const float wy=(.5f-(v-g->v0)/dv)*g->height_scale;
       const float z=kind==0&&layer->hollow_voxel
-          ?(i>=2?-layer->hollow_recess:DioramaTrunk_RimFront(layer->hollow_recess,origin_x+edge.x+c[end],true))
+          ?(i>=2?-layer->hollow_recess:DioramaTrunk_RimFront(layer->hollow_recess,edge.x+c[end],true))
           :front-(i>=2?depth:0);
       if(cover_top)cover.corners[i]=(DioramaGroundCoverCorner){
-          .position={origin_x+edge.x+c[end],world_y+c[end+1],z},
+          .position={edge.x+c[end],world_y+c[end+1],z},
           .lift={0,-1,0},.depth_fraction=i>=2?1:0};
       Scene3DClipPoint clip;
       ok=ok&&Scene3D_TransformToClip(g->matrix,wx,wy,z,&clip)&&
-          ProjectWorldPoint(g->matrix,wx,wy,z,g->width,g->height,&next.v[i].position);
+          ProjectHollowClip(g,&clip,&next.v[i].position,g->depth_sink?next.depths+i:NULL);
       if(!ok)break;
-      if(g->depth_sink)next.depths[i]=clip.z/clip.w*.5f+.5f;
       next.distance+=clip.w*.25f;
-      const ArRenderPointF source_uv={(edge.x+.5f)/SR_PPU_SURFACE_MAX_WIDTH,
+      const ArRenderPointF source_uv={(local_x+.5f)/SR_PPU_SURFACE_MAX_WIDTH,
           (world_y-origin_y+.5f)/SR_PPU_SURFACE_MAX_HEIGHT};
       next.v[i].tex_coord=kind==0?(ArRenderPointF){i>=2?1.f:0.f,
           ((world_y&31)+c[end+1])/32.f}:guard?(ArRenderPointF){
-              (origin_x+edge.x-guard->world_x+.5f)/kDioramaTrunkGuardWidth,
+              (edge.x-guard->world_x+.5f)/kDioramaTrunkGuardWidth,
               (world_y-guard->world_y+guard->atlas_y+.5f)/kDioramaTrunkGuardHeight}:source_uv;
       float shade=kind==0?(i>=2?.48f:.73f):(edge.side==0?(i>=2?.72f:.94f):(i>=2?.45f:.64f));
       if(kind==0)shade*=s_trunk_fade;

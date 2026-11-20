@@ -3393,6 +3393,30 @@ static void TestFullDepthMist(void) {
     CHECK(envelope.x0<=x0-origin.x&&envelope.x1>=x1-origin.x);
     CHECK(envelope.y0<=y0-origin.y&&envelope.y1>=y1-origin.y);
   }
+  /* A rounded playfield bank with the default narrow span used to place its
+   * rainbow at .30, behind the .40-.60 cloud. Check real emitted triangles. */
+  e->field_style.voxel_depth=0;
+  e->field_style.volume=1;
+  e->field_style.rainbow=1;
+  frame.authored_count=2;
+  frame.authored[1]=(ActionEffectInstance){.kind=kActionEffect_AuthoredCloudLight,
+    .flags=kActionEffectFlag_Visible,.world_x=256,.world_y=256,.particle_lifetime=120,
+    .tuning={.color=0xffffff,.intensity=1},.geometry={.kind=kActionEffectGeometry_Rect,
+      .data.rect={-240,-96,240,96}},.field_style={.strands=16,
+        .cloud={.streak=1,.falloff=.3f,.cover=.5f,.edge_position=.1f}}};
+  for(unsigned voxel=0;voxel<2;++voxel) {
+    projection.voxel_scenery=voxel;
+    source.context=context;
+    source.count=0;
+    BUILD_DEPTH();
+    unsigned rainbows=0;
+    for(unsigned i=0;i<source.count;++i)if(p[i].meta[0]==kActionSourceRainbowTriangle) {
+      ++rainbows;
+      CHECK(!!((unsigned)p[i].origin[2]&64u)==!!voxel);
+      if(voxel)CHECK(fabsf(p[i].extra[1]-.5f)<.00001f);
+    }
+    CHECK(rainbows>0);
+  }
 #undef BUILD_DEPTH
 }
 

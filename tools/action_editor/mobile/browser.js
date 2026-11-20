@@ -43,8 +43,8 @@
   function ensureRoom() {
     const r=currentRoom(),key=`${view.room}:${view.region}`;
     if(loaded===key)return;
-    send(SharedActionPreview.encode(data,blobs,r),api.RoomPreview_Load);
-    send(encoder.encode(bundle.scenery),api.RoomPreview_Configure);
+    if(!SharedActionPreview.loadConfigured(api,SharedActionPreview.encode(data,blobs,r),bundle.scenery,2))
+      throw Error('The shared renderer rejected the scene or configuration.');
     send(encoder.encode(bundle.effects),api.RoomPreview_ConfigureEffects);
     if(!api.RoomPreview_Set3DMode(2))throw Error('Voxel preview is unavailable.');
     api.RoomPreview_SetReceivers(0,0,0,0,0);setView();

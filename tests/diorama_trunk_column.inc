@@ -164,7 +164,7 @@ static unsigned TrunkColumnFixture(unsigned scenario) {
   effects.trunk=DioramaTrunk_Default();effects.authored_count=1;
   effects.authored[0]=(ActionEffectInstance){.kind=kActionEffect_AuthoredFan,.world_x=332,.world_y=164,
       .field_style={.opening=true},.tuning={.intensity=2.5f,.color=0xffffff}};
-  scene.trunk_settings.wrap=0;scene.trunk_effects=&effects;scene.trunk_lighting=true;
+  scene.trunk_settings.wrap=0;scene.environment_effects=&effects;scene.environment_lighting=true;
   DioramaProjection projection;r.capture=&capture;r.projection=&projection;
   unsigned frost=0;
   const float cut_x=(512-origin)/640.f,cut_y=36/352.f;
@@ -174,7 +174,7 @@ static unsigned TrunkColumnFixture(unsigned scenario) {
     probe.exposure=scene.scenery_exposure=frame==4?&exposure:NULL;
     r.trunk_voxel=probe.enabled=scene.voxel_mode=frame!=2;probe.front=probe.rear=probe.caps=probe.guards=probe.shaded=0;
     probe.round_caps=0;
-    r.depth_rim_vertices=probe.frost=0;scene.trunk_lighting=frame!=5;
+    r.depth_rim_vertices=probe.frost=0;scene.environment_lighting=frame!=5;
     const unsigned creates=r.creates;
     assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
     if(probe.enabled)assert(probe.front&&probe.rear&&probe.caps&&probe.guards);

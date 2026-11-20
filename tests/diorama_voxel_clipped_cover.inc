@@ -59,7 +59,7 @@ static unsigned ClippedCoverFixture(unsigned scenario) {
       .voxel_observer_userdata=&probe};
   const DioramaDepthSink sink={.submit=ClippedCoverDepth,.userdata=&r};
   DioramaScene scene={.render=&options,.depth_sink=shared?&sink:NULL,.map_group=6,.map_number=5,
-      .voxel_geometry=g,.trunk_effects=&effects};
+      .voxel_geometry=g,.environment_effects=&effects};
   DioramaProjection projection;r.projection=&projection;r.capture=&capture;
   assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
   assert(projection.valid&&probe.starts&&probe.supports&&probe.ends&&probe.faces);

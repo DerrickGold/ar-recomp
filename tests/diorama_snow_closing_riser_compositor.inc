@@ -69,7 +69,7 @@ static void SnowCoverRender(unsigned scenario) {
   DioramaCapture capture={.width=256,.height=224,.textures=textures,.pixels=pixels};DioramaProjection projection;r.projection=&projection;r.capture=&capture;
   const DioramaView view={.viewport={0,0,960,600},.visible_width=256,.distance_scale=1,.camera={.tilt_x=.25f,.tilt_y=left?-.3f:.3f}};
   const DioramaRenderOptions options={.visible_planes=(1u<<kDioramaPlane_Count)-1,.voxel_observe_face=SnowFaceObserve};
-  const DioramaDepthSink sink={.submit=SnowCoverDepth,.userdata=&r};DioramaScene scene={.render=&options,.depth_sink=shared?&sink:NULL,.map_group=6,.map_number=1,.voxel_geometry=g,.trunk_effects=&effects};
+  const DioramaDepthSink sink={.submit=SnowCoverDepth,.userdata=&r};DioramaScene scene={.render=&options,.depth_sink=shared?&sink:NULL,.map_group=6,.map_number=1,.voxel_geometry=g,.environment_effects=&effects};
   SnowCoverRecorded baseline={0};uint64_t original_faces=0;unsigned original_count=0;
   for(unsigned frame=0;frame<2;++frame) {
     ReviseVoxelFixture(g);g->edges[0].snow_closing_riser[!left]=frame?2:0;snow_record.n=0;snow_faces=0;snow_face_hash=0;

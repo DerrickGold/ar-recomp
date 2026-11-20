@@ -115,6 +115,38 @@ typedef struct DioramaVoxelCell {
   DioramaVoxelTransform transform;
 } DioramaVoxelCell;
 
+/* Artwork slots follow the compiled donor order. Serialization still writes
+ * them in field-bit order. A present field with unset art means explicit Auto. */
+enum { kDioramaVoxelArtSlotCount = 7 };
+typedef struct DioramaVoxelArtField {
+  const char *token;
+  uint32_t flag;
+  size_t offset;
+} DioramaVoxelArtField;
+
+static inline const DioramaVoxelArtField *DioramaVoxelCell_ArtFields(void) {
+  static const DioramaVoxelArtField fields[kDioramaVoxelArtSlotCount] = {
+    {"front-art", kDioramaVoxelCell_FrontArt, offsetof(DioramaVoxelCell, front_art)},
+    {"top-art", kDioramaVoxelCell_TopArt, offsetof(DioramaVoxelCell, top_art)},
+    {"side-art", kDioramaVoxelCell_SideArt, offsetof(DioramaVoxelCell, side_art)},
+    {"back-art", kDioramaVoxelCell_BackArt, offsetof(DioramaVoxelCell, backing_art)},
+    {"left-art", kDioramaVoxelCell_LeftArt, offsetof(DioramaVoxelCell, left_art)},
+    {"right-art", kDioramaVoxelCell_RightArt, offsetof(DioramaVoxelCell, right_art)},
+    {"bottom-art", kDioramaVoxelCell_BottomArt, offsetof(DioramaVoxelCell, bottom_art)},
+  };
+  return fields;
+}
+
+static inline const DioramaVoxelArt *DioramaVoxelCell_Art(const DioramaVoxelCell *cell,
+    const DioramaVoxelArtField *field) {
+  return (const DioramaVoxelArt *)((const uint8_t *)cell + field->offset);
+}
+
+static inline DioramaVoxelArt *DioramaVoxelCell_MutableArt(DioramaVoxelCell *cell,
+    const DioramaVoxelArtField *field) {
+  return (DioramaVoxelArt *)((uint8_t *)cell + field->offset);
+}
+
 typedef enum DioramaVoxelObjectMode {
   kDioramaVoxelObject_Auto,
   kDioramaVoxelObject_Flat,
@@ -150,13 +182,9 @@ typedef struct DioramaVoxelEdits {
 static inline uint32_t DioramaVoxelCell_EffectiveFields(const DioramaVoxelCell *c) {
   if (!c) return 0;
   uint32_t fields = c->fields;
-  const DioramaVoxelArt *art[] = {&c->backing_art, &c->top_art, &c->side_art,
-      &c->front_art, &c->left_art, &c->right_art, &c->bottom_art};
-  const uint32_t flags[] = {kDioramaVoxelCell_BackArt, kDioramaVoxelCell_TopArt,
-      kDioramaVoxelCell_SideArt, kDioramaVoxelCell_FrontArt, kDioramaVoxelCell_LeftArt,
-      kDioramaVoxelCell_RightArt, kDioramaVoxelCell_BottomArt};
-  for (unsigned i = 0; i < sizeof(flags) / sizeof(*flags); ++i)
-    if (!art[i]->set) fields &= ~flags[i];
+  const DioramaVoxelArtField *art_fields = DioramaVoxelCell_ArtFields();
+  for (unsigned i = 0; i < kDioramaVoxelArtSlotCount; ++i)
+    if (!DioramaVoxelCell_Art(c, &art_fields[i])->set) fields &= ~art_fields[i].flag;
   return fields;
 }
 
@@ -205,84 +233,6 @@ static inline const DioramaVoxelObject *DioramaVoxelEdits_Object(
         (!(o->selector_fields & kDioramaVoxelObject_Animation) || o->animation == animation)) return o;
   }
   return NULL;
-}
-
-/* Hash only semantic fields, never padding or inactive art. Native caches use
- * this digest so a Preview/Apply change invalidates immutable scene geometry. */
-static inline uint64_t DioramaVoxel_HashBytes(uint64_t hash, const void *data, size_t size) {
-  const uint8_t *bytes = (const uint8_t *)data;
-  while (size--) hash = (hash ^ *bytes++) * UINT64_C(1099511628211);
-  return hash;
-}
-static inline uint64_t DioramaVoxelArt_Hash(uint64_t hash, const DioramaVoxelArt *art) {
-  hash = DioramaVoxel_HashBytes(hash, &art->set, sizeof(art->set));
-  if (!art->set) return hash;
-  hash = DioramaVoxel_HashBytes(hash, art->words, sizeof(art->words));
-  const uint8_t crop[] = {art->bg, art->x, art->y, art->size};
-  return DioramaVoxel_HashBytes(hash, crop, sizeof(crop));
-}
-static inline uint64_t DioramaVoxelEdits_Hash(uint64_t hash, const DioramaVoxelEdits *edits) {
-  if (!edits || edits->cell_count > kDioramaVoxelCellMax ||
-      edits->object_count > kDioramaVoxelObjectMax) return hash;
-  hash = DioramaVoxel_HashBytes(hash, &edits->cell_count, sizeof(edits->cell_count));
-  hash = DioramaVoxel_HashBytes(hash, &edits->object_count, sizeof(edits->object_count));
-  for (unsigned i = 0; i < edits->cell_count; ++i) {
-    const DioramaVoxelCell *c = &edits->cells[i];
-    const int16_t xy[] = {c->x, c->y};
-    hash = DioramaVoxel_HashBytes(hash, xy, sizeof(xy));
-    const uint16_t wh[] = {DioramaVoxelCell_Width(c), DioramaVoxelCell_Height(c)};
-    hash = DioramaVoxel_HashBytes(hash, wh, sizeof(wh));
-    hash = DioramaVoxel_HashBytes(hash, &c->fields, sizeof(c->fields));
-    hash = DioramaVoxel_HashBytes(hash, &c->terrain_mask, sizeof(c->terrain_mask));
-    if (c->fields & kDioramaVoxelCell_Front) hash = DioramaVoxel_HashBytes(hash, &c->front, sizeof(c->front));
-    if (c->fields & kDioramaVoxelCell_Back) hash = DioramaVoxel_HashBytes(hash, &c->back, sizeof(c->back));
-    if (c->fields & kDioramaVoxelCell_Width) hash = DioramaVoxel_HashBytes(hash, &c->width, sizeof(c->width));
-    if (c->fields & kDioramaVoxelCell_Offset) hash = DioramaVoxel_HashBytes(hash, &c->offset_x, sizeof(c->offset_x));
-    if (c->fields & kDioramaVoxelCell_Backing) hash = DioramaVoxel_HashBytes(hash, &c->backing, sizeof(c->backing));
-    if (c->fields & kDioramaVoxelCell_BackArt) hash = DioramaVoxelArt_Hash(hash, &c->backing_art);
-    if (c->fields & kDioramaVoxelCell_TopArt) hash = DioramaVoxelArt_Hash(hash, &c->top_art);
-    if (c->fields & kDioramaVoxelCell_SideArt) hash = DioramaVoxelArt_Hash(hash, &c->side_art);
-    if (c->fields & kDioramaVoxelCell_FrontArt) hash = DioramaVoxelArt_Hash(hash, &c->front_art);
-    if (c->fields & kDioramaVoxelCell_LeftArt) hash = DioramaVoxelArt_Hash(hash, &c->left_art);
-    if (c->fields & kDioramaVoxelCell_RightArt) hash = DioramaVoxelArt_Hash(hash, &c->right_art);
-    if (c->fields & kDioramaVoxelCell_BottomArt) hash = DioramaVoxelArt_Hash(hash, &c->bottom_art);
-    if (c->fields & kDioramaVoxelCell_Faces) hash = DioramaVoxel_HashBytes(hash, &c->faces, sizeof(c->faces));
-    if (c->fields & kDioramaVoxelCell_Shape) {
-      hash = DioramaVoxel_HashBytes(hash, &c->shape, sizeof(c->shape));
-      if (c->shape != kDioramaVoxelShape_Box) {
-        hash = DioramaVoxel_HashBytes(hash, &c->shape_y, sizeof(c->shape_y));
-        hash = DioramaVoxel_HashBytes(hash, &c->shape_h, sizeof(c->shape_h));
-      }
-    }
-    if (c->fields & kDioramaVoxelCell_FrontEnd) hash = DioramaVoxel_HashBytes(hash, &c->front_end, sizeof(c->front_end));
-    if (c->fields & kDioramaVoxelCell_BackEnd) hash = DioramaVoxel_HashBytes(hash, &c->back_end, sizeof(c->back_end));
-    if (c->fields & kDioramaVoxelCell_Bend) {
-      hash = DioramaVoxel_HashBytes(hash, &c->bend.axis, sizeof(c->bend.axis));
-      const int16_t domain[] = {c->bend.anchor, c->bend.tip};
-      const float offsets[] = {c->bend.dx, c->bend.dy, c->bend.dz};
-      hash = DioramaVoxel_HashBytes(hash, domain, sizeof(domain));
-      hash = DioramaVoxel_HashBytes(hash, offsets, sizeof(offsets));
-    }
-    if (c->fields & kDioramaVoxelCell_Transform) {
-      const float transform[] = {c->transform.px, c->transform.py, c->transform.pz,
-          c->transform.dx, c->transform.dy, c->transform.dz,
-          c->transform.sx, c->transform.sy, c->transform.sz};
-      hash = DioramaVoxel_HashBytes(hash, transform, sizeof(transform));
-    }
-  }
-  for (unsigned i = 0; i < edits->object_count; ++i) {
-    const DioramaVoxelObject *o = &edits->objects[i];
-    hash = DioramaVoxel_HashBytes(hash, &o->source, sizeof(o->source));
-    const uint8_t fields[] = {o->selector_fields, o->fields, o->terrain_mask};
-    hash = DioramaVoxel_HashBytes(hash, fields, sizeof(fields));
-    if (o->selector_fields & kDioramaVoxelObject_Parent) hash = DioramaVoxel_HashBytes(hash, &o->parent, sizeof(o->parent));
-    if (o->selector_fields & kDioramaVoxelObject_Animation) hash = DioramaVoxel_HashBytes(hash, &o->animation, sizeof(o->animation));
-    if (o->fields & kDioramaVoxelObject_Mode) hash = DioramaVoxel_HashBytes(hash, &o->mode, sizeof(o->mode));
-    if (o->fields & kDioramaVoxelObject_Offset) hash = DioramaVoxel_HashBytes(hash, &o->offset, sizeof(o->offset));
-    if (o->fields & kDioramaVoxelObject_Thickness) hash = DioramaVoxel_HashBytes(hash, &o->thickness, sizeof(o->thickness));
-    if (o->fields & kDioramaVoxelObject_Width) hash = DioramaVoxel_HashBytes(hash, &o->width_scale, sizeof(o->width_scale));
-  }
-  return hash;
 }
 
 #endif

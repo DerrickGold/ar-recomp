@@ -10,7 +10,7 @@ static bool HollowGuardMatches(const DioramaCapture *capture,const DioramaTrunkG
       !memcmp(&expected,&guard->layout,sizeof(expected));
 }
 static bool PrepareHollowGuardMesh(const DioramaCapture *capture,const DioramaViewGeometry *g,
-    const DioramaLayerDraw *layer,const DioramaTrunkGuardStrip *strip,bool rear,bool filtered,DioramaLayerMesh *mesh) {
+    const DioramaLayerDraw *layer,const DioramaTrunkGuardStrip *strip,bool rear,DioramaLayerMesh *mesh) {
   memset(mesh,0,sizeof(*mesh));mesh->constrained=true;mesh->has_depth=layer->depth_sink!=NULL;
   const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
   const float oy=capture->camera_y-capture->authentic_y0+1;
@@ -52,19 +52,10 @@ static bool PrepareHollowGuardMesh(const DioramaCapture *capture,const DioramaVi
       memcpy(mesh->indices+mesh->index_count,indices,sizeof(indices));mesh->index_count+=6;
     }
   }
-  /* Existing dimming/light sampling remains in PRIMARY native-source UV. */
-  ShadeDioramaVertices(layer,mesh->vertices,mesh->vertex_count);
-  for(int i=0;i<mesh->vertex_count;++i) {
-    ArRenderVertex2D *v=&mesh->vertices[i];
-    const float world_x=ox+v->tex_coord.x*SR_PPU_SURFACE_MAX_WIDTH;
-    const float world_y=oy+v->tex_coord.y*SR_PPU_SURFACE_MAX_HEIGHT;
-    v->tex_coord=(ArRenderPointF){(world_x-strip->world_x)/(filtered?strip->width:kDioramaTrunkGuardWidth),
-        (world_y-strip->world_y+(filtered?0:strip->atlas_y))/(filtered?kDioramaTrunkGuardRows:kDioramaTrunkGuardHeight)};
-  }
   return true;
 }
 static PresentationOutcome DrawHollowGuard(ArRenderDevice *device,const DioramaCapture *capture,
-    const DioramaViewGeometry *g,const DioramaLayerDraw *layer,const DioramaTrunkGuardView *guard,int room) {
+    const DioramaViewGeometry *g,const DioramaLayerDraw *layer,const DioramaTrunkGuardView *guard) {
   if(!HollowGuardMatches(capture,guard))return kPresentationOutcome_Complete;
   const unsigned band=layer->description->plane==SR_PPU_OVERLAY_BG1?0:
       layer->description->plane==kDioramaPlane_Bg1Hi?1:2;
@@ -74,8 +65,8 @@ static PresentationOutcome DrawHollowGuard(ArRenderDevice *device,const DioramaC
     const DioramaTrunkGuardStrip *strip=&guard->layout.strips[i];
     if(!strip->valid.width||!strip->valid.height)continue;
     DioramaLayerDraw source=*layer;source.texture=guard->textures[band];
-    if(!rear&&(!DrawHollowSolidEdges(device,capture,g,&source,room,band==0?1:0,strip,i+1)||
-        !DrawHollowPassageEdges(device,capture,g,&source,room,band==1,strip,i+1)))
+    if(!rear&&(!DrawHollowSolidEdges(device,capture,g,&source,band==0?1:0,strip)||
+        !DrawHollowPassageEdges(device,capture,g,&source,band==1,strip)))
       return kPresentationOutcome_CoreFailure;
     /* Each unrelated strip gets an exact compact source, so LINEAR cannot
      * mix across atlas row64 or the unused right tail. BeginTarget drains
@@ -87,36 +78,22 @@ static PresentationOutcome DrawHollowGuard(ArRenderDevice *device,const DioramaC
     if(!PresentationOutcome_IsUsable(outcome))return outcome;
     const bool filtered=ArRenderTexture_IsValid(texture);
     if(!filtered)texture=guard->textures[band];
+    const HollowGuardSource guard_source=PrepareHollowGuardSource(capture,layer,strip,filtered);
     if(band==0&&layer->hollow_voxel&&s_trunk_assets->side_clearance) {
       const float regions[2][2]={{0,320},{704,(float)s_trunk_assets->side_width}};
       const float x0=strip->world_x+strip->valid.x,x1=x0+strip->valid.width;
       const float y0=strip->world_y+strip->valid.y,y1=y0+strip->valid.height;
       HollowFrontSource carved={.device=device,.capture=capture,.geometry=g,.layer=layer,
-          .strip=strip,.texture=texture,.filtered=filtered,.outcome=outcome};
+          .guard=&guard_source,.texture=texture,.outcome=outcome};
       for(unsigned region=0;region<2;++region)
         if(!DrawHollowCarvedFront(&carved,fmaxf(regions[region][0],x0),fminf(regions[region][1],x1),y0,y1))
           return kPresentationOutcome_CoreFailure;
       outcome=carved.outcome;
     }
     DioramaLayerMesh mesh;
-    if(!PrepareHollowGuardMesh(capture,g,layer,strip,rear,filtered,&mesh))return kPresentationOutcome_CoreFailure;
-    if(!mesh.vertex_count)continue;
-    const float ox=capture->bg1_camera_x-(capture->width-256)*.5f-capture->obj_apron;
-    const float oy=capture->camera_y-capture->authentic_y0+1;
-    const float sample_width=filtered?strip->width:kDioramaTrunkGuardWidth;
-    const float sample_height=filtered?kDioramaTrunkGuardRows:kDioramaTrunkGuardHeight;
-    const ArRenderRectF source_uv={(strip->world_x-ox)/SR_PPU_SURFACE_MAX_WIDTH,
-        (strip->world_y-oy-(filtered?0:strip->atlas_y))/SR_PPU_SURFACE_MAX_HEIGHT,
-        sample_width/SR_PPU_SURFACE_MAX_WIDTH,sample_height/SR_PPU_SURFACE_MAX_HEIGHT};
-    DioramaSceneryLightEffectParams light=layer->lighting;
-    light.mode=0;light.blur_radius=0;light.attributes_uv=source_uv;
-    light.texel_width=1.f/(sample_width*(filtered?kDioramaSupersample:1));
-    light.texel_height=1.f/(sample_height*(filtered?kDioramaSupersample:1));
-    const bool perspective=layer->hollow_voxel&&layer->depth_sink;
-    if(!RenderShadedDioramaDepthGeometryWithW(device,texture,mesh.vertices,mesh.depths,
-        perspective?mesh.clip_w:NULL,mesh.vertex_count,
-        mesh.indices,mesh.index_count,layer->blend,layer->exposure,source_uv,&light,
-        layer->depth_sink,layer->description->plane,false))return kPresentationOutcome_CoreFailure;
+    if(!PrepareHollowGuardMesh(capture,g,layer,strip,rear,&mesh) ||
+        !SubmitHollowGuardMesh(device,texture,layer,&guard_source,&mesh))
+      return kPresentationOutcome_CoreFailure;
   }
   return outcome;
 }

@@ -83,17 +83,15 @@ static bool DioramaGroundCover_Associate(DioramaGroundCoverCache *,
  * receiver batch and submit only after its bounded generation succeeds.
  * A successful empty result owns suppression and never requests flat fallback.
  * No allocations, scene scans, lighting scans or projection occur here. */
-static bool DioramaGroundCover_BuildCap(DioramaGroundCoverCache *,
-    DioramaGroundCoverOwner, const ActionGroundCoverBank *,
-    const ActionGroundCoverPressure *, const DioramaGroundCoverCap *, float tolerance,
+static bool DioramaGroundCover_BuildCap(const DioramaGroundCoverAssociation *,
+    const ActionGroundCoverBank *, const ActionGroundCoverPressure *, const DioramaGroundCoverCap *,
     DioramaGroundCoverVertex *out, unsigned capacity, unsigned *count);
 /* The shallow dense front lip belongs to the same receiver. Only the original
  * complete near edge owns it; actor/texture depth cuts cannot create extra
  * lips. Its crest shares the top's pressure and lift, while its lower edge
  * feathers 1.5 native pixels down the actual transformed front surface. */
-static bool DioramaGroundCover_BuildLip(DioramaGroundCoverCache *,
-    DioramaGroundCoverOwner, const ActionGroundCoverBank *,
-    const ActionGroundCoverPressure *, const DioramaGroundCoverCap *, float tolerance,
+static bool DioramaGroundCover_BuildLip(const DioramaGroundCoverAssociation *,
+    const ActionGroundCoverBank *, const ActionGroundCoverPressure *, const DioramaGroundCoverCap *,
     DioramaGroundCoverVertex *out, unsigned capacity, unsigned *count);
 static bool DioramaGroundCover_PrepareCapPressure(const ActionGroundCoverBank *,
     const ActionSceneEffectFrame *,const DioramaGroundCoverCap *,ActionGroundCoverPressure *);

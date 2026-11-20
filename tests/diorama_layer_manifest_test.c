@@ -164,6 +164,9 @@ int main(void) {
   const DioramaTileStamp *last = DioramaLayerOrder_StampAt(
       &resolved->stamp_layers[0], 14999 % 128, 14999 / 128);
   assert(last && last->words[0] == 0x10);
+  const uint64_t voxel_key=DioramaLayerOrder_VoxelGeometryKey(resolved,false);
+  const uint64_t water_key=DioramaLayerOrder_VoxelGeometryKey(resolved,true);
+  assert(resolved->voxel_geometry_keys[0]==voxel_key&&resolved->voxel_geometry_keys[1]==water_key);
   for (unsigned repeat = 0; repeat < 100; ++repeat) {
     assert(DioramaLayerManifest_TerrainRoom(room, 0) == resolved);
     assert(DioramaLayerOrder_StampAt(&resolved->stamp_layers[0],
@@ -176,6 +179,8 @@ int main(void) {
   last = DioramaLayerOrder_StampAt(&resolved->stamp_layers[0],
       14999 % 128, 14999 / 128);
   assert(last && last->words[0] == 0x25);
+  assert(DioramaLayerOrder_VoxelGeometryKey(resolved,false)!=voxel_key);
+  assert(DioramaLayerOrder_VoxelGeometryKey(resolved,true)!=water_key);
   resolved = DioramaLayerManifest_TerrainRoom(edit, 1);
   assert(resolved && resolved->stamp_layers[0].count == 14999);
   assert(!DioramaLayerOrder_StampAt(&resolved->stamp_layers[0],

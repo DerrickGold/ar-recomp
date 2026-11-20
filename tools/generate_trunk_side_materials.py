@@ -36,7 +36,12 @@ for record in sorted(data['materials'], key=lambda item: item['key']):
     for room, terrain, native_id in record['origins']:
         assert room in (6, 7) and terrain in (0, 1, 2) and 0 <= native_id < 256
         rooms |= 1 << room
-    text = ','.join('{' + ','.join(map(str, mask)) + '}' for mask in masks)
+    passage = record.get('passage_colors', [0, 0, 0, 0])
+    assert len(passage) == 4 and all(type(v) is int and 0 <= v <= 65535 and not v & 1 for v in passage)
+    assert all(not (v & ~rear) for v, rear in zip(passage, masks[1]))
+    if any(passage):
+        assert record.get('passage_reason')
+    text = ','.join('{' + ','.join(map(str, mask)) + '}' for mask in masks + [passage])
     opening = record['role'].startswith('recessed_noncolliding_snow')
     if opening:
         assert not any(masks[0]) and any(masks[1])

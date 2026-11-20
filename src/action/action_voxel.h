@@ -4,6 +4,7 @@
 #include "diorama/diorama_layer_order.h"
 #include <math.h>
 typedef struct ActionVoxelGeometry ActionVoxelGeometry;
+typedef struct ActionVoxelAuthoredLayout ActionVoxelAuthoredLayout;
 const DioramaVoxelEdits *ActionVoxel_Edits(const ActionVoxelGeometry *geometry);
 bool ActionVoxel_HasObjectEdits(const ActionVoxelGeometry *geometry);
 const DioramaVoxelObject *ActionVoxel_ObjectEdit(const ActionVoxelGeometry *geometry,
@@ -196,6 +197,9 @@ static inline bool ActionVoxel_BackgroundApron(ActionVoxelProfile profile,unsign
 static inline bool ActionVoxel_BackgroundWater(ActionVoxelProfile profile,unsigned room) {
   return profile==kActionVoxelProfile_FillmoreCave || profile==kActionVoxelProfile_NorthwallIce ||
       (profile==kActionVoxelProfile_Castle && room==5);
+}
+static inline bool ActionVoxel_UsesBg2Characters(ActionVoxelProfile profile, unsigned room) {
+  return ActionVoxel_BackgroundWater(profile, room) || profile == kActionVoxelProfile_MarahnaJungle;
 }
 /* The tower's flat-layer facade bias crops its modeled walking deck. This
  * policy is available before geometry publication for native camera queries.
@@ -421,6 +425,14 @@ float ActionVoxel_PlayRecess(const ActionVoxelGeometry *c);
 float ActionVoxel_SceneryRecess(const ActionVoxelGeometry *c);
 bool ActionVoxel_RearMountedScenery(const ActionVoxelGeometry *c);
 float ActionVoxel_FrontRecess(const ActionVoxelGeometry *c, int tile_x, int tile_y);
+enum {
+  kVoxelFrontRecessed=1, kVoxelFrontHidden=2, kVoxelFrontTrunk=4, kVoxelFrontColumn=8,
+  kVoxelFrontPixelRecess=16, kVoxelFrontShallow=32,
+};
+/* Camera-independent tags for an 8-pixel-cell rectangle. Holes outside the
+ * compiled room are returned as ordinary flat cells. */
+void ActionVoxel_CopyFrontClasses(const ActionVoxelGeometry *c,int x,int y,
+    int width,int height,bool high,uint8_t *out);
 /* Reviewed low-priority wood sharing a water character. Bit 7 is the left
  * pixel; selected native pixels use SceneryRecess and all others stay at 0.
  * Borrowed immutable rows, or NULL. High-priority artwork never has a mask.
@@ -441,26 +453,70 @@ bool ActionVoxel_Build(ActionVoxelGeometry *c, const ActionRoomScene *scene,
 bool ActionVoxel_BuildWithTiles(ActionVoxelGeometry *c, const ActionRoomScene *scene,
                                  const DioramaRoomOverride *terrain, ActionVoxelSettings settings,
                                  const uint16_t *tiles, size_t tile_pitch);
+typedef struct ActionVoxelBuildSource {
+  const ActionRoomScene *scene;
+  const DioramaRoomOverride *terrain;
+  const uint16_t *tiles;
+  size_t tile_pitch;
+  /* Optional caller-owned storage for the resolved authored cells. Clear it
+   * when the room bounds or authored cells change. Geometry never borrows it. */
+  ActionVoxelAuthoredLayout **authored;
+} ActionVoxelBuildSource;
+void ActionVoxelAuthoredLayout_Clear(ActionVoxelAuthoredLayout **layout);
+bool ActionVoxel_BuildFromSource(ActionVoxelGeometry *c, const ActionVoxelBuildSource *source,
+    ActionVoxelSettings settings);
 /* Exact native animation frames may share geometry when the material policy
  * proves every phase is presentation-only. The reference must retain all ROM
- * phases. Recheck the proof after any other geometry input changes; normalize
- * only the compiler's private character copy, never live VRAM/capture data. */
+ * phases. Recheck the proof after other geometry inputs change. Native
+ * VRAM and pixel capture continue to use the current phase. */
 bool ActionVoxel_AnimationMatches(const ActionRoomScene *reference,
                                    const uint8_t characters[kActionRoomSceneCharacterBytes],
                                    size_t *offset, size_t *bytes);
-/* Every native phase must pass the material/topology proof below. Jungle
- * admits only BG2 waves with no BG1 owner and unchanged native BG2 definitions;
- * its neighbouring rear-art repairs remain outside that reuse proof. */
-static inline bool ActionVoxel_AnimationCacheCandidate(ActionVoxelProfile profile) {
-  return profile==kActionVoxelProfile_KassandoraDesert ||
-      profile==kActionVoxelProfile_KassandoraTomb || profile==kActionVoxelProfile_AitosCaverns ||
-      profile==kActionVoxelProfile_MarahnaTemple || profile==kActionVoxelProfile_MarahnaJungle ||
-      profile==kActionVoxelProfile_NorthwallSnow;
-}
 bool ActionVoxel_AnimationIsPresentationOnly(const ActionRoomScene *scene,
                                    const ActionRoomScene *reference,
                                    const DioramaRoomOverride *terrain,
                                    const uint16_t *tiles, size_t tile_pitch);
+
+typedef struct ActionVoxelAnimation {
+  size_t offset, bytes;
+  unsigned phases;
+} ActionVoxelAnimation;
+bool ActionVoxel_DescribeAnimation(const ActionRoomScene *reference, ActionVoxelAnimation *animation);
+int ActionVoxel_MatchAnimationPhase(const ActionRoomScene *reference,
+    const ActionVoxelAnimation *animation, const uint8_t *uploaded);
+
+enum { kActionVoxelCharacterBytes = 32,
+       kActionVoxelNativeCharacters = kActionRoomSceneCharacterBytes / kActionVoxelCharacterBytes,
+       kActionVoxelExtraCharacters = kActionRoomSceneExtraCharacterBytes / kActionVoxelCharacterBytes,
+       kActionVoxelCachedPhases = 4 };
+typedef struct ActionVoxelCharacterSources {
+  bool native[kActionVoxelNativeCharacters];
+  bool extra[kActionVoxelExtraCharacters];
+} ActionVoxelCharacterSources;
+bool ActionVoxel_CollectCharacterSources(const ActionVoxelBuildSource *source,
+    ActionVoxelCharacterSources *sources);
+bool ActionVoxel_UsesAnimatedCharacters(const ActionVoxelCharacterSources *sources,
+    const ActionVoxelAnimation *animation);
+
+/* One cache per immutable set of non-animation inputs. The game clears it on
+ * live map, palette or art changes, the editor clears it on a successful edit.
+ * A shared slot requires the material proof. Exact slots require native
+ * bytes, and unknown uploads clear the proof and take the ordinary build. */
+typedef struct ActionVoxelAnimationCache {
+  const ActionVoxelGeometry *entries[kActionVoxelCachedPhases];
+  bool classified, shared;
+} ActionVoxelAnimationCache;
+void ActionVoxelAnimationCache_Clear(ActionVoxelAnimationCache *cache);
+void ActionVoxelAnimationCache_Trim(ActionVoxelAnimationCache *cache,
+    const ActionVoxelGeometry *keep);
+int ActionVoxelAnimationCache_Select(ActionVoxelAnimationCache *cache, int phase,
+    const ActionVoxelBuildSource *source, const ActionRoomScene *reference);
+bool ActionVoxelAnimationCache_SharesPhases(const ActionVoxelAnimationCache *cache);
+/* Returns an owned reference, or NULL for a miss or an uncacheable phase. */
+const ActionVoxelGeometry *ActionVoxelAnimationCache_Acquire(
+    const ActionVoxelAnimationCache *cache, int slot);
+void ActionVoxelAnimationCache_Store(ActionVoxelAnimationCache *cache, int slot,
+    const ActionVoxelGeometry *geometry);
 bool ActionVoxel_Active(const ActionVoxelGeometry *c, unsigned group, unsigned room);
 /* Reviewed BG1 matte pixels, compiled in world coordinates. Apply only while
  * this geometry owns Voxel presentation; native collision remains unchanged.
@@ -489,6 +545,7 @@ const uint16_t *ActionVoxel_EdgesForPass(const ActionVoxelGeometry *c, VoxelEdge
 enum { kVoxelEdgeChunkSize = 32 };
 typedef struct VoxelEdgeChunk {
   int left, top, right, bottom;
+  uint32_t transformed_edges; /* One bit per edge in this 32-edge run. */
 } VoxelEdgeChunk;
 /* Consecutive groups in pass order, so rejecting a group preserves tie order. */
 const VoxelEdgeChunk *ActionVoxel_EdgeChunksForPass(const ActionVoxelGeometry *c,

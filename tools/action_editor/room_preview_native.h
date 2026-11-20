@@ -10,6 +10,7 @@ void RoomPreview_SetProjectionOffsets(const ArRenderPointF *planes, ArRenderPoin
 unsigned RoomPreview_SkyboxRoom(void);
 int RoomPreview_LoadSkybox(unsigned size);
 int RoomPreview_Load(unsigned size);
+int RoomPreview_LoadConfigured(unsigned scene_size,unsigned scenery_size,int mode);
 int RoomPreview_LoadPlayer(unsigned size);
 /* Raw native .arobj packet, read from DioramaPreview_Input(). Room/terrain
  * mismatch leaves the previous packet intact. Native and stand-in actors

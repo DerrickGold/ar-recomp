@@ -93,17 +93,32 @@ static void TrunkTestReflect(DioramaTileStamp *stamp,unsigned flip) {
   uint16_t words[4];memcpy(words,stamp->words,sizeof(words));
   for(unsigned q=0;q<4;++q)stamp->words[q]=words[q^flip]^((flip&1)?0x4000:0)^((flip&2)?0x8000:0);
 }
-static void TrunkTestSideEqual(const ActionTrunkAssets *a,const ActionTrunkAssets *b) {
+static void TrunkTestSideGeometryEqual(const ActionTrunkAssets *a,const ActionTrunkAssets *b) {
   assert(a->side_width==b->side_width && a->height==b->height);
   assert(!memcmp(a->side_masks,b->side_masks,sizeof(a->side_masks)));
-  assert(!memcmp(a->side_snow,b->side_snow,sizeof(a->side_snow)));
   assert(a->side_clearance==b->side_clearance);
   assert(!memcmp(a->side_contacts,b->side_contacts,sizeof(a->side_contacts)));
   assert(!memcmp(a->side_detail_cells,b->side_detail_cells,sizeof(a->side_detail_cells)));
   assert(!memcmp(a->side_clearance_grid,b->side_clearance_grid,sizeof(a->side_clearance_grid)));
+  assert(!memcmp(a->side_front_cells,b->side_front_cells,sizeof(a->side_front_cells)));
   assert(a->column_geometry==b->column_geometry);
   assert(!memcmp(a->column_front,b->column_front,sizeof(a->column_front)));
   assert(!memcmp(a->column_caps,b->column_caps,sizeof(a->column_caps)));
+}
+static void TrunkTestSideEqual(const ActionTrunkAssets *a,const ActionTrunkAssets *b) {
+  TrunkTestSideGeometryEqual(a,b);
+  assert(!memcmp(a->side_snow,b->side_snow,sizeof(a->side_snow)));
+}
+static void TrunkTestPalette(const ActionRoomScene *s,const ActionTrunkAssets *base,ActionTrunkAssets *edited) {
+  static ActionRoomScene recolored;recolored=*s;
+  /* No source palette entry remains black. Material ownership, contacts,
+   * aperture clearance and cached subdivision must remain identical. */
+  for(unsigned i=0;i<128;++i)ByteOrder_WriteLe16(recolored.palette+i*2,0x4210|(i&31));
+  assert(ActionTrunk_Build(edited,&recolored,NULL));
+  TrunkTestSideGeometryEqual(base,edited);
+  assert(!memcmp(base->masks,edited->masks,sizeof(base->masks)));
+  assert(memcmp(base->bark,edited->bark,sizeof(base->bark)));
+  assert(base->revision!=edited->revision);
 }
 static void TrunkTestColumn(const ActionRoomScene *s,const DioramaRoomOverride *terrain,
     const ActionTrunkAssets *a) {
@@ -583,6 +598,7 @@ static void TrunkSideFixtures(const char *directory) {
     assert(!legacy->side_width);for(size_t i=0;i<sizeof(legacy->side_masks);++i)assert(!((const uint8_t *)legacy->side_masks)[i]);
     TrunkTestNative(s,base,region);TrunkTestColumn(s,NULL,base);
     TrunkTestDivots(s,base,edited,region);TrunkTestClearance(s,base,region);
+    TrunkTestPalette(s,base,edited);
     TrunkTestSplit(s,NULL,legacy,base,15,true);TrunkTestSplit(s,NULL,legacy,base,7,false);TrunkTestSplit(s,NULL,legacy,base,0,false);
     remapped=*s;TrunkTestRemap(&remapped);assert(ActionTrunk_Build(edited,&remapped,NULL));TrunkTestSideEqual(base,edited);
     TrunkTestEdits(s,base,edited);TrunkTestColumnEdits(s,base,edited);TrunkTestSlopeStamps(s,edited);

@@ -23,11 +23,6 @@ typedef struct DioramaUploadResult {
   DioramaCoverageMask coverage_masks[kDioramaPlane_Count];
 } DioramaUploadResult;
 
-typedef struct DioramaUploadChanges {
-  uint32_t plane_mask;
-  PresentationUploadChanges source;
-} DioramaUploadChanges;
-
 DioramaUploadResult Diorama_Upload(
     ArRenderDevice *device,
     ArRenderTexture textures[kDioramaPlane_Count],
@@ -49,16 +44,16 @@ DioramaUploadResult Diorama_UploadResolved(
     uint32_t plane_mask, uint32_t gpu_mask, uint32_t gpu_changed,
     bool collect_coverage);
 
-/* Optional exact change evidence for CPU planes sharing a source revision.
- * Other planes and mirrors without that synchronized baseline compare pixels
- * normally. A failed upload transaction invalidates all participating mirrors. */
+/* Optional change evidence indexed by CPU plane. A NULL entry or a mirror
+ * without the given source revision compares pixels normally. A failed upload
+ * transaction invalidates all participating mirrors. */
 DioramaUploadResult Diorama_UploadResolvedWithChanges(
     ArRenderDevice *device, ArRenderTexture textures[kDioramaPlane_Count],
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
     int width, int height, int apron, unsigned bg_apron_mask,
     uint32_t plane_mask, uint32_t gpu_mask, uint32_t gpu_changed,
-    bool collect_coverage, const DioramaUploadChanges *changes);
+    bool collect_coverage, const PresentationUploadChanges *const changes[kDioramaPlane_Count]);
 
 /* Generated planes can move beyond either endpoint's alpha footprint. Their
  * compositor already uses the complete mesh; do not scan unused footprints. */

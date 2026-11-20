@@ -1,5 +1,6 @@
 /* A shelf touching a solid bank needs an internal cap, not just a shorter
  * back depth. Verify the submitted source surfaces and the closing cap. */
+#include "action/action_trunk_front.h"
 typedef struct TrunkClearanceProbe {
   Recorder *recorder;
   unsigned lips,returns,bodies,guards,closures,full_bank;
@@ -95,6 +96,11 @@ static unsigned TrunkClearanceFixture(unsigned angle) {
   memcpy(trunk.side_masks[kActionTrunkSideSnow],trunk.side_masks[kActionTrunkSideSolid],sizeof(trunk.side_masks[0]));
   trunk.side_masks[kActionTrunkSideSolid][128*128+184/8]&=~(1u<<(184&7));
   trunk.side_masks[kActionTrunkSideSnow][128*128+184/8]&=~(1u<<(184&7));
+  ActionTrunk_PrepareSideFronts(&trunk);
+  assert(ActionTrunk_SideFrontCell(&trunk,160,64)==kActionTrunkFrontNative);
+  assert(ActionTrunk_SideFrontCell(&trunk,160,112)==kActionTrunkFrontPixels);
+  assert(ActionTrunk_SideFrontCell(&trunk,160,128)==kActionTrunkFrontPixels);
+  assert(ActionTrunk_SideFrontCell(&trunk,160,136)==kActionTrunkFrontRecessed);
   Recorder r={.width=960,.height=600,.bound_effect=-1,.shaders=true};
   ArRenderBackendOps ops=kOps;ops.update_texture=TrunkClearanceUpdate;
   ArRenderDevice device;assert(ArRenderDevice_Init(&device,&ops,&r,(ArRenderCapabilities){.flags=UINT64_MAX}));

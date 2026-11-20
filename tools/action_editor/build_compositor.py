@@ -108,6 +108,7 @@ def build(output, compiler='emcc', scene=None):
                '-sSTACK_SIZE=1048576', '-sINITIAL_MEMORY=134217728', '-sALLOW_MEMORY_GROWTH=0',
                *['-Wl,--export=DioramaPreview_' + x for x in exports],
                *['-Wl,--export=RoomPreview_' + x for x in ('LoadObjects', 'ClearObjects', 'ObjectInfo', 'ObjectAccents')],
+               '-Wl,--export=RoomPreview_LoadConfigured',
                *['-Wl,--export=RoomPreview_' + x for x in ('VoxelPick', 'VoxelTile', 'VoxelGroup', 'VoxelTransformHandles', 'VoxelBendHandles', 'VoxelObjects', 'SetInspection', 'SceneryError')],
                *['-Wl,--export=RoomPreview_' + x for x in ('GroundCoverAuditEnable', 'GroundCoverAuditCount', 'GroundCoverAuditComplete', 'GroundCoverAuditValue')],
                *['-Wl,--export=RoomPreview_' + x for x in ('VoxelAuditCount', 'VoxelAuditComplete', 'VoxelAuditRead')],

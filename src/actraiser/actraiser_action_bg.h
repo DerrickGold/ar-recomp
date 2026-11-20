@@ -172,6 +172,8 @@ typedef struct ActRaiserActionBgDiagnostics {
   uint64_t room_scene_register_mismatches;
   uint64_t room_scene_hle_layers;
   uint64_t room_scene_hle_fallbacks;
+  uint64_t voxel_character_plan_builds;
+  uint64_t voxel_geometry_build_attempts;
   uint64_t fallbacks[kActRaiserActionBgFallback_Count];
 } ActRaiserActionBgDiagnostics;
 

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include "present/owned_bg_packet.h"
 #include "snesrecomp/runner/ppu_bg_packet.h"
 
 /* Identity of the split's immutable geometry and its world/color inputs.
@@ -18,7 +19,9 @@ typedef struct DioramaVoxelSourceKey {
 } DioramaVoxelSourceKey;
 
 typedef struct DioramaVoxelSourceCache {
-  SrPpuBgPacket *packet;
+  const SrPpuBgPacket *packet;
+  SrPpuBgPacket *private_packet;
+  OwnedBgPacket *owner;
   DioramaVoxelSourceKey key;
   bool valid;
 } DioramaVoxelSourceCache;
@@ -49,17 +52,15 @@ static inline bool DioramaVoxelSourceWordsEqual(const uint32_t *a,
 
 static inline bool DioramaVoxelSourceRowEqual(const SrPpuBgPacket *a,
     const SrPpuBgPacket *b, unsigned source, unsigned y,
-    DioramaVoxelSourcePalettePair *palette, bool format_palette) {
+    DioramaVoxelSourcePalettePair *palette) {
   const unsigned index = SR_PPU_BG_PACKET_HEADER_WORDS +
       SrPpuBgPacket_Row(source, y) * SR_PPU_BG_PACKET_ROW_WORDS;
   const uint32_t *ar = a->words + index, *br = b->words + index;
   if (!DioramaVoxelSourceWordsEqual(ar, br, 5)) return false;
   if (!ar[0]) return true;
   /* Compact rows and edit cells address three palette bits and four color
-   * bits: only entries 0..127. Format 1 can address all 256. Restrict this
-   * exact dependency to the row planner; whole-source
-   * comparison retains its existing 256-entry behavior. */
-  const unsigned words = format_palette && ar[0] >= 2 ? 128u : 256u;
+   * bits: only entries 0..127. Format 1 can address all 256. */
+  const unsigned words = ar[0] >= 2 ? 128u : 256u;
   if (ar[6] != palette->a || br[6] != palette->b || words != palette->words) {
     palette->a = ar[6]; palette->b = br[6]; palette->words = words;
     palette->equal = DioramaVoxelSourceWordsEqual(a->words + ar[6], b->words + br[6], words);
@@ -73,15 +74,6 @@ static inline bool DioramaVoxelSourceRowEqual(const SrPpuBgPacket *a,
   if (ar[0] == 4 && (!!ar[5] != !!br[5] || (ar[5] &&
       !DioramaVoxelSourceWordsEqual(a->words + ar[5], b->words + br[5],
                                   SR_PPU_BG_PACKET_PIXEL_STRIDE)))) return false;
-  return true;
-}
-
-static inline bool DioramaVoxelSourceRowsEqual(const SrPpuBgPacket *a,
-                                              const SrPpuBgPacket *b, unsigned source) {
-  if ((a->words[2] ^ b->words[2]) & (1u << source)) return false;
-  DioramaVoxelSourcePalettePair palette = {0};
-  for (unsigned y = 0; y < a->words[1]; ++y)
-    if (!DioramaVoxelSourceRowEqual(a, b, source, y, &palette, false)) return false;
   return true;
 }
 
@@ -118,22 +110,6 @@ static inline bool DioramaVoxelSourceCache_ContextMatches(const DioramaVoxelSour
   return true;
 }
 
-static inline bool DioramaVoxelSourceCache_Matches(const DioramaVoxelSourceCache *cache,
-    const SrPpuBgPacket *p, const DioramaVoxelSourceKey *key) {
-  if (!DioramaVoxelSourceCache_ContextMatches(cache, p, key)) return false;
-  const SrPpuBgPacket *before = cache->packet;
-  if (!DioramaVoxelSourceRowsEqual(p, before, 0) ||
-      !!p->words[7] != !!before->words[7]) return false;
-  if (p->words[7]) {
-    /* Full-add BG1 ownership also depends on BG2 ranks/edits and the native
-     * non-BG winners. Preserve that dependency even when BG1 tiles are fixed. */
-    if (!DioramaVoxelSourceRowsEqual(p, before, 1)) return false;
-    for (unsigned y = 0; y < p->words[1]; ++y)
-      if (!DioramaVoxelSourceWinnerRowEqual(p, before, y)) return false;
-  }
-  return true;
-}
-
 /* BG1 decoding and the Voxel split have no dependency on adjacent capture
  * rows: sparse backing donors, columns and masks are immutable geometry,
  * indexed by world coordinates rather than neighboring captured pixels.
@@ -152,8 +128,8 @@ static inline bool DioramaVoxelSourceCache_PlanRows(const DioramaVoxelSourceCach
   if ((p->words[2] ^ cache->packet->words[2]) & (full_add ? 3u : 1u)) return false;
   DioramaVoxelSourcePalettePair palette[2] = {{0}, {0}};
   for (unsigned y = 0; y < p->words[1]; ++y) {
-    const bool bg1 = DioramaVoxelSourceRowEqual(p, cache->packet, 0, y, &palette[0], true);
-    const bool bg2 = !full_add || DioramaVoxelSourceRowEqual(p, cache->packet, 1, y, &palette[1], true);
+    const bool bg1 = DioramaVoxelSourceRowEqual(p, cache->packet, 0, y, &palette[0]);
+    const bool bg2 = !full_add || DioramaVoxelSourceRowEqual(p, cache->packet, 1, y, &palette[1]);
     const bool winner = !full_add || DioramaVoxelSourceWinnerRowEqual(p, cache->packet, y);
     plan->changed[y] = !bg1 || !bg2 || !winner;
     plan->count += plan->changed[y];
@@ -164,18 +140,27 @@ static inline bool DioramaVoxelSourceCache_PlanRows(const DioramaVoxelSourceCach
 /* Call only after a successful materialization and split into the retained
  * surfaces. Allocation failure merely disables this optional reuse. */
 static inline void DioramaVoxelSourceCache_Retain(DioramaVoxelSourceCache *cache,
-    const SrPpuBgPacket *p, const DioramaVoxelSourceKey *key) {
+    const SrPpuBgPacket *p, const DioramaVoxelSourceKey *key, OwnedBgPacket *owner) {
   cache->valid = false;
   if (!DioramaVoxelSourcePacketUsable(p, key)) return;
-  if (!cache->packet) cache->packet = malloc(sizeof(*cache->packet));
-  if (!cache->packet) return;
-  memcpy(cache->packet, p, SrPpuBgPacket_Size(p));
+  if (owner && p == &owner->packet) {
+    OwnedBgPacket_Retain(owner);
+  } else {
+    owner = NULL;
+    if (!cache->private_packet) cache->private_packet = malloc(sizeof(*cache->private_packet));
+    if (!cache->private_packet) return;
+    memcpy(cache->private_packet, p, SrPpuBgPacket_Size(p));
+  }
+  OwnedBgPacket_Release(cache->owner);
+  cache->owner = owner;
+  cache->packet = owner ? &owner->packet : cache->private_packet;
   cache->key = *key;
   cache->valid = true;
 }
 
 static inline void DioramaVoxelSourceCache_Reset(DioramaVoxelSourceCache *cache) {
-  free(cache->packet);
+  OwnedBgPacket_Release(cache->owner);
+  free(cache->private_packet);
   *cache = (DioramaVoxelSourceCache){0};
 }
 

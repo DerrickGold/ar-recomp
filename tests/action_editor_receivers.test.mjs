@@ -303,6 +303,9 @@ console.log(`Shared camera: ${edgeViews} aspect/zoom/tilt/capture combinations s
 // buffer boundary while the authored world continues beyond it.
 const bossRoom=data.rooms.find(r=>r.group===2&&r.map===8);
 assert.equal(send(encode(data,blobs,bossRoom),api.RoomPreview_Load),1);
+// This check measures the continuous Diorama playfield mesh. Voxel terrain
+// submits individual surfaces whose UVs don't run from top to bottom.
+assert.equal(api.RoomPreview_Set3DMode(1),1);
 const bossConfig='[layers:02:08]\nbg1-policy = edge:world\n'+
   'bg1-map:us+jp+eu = bounds:-10,-6,26,20\n'+
   [[-10,-6],[25,-6],[-10,19],[25,19]].map(([x,y])=>

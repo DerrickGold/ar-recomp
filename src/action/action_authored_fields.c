@@ -1573,8 +1573,8 @@ static bool CanopyLight(ActionEffectGeometryWriter *w,const ActionEffectInstance
 
 /* Two masks per validated cloud lobe, plus one player and one enemy wake.
  * This scratch list is local to a bank; no frame cache or invalidation state. */
-enum { kRollingMistMaxStrands=24,
-  kRollingMistMaxPatches=kRollingMistMaxStrands*2*kActionCloudInteriorLayers+2 };
+enum { kRollingMistMaxStrands=24, kRollingMistMaxLobes=kRollingMistMaxStrands*2,
+  kRollingMistMaxPatches=kRollingMistMaxLobes*kActionCloudInteriorLayers+2 };
 typedef struct MistPatch {
   float x,y,rx,ry,crest;
   float depth; /* Paired body/crest share one stable position inside a voxel bank. */
@@ -1789,12 +1789,33 @@ static bool MistRainbow(ActionEffectGeometryWriter *w,const ActionEffectInstance
   }
   return true;
 }
+/* Fixed slices share their projection across bodies, crests and sparkles.
+ * Narrow banks have changing lobe depths, so retain only the latest plane. */
+typedef struct MistProjectionCache {
+  const ActionEffectProjectionContext *base;
+  unsigned count, limit;
+  float depths[kActionCloudInteriorLayers+1];
+  ActionEffectProjectionContext contexts[kActionCloudInteriorLayers+1];
+  DioramaProjection projections[kActionCloudInteriorLayers+1];
+} MistProjectionCache;
+
+static ActionEffectProjectionContext *MistProjectionAt(MistProjectionCache *cache,float depth) {
+  for(unsigned i=0;i<cache->count;++i)
+    if(cache->depths[i]==depth)return &cache->contexts[i];
+  const unsigned slot=cache->count<cache->limit?cache->count:cache->limit-1;
+  if(!ActionEffectProjection_VolumeContext(cache->base,depth,
+      &cache->contexts[slot],&cache->projections[slot]))return NULL;
+  cache->depths[slot]=depth;
+  if(slot==cache->count)++cache->count;
+  return &cache->contexts[slot];
+}
+
 /* A few droplets per body lobe, following its translation and density mask.
  * Stable lobe seeds keep a partial view identical to a crop of the whole bank.
  * The paired crest isn't another volume, so it must not double the sparkles. */
 static bool MistSparkles(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
     const MistPatch *patches,unsigned count,const ActionEffectLocalRect *clip,
-    ActionEffectProjectPointFn project,void *context) {
+    ActionEffectProjectPointFn project,void *context,MistProjectionCache *projection) {
   if(e->field_style.sparkle<=0||!w->frame||w->atmosphere_unlit)return true;
   for(unsigned i=0;i<count;++i) {
     const MistPatch *p=&patches[i];
@@ -1820,9 +1841,16 @@ static bool MistSparkles(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       if(alpha<=.002f)continue;
       const ArRenderColorF color={.65f+.35f*light.r/light.a,
           .65f+.35f*light.g/light.a,.65f+.35f*light.b/light.a,alpha};
-      if(p->depth>0) {
+      if(p->depth>0&&w->source) {
         if(!AppendSceneVolumeParticle(w,e,x,y,x,y-1,size*1.3f,size*.7f,p->depth,color,project,context))return false;
-      } else if(!AppendSceneParticle(w,e,x,y,x,y-1,size*1.3f,size*.7f,color,project,context))return false;
+      } else {
+        void *target=context;
+        if(p->depth>0&&projection->base) {
+          target=MistProjectionAt(projection,p->depth);
+          if(!target)return false;
+        }
+        if(!AppendSceneParticle(w,e,x,y,x,y-1,size*1.3f,size*.7f,color,project,target))return false;
+      }
     }
   }
   return true;
@@ -1843,20 +1871,22 @@ static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance
     const uint32_t seed=e->particle_style.seed^(i+1)*0x9e3779b9u;
     CloudBankPatch pair[2];
     CloudMotion_Bank(&motion,i,seed,pair);
-    for(unsigned band=0;band<bands;++band)for(unsigned tier=0;tier<2;++tier) {
+    const unsigned cloud=motion.volume?DeterministicHash_Mix32(seed)%kActionMaskCloudCount:0;
+    const unsigned cells[2]={motion.volume?kActionMaskCloudBodyFirst+cloud:
+        kActionMaskFogFirst+seed%kActionMaskFogCount,
+        motion.volume?kActionMaskCloudLightFirst+cloud:
+        kActionMaskFogFirst+(seed+3)%kActionMaskFogCount};
+    const float depth=bank_air&&bands==1?rear+(front-rear)*HashUnit(seed^0x64a3u):0;
+    for(unsigned tier=0;tier<2;++tier) {
       const CloudBankPatch *p=&pair[tier];
-      const unsigned cell=motion.volume?
-          (tier?kActionMaskCloudLightFirst:kActionMaskCloudBodyFirst)+DeterministicHash_Mix32(seed)%kActionMaskCloudCount:
-          kActionMaskFogFirst+(seed+tier*3)%kActionMaskFogCount;
-      const float depth=bands>1?band/(float)(bands-1):HashUnit(seed^0x64a3u);
       /* Divide opacity between depth slices so their overlap stays
        * comparable to the authored bank instead of tripling its density. */
       const float alpha=bands>1?1-powf(1-p->alpha,1.f/bands):p->alpha;
       AddMistPatch(patches,&count,clip,(MistPatch){.x=p->x,.y=p->y,.rx=p->rx,.ry=p->ry,
-          .crest=tier,.depth=bank_air?rear+(front-rear)*depth:0,
-          .cell=cell,.seed=seed,.tint={.a=alpha}});
+          .crest=tier,.depth=depth,.cell=cells[tier],.seed=seed,.tint={.a=alpha}});
     }
   }
+  const unsigned lobe_count=count;
   /* A fixed allowance per bank; prefer the player and then the strongest
    * nearby body. This never consumes native actor/sprite slots. */
   const ActionEffectActor *actors[2]={0};float weights[2]={0};
@@ -1882,20 +1912,7 @@ static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance
         .tint={.a=fminf(.65f,e->tuning.intensity*s->wake*weights[i]*.7f)}});
   }
   TintMistPatches(w,e,patches,count);
-  /* Depth is independent of camera and animation; body and crest stay
-   * together. Sort the complete bank, including explicitly expanded slices. */
-  if(bank_air)for(unsigned i=1;i<count;++i) {
-    const MistPatch patch=patches[i];unsigned j=i;
-    while(j && patches[j-1].depth>patch.depth){patches[j]=patches[j-1];--j;}
-    patches[j]=patch;
-  }
   const bool lava_light=!w->atmosphere_unlit&&LightingWorldPlane(e->projection_plane)==kActionEffectProjectionPlane_Bg1;
-  float bursts[kRollingMistMaxPatches];
-  if(lava_light) {
-    ArRenderPointF points[kRollingMistMaxPatches];
-    for(unsigned i=0;i<count;++i)points[i]=(ArRenderPointF){e->world_x+patches[i].x,e->world_y+patches[i].y};
-    ActionLavaActivity_Sample(w->frame,points,count,bursts);
-  }
   /* A bank augmenting native foreground clouds needs matter behind its
    * silhouette. Reuse the lit lobes at three bounded, world-space depths;
    * retain the original front face and its native painter/priority slot.
@@ -1924,21 +1941,46 @@ static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance
       if(w->source && !ActionEffectSource_VolumeRange(w->source,first,depth))return false;
     }
   }
-  for(unsigned i=0;i<count;++i) {
-    if(lava_light) {
+  if(lava_light) {
+    ArRenderPointF points[kRollingMistMaxLobes+2];
+    float bursts[kRollingMistMaxLobes+2];
+    for(unsigned i=0;i<count;++i)points[i]=(ArRenderPointF){e->world_x+patches[i].x,e->world_y+patches[i].y};
+    ActionLavaActivity_Sample(w->frame,points,count,bursts);
+    for(unsigned i=0;i<count;++i) {
       const float burst=bursts[i];
       ArRenderColorF *tint=&patches[i].tint;
       tint->r=fminf(1,tint->r+burst*.85f);
       tint->g=fminf(1,tint->g+burst*.32f);
       tint->b=fminf(1,tint->b+burst*.06f);
     }
-    const MistPatch *p=&patches[i];
-    ActionEffectProjectionContext volume_context;DioramaProjection volume_projection;
-    void *patch_context=context;
-    if(bank_air && !w->source) {
-      if(!ActionEffectProjection_VolumeContext(bank_air,p->depth,&volume_context,&volume_projection))return false;
-      patch_context=&volume_context;
+  }
+  /* Slice copies share the lobe's authored XY and lighting. Expand only after
+   * sampling, then keep stable painter order, including the planar wakes. */
+  if(bands>1&&lobe_count) {
+    const unsigned extra=lobe_count*(bands-1);
+    memmove(patches+lobe_count+extra,patches+lobe_count,(count-lobe_count)*sizeof(*patches));
+    for(unsigned band=bands;band-->0;) {
+      const float depth=rear+(front-rear)*(band/(float)(bands-1));
+      for(unsigned i=0;i<lobe_count;++i) {
+        patches[band*lobe_count+i]=patches[i];
+        patches[band*lobe_count+i].depth=depth;
+      }
     }
+    count+=extra;
+  }
+  if(bank_air)for(unsigned i=1;i<count;++i) {
+    const MistPatch patch=patches[i];unsigned j=i;
+    while(j && patches[j-1].depth>patch.depth){patches[j]=patches[j-1];--j;}
+    patches[j]=patch;
+  }
+  MistProjectionCache projection;
+  projection.base=w->source?NULL:bank_air;
+  projection.count=0;
+  projection.limit=bands>1?bands+1:1;
+  for(unsigned i=0;i<count;++i) {
+    const MistPatch *p=&patches[i];
+    void *patch_context=projection.base?MistProjectionAt(&projection,p->depth):context;
+    if(projection.base&&!patch_context)return false;
     const unsigned first=w->vertex_count;
     if(!MaskPatch(w,e,clip,p->cell,p->x,p->y,p->rx,p->ry,p->tint,project,patch_context))return false;
     if(bank_air && w->source && !ActionEffectSource_VolumeRange(w->source,first,p->depth))return false;
@@ -1946,17 +1988,16 @@ static bool RollingMist(ActionEffectGeometryWriter *w,const ActionEffectInstance
   if(!lighting)return true;
   /* The spectrum scatters inside the same bank; individual sparkles follow
    * their own billow rather than remaining pasted on the rear sheet. */
-  ActionEffectProjectionContext rainbow_context;DioramaProjection rainbow_projection;
-  void *rainbow_target=context;
-  const float rainbow_depth=s->volume>0?(s->placement==2?1-s->volume*.3f:s->volume*.3f):.5f;
-  if(bank_air && !w->source) {
-    if(!ActionEffectProjection_VolumeContext(bank_air,rainbow_depth,&rainbow_context,&rainbow_projection))return false;
-    rainbow_target=&rainbow_context;
+  if(s->rainbow>0) {
+    const float preferred_depth=s->volume>0?(s->placement==2?1-s->volume*.3f:s->volume*.3f):.5f;
+    const float rainbow_depth=s->placement==1?rear+(front-rear)*.5f:fmaxf(rear,fminf(front,preferred_depth));
+    void *rainbow_context=projection.base?MistProjectionAt(&projection,rainbow_depth):context;
+    if(projection.base&&!rainbow_context)return false;
+    const unsigned first=w->vertex_count;
+    if(!MistRainbow(w,e,patches,count,clip,project,rainbow_context))return false;
+    if(bank_air && w->source && !ActionEffectSource_VolumeRange(w->source,first,rainbow_depth))return false;
   }
-  const unsigned first=w->vertex_count;
-  if(!MistRainbow(w,e,patches,count,clip,project,rainbow_target))return false;
-  if(bank_air && w->source && !ActionEffectSource_VolumeRange(w->source,first,rainbow_depth))return false;
-  return MistSparkles(w,e,patches,count,clip,project,context);
+  return MistSparkles(w,e,patches,count,clip,project,context,&projection);
 }
 
 /* Feathered source-space filaments retain their distant softness at every

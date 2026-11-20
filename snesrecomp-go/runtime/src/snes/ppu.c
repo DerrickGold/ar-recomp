@@ -3672,6 +3672,22 @@ static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
     if (plan.main_mode == 0u && plan.sub_mode == 0u) return;
     policy = PpuResolveWidescreenLayerPolicy(
         ppu, (uint8_t)layer, screen_y);
+    const bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0u;
+    const unsigned visibility = ppu->backgroundFullAdd
+        ? (plan.sub_mode || plan.main_mode ? 1u : 0u)
+        : owner_sub ? plan.sub_mode : plan.main_mode;
+    uint32_t *packet_pixels = NULL, *packet_meta = NULL;
+    int packet_origin = 0;
+    if ((ppu->backgroundTileSources & (1u << layer)) && visibility == 1u &&
+            mode == 1 && bpp == 4 && tile_size == 8 && !offset_per_tile) {
+        packet_pixels = background_packet_row(ppu, (unsigned)layer, screen_y);
+        if (packet_pixels) {
+            const unsigned y = (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y);
+            packet_meta = SrPpuBgPacket_Meta(ppu->backgroundPacket, (unsigned)layer, y);
+            packet_origin = surface_origin_x(ppu, ppu->overlayRenderPitch[layer]);
+            if (packet_meta[0] < 3u) packet_pixels = NULL;
+        }
+    }
     for (int x = left; x < right;) {
         int source_x;
         int step = 1;
@@ -3735,20 +3751,27 @@ static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
             /* An extracted Mode-1 8x8 VRAM background uses the same immutable
              * bitplane packet as a virtual map. Preserve each scanline's VRAM,
              * scroll and owner-window state; do not expand its pixels on CPU. */
-            const bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0u;
-            const unsigned visibility = ppu->backgroundFullAdd
-                ? (plan.sub_mode || plan.main_mode ? 1u : 0u)
-                : owner_sub ? plan.sub_mode : plan.main_mode;
             const unsigned saved_window_run = plan.run;
             const unsigned band = background_packet_band(ppu, layer, entry, 0xffu);
-            for (int at = 0; at < run;) {
-                if (!visibility || (visibility == 2u && native_window_plan_inside(&plan, x + at))) {
-                    ++at; continue;
+            if (packet_pixels && step == 1) {
+                /* The scanline already owns its compact packet row. Keep tile
+                 * fetches live while reusing the resolved destination. */
+                const uint32_t raw = ppu->vram[tile_base & 0x7fff] |
+                    ((uint32_t)ppu->vram[(tile_base + 8) & 0x7fff] << 16);
+                background_packet_native_tile(packet_pixels, packet_meta,
+                    (unsigned)(packet_origin + x), run, fine_x, raw, entry, band,
+                    layer_rank(ppu, layer, (entry >> 13) & 1u),
+                    &ppu->overlayRenderContentMask[layer]);
+            } else {
+                for (int at = 0; at < run;) {
+                    if (!visibility || (visibility == 2u && native_window_plan_inside(&plan, x + at))) {
+                        ++at; continue;
+                    }
+                    const int start = at++;
+                    while (at < run && (visibility != 2u || !native_window_plan_inside(&plan, x + at))) ++at;
+                    background_packet_tile(ppu, layer, screen_y, x + start, at - start,
+                        fine_x + start * step, in_y, step, entry, band, false, false, false, 0, 0, NULL);
                 }
-                const int start = at++;
-                while (at < run && (visibility != 2u || !native_window_plan_inside(&plan, x + at))) ++at;
-                background_packet_tile(ppu, layer, screen_y, x + start, at - start,
-                    fine_x + start * step, in_y, step, entry, band, false, false, false, 0, 0, NULL);
             }
             if (!(ppu->backgroundCpuSources & (1u << layer))) { x += run; continue; }
             plan.run = (uint8_t)saved_window_run;

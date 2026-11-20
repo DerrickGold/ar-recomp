@@ -2,9 +2,87 @@
  * Tile/character addresses are deliberately excluded from material identity. */
 #include "action_voxel_internal.h"
 #include "action/action_bg_metatile.h"
+#include "action/action_native_contact.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+typedef struct VoxelRoomBounds {
+  int x0, y0, x1, y1;
+} VoxelRoomBounds;
+
+static VoxelRoomBounds RoomBounds(const ActionRoomScene *scene, const DioramaRoomOverride *terrain) {
+  const DioramaStampLayerOverride *stamps = terrain ? &terrain->stamp_layers[0] : NULL;
+  if (stamps && stamps->set_bounds)
+    return (VoxelRoomBounds){stamps->x0 * 16, stamps->y0 * 16, stamps->x1 * 16, stamps->y1 * 16};
+  return (VoxelRoomBounds){0, 0, ActionRoomScene_TileWidth(scene, 1) * 8,
+      ActionRoomScene_TileHeight(scene, 1) * 8};
+}
+
+typedef struct VoxelAuthoredRecord {
+  uint32_t fields;
+  bool used, owns_artwork, native_transform, native_identity;
+} VoxelAuthoredRecord;
+
+struct ActionVoxelAuthoredLayout {
+  int x, y, columns, rows;
+  unsigned count;
+  VoxelAuthoredRecord records[kDioramaVoxelCellMax];
+  uint16_t owners[];
+};
+
+void ActionVoxelAuthoredLayout_Clear(ActionVoxelAuthoredLayout **layout) {
+  free(*layout);
+  *layout = NULL;
+}
+
+/* Keep record ownership even for reset records. A later reset masks the
+ * earlier edit before we decide which cells actually need compiled artwork. */
+static unsigned ResolveAuthoredLayout(const ActionVoxelBuildSource *source,
+    ActionVoxelAuthoredLayout **scratch, const ActionVoxelAuthoredLayout **out) {
+  *out = NULL;
+  const DioramaRoomOverride *terrain = source->terrain;
+  if (!terrain || !terrain->voxel.cell_count) return 0;
+  ActionVoxelAuthoredLayout **slot = source->authored ? source->authored : scratch;
+  if (*slot) {
+    *out = *slot;
+    return 0;
+  }
+  const VoxelRoomBounds bounds = RoomBounds(source->scene, terrain);
+  if (!ActionVoxel_ValidBounds(bounds.x0, bounds.y0, bounds.x1, bounds.y1)) return 4;
+  const int columns = (bounds.x1 - bounds.x0) / 16, rows = (bounds.y1 - bounds.y0) / 16;
+  const size_t cells = (size_t)columns * rows;
+  if (cells > kVoxelAuthoredCellMax) return 1;
+  if (terrain->voxel.cell_count > kDioramaVoxelCellMax) return 3;
+  ActionVoxelAuthoredLayout *layout = calloc(1, sizeof(*layout) + cells * sizeof(*layout->owners));
+  if (!layout) return 3;
+  layout->x = bounds.x0 / 16;
+  layout->y = bounds.y0 / 16;
+  layout->columns = columns;
+  layout->rows = rows;
+  ActionVoxel_FillRecordOwners(&terrain->voxel, layout->x, layout->y, columns, rows, layout->owners);
+  for (unsigned i = 0; i < terrain->voxel.cell_count; ++i) {
+    const DioramaVoxelCell *cell = &terrain->voxel.cells[i];
+    VoxelAuthoredRecord *record = &layout->records[i];
+    record->fields = DioramaVoxelCell_EffectiveFields(cell);
+    if (cell->faces == kDioramaVoxelFaceMask_All) record->fields &= ~kDioramaVoxelCell_Faces;
+    if (!record->fields) continue;
+    record->owns_artwork = ActionVoxel_CellOwnsArtwork(cell);
+    record->native_transform = ActionVoxel_CellUsesNativeTransform(cell);
+    record->native_identity = ActionVoxel_CellKeepsNativeIdentity(cell);
+  }
+  for (size_t i = 0; i < cells; ++i) {
+    const unsigned owner = layout->owners[i];
+    if (owner && layout->records[owner - 1].fields) {
+      layout->records[owner - 1].used = true;
+      ++layout->count;
+    }
+  }
+  *slot = layout;
+  *out = layout;
+  return 0;
+}
+
 typedef struct VoxelMaterialProfile {
   uint64_t key;
   uint16_t rooms;
@@ -156,13 +234,9 @@ static VoxelSemanticKind SemanticMaterialKind(const CastleMaterial *m,unsigned k
   return kVoxelSemantic_None;
 }
 static unsigned Pixel(const ActionRoomScene *s, unsigned word, int x, int y) {
-  if (word & 0x4000) x = 7 - x;
-  if (word & 0x8000) y = 7 - y;
-  if ((word & 1023) >= kActionRoomSceneCharacterBytes / 32) return 0;
-  const unsigned char *c = s->characters + (word & 1023) * 32;
-  const unsigned shift = 7 - x;
-  return ((c[y * 2] >> shift) & 1) | (((c[y * 2 + 1] >> shift) & 1) << 1) |
-         (((c[y * 2 + 16] >> shift) & 1) << 2) | (((c[y * 2 + 17] >> shift) & 1) << 3);
+  const unsigned tile = word & 1023;
+  if (tile >= kActionVoxelNativeCharacters) return 0;
+  return ActionRoomScene_Decode4bppPixel(s->characters + tile * kActionVoxelCharacterBytes, word, x, y);
 }
 static unsigned DepthRank(const ActionVoxelGeometry *c, size_t at) {
   if (c->branch_pixels && (c->branch_pixels[at >> 3] & (1u << (at & 7)))) return 3;
@@ -735,10 +809,9 @@ static unsigned NativeWords(const ActionRoomScene *s, unsigned id, uint16_t word
   }
   return collision;
 }
-bool ActionVoxel_AnimationMatches(const ActionRoomScene *reference,
-                                   const uint8_t characters[kActionRoomSceneCharacterBytes],
-                                   size_t *offset, size_t *bytes) {
-  if (!reference || !characters || !offset || !bytes ||
+bool ActionVoxel_DescribeAnimation(const ActionRoomScene *reference, ActionVoxelAnimation *animation) {
+  *animation = (ActionVoxelAnimation){0};
+  if (!reference ||
       !reference->have_character_bank[0] || !reference->have_character_bank[1] ||
       !ActionRoomScene_HasCharacterAnimation(reference)) return false;
   const size_t target = (size_t)ActionRoomScene_CharacterAnimationTarget(reference) * 2;
@@ -746,12 +819,137 @@ bool ActionVoxel_AnimationMatches(const ActionRoomScene *reference,
   const unsigned phases = ActionRoomScene_CharacterAnimationPhaseCount(reference);
   if ((target & 31) || (stride & 31) || target > kActionRoomSceneCharacterBytes ||
       phases * stride > kActionRoomSceneCharacterBytes - target) return false;
-  for (unsigned phase = 0; phase < phases; ++phase)
-    if (!memcmp(characters + target, reference->characters + target + phase * stride, stride)) {
-      *offset = target; *bytes = stride;
-      return true;
+  *animation = (ActionVoxelAnimation){target, stride, phases};
+  return true;
+}
+
+int ActionVoxel_MatchAnimationPhase(const ActionRoomScene *reference,
+    const ActionVoxelAnimation *animation, const uint8_t *uploaded) {
+  const size_t offset = animation->offset, bytes = animation->bytes;
+  for (unsigned phase = 0; phase < animation->phases; ++phase)
+    if (!memcmp(uploaded, reference->characters + offset + phase * bytes, bytes))
+      return (int)phase;
+  return -1;
+}
+
+bool ActionVoxel_AnimationMatches(const ActionRoomScene *reference,
+    const uint8_t characters[kActionRoomSceneCharacterBytes], size_t *offset, size_t *bytes) {
+  ActionVoxelAnimation animation;
+  if (!characters || !offset || !bytes || !ActionVoxel_DescribeAnimation(reference, &animation) ||
+      ActionVoxel_MatchAnimationPhase(reference, &animation, characters + animation.offset) < 0) return false;
+  *offset = animation.offset;
+  *bytes = animation.bytes;
+  return true;
+}
+
+static void CollectCharacter(ActionVoxelCharacterSources *sources, uint16_t word) {
+  const unsigned character = word & 1023u;
+  if (character < kActionVoxelNativeCharacters) sources->native[character] = true;
+  else if (character >= 0x200 && character < 0x200 + kActionVoxelExtraCharacters)
+    sources->extra[character - 0x200] = true;
+}
+
+static const DioramaVoxelArt *AuthoredFaceArt(const DioramaVoxelCell *cell, unsigned face) {
+  const DioramaVoxelArtField *field = &DioramaVoxelCell_ArtFields()[face];
+  const DioramaVoxelArt *art = DioramaVoxelCell_Art(cell, field);
+  return (cell->fields & field->flag) && art->set ? art : NULL;
+}
+
+bool ActionVoxel_CollectCharacterSources(const ActionVoxelBuildSource *source,
+    ActionVoxelCharacterSources *sources) {
+  *sources = (ActionVoxelCharacterSources){0};
+  const ActionRoomScene *scene = source->scene;
+  const DioramaRoomOverride *terrain = source->terrain;
+  const ActionVoxelProfile profile = ActionVoxel_ProfileForRoom(scene->group, scene->map);
+  const bool bg2 = ActionVoxel_UsesBg2Characters(profile, scene->map);
+  for (unsigned layer = 0; layer < (bg2 ? 2u : 1u); ++layer) {
+    if (ActionRoomScene_HasBackground(scene, layer + 1)) {
+      const unsigned attributes = ActionRoomScene_BgAttributes(scene, layer + 1);
+      const uint8_t *definitions = scene->bg[layer].metatiles;
+      for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; i += 2)
+        CollectCharacter(sources, ActionBg_ComposeTilemapWord(
+            (definitions[i] << 8) | definitions[i + 1], kActionRoomSceneTileWordMask, attributes));
     }
+    if (!terrain) continue;
+    const DioramaStampLayerOverride *stamps = &terrain->stamp_layers[layer];
+    for (size_t i = 0; i < stamps->count; ++i)
+      for (unsigned q = 0; q < 4; ++q) CollectCharacter(sources, stamps->cells[i].words[q]);
+  }
+  if (source->tiles) {
+    const unsigned width = ActionRoomScene_TileWidth(scene, 1), height = ActionRoomScene_TileHeight(scene, 1);
+    if (source->tile_pitch < width) return false;
+    for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < width; ++x)
+      CollectCharacter(sources, source->tiles[y * source->tile_pitch + x]);
+  }
+  if (!terrain || !terrain->voxel.cell_count) return true;
+  ActionVoxelAuthoredLayout *scratch = NULL;
+  const ActionVoxelAuthoredLayout *layout;
+  if (ResolveAuthoredLayout(source, &scratch, &layout)) return false;
+  for (unsigned i = 0; i < terrain->voxel.cell_count; ++i) {
+    if (!layout->records[i].used || !layout->records[i].owns_artwork) continue;
+    const DioramaVoxelCell *cell = &terrain->voxel.cells[i];
+    for (unsigned face = 0; face < kDioramaVoxelArtSlotCount; ++face) {
+      const DioramaVoxelArt *art = AuthoredFaceArt(cell, face);
+      if (art) for (unsigned q = 0; q < 4; ++q) CollectCharacter(sources, art->words[q]);
+    }
+  }
+  free(scratch);
+  return true;
+}
+
+bool ActionVoxel_UsesAnimatedCharacters(const ActionVoxelCharacterSources *sources,
+    const ActionVoxelAnimation *animation) {
+  for (size_t at = animation->offset; at < animation->offset + animation->bytes;
+       at += kActionVoxelCharacterBytes)
+    if (sources->native[at / kActionVoxelCharacterBytes]) return true;
   return false;
+}
+
+void ActionVoxelAnimationCache_Trim(ActionVoxelAnimationCache *cache, const ActionVoxelGeometry *keep) {
+  for (unsigned i = 0; i < kActionVoxelCachedPhases; ++i) {
+    if (cache->entries[i] == keep) continue;
+    ActionVoxel_Release(cache->entries[i]);
+    cache->entries[i] = NULL;
+  }
+}
+
+void ActionVoxelAnimationCache_Clear(ActionVoxelAnimationCache *cache) {
+  ActionVoxelAnimationCache_Trim(cache, NULL);
+  *cache = (ActionVoxelAnimationCache){0};
+}
+
+static bool AnimationIsPresentationOnly(const ActionVoxelBuildSource *source,
+    const ActionRoomScene *reference);
+
+int ActionVoxelAnimationCache_Select(ActionVoxelAnimationCache *cache, int phase,
+    const ActionVoxelBuildSource *source, const ActionRoomScene *reference) {
+  if (phase < 0) {
+    ActionVoxelAnimationCache_Clear(cache);
+    return -1;
+  }
+  if (!cache->classified) {
+    cache->shared = AnimationIsPresentationOnly(source, reference);
+    cache->classified = true;
+  }
+  if (cache->shared) return 0;
+  return phase < kActionVoxelCachedPhases ? phase : -1;
+}
+
+bool ActionVoxelAnimationCache_SharesPhases(const ActionVoxelAnimationCache *cache) {
+  return cache->shared;
+}
+
+const ActionVoxelGeometry *ActionVoxelAnimationCache_Acquire(
+    const ActionVoxelAnimationCache *cache, int slot) {
+  return (unsigned)slot < kActionVoxelCachedPhases ? ActionVoxel_Retain(cache->entries[slot]) : NULL;
+}
+
+void ActionVoxelAnimationCache_Store(ActionVoxelAnimationCache *cache, int slot,
+    const ActionVoxelGeometry *geometry) {
+  if ((unsigned)slot >= kActionVoxelCachedPhases || !geometry) return;
+  const ActionVoxelGeometry *retained = ActionVoxel_Retain(geometry);
+  ActionVoxel_Release(cache->entries[slot]);
+  cache->entries[slot] = retained;
 }
 typedef struct AnimationMaterial {
   uint16_t words[4];
@@ -777,72 +975,85 @@ static bool AddAnimationMaterial(AnimationMaterial materials[kAnimationMaterials
   m->collision = collision;
   return true;
 }
-bool ActionVoxel_AnimationIsPresentationOnly(const ActionRoomScene *s,
-                                   const ActionRoomScene *reference,
-                                   const DioramaRoomOverride *terrain,
-                                   const uint16_t *tiles, size_t tile_pitch) {
+static bool WaterAnimationIsPresentationOnly(const ActionRoomScene *s,
+    const ActionRoomScene *reference, const DioramaRoomOverride *terrain, size_t offset, size_t bytes);
+
+/* Profiles with a reviewed proof may share one slot. All other profiles
+ * still get exact-phase reuse when their geometry reads animated art. */
+static bool HasPresentationOnlyProof(ActionVoxelProfile profile) {
+  return profile == kActionVoxelProfile_KassandoraDesert ||
+      profile == kActionVoxelProfile_KassandoraTomb || profile == kActionVoxelProfile_AitosCaverns ||
+      profile == kActionVoxelProfile_MarahnaTemple || profile == kActionVoxelProfile_MarahnaJungle ||
+      profile == kActionVoxelProfile_NorthwallSnow;
+}
+
+static bool AuthoredArtIsAnimationIndependent(const ActionVoxelBuildSource *source,
+    unsigned width, unsigned height, size_t offset, size_t bytes,
+    const ActionVoxelAuthoredLayout *layout) {
+  const DioramaRoomOverride *terrain = source->terrain;
+  const DioramaStampLayerOverride *stamps = &terrain->stamp_layers[0];
+  for (int y = 0; y < layout->rows; ++y) for (int x = 0; x < layout->columns; ++x) {
+    const unsigned owner = layout->owners[(size_t)y * layout->columns + x];
+    if (!owner || !layout->records[owner - 1].owns_artwork) continue;
+    const int cx = layout->x + x, cy = layout->y + y;
+    /* A moved native cap can sample a 16px patch extending into an adjacent cell. */
+    const int reach = layout->records[owner - 1].native_transform ? 1 : 0;
+    for (int dy = -reach; dy <= reach; ++dy) for (int dx = -reach; dx <= reach; ++dx) {
+      const DioramaTileStamp *stamp = DioramaLayerOrder_StampAt(stamps, cx + dx, cy + dy);
+      if (reach && stamp && stamp->blank) continue;
+      for (unsigned q = 0; q < 4; ++q) {
+        uint16_t word = 0;
+        const int tx = (cx + dx) * 2 + (int)(q & 1), ty = (cy + dy) * 2 + (int)(q >> 1);
+        if (stamp) word = stamp->blank ? 0 : stamp->words[q];
+        else if ((unsigned)tx < width && (unsigned)ty < height) {
+          if (source->tiles) word = source->tiles[(size_t)ty * source->tile_pitch + tx];
+          else if (!ActionRoomScene_LookupTile(source->scene, 1, tx, ty, &word, NULL)) return false;
+        } else if (reach) continue; /* Missing neighbours are transparent. */
+        const size_t at = (word & 1023) * kActionVoxelCharacterBytes;
+        if (at >= offset && at < offset + bytes) return false;
+      }
+    }
+  }
+  for (unsigned i = 0; i < terrain->voxel.cell_count; ++i) {
+    if (!layout->records[i].used || !layout->records[i].owns_artwork) continue;
+    for (unsigned face = 0; face < kDioramaVoxelArtSlotCount; ++face) {
+      const DioramaVoxelArt *art = AuthoredFaceArt(&terrain->voxel.cells[i], face);
+      if (!art) continue;
+      for (unsigned q = 0; q < 4; ++q) {
+        const size_t at = (art->words[q] & 1023) * kActionVoxelCharacterBytes;
+        if (at >= offset && at < offset + bytes) return false;
+      }
+    }
+  }
+  return true;
+}
+
+static bool AnimationIsPresentationOnly(const ActionVoxelBuildSource *source,
+    const ActionRoomScene *reference) {
+  const ActionRoomScene *s = source->scene;
+  const DioramaRoomOverride *terrain = source->terrain;
+  const uint16_t *tiles = source->tiles;
+  const size_t tile_pitch = source->tile_pitch;
   size_t offset, bytes;
   /* Only opt in policies without baked neighbour samples or structural
    * inference from rear artwork. Other policies retain normal invalidation. */
   if (!s || !reference || s->group != reference->group || s->map != reference->map ||
-      !ActionVoxel_AnimationCacheCandidate(ActionVoxel_ProfileForRoom(s->group,s->map)) ||
-      !ActionRoomScene_HasBackground(s,1) ||
-      !ActionVoxel_AnimationMatches(reference,s->characters,&offset,&bytes)) return false;
+      !ActionRoomScene_HasBackground(s,1)) return false;
   const ActionVoxelProfile profile = ActionVoxel_ProfileForRoom(s->group,s->map);
+  const bool bg2_water = ActionVoxel_BackgroundWater(profile, s->map);
+  if ((!bg2_water && !HasPresentationOnlyProof(profile)) ||
+      !ActionVoxel_AnimationMatches(reference, s->characters, &offset, &bytes)) return false;
   const bool desert = profile == kActionVoxelProfile_KassandoraDesert;
   const unsigned width = ActionRoomScene_TileWidth(s,1), height = ActionRoomScene_TileHeight(s,1);
   if (tiles && tile_pitch < width) return false;
-  /* Owned front/backing and donor art need exact animation only when they
-   * actually observe the animated CHR window. A static touch-up must not undo
-   * whole-room animation reuse on heavy jungle and snow maps. */
-  if(terrain && terrain->voxel.cell_count) {
-    const DioramaStampLayerOverride *bounds=&terrain->stamp_layers[0];
-    const int x0=bounds->set_bounds?bounds->x0:0,y0=bounds->set_bounds?bounds->y0:0;
-    const int columns=bounds->set_bounds?bounds->x1-x0:(int)width/2;
-    const int rows=bounds->set_bounds?bounds->y1-y0:(int)height/2;
-    uint16_t *owners=ActionVoxel_RecordOwners(&terrain->voxel,x0,y0,columns,rows);
-    if(!owners)return false;
-    bool used[kDioramaVoxelCellMax]={0},safe=true;
-    for(int yy=0;safe && yy<rows;++yy)for(int xx=0;safe && xx<columns;++xx) {
-      const unsigned owner=owners[(size_t)yy*columns+xx];if(!owner)continue;
-      const DioramaVoxelCell *cell=&terrain->voxel.cells[owner-1];
-      if(!ActionVoxel_CellOwnsArtwork(cell))continue;
-      used[owner-1]=true;
-      const int cx=x0+xx,cy=y0+yy;
-      /* A moved native cap owns a small neighbour patch for its reviewed
-       * inset/fold sampling. Those source pixels must stay live as well as
-       * the selected cell itself; the compiler's 16px patches reach at most
-       * one adjacent cell in each direction. */
-      const int reach=ActionVoxel_CellUsesNativeTransform(cell)?1:0;
-      for(int dy=-reach;safe && dy<=reach;++dy)for(int dx=-reach;safe && dx<=reach;++dx) {
-        const DioramaTileStamp *stamp=DioramaLayerOrder_StampAt(bounds,cx+dx,cy+dy);
-        if(reach && stamp && stamp->blank)continue;
-        for(unsigned q=0;q<4;++q) {
-          uint16_t word=0;const int x=(cx+dx)*2+(q&1),y=(cy+dy)*2+(q>>1);
-          if(stamp)word=stamp->blank?0:stamp->words[q];
-          else if(x>=0 && y>=0 && (unsigned)x<width && (unsigned)y<height) {
-            if(tiles)word=tiles[(size_t)y*tile_pitch+x];
-            else if(!ActionRoomScene_LookupTile(s,1,x,y,&word,NULL)){safe=false;break;}
-          } else if(reach)continue; /* Missing neighbours are transparent, not CHR 0. */
-          const size_t at=(word&1023)*32;
-          if(at>=offset && at<offset+bytes){safe=false;break;}
-        }
-      }
-    }
-    free(owners);if(!safe)return false;
-    for(unsigned i=0;i<terrain->voxel.cell_count;++i)if(used[i]) {
-      const DioramaVoxelCell *cell=&terrain->voxel.cells[i];
-      const DioramaVoxelArt *arts[]={&cell->backing_art,&cell->top_art,&cell->side_art,
-          &cell->front_art,&cell->left_art,&cell->right_art,&cell->bottom_art};
-      const unsigned fields[]={kDioramaVoxelCell_BackArt,kDioramaVoxelCell_TopArt,kDioramaVoxelCell_SideArt,
-          kDioramaVoxelCell_FrontArt,kDioramaVoxelCell_LeftArt,kDioramaVoxelCell_RightArt,kDioramaVoxelCell_BottomArt};
-      for(unsigned a=0;a<7;++a)if((cell->fields&fields[a]) && arts[a]->set)
-        for(unsigned q=0;q<4;++q) {
-          const size_t donor=(arts[a]->words[q]&1023)*32;
-          if(donor>=offset && donor<offset+bytes)return false;
-        }
-    }
-  }
+  /* Owned front, backing and donor artwork need exact phases only when
+   * their source pixels actually observe the animated character window. */
+  ActionVoxelAuthoredLayout *scratch = NULL;
+  const ActionVoxelAuthoredLayout *layout;
+  if (ResolveAuthoredLayout(source, &scratch, &layout)) return false;
+  const bool authored_safe = !layout || AuthoredArtIsAnimationIndependent(source, width, height, offset, bytes, layout);
+  free(scratch);
+  if (!authored_safe) return false;
   AnimationMaterial materials[kAnimationMaterials];
   unsigned count = 0;
   /* Include unused definitions: a definition can supply the backing marker
@@ -882,6 +1093,8 @@ bool ActionVoxel_AnimationIsPresentationOnly(const ActionRoomScene *s,
       }
     return true;
   }
+  if (bg2_water)
+    return !count && WaterAnimationIsPresentationOnly(s, reference, terrain, offset, bytes);
   ActionRoomScene *phase_scene = malloc(sizeof(*phase_scene));
   if (!phase_scene) return false;
   *phase_scene = *s;
@@ -940,6 +1153,14 @@ bool ActionVoxel_AnimationIsPresentationOnly(const ActionRoomScene *s,
   free(phase_scene);
   return safe;
 }
+bool ActionVoxel_AnimationIsPresentationOnly(const ActionRoomScene *scene,
+    const ActionRoomScene *reference, const DioramaRoomOverride *terrain,
+    const uint16_t *tiles, size_t tile_pitch) {
+  const ActionVoxelBuildSource source = {.scene = scene, .terrain = terrain, .tiles = tiles,
+    .tile_pitch = tile_pitch};
+  return AnimationIsPresentationOnly(&source, reference);
+}
+
 static bool LookupMaterialSource(const ActionRoomScene *s, const DioramaStampLayerOverride *stamps,
                            const CastleMaterial native[256], int cx, int cy, CastleMaterial *out,
                            uint8_t *metatile, const uint16_t *tiles, size_t tile_pitch) {
@@ -995,18 +1216,14 @@ static bool LookupMaterial(const ActionRoomScene *s,const DioramaStampLayerOverr
       out->top_surface==kVoxelTopSurface_Own16 &&
       CastleChainAbove(s,stamps,native,cx,cy,tiles,tile_pitch))
     for(unsigned q=0;q<4;++q)out->kind[q]=kVoxelSolid;
-  if(!out->native_slope || (out->collision!=6 && out->collision!=9))return true;
+  if(!out->native_slope || !ActionNativeContact_IsRamp(out->collision))return true;
   const unsigned left=NativeContourCollision(s,stamps,native,cx-1,cy);
   const unsigned right=NativeContourCollision(s,stamps,native,cx+1,cy);
   /* The native $00:90A9/$9084 collision paths choose 1:2 paired ramps from
    * adjacent matching collision codes, otherwise a standalone 1:1 ramp.
    * Neighbour priority is intentional and matches the native two branches. */
   for(unsigned x=0;x<16;++x) {
-    const unsigned phase=out->collision==6?(x&14):((~x)&14);
-    const bool upper=out->collision==6?left==6:right==9;
-    const bool lower=out->collision==6?right==6:left==9;
-    const unsigned height=upper?8+phase/2:lower?phase/2:phase;
-    for(unsigned y=0;y<16-height;++y)out->rear_rows[y]|=1u<<(15-x);
+    for(unsigned y=0;y<ActionNativeContact_Top(out->collision,left,right,x);++y)out->rear_rows[y]|=1u<<(15-x);
   }
   return true;
 }
@@ -1083,9 +1300,8 @@ static unsigned WaterMaterial(const ActionRoomScene *s, const uint16_t words[4],
   }
   return false;
 }
-static bool BuildWaterSurfaces(ActionVoxelGeometry *c, const ActionRoomScene *s,
-                               const DioramaRoomOverride *terrain) {
-  if (!ActionVoxel_BackgroundWater(c->profile,s->map)) return true;
+static bool BuildWaterSurfaces(const ActionRoomScene *s, const DioramaRoomOverride *terrain,
+    VoxelWaterSurface *surfaces, unsigned *surface_count, VoxelWaterfall *falls, unsigned *fall_count) {
   if (!ActionRoomScene_HasBackground(s,2) || !s->have_character_bank[1]) return false;
   const DioramaStampLayerOverride *stamps = terrain ? &terrain->stamp_layers[1] : NULL;
   int x0 = 0, y0 = 0, x1 = ActionRoomScene_TileWidth(s,2)*8, y1 = ActionRoomScene_TileHeight(s,2)*8;
@@ -1094,13 +1310,13 @@ static bool BuildWaterSurfaces(ActionVoxelGeometry *c, const ActionRoomScene *s,
   }
   if (!ActionVoxel_ValidBounds(x0,y0,x1,y1)) return false;
   CastleMaterial materials[256]; unsigned char water[256];
+  const unsigned attributes = ActionRoomScene_BgAttributes(s, 2);
   for (unsigned id = 0; id < 256; ++id) {
     uint16_t words[4];
-    for (unsigned q = 0; q < 4; ++q) {
-      const uint8_t *d = s->bg[1].metatiles+id*8+q*2;
-      words[q] = ActionBg_ComposeTilemapWord((d[0]<<8)|d[1],kActionRoomSceneTileWordMask,
-                                             ActionRoomScene_BgAttributes(s,2));
-    }
+    const uint8_t *d = s->bg[1].metatiles + id * 8;
+    for (unsigned q = 0; q < 4; ++q, d += 2)
+      words[q] = ActionBg_ComposeTilemapWord((d[0] << 8) | d[1],
+          kActionRoomSceneTileWordMask, attributes);
     water[id] = WaterMaterial(s,words,&materials[id]);
   }
   for (int y = y0/16; y < y1/16; ++y) for (int x = x0/16; x < x1/16; ++x) {
@@ -1120,35 +1336,72 @@ static bool BuildWaterSurfaces(ActionVoxelGeometry *c, const ActionRoomScene *s,
     const bool high = (material->words[0]&0x2000) != 0;
     if(kind==2) {
       unsigned i=0;
-      for(;i<c->waterfall_count;++i) {
-        VoxelWaterfall *fall=&c->waterfalls[i];
+      for(;i<*fall_count;++i) {
+        VoxelWaterfall *fall=&falls[i];
         if(fall->x==x*16 && fall->width==16 && fall->y+fall->height==y*16 && fall->high_priority==high) {
           fall->height+=16;break;
         }
       }
-      if(i==c->waterfall_count) {
+      if(i==*fall_count) {
         if(i==kVoxelMaxWaterfalls)return false;
-        c->waterfalls[c->waterfall_count++]=(VoxelWaterfall){x*16,y*16,16,16,high};
+        falls[(*fall_count)++]=(VoxelWaterfall){x*16,y*16,16,16,high};
       }
       continue;
     }
-    VoxelWaterSurface *last = c->water_surface_count ? &c->water_surfaces[c->water_surface_count-1] : NULL;
+    VoxelWaterSurface *last = *surface_count ? &surfaces[*surface_count - 1] : NULL;
     if (last && last->y == y*16 && last->x+last->width == x*16 && last->high_priority == high)
       last->width += 16;
     else {
-      if (c->water_surface_count == kVoxelMaxWaterSurfaces) return false;
-      c->water_surfaces[c->water_surface_count++] = (VoxelWaterSurface){
+      if (*surface_count == kVoxelMaxWaterSurfaces) return false;
+      surfaces[(*surface_count)++] = (VoxelWaterSurface){
           .x=x*16,.y=y*16,.width=16,.high_priority=high,.background=1,.sample_y=3,.sample_height=8};
     }
   }
   /* Join adjacent columns only when the complete native fall agrees. */
-  for(unsigned i=0;i<c->waterfall_count;++i)for(unsigned j=i+1;j<c->waterfall_count;) {
-    VoxelWaterfall *a=&c->waterfalls[i],*b=&c->waterfalls[j];
+  for(unsigned i=0;i<*fall_count;++i)for(unsigned j=i+1;j<*fall_count;) {
+    VoxelWaterfall *a=&falls[i],*b=&falls[j];
     if(a->x+a->width==b->x && a->y==b->y && a->height==b->height && a->high_priority==b->high_priority) {
-      a->width+=b->width;memmove(b,b+1,(c->waterfall_count-j-1)*sizeof(*b));--c->waterfall_count;
+      a->width+=b->width;memmove(b,b+1,(*fall_count-j-1)*sizeof(*b));--*fall_count;
     } else ++j;
   }
   return true;
+}
+
+static bool WaterAnimationIsPresentationOnly(const ActionRoomScene *s,
+    const ActionRoomScene *reference, const DioramaRoomOverride *terrain, size_t offset, size_t bytes) {
+  /* Compare the water layout after authored stamps and opacity edits. The
+   * captures still sample the pixels from the live phase. */
+  VoxelWaterSurface baseline_surfaces[kVoxelMaxWaterSurfaces];
+  VoxelWaterfall baseline_falls[kVoxelMaxWaterfalls];
+  unsigned baseline_surface_count = 0, baseline_fall_count = 0;
+  if (!BuildWaterSurfaces(s, terrain, baseline_surfaces, &baseline_surface_count,
+          baseline_falls, &baseline_fall_count)) return false;
+  ActionRoomScene *phase = malloc(sizeof(*phase));
+  if (!phase) return false;
+  *phase = *s;
+  bool stable = true;
+  const unsigned phases = ActionRoomScene_CharacterAnimationPhaseCount(reference);
+  for (unsigned p = 0; stable && p < phases; ++p) {
+    memcpy(phase->characters + offset, reference->characters + offset + p * bytes, bytes);
+    if (!memcmp(phase->characters + offset, s->characters + offset, bytes)) continue;
+    VoxelWaterSurface surfaces[kVoxelMaxWaterSurfaces];
+    VoxelWaterfall falls[kVoxelMaxWaterfalls];
+    unsigned surface_count = 0, fall_count = 0;
+    stable = BuildWaterSurfaces(phase, terrain, surfaces, &surface_count, falls, &fall_count) &&
+        surface_count == baseline_surface_count && fall_count == baseline_fall_count;
+    for (unsigned i = 0; stable && i < surface_count; ++i) {
+      const VoxelWaterSurface *a = &baseline_surfaces[i], *b = &surfaces[i];
+      stable = a->x == b->x && a->y == b->y && a->width == b->width &&
+          a->high_priority == b->high_priority;
+    }
+    for (unsigned i = 0; stable && i < fall_count; ++i) {
+      const VoxelWaterfall *a = &baseline_falls[i], *b = &falls[i];
+      stable = a->x == b->x && a->y == b->y && a->width == b->width &&
+          a->height == b->height && a->high_priority == b->high_priority;
+    }
+  }
+  free(phase);
+  return stable;
 }
 /* A high-priority post has no low-priority pixels to copy at its old position.
  * Reconstruct only an unambiguous continuation between two native neighbours.
@@ -1967,22 +2220,19 @@ static bool BuildMountainRampReturns(ActionVoxelGeometry *c,const ActionRoomScen
 #include "action_voxel_castle_matte.inc"
 #include "action_voxel_jungle_terminal.inc"
 #include "action_voxel_infill.inc"
-static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
-                          const DioramaRoomOverride *terrain, const uint16_t *tiles, size_t tile_pitch) {
+static bool BuildGeometry(ActionVoxelGeometry *c, const ActionVoxelBuildSource *source) {
+  const ActionRoomScene *s = source->scene;
+  const DioramaRoomOverride *terrain = source->terrain;
+  const uint16_t *tiles = source->tiles;
+  const size_t tile_pitch = source->tile_pitch;
   if (!ActionVoxel_Room(s->group, s->map)) return true;
   c->profile = ActionVoxel_ProfileForRoom(s->group, s->map);
   if (terrain) c->edits = terrain->voxel;
   if (!ActionRoomScene_HasBackground(s, 1) || !s->have_palette || !s->have_character_bank[0])
     return false;
-  const int native_w = ActionRoomScene_TileWidth(s, 1), native_h = ActionRoomScene_TileHeight(s, 1);
   const DioramaStampLayerOverride *stamps = terrain ? &terrain->stamp_layers[0] : NULL;
-  int x0 = 0, y0 = 0, x1 = native_w * 8, y1 = native_h * 8;
-  if (stamps && stamps->set_bounds) {
-    x0 = stamps->x0 * 16;
-    y0 = stamps->y0 * 16;
-    x1 = stamps->x1 * 16;
-    y1 = stamps->y1 * 16;
-  }
+  const VoxelRoomBounds bounds = RoomBounds(s, terrain);
+  const int x0 = bounds.x0, y0 = bounds.y0, x1 = bounds.x1, y1 = bounds.y1;
   if (!ActionVoxel_ValidBounds(x0, y0, x1, y1)) return false;
   c->origin_x = x0;
   c->origin_y = y0;
@@ -2508,75 +2758,80 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionRoomScene *s,
     }
     free(c->rear_relief);c->rear_relief=smooth;
   }
-  if (!BuildWaterSurfaces(c,s,terrain)) return false;
+  if (ActionVoxel_BackgroundWater(c->profile, s->map) &&
+      !BuildWaterSurfaces(s, terrain, c->water_surfaces, &c->water_surface_count,
+          c->waterfalls, &c->waterfall_count)) return false;
   c->ready = true;
-  if(!BuildAuthoredCells(c,s,terrain,stamps,native,palette,tiles,tile_pitch))return false;
+  ActionVoxelAuthoredLayout *scratch = NULL;
+  const ActionVoxelAuthoredLayout *layout;
+  c->build_error = ResolveAuthoredLayout(source, &scratch, &layout);
+  const bool authored_ok = !c->build_error &&
+      BuildAuthoredCells(c,s,terrain,stamps,native,palette,tiles,tile_pitch,layout);
+  free(scratch);
+  if (!authored_ok) return false;
   SurfaceCloseRoomEdges(c,s,terrain,stamps,native,palette,tiles,tile_pitch);
   if(!BuildAutomaticSurfaceArt(c,s,terrain,stamps,native,palette,tiles,tile_pitch))return false;
   if(!BuildLintelReturns(c,s,terrain,stamps,native,tiles,tile_pitch))return false;
   BuildCastleTerminalMatte(c,s,terrain,stamps,native,palette,tiles,tile_pitch);
   BuildJungleTerminal(c,s,terrain,stamps,native,palette,tiles,tile_pitch);
-  /* Store bounds for consecutive edge runs after all authored/appended edges
-   * have been indexed. Match the renderer's native capture test exactly. */
+  /* Keep native bounds and transformed membership in pass order. A moved edge
+   * can enter the capture even when its original chunk is outside. */
   for(unsigned pass=0;pass<kVoxelPassLists;++pass) {
     for(unsigned i=0;i<c->pass_counts[pass];++i) {
       const VoxelEdge *edge=&c->edges[c->pass_edges[pass][i]];
       const int x=edge->x+(edge->side==1),y=edge->y+(edge->side==2);
       const int right=x+((edge->side&1)?0:edge->length),bottom=y+((edge->side&1)?edge->length:0);
       VoxelEdgeChunk *chunk=&c->pass_chunks[pass][i/kVoxelEdgeChunkSize];
-      if(i%kVoxelEdgeChunkSize==0) *chunk=(VoxelEdgeChunk){x,y,right,bottom};
+      const unsigned offset=i%kVoxelEdgeChunkSize;
+      if(offset==0) *chunk=(VoxelEdgeChunk){.left=x,.top=y,.right=right,.bottom=bottom};
       else {
         if(x<chunk->left)chunk->left=x;
         if(y<chunk->top)chunk->top=y;
         if(right>chunk->right)chunk->right=right;
         if(bottom>chunk->bottom)chunk->bottom=bottom;
       }
+      if(c->native_transform_count) {
+        const VoxelAuthoredCell *cell=ActionVoxel_AuthoredCellAt(c,
+            (int)floorf(edge->x/16.f),(int)floorf(edge->y/16.f));
+        if(cell&&cell->native_transform)chunk->transformed_edges|=UINT32_C(1)<<offset;
+      }
     }
   }
+  c->edge_chunks_ready=true;
+  ActionVoxel_PrepareFrontClasses(c);
+  ActionVoxel_PrepareSplitRules(c);
   return true;
 }
 
-bool ActionVoxel_BuildWithTiles(ActionVoxelGeometry *c, const ActionRoomScene *s,
-                           const DioramaRoomOverride *terrain, ActionVoxelSettings settings,
-                           const uint16_t *tiles, size_t tile_pitch) {
+bool ActionVoxel_BuildFromSource(ActionVoxelGeometry *c, const ActionVoxelBuildSource *source,
+    ActionVoxelSettings settings) {
+  const ActionRoomScene *s = source->scene;
   if (!c || atomic_load_explicit(&c->references, memory_order_relaxed) != 1 || !s || !isfinite(settings.depth) || !isfinite(settings.play_recess) ||
       settings.depth < 0 || settings.depth > .4f || settings.play_recess < 0 ||
       settings.play_recess > settings.depth * .7f)
     return false;
-  if (tiles && tile_pitch < ActionRoomScene_TileWidth(s, 1)) return false;
+  if (source->tiles && source->tile_pitch < ActionRoomScene_TileWidth(s, 1)) return false;
   ActionVoxelGeometry *next = ActionVoxel_Create();
   if (!next) return false;
   next->settings = settings;
-  if (!BuildGeometry(next, s, terrain, tiles, tile_pitch)) {
+  if (!BuildGeometry(next, source)) {
     c->build_error=next->build_error;
     ActionVoxel_Release(next);
     return false;
   }
-  free(c->front);
-  free(c->semantic_cells);
-  free(c->native_priority_decks);
-  free(c->cutouts);
-  free(c->branch_pixels);
-  free(c->front_recess);
-  free(c->thin_trim_cells);
-  free(c->raised_scenery_cells);
-  free(c->pixel_recess_cells);
-  free(c->trunk_cells);
-  free(c->column_cells);
-  free(c->rear_relief);
-  free(c->soft_surfaces);
-  free(c->rear_fills);
-  free(c->jungle_terminal);
-  free(c->authored);
-  free(c->authored_at);
-  free(c->authored_art);
-  free(c->authored_cap_art);
-  free(c->authored_contours);
-  free(c->profile_surfaces);
+  ActionVoxel_FreeBuffers(c);
   *c = *next;
   atomic_init(&c->references, 1);
   free(next);
   return true;
+}
+
+bool ActionVoxel_BuildWithTiles(ActionVoxelGeometry *c, const ActionRoomScene *s,
+    const DioramaRoomOverride *terrain, ActionVoxelSettings settings, const uint16_t *tiles,
+    size_t tile_pitch) {
+  const ActionVoxelBuildSource source = {.scene = s, .terrain = terrain, .tiles = tiles,
+    .tile_pitch = tile_pitch};
+  return ActionVoxel_BuildFromSource(c, &source, settings);
 }
 
 bool ActionVoxel_Build(ActionVoxelGeometry *c, const ActionRoomScene *s,

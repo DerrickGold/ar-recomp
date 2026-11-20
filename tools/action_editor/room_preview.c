@@ -96,6 +96,7 @@ unsigned RoomPreview_CloudOpenings(uint32_t seed,unsigned count) {
 }
 
 static EditorRoomScene *s_room;
+static char s_room_load_error[192];
 static EditorObjectPreview s_objects;
 static ArRenderTexture s_textures[kDioramaPlane_Count];
 static const uint8_t *s_pixels[kDioramaPlane_Count];
@@ -534,7 +535,10 @@ uint32_t RoomPreview_EffectHash(void) { return EditorRoomScene_EffectHash(s_room
 uint32_t RoomPreview_Hash(void) { return EditorRoomScene_Hash(s_room); }
 unsigned RoomPreview_Width(void) { return s_room ? EditorRoomScene_Width(s_room) : 0; }
 unsigned RoomPreview_Height(void) { return s_room ? EditorRoomScene_Height(s_room) : 0; }
-const char *RoomPreview_SceneryError(void) { return s_room ? EditorRoomScene_SceneryError(s_room) : "No room is loaded."; }
+const char *RoomPreview_SceneryError(void) {
+  if(s_room_load_error[0])return s_room_load_error;
+  return s_room ? EditorRoomScene_SceneryError(s_room) : "No room is loaded.";
+}
 int RoomPreview_CameraX(void) { return s_cached ? s_x : 0; }
 unsigned RoomPreview_Uploads(void) { return s_uploads; }
 void RoomPreview_ClearObjects(void) {
@@ -614,16 +618,34 @@ void RoomPreview_Reset(void) {
   EditorReceiverPreview_Reset();s_receiver_projection=(DioramaProjection){0};
   memset(s_storage, 0, sizeof(s_storage));
 }
-int RoomPreview_Load(unsigned size) {
+static int LoadRoom(unsigned size,const char *scenery,Action3DMode mode) {
+  s_room_load_error[0]=0;
   ActionSceneSnapshot assets;
   if (size > kActionSceneSnapshotMaxBytes ||
       !ActionSceneSnapshot_Decode(DioramaPreview_Input(), size, &assets)) return 0;
-  EditorRoomScene *next = EditorRoomScene_Create(&assets);
+  /* WASM has a fixed heap. Keep the visible room until its replacement
+   * succeeds, but free phase variants that the current frame does not use. */
+  EditorRoomScene_TrimVoxelAnimationCache(s_room);
+  EditorRoomScene *next=EditorRoomScene_CreateConfigured(&assets,scenery,mode,
+      s_room_load_error,sizeof(s_room_load_error));
   if (!next) return 0;
   RoomPreview_Reset(); DioramaPreview_Reset(); s_room = next;
   return 1;
 }
+int RoomPreview_Load(unsigned size) {
+  return LoadRoom(size,NULL,kAction3D_Voxel);
+}
+int RoomPreview_LoadConfigured(unsigned scene_size,unsigned scenery_size,int mode) {
+  s_room_load_error[0]=0;
+  const unsigned capacity=DioramaPreview_Capacity();
+  if(scene_size>=capacity||scenery_size>=capacity-scene_size||mode<kAction3D_Off||mode>kAction3D_Voxel)return 0;
+  uint8_t *scenery=DioramaPreview_Input()+scene_size;
+  if(memchr(scenery,0,scenery_size))return 0;
+  scenery[scenery_size]=0;
+  return LoadRoom(scene_size,(char *)scenery,(Action3DMode)mode);
+}
 int RoomPreview_Configure(unsigned size) {
+  s_room_load_error[0]=0;
   if (!s_room || size >= DioramaPreview_Capacity() || memchr(DioramaPreview_Input(), 0, size)) return 0;
   DioramaPreview_Input()[size] = 0;
   if (!EditorRoomScene_Configure(s_room, (char *)DioramaPreview_Input())) return 0;

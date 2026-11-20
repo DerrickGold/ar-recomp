@@ -222,6 +222,10 @@ typedef struct DioramaPixelEdit {
 typedef struct DioramaPixelLayerOverride {
   uint16_t count;
   DioramaPixelEdit edits[kDioramaPixelEditMax];
+  /* Terrain-resolved lookup tables. Entries are record indices plus one. */
+  bool indexed;
+  uint16_t metatile_index[256];
+  uint16_t cell_index[2 * kDioramaPixelEditMax];
 } DioramaPixelLayerOverride;
 
 /* Frozen displayed tile words and depth bands. Coordinates may extend beyond
@@ -296,6 +300,8 @@ typedef struct DioramaRoomOverride {
   DioramaNativeBloom native_bloom;
   DioramaTrunkSettings trunk;
   DioramaVoxelEdits voxel;
+  /* Published only on the immutable, terrain-resolved manifest view. */
+  uint64_t voxel_geometry_keys[2];
   struct {
     bool set;
     int16_t x, y; /* view offset in native pixels, relative to native scroll */
@@ -355,6 +361,11 @@ void DioramaLayerOrder_ClearRoom(DioramaRoomOverride *room);
  * start zero-initialized and owns its own reusable stamp buffers. */
 bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
                                   unsigned profile, DioramaRoomOverride *out);
+/* Both operations read the same terrain-resolved authored inputs. Native
+ * scene data and live tile words are checked by the geometry cache itself. */
+uint64_t DioramaLayerOrder_VoxelGeometryKey(const DioramaRoomOverride *room, bool include_bg2);
+bool DioramaLayerOrder_VoxelGeometryInputsEqual(const DioramaRoomOverride *a,
+    const DioramaRoomOverride *b, bool include_bg2);
 
 /* Lookup a coordinate in a terrain-resolved stamp layer. */
 const DioramaTileStamp *DioramaLayerOrder_StampAt(
@@ -377,7 +388,8 @@ const DioramaPixelEdit *DioramaLayerOrder_PixelEditAt(
     int cell_y, int metatile);
 
 typedef struct DioramaLayerOrderTable {
-  DioramaRoomOverride rooms[kDioramaRoomOverrideMax];
+  /* Allocate only sections that exist, and keep addresses stable until clear. */
+  DioramaRoomOverride *rooms[kDioramaRoomOverrideMax];
   int count;
 } DioramaLayerOrderTable;
 

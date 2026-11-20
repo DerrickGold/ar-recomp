@@ -111,12 +111,14 @@ static void EqualPixelsAndSplit(const DioramaVoxelSourceCache *cache,const SrPpu
 
 static void Expect(const DioramaVoxelSourceCache *cache,const SrPpuBgPacket *p,
     const DioramaVoxelSourceKey *key,bool match) {
-  assert(DioramaVoxelSourceCache_Matches(cache,p,key)==match);
+  DioramaVoxelSourceRowPlan plan;
+  const bool reusable = DioramaVoxelSourceCache_PlanRows(cache, p, key, &plan) && !plan.count;
+  assert(reusable == match);
   if(match){++hits;EqualPixelsAndSplit(cache,p);}else ++misses;
 }
 
 static void Retain(DioramaVoxelSourceCache *cache,const SrPpuBgPacket *p,const DioramaVoxelSourceKey *key) {
-  DioramaVoxelSourceCache_Retain(cache,p,key);
+  DioramaVoxelSourceCache_Retain(cache,p,key,NULL);
   assert(cache->valid&&cache->packet&&cache->packet!=p);
   Expect(cache,p,key,true);
 }
@@ -372,7 +374,7 @@ static void PaletteSpans(DioramaVoxelSourceCache *cache,const DioramaVoxelSource
     }
     Retain(cache,&original,key);
     CopyPacket(&candidate,&original);ChangeSharedPalette(&candidate,0,128,256);
-    Expect(cache,&candidate,key,false);
+    Expect(cache,&candidate,key,format!=1);
     CheckRows(cache,&candidate,key,format==1?15:0);
     assert(!!PixelDifference(&original,&candidate)==(format==1));
     CopyPacket(&candidate,&original);
@@ -402,9 +404,9 @@ static void PaletteSpans(DioramaVoxelSourceCache *cache,const DioramaVoxelSource
     assert(SrPpuBgPacket_Valid(&original));Retain(cache,&original,key);
     for(unsigned source=0;source<2;++source) {
       CopyPacket(&candidate,&original);ChangeSharedPalette(&candidate,source,128,256);
-      /* Whole-source matching remains conservative. The row planner uses
-       * the exact format-specific reachable span in either full-add mode. */
-      Expect(cache,&candidate,key,false);assert(!PixelDifference(&original,&candidate));
+      /* Compact rows cannot read the upper half of the palette, even when
+       * the split also depends on native winners and BG2. */
+      Expect(cache,&candidate,key,true);assert(!PixelDifference(&original,&candidate));
       CheckRows(cache,&candidate,key,0);
       SrPpuBgPacket_FullAddRow(&candidate,2)[4+3]^=1u<<18;
       CheckRows(cache,&candidate,key,4); /* Native winner changes still count. */
@@ -510,7 +512,7 @@ static void KeysAndFailures(DioramaVoxelSourceCache *cache,const DioramaVoxelSou
     Expect(cache,&candidate,&changed,false);
     DioramaVoxelSourceRowPlan plan;
     assert(!DioramaVoxelSourceCache_PlanRows(cache,&candidate,&changed,&plan));
-    DioramaVoxelSourceCache_Retain(cache,&candidate,&changed);assert(!cache->valid);
+    DioramaVoxelSourceCache_Retain(cache,&candidate,&changed,NULL);assert(!cache->valid);
     Retain(cache,&original,key);
   }
   Expect(cache,NULL,key,false);
@@ -519,6 +521,21 @@ static void KeysAndFailures(DioramaVoxelSourceCache *cache,const DioramaVoxelSou
   DioramaVoxelSourceCache_Reset(cache);assert(!cache->valid&&!cache->packet&&!cache->key.geometry);
   assert(!DioramaVoxelSourceCache_PlanRows(cache,&original,key,&plan));
   Expect(cache,&original,key,false);DioramaVoxelSourceCache_Reset(cache);
+}
+
+static void RetainedOwner(const DioramaVoxelSourceKey *key) {
+  DioramaVoxelSourceCache cache = {0};
+  OwnedBgPacket *owner = malloc(sizeof(*owner));
+  assert(owner);
+  atomic_init(&owner->references, 1);
+  Build(&original, 4, false, true);
+  CopyPacket(&owner->packet, &original);
+  DioramaVoxelSourceCache_Retain(&cache, &owner->packet, key, owner);
+  assert(cache.valid && cache.packet == &owner->packet && !cache.private_packet);
+  assert(atomic_load(&owner->references) == 2);
+  OwnedBgPacket_Release(owner);
+  Expect(&cache, &original, key, true);
+  DioramaVoxelSourceCache_Reset(&cache);
 }
 
 int main(int argc,char **argv) {
@@ -547,6 +564,7 @@ int main(int argc,char **argv) {
   Formats(&cache,&key);OrdinaryRows(&cache,&key);FullAdd(&cache,&key);FullAddRows(&cache,&key);
   PaletteSpans(&cache,&key);
   for(unsigned full_add=0;full_add<2;++full_add)KeysAndFailures(&cache,&key,full_add);
+  RetainedOwner(&key);
   ActionVoxel_Release(geometry);
   if(argc==2)AnchoredSplitRows(argv[1]);
   printf("Voxel source cache: %u semantic hits, %u invalidations, %u decoded pixels plus rear/front split equivalence; formats 1–4, relocated arenas, HDMA, phase, mattes, full-add ownership, key fields and owned lifetime passed\n",hits,misses,compared_pixels);

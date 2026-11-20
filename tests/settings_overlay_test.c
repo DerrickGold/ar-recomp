@@ -1055,6 +1055,7 @@ static void CheckLayerRowPresentation(void) {
       CHECK(!memcmp(&before, &rows[i], sizeof(before)));
     }
   }
+  DioramaLayerOrder_ClearTable(&table);
 }
 
 static void CheckCompleteDescriptorCatalog(void) {
@@ -1684,7 +1685,7 @@ static bool FakeLayerPalette(uint16_t out_cgram[kSettingsOverlayLayerPaletteEntr
 static void CheckLayerEditorSection(void) {
   SettingsOverlay_SetLayerEditorHooks(FakeLayerTable, FakeLayerRoom, FakeLayerSave);
   SettingsOverlay_SetLayerPaletteProvider(FakeLayerPalette);
-  memset(&s_fake_layer_table, 0, sizeof(s_fake_layer_table));
+  DioramaLayerOrder_ClearTable(&s_fake_layer_table);
   for (int i = 0; i < kSettingsOverlayLayerPaletteEntries; i++)
     s_fake_cgram[i] = (uint16_t)i;
   s_fake_room_live = true;
@@ -3820,7 +3821,7 @@ int main(int argc, char **argv) {
    * shipped rake on its water is the case the whole feature exists for. */
   if (preview_dir && preview_dir[0]) {
     SettingsOverlay_SetLayerEditorHooks(FakeLayerTable, FakeLayerRoom, FakeLayerSave);
-    memset(&s_fake_layer_table, 0, sizeof(s_fake_layer_table));
+    DioramaLayerOrder_ClearTable(&s_fake_layer_table);
     s_fake_room_live = true;
     DioramaRoomOverride *preview_room =
         DioramaLayerOrder_FindOrAdd(&s_fake_layer_table, s_fake_group, s_fake_map);

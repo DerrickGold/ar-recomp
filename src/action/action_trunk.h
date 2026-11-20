@@ -11,6 +11,7 @@ enum { kActionTrunkLeft=320, kActionTrunkWidth=384,
 enum { kActionTrunkSideSolid, kActionTrunkSideRear,
   kActionTrunkSidePriority, kActionTrunkSideSnow, kActionTrunkSideSnowFace,
   kActionTrunkSideMaskCount };
+enum { kActionTrunkFrontPixels=-1, kActionTrunkFrontNative, kActionTrunkFrontRecessed };
 
 /* Built from the loaded ROM and selected terrain, never compiled artwork.
  * Immutable after publication; the owner outlives all frames borrowing it. */
@@ -38,6 +39,7 @@ typedef struct ActionTrunkAssets {
   /* Native eight-pixel grid vertices: clearance only beside opaque tunnel
    * openings, with a smooth return to full thickness away from their rim. */
   uint8_t side_clearance_grid[(kActionTrunkMaxHeight/8+1)*(kActionTrunkSideWidth/8+1)];
+  int8_t side_front_cells[(kActionTrunkMaxHeight/8)*(kActionTrunkSideWidth/8)];
 } ActionTrunkAssets;
 
 static inline bool ActionTrunk_ColumnRecess(const ActionTrunkAssets *a,int x,int y) {
@@ -47,6 +49,11 @@ static inline bool ActionTrunk_ColumnRecess(const ActionTrunkAssets *a,int x,int
 
 bool ActionTrunk_Build(ActionTrunkAssets *, const ActionRoomScene *,
                        const struct DioramaRoomOverride *);
+/* Cached during room construction, before these immutable assets publish. */
+static inline int ActionTrunk_SideFrontCell(const ActionTrunkAssets *a,int x,int y) {
+  return a&&a->side_clearance&&x>=0&&(unsigned)x<a->side_width&&y>=0&&(unsigned)y<a->height
+      ?a->side_front_cells[(y/8)*(kActionTrunkSideWidth/8)+x/8]:kActionTrunkFrontNative;
+}
 static inline const uint8_t *ActionTrunk_MaskRow(const ActionTrunkAssets *a,int y,unsigned kind) {
   return a&&kind<3&&y>=0&&(unsigned)y<a->height?a->masks[kind]+y*48:NULL;
 }

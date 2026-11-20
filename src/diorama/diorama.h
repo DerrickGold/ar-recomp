@@ -468,10 +468,12 @@ typedef struct DioramaScene {
   void *capture_voxel_terrain_userdata;
   const DioramaVoxelTerrainCapture *voxel_terrain;
   DioramaTrunkSettings trunk_settings;
-  const struct ActionSceneEffectFrame *trunk_effects;
+  /* Shared environmental input for ground cover, mist, wet/ice finishes and
+   * the tree enclosure. Tree geometry/ambience controls stay in trunk_settings. */
+  const struct ActionSceneEffectFrame *environment_effects;
   /* Optional native snow lighting; omitted by geometry-only replay tools. */
   ActionGroundCoverLightSamplesFn ground_cover_light;
-  bool trunk_lighting, trunk_particles;
+  bool environment_lighting, environment_particles;
   uint32_t additive_plane_mask;
   /* 0 leaves authored color intact; 1 darkens BG1 low/high/far to black.
    * Applied to existing face/depth geometry, without changing layer alpha. */
@@ -571,6 +573,13 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
                                       const DioramaView *view,
                                       const DioramaScene *scene,
                                       DioramaProjection *out_projection);
+
+#ifdef AR_DIORAMA_VOXEL_CACHE_TEST
+typedef struct DioramaVoxelCacheWork {
+  unsigned contour_spans, authored_queries, authored_reservations;
+} DioramaVoxelCacheWork;
+DioramaVoxelCacheWork Diorama_VoxelCacheWork(void);
+#endif
 
 /* Drops backend-owned targets/effects after a render-device reset so they are
  * lazily recreated against the current device. */

@@ -26,7 +26,7 @@ const imports={create:()=>++allocations,destroy:()=>{allocations--;},update:()=>
   const ready=new Promise(resolve=>{readyResolve=resolve;});
   const selected=data.rooms.find(r=>r.group===7&&r.map===3);
   const context=vm.createContext({
-    window:{__ROOM_PREVIEW_WASM__:fs.readFileSync(wasmFile).toString('base64')},
+    window:{__ROOM_PREVIEW_WASM__:fs.readFileSync(wasmFile).toString('base64'),addEventListener(){}},
     document:{querySelector:element,createElement:()=>({}),addEventListener(){}},$:element,
     ActionWebGL2Backend:class {
       constructor(){this.imports=attachDepthImports({...imports},()=>this.memory);this.gl={MAX_TEXTURE_SIZE:1,getParameter:()=>16384};}

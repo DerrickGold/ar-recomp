@@ -127,14 +127,16 @@ static void Synthetic(void) {
   const int views[][4]={{-8,16,16,16},{-13,11,27,27},{-8,17,16,15},{-30,16,11,16},
     {8,16,17,16},{-8,-1,16,12},{-8,32,16,12},{-9,15,1,1},{7,31,2,2}};
   ActionRoomSceneFrameState f={.brightness=15};
-  for(unsigned feature=0;feature<6;++feature) {
-    c.branch_pixels=feature==1 ? branches : NULL;
+  for(unsigned feature=0;feature<7;++feature) {
+    c.branch_pixels=feature==1 || feature==6 ? branches : NULL;
     c.trunk_cells=feature==2 ? trunks : NULL;
-    c.column_cells=feature==3 || feature==5 ? columns : NULL;
+    c.column_cells=feature==3 || feature==5 || feature==6 ? columns : NULL;
     c.column_curves[0].contact_count=feature==5?8:0;
     c.column_curves[0].contact_x=-8;c.column_curves[0].linear=feature==5;
     for(unsigned i=0;i<8;++i)c.column_curves[0].contact[i]=8+i;
     c.profile=feature==4 ? kActionVoxelProfile_Castle : kActionVoxelProfile_BloodpoolMarsh;
+    ActionVoxel_PrepareSplitRules(&c);
+    assert((c.split_rules!=NULL)==(feature!=0));
     for(unsigned v=0;v<sizeof(views)/sizeof(views[0]);++v) {
       const int *view=views[v];
       for(unsigned alpha=0;alpha<6;++alpha) {
@@ -154,6 +156,7 @@ static void Synthetic(void) {
       Compare(&c,-13,11,32,37,35,0,&f,0,0,true);
     }
     c.rear_fill_count=0;f=(ActionRoomSceneFrameState){.brightness=15};
+    free(c.split_rules);c.split_rules=NULL;
   }
   puts("split synthetic: 256 material bytes, alpha/RGB, clipping, pitches, aliases, sparse fills and complex fallback passed");
 }

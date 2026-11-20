@@ -152,8 +152,10 @@ const SharedRoomPreview = (() => {
         // is built. Both room assets can coexist while loading in fixed WASM memory.
         if(nativeObjects)api.RoomPreview_ClearObjects();
         objectControls();
-        send(SharedActionPreview.encode(DATA,BLOBS,room),api.RoomPreview_Load);
-        key=next;collision=null;eventConfig=null;config='';configDirty=true;skyboxKey=0;effectsConfig=null;configuredMode=-1;
+        const text=roomIni();
+        if(!SharedActionPreview.loadConfigured(api,SharedActionPreview.encode(DATA,BLOBS,room),text,selectedMode()))
+          throw Error(sceneryError()||'Shared renderer rejected the room or its edits.');
+        key=next;collision=null;eventConfig=null;config=text;configDirty=false;skyboxKey=0;effectsConfig=null;configuredMode=-1;
       }
       configureMode();
       if(configDirty) {
@@ -165,8 +167,9 @@ const SharedRoomPreview = (() => {
         configDirty=false;
       }
   }
+  function selectedMode() {return typeof VoxelEditor==='undefined'?2:VoxelEditor.mode();}
   function configureMode() {
-    const selected=typeof VoxelEditor==='undefined'?2:VoxelEditor.mode();
+    const selected=selectedMode();
     if(api.RoomPreview_Set3DMode&&!api.RoomPreview_Set3DMode(selected))throw Error('Invalid shared preview 3D mode.');
     if(api.RoomPreview_SetInspection&&!api.RoomPreview_SetInspection(selected===2?inspection:0))throw Error('Invalid preview inspection mode.');
     $('#sharedInspection').disabled=selected!==2;
@@ -484,9 +487,11 @@ const SharedRoomPreview = (() => {
         const base=DATA.rooms.find(r=>roomKey(r)===identity);
         for(let terrain=0;terrain<3;terrain++) {
           const variant=terrainRoom(base,terrain);
-          send(SharedActionPreview.encode(DATA,BLOBS,variant),api.RoomPreview_Load);
-          configureMode();
-          try {send(new TextEncoder().encode(roomSectionHeader(base)+'\n'+bgPolicyPairLines(pair).join('\n')),api.RoomPreview_Configure);}
+          try {
+            const text=roomSectionHeader(base)+'\n'+bgPolicyPairLines(pair).join('\n');
+            if(!SharedActionPreview.loadConfigured(api,SharedActionPreview.encode(DATA,BLOBS,variant),text,selectedMode()))
+              throw Error(sceneryError());
+          }
           catch {throw Error(`Background policy rejected for room ${base.group}:${base.map}, ${terrainLabel(variant)} terrain. Check band order, overlap and world row bounds.`);}
         }
       }

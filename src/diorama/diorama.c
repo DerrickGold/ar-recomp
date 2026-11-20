@@ -24,6 +24,7 @@
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Optional compositor polish is additive. The game owns its settings and
@@ -3590,12 +3591,22 @@ static DioramaTrunkSettings s_trunk_settings;
 static float s_trunk_fade;
 static bool s_trunk_column;
 static float TrunkRecess(void) {return s_trunk_settings.enabled?s_trunk_settings.recess:0;}
+/* Source faces and closing caps derive XY, depth and W from one transform. */
+static bool ProjectHollowClip(const DioramaViewGeometry *g,const Scene3DClipPoint *clip,
+    ArRenderPointF *out,float *out_depth) {
+  if(clip->w<=kScene3DMinimumProjectionDepth)return false;
+  const float inverse_w=1.f/clip->w;
+  const ArRenderPointF position={(clip->x*inverse_w*.5f+.5f)*g->width,
+      (1.f-(clip->y*inverse_w*.5f+.5f))*g->height};
+  const float depth=clip->z*inverse_w*.5f+.5f;
+  if(!isfinite(position.x)||!isfinite(position.y)||!isfinite(depth))return false;
+  *out=position;if(out_depth)*out_depth=depth;return true;
+}
 static bool ProjectHollowPoint(const DioramaViewGeometry *g,DioramaLayerMesh *mesh,
     unsigned index,float x,float y,float z) {
-  if(!ProjectWorldPointDepth(g->matrix,x,y,z,g->width,g->height,
-      &mesh->vertices[index].position,mesh->has_depth?mesh->depths+index:NULL))return false;
   Scene3DClipPoint clip;
-  if(!Scene3D_TransformToClip(g->matrix,x,y,z,&clip)||clip.w<=0)return false;
+  if(!Scene3D_TransformToClip(g->matrix,x,y,z,&clip)||
+      !ProjectHollowClip(g,&clip,&mesh->vertices[index].position,mesh->has_depth?mesh->depths+index:NULL))return false;
   mesh->clip_w[index]=clip.w;return true;
 }
 static void PrepareHollowMesh(const DioramaCapture *capture,
@@ -3737,6 +3748,14 @@ static bool PrepareHollowRegionMesh(const DioramaCapture *capture,
   return true;
 }
 
+#ifdef AR_DIORAMA_VOXEL_CACHE_TEST
+static DioramaVoxelCacheWork s_voxel_cache_work;
+DioramaVoxelCacheWork Diorama_VoxelCacheWork(void) { return s_voxel_cache_work; }
+#define COUNT_VOXEL_CACHE_WORK(field) (++s_voxel_cache_work.field)
+#else
+#define COUNT_VOXEL_CACHE_WORK(field) ((void)0)
+#endif
+
 #include "diorama_ground_cover_render.inc"
 #include "diorama_ground_fog.inc"
 #include "diorama_wet_surface.inc"
@@ -3744,6 +3763,7 @@ static bool PrepareHollowRegionMesh(const DioramaCapture *capture,
 #include "diorama_trunk_edges.inc"
 #include "diorama_voxel_edges.inc"
 #include "diorama_voxel_authored.inc"
+#undef COUNT_VOXEL_CACHE_WORK
 #include "diorama_voxel_sprites.inc"
 #include "diorama_trunk_life.inc"
 #include "diorama_voxel_observe.inc"
@@ -4872,7 +4892,7 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       result=PresentationOutcome_Combine(result,sides);
       if(!PresentationOutcome_IsUsable(sides))return result;
     }
-    const PresentationOutcome guards=DrawHollowGuard(device,capture,geometry,&layer,scene->trunk_guard,scene->map_number);
+    const PresentationOutcome guards=DrawHollowGuard(device,capture,geometry,&layer,scene->trunk_guard);
     result=PresentationOutcome_Combine(result,guards);
     if(!PresentationOutcome_IsUsable(guards))return result;
     return PresentationOutcome_Combine(result,DioramaSubmitPlaneEffect(
@@ -4881,14 +4901,14 @@ static PresentationOutcome DrawResolvedDioramaLayer(
   }
   if(layer.hollow_recess>0 &&
       (description->plane==SR_PPU_OVERLAY_BG1||description->plane==kDioramaPlane_Bg1Hi) &&
-      !DrawHollowSolidEdges(device,capture,geometry,&layer,scene->map_number,
-          description->plane==SR_PPU_OVERLAY_BG1?1:0,NULL,0))return kPresentationOutcome_CoreFailure;
+      !DrawHollowSolidEdges(device,capture,geometry,&layer,
+          description->plane==SR_PPU_OVERLAY_BG1?1:0,NULL))return kPresentationOutcome_CoreFailure;
   if(layer.hollow_recess>0 &&
       (description->plane==SR_PPU_OVERLAY_BG1||description->plane==kDioramaPlane_Bg1Hi) &&
-      !DrawHollowPassageEdges(device,capture,geometry,&layer,scene->map_number,
-          description->plane==kDioramaPlane_Bg1Hi,NULL,0))return kPresentationOutcome_CoreFailure;
+      !DrawHollowPassageEdges(device,capture,geometry,&layer,
+          description->plane==kDioramaPlane_Bg1Hi,NULL))return kPresentationOutcome_CoreFailure;
   if(guarded_trunk&&(description->plane==SR_PPU_OVERLAY_BG1||description->plane==kDioramaPlane_Bg1Hi)) {
-    const PresentationOutcome guards=DrawHollowGuard(device,capture,geometry,&layer,scene->trunk_guard,scene->map_number);
+    const PresentationOutcome guards=DrawHollowGuard(device,capture,geometry,&layer,scene->trunk_guard);
     if(!PresentationOutcome_IsUsable(guards))return guards;
   }
   if(layer.hollow_voxel&&description->plane==SR_PPU_OVERLAY_BG1) {
@@ -5245,8 +5265,8 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
   s_trunk_assets=scene->trunk;s_trunk_settings=scene->trunk_settings;
   s_trunk_column=scene->voxel_mode&&HollowPlaySpace(scene)&&scene->trunk->column_geometry&&TrunkRecess()>0;
   s_trunk_fade=1-scene->native_bloom_dimming;
-  TrunkLifePrepare(scene->trunk_effects,scene->native_bloom_clock,
-      scene->trunk_lighting,scene->trunk_particles);
+  TrunkLifePrepare(scene->environment_effects,scene->native_bloom_clock,
+      scene->environment_lighting,scene->environment_particles);
   ArRenderTexture textures[kDioramaPlane_Count];
   for (int plane = 0; plane < kDioramaPlane_Count; ++plane)
     textures[plane] = capture->textures ? capture->textures[plane]
@@ -5326,7 +5346,7 @@ static PresentationOutcome DioramaCompositeBody(ArRenderDevice *device,
   if(!GroundCoverPrepare(scene,out_projection))goto failed;
   GroundFogPrepare(scene, &geometry);
   WetSurfacePrepare(scene, &geometry);
-  IceSurfacePrepare(scene, &geometry);
+  IceSurfacePrepare(scene, capture, &geometry);
   DioramaProjection cover_projection;
   if(!out_projection&&(s_ground_cover.active_count || s_ground_fog.span_count)) {
     /* Effect callbacks still need projection ownership when the caller does
@@ -5567,6 +5587,7 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
 void Diorama_ResetCompositorResources(ArRenderDevice *device) {
   ResetDesertColumnScratch();
   ResetVoxelAuthoredAtlas(device);
+  ResetVoxelContours();
   ResetVoxelCapPalette(device);
   ResetVoxelWaterColors(device);
   ResetJungleTerminalColors(device);
@@ -5574,6 +5595,7 @@ void Diorama_ResetCompositorResources(ArRenderDevice *device) {
   /* Materials borrow the map's native handle, so release their states first. */
   DioramaEffectBackend_Reset(device);
   HollowResetMaterial(device);
+  HollowResetContours();
   ArRenderDevice_DestroyTexture(device,s_diorama_unlit_map);
   s_diorama_unlit_map=ArRenderTexture_Invalid();
   ArRenderDevice_DestroyTexture(device,s_diorama_white_pixel);

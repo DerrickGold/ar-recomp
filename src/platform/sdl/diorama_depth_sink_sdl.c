@@ -82,6 +82,11 @@ static bool Finish(void *context,ArRenderDevice *device,bool success) {
   return drained && !s->failed;
 }
 
+static bool FlushOrderedDraws(void *context,ArRenderDevice *device) {
+  ArSdlDioramaDepthSink *s=context;
+  return s->owner==device&&!s->failed&&Flush(s);
+}
+
 void ArSdlDioramaDepthSink_Reset(ArSdlDioramaDepthSink *s) {
   if (!s) return;
   if (s->owner) (void)Finish(s,s->owner,false);
@@ -336,7 +341,8 @@ const DioramaDepthSink *ArSdlDioramaDepthSink_Begin(ArSdlDioramaDepthSink *s,ArR
   if (!ArSdlRenderBackend_SetExternalFlush(device,Flush,s)) return NULL;
   s->device=gpu;s->owner=device;s->failed=false;
   s->hybrid=false;
-  s->sink=(DioramaDepthSink){.submit=Submit,.userdata=s,.texture_banks=true,.clear=Clear,.finish=Finish};
+  s->sink=(DioramaDepthSink){.submit=Submit,.userdata=s,.texture_banks=true,.clear=Clear,
+      .finish=Finish,.flush=FlushOrderedDraws};
   s->stats.draws=s->stats.submissions=s->stats.largest_batch=0;
   for (unsigned i=0;i<4;++i) s->targets[i].valid=false;
   return &s->sink;

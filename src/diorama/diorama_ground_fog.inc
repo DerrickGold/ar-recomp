@@ -113,7 +113,7 @@ static void GroundFogPrepare(const DioramaScene *scene, const DioramaViewGeometr
   s_ground_fog.geometry = scene->voxel_geometry;
   s_ground_fog.min_x = s_ground_fog.min_y = INFINITY;
   s_ground_fog.max_x = s_ground_fog.max_y = -INFINITY;
-  const ActionSceneEffectFrame *frame = scene->trunk_effects;
+  const ActionSceneEffectFrame *frame = scene->environment_effects;
   const float fade = 1.f - scene->native_bloom_dimming;
   /* Attached atmosphere follows Environmental Effects, like the planar
    * BG1 mist pass. The gameplay particle switch only controls loose grains. */

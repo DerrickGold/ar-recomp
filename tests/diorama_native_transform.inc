@@ -1,6 +1,11 @@
 static uint16_t NativeAffineColor(int x,int y) {
   return 0x8000|((x&3)*5+2)|(((y&3)*6+3)<<5)|((((x+y)&3)*7+1)<<10);
 }
+static bool NativeAffineFlush(void *context,ArRenderDevice *device) {
+  (void)device;
+  ++((Recorder *)context)->depth_flushes;
+  return true;
+}
 static void NativeAffineObserve(void *context,const DioramaVoxelPickFace *face) {
   NativeAffineProbe *probe=context;
   if(!face->authored && face->kind!=kDioramaVoxelFace_Top &&
@@ -44,6 +49,39 @@ static void NativeAffineCheckCrisp(const NativeAffineProbe *probe,const Recorder
     assert(probe->crisp_pixels[(oy+y)*2048+ox+x]==
         ActionVoxel_AuthoredColor(cell->pixels[0][(y/4)*16+x/4],NULL));
 }
+#ifdef AR_DIORAMA_VOXEL_CACHE_TEST
+static void CheckContourPhaseReuse(ArRenderDevice *device, const DioramaCapture *capture,
+    const DioramaView *view, const DioramaScene *scene, ActionVoxelGeometry *voxel,
+    NativeAffineProbe *probe, DioramaProjection *projection) {
+  /* The caller drew the first revision. Additional revisions have the same
+   * visible edges so any warm span resolution comes from invalidation. */
+  uint64_t phases[4] = {voxel->revision};
+  for (unsigned phase = 1; phase < 4; ++phase) {
+    const unsigned previous = Diorama_VoxelCacheWork().contour_spans;
+    ReviseVoxelFixture(voxel);
+    phases[phase] = voxel->revision;
+    probe->count = 0;
+    assert(PresentationOutcome_IsUsable(Diorama_Composite(device, capture, view, scene, projection)));
+    assert(probe->count && Diorama_VoxelCacheWork().contour_spans > previous);
+  }
+  const unsigned warm = Diorama_VoxelCacheWork().contour_spans;
+  DioramaCapture scrolled = *capture;
+  scrolled.bg1_camera_x += 32;
+  DioramaView rotated = *view;
+  rotated.camera.tilt_y = -rotated.camera.tilt_y;
+  for (unsigned cycle = 0; cycle < 2; ++cycle) {
+    for (unsigned phase = 0; phase < 4; ++phase) {
+      voxel->revision = phases[phase];
+      probe->count = 0;
+      assert(PresentationOutcome_IsUsable(Diorama_Composite(device,
+          cycle ? &scrolled : capture, cycle ? &rotated : view, scene, projection)));
+      assert(probe->count && Diorama_VoxelCacheWork().contour_spans == warm &&
+          "warm native contours survive phase switches, scroll, and orbit");
+    }
+  }
+  voxel->revision = phases[0];
+}
+#endif
 static unsigned NativeAffineFixture(unsigned scenario) {
   s_count=0;static NativeAffineProbe probe,baseline;memset(&probe,0,sizeof(probe));
   Recorder r={.width=960,.height=600,.bound_effect=-1,.native_affine=&probe};ArRenderDevice device;
@@ -93,7 +131,7 @@ static unsigned NativeAffineFixture(unsigned scenario) {
       .camera={.tilt_x=.15f,.tilt_y=scenario?-.4f:.4f,.distance=3.25f}};
   const DioramaRenderOptions options={.visible_planes=(1u<<kDioramaPlane_Count)-1,
       .voxel_observe_face=NativeAffineObserve,.voxel_observer_userdata=&probe};
-  const DioramaDepthSink sink={.submit=DepthGeometry,.userdata=&r};
+  const DioramaDepthSink sink={.submit=DepthGeometry,.userdata=&r,.flush=NativeAffineFlush};
   const DioramaScene scene={.render=&options,.depth_sink=s_depth_fixture?&sink:NULL,
       .map_group=1,.map_number=1,.voxel_geometry=voxel};
   DioramaProjection projection;r.projection=&projection;r.capture=&capture;
@@ -133,7 +171,14 @@ static unsigned NativeAffineFixture(unsigned scenario) {
     assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
     assert(projection.valid && probe.count && r.actor_seen);
     for(unsigned f=0;f<probe.count;++f)assert(probe.submitted[f]);
-    if(!frame){baseline=probe;continue;}
+    if(!frame){
+      baseline=probe;
+#ifdef AR_DIORAMA_VOXEL_CACHE_TEST
+      if (s_check_voxel_cache)
+        CheckContourPhaseReuse(&device,&capture,&view,&scene,voxel,&probe,&projection);
+#endif
+      continue;
+    }
     if(frame==1) {
       /* A pivot-only identity remains on the original native path, including
        * source filtering/shading. It must not allocate any owned-art page. */
@@ -215,6 +260,34 @@ static unsigned NativeAffineFixture(unsigned scenario) {
       }
     }
     assert(caps && fronts && backs && shared && before && !after && near_caps && rear_caps);
+    if(frame==3) {
+      /* The source chunk lies outside the capture, but its transformed
+       * edges move into view. Extended terrain must still submit them. */
+      const DioramaVoxelTerrainCapture terrain={.bounds={0,1,256,224},
+          .textures={textures[kDioramaPlane_Bg1Far],textures[kDioramaPlane_Bg1Hi],textures[SR_PPU_OVERLAY_BG1]}};
+      DioramaScene extended=scene;extended.voxel_terrain=&terrain;
+      voxel->pass_chunks[0][0]=(VoxelEdgeChunk){.left=80+shift,.top=96,.right=112+shift,.bottom=152,
+          .transformed_edges=(UINT32_C(1)<<edges)-1};
+      DioramaVoxelPickFace moved[512];unsigned expected=0;
+      for(unsigned cached=0;cached<2;++cached) {
+        voxel->edge_chunks_ready=cached!=0;
+        probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
+        assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&extended,&projection)));
+        unsigned count=0;
+        for(unsigned f=0;f<probe.count;++f) {
+          const DioramaVoxelPickFace *face=&probe.faces[f];
+          if(face->kind==kDioramaVoxelFace_Front || face->kind==kDioramaVoxelFace_Backing)continue;
+          assert(probe.submitted[f]);
+          if(!cached)moved[count]=*face;
+          else assert(count<expected && !memcmp(&moved[count],face,sizeof(*face)));
+          ++count;
+        }
+        if(!cached)expected=count;
+        else assert(count==expected);
+      }
+      assert(expected>0);
+      voxel->edge_chunks_ready=false;
+    }
   }
   /* Moving high-priority owned art into view must not depend on any original
    * high-band pixels or texture having been captured at the destination. */
@@ -237,9 +310,26 @@ static unsigned NativeAffineFixture(unsigned scenario) {
   }
   assert(high_fronts);
   const unsigned reused_creates=r.creates,reused_uploads=r.uploads;
+#ifdef AR_DIORAMA_VOXEL_CACHE_TEST
+  const DioramaVoxelCacheWork warm_work=Diorama_VoxelCacheWork();
+#endif
   probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
   assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
   assert(r.creates==reused_creates && r.uploads==reused_uploads); /* Resident source, no per-frame upload. */
+#ifdef AR_DIORAMA_VOXEL_CACHE_TEST
+  assert(Diorama_VoxelCacheWork().authored_queries==warm_work.authored_queries);
+  assert(Diorama_VoxelCacheWork().authored_reservations==warm_work.authored_reservations);
+#endif
+  const unsigned flushes=r.depth_flushes;
+  ReviseVoxelFixture(voxel);
+  probe.count=0;memset(probe.submitted,0,sizeof(probe.submitted));r.actor_seen=false;
+  assert(PresentationOutcome_IsUsable(Diorama_Composite(&device,&capture,&view,&scene,&projection)));
+  assert(r.creates==reused_creates && r.uploads==reused_uploads); /* Same art across revisions. */
+  assert(r.depth_flushes==flushes+(unsigned)!!s_depth_fixture);
+#ifdef AR_DIORAMA_VOXEL_CACHE_TEST
+  assert(Diorama_VoxelCacheWork().authored_queries>warm_work.authored_queries);
+  assert(Diorama_VoxelCacheWork().authored_reservations>warm_work.authored_reservations);
+#endif
   /* A top-art edit promotes one member to an authored surface, but its Auto
    * native front still needs the same filtering as the rest of its group. */
   VoxelAuthoredCell *mixed=&voxel->authored[0];mixed->surface=true;mixed->native_transform=false;

@@ -4,6 +4,7 @@
 #include <string.h>
 #include "diorama/diorama_bg_gpu.h"
 #include "platform/sdl/render_sdl_interop.h"
+#include "present/owned_bg_packet.h"
 #include "support/test_assert.h"
 
 static void Fill(SrPpuBgPacket *p, unsigned width, unsigned height, unsigned phase) {
@@ -156,6 +157,40 @@ static void CheckPacketCache(ArRenderDevice *device, SrPpuBgPacket *packet, uint
     CheckCachedPixels(device, packet, mask, bg2);
     CheckCachedPixels(device, packet, mask, 0);
   }
+}
+
+static void CheckSharedPacketLifetime(ArRenderDevice *device, SrPpuBgPacket *packet,
+    uint32_t mask) {
+  ArRenderTexture textures[kDioramaPlane_Count] = {0};
+  OwnedBgPacket *pinned[2];
+  uint32_t changed;
+  for (unsigned i = 0; i < 2; ++i) {
+    Fill(packet, 32, 32, 71 + i);
+    assert(DioramaBgGpu_ResolveOwned(device, packet, NULL, mask, textures,
+        NULL, &changed, &pinned[i]) == mask);
+    assert(changed == mask && pinned[i]);
+    assert(!memcmp(packet, &pinned[i]->packet, SrPpuBgPacket_Size(packet)));
+    OwnedBgPacket_Retain(pinned[i]);
+  }
+  assert(pinned[0] != pinned[1]);
+  Fill(packet, 32, 32, 73);
+  OwnedBgPacket *snapshot = NULL;
+  assert(DioramaBgGpu_ResolveOwned(device, packet, NULL, mask, textures,
+      NULL, &changed, &snapshot) == mask);
+  assert(changed == mask && !snapshot);
+  for (unsigned i = 0; i < 2; ++i) {
+    Fill(packet, 32, 32, 71 + i);
+    assert(!memcmp(packet, &pinned[i]->packet, SrPpuBgPacket_Size(packet)));
+    OwnedBgPacket_Release(pinned[i]);
+  }
+  Fill(packet, 32, 32, 74);
+  assert(DioramaBgGpu_ResolveOwned(device, packet, NULL, mask, textures,
+      NULL, &changed, &snapshot) == mask);
+  assert(changed == mask && snapshot);
+  assert(!memcmp(packet, &snapshot->packet, SrPpuBgPacket_Size(packet)));
+  assert(DioramaBgGpu_ResolveOwned(device, packet, NULL, mask, textures,
+      NULL, &changed, &snapshot) == mask);
+  assert(!changed && !snapshot);
 }
 
 int main(void) {
@@ -335,6 +370,7 @@ int main(void) {
   assert(SDL_SetRenderTarget(renderer, base_target));
   SDL_DestroyTexture(history);
   CheckPacketCache(&device, packet, mask);
+  CheckSharedPacketLifetime(&device, packet, mask);
   DioramaBgGpu_Reset(&device);
   free(packet); ArSdlRenderBackend_Destroy(&device);
   SDL_DestroyWindow(window); SDL_Quit();

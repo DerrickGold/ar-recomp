@@ -49,6 +49,8 @@ const DioramaRoomOverride *DioramaLayerManifest_TerrainRoom(
         }
       }
     }
+    for(unsigned i=0;i<2;++i)
+      s_terrain_room.voxel_geometry_keys[i]=DioramaLayerOrder_VoxelGeometryKey(&s_terrain_room,i!=0);
     s_terrain_source = room;
     s_terrain_profile = profile;
     s_terrain_valid = true;
@@ -174,6 +176,13 @@ bool DioramaLayerManifest_Load(void) {
       }
       room = DioramaLayerOrder_FindOrAddSection(loaded, group, map, section);
       if (!room) {
+        if (loaded->count < kDioramaRoomOverrideMax) {
+          DioramaLayerOrder_ClearTable(loaded);
+          free(loaded);
+          fclose(file);
+          fprintf(stderr, "[diorama-layers] out of memory loading %s -- previous overrides kept\n", path);
+          return false;
+        }
         fprintf(stderr, "[diorama-layers] %s:%d: table full, room dropped\n", kLayerManifestLeaf,
                 line_number);
         bad++;
@@ -357,7 +366,7 @@ bool DioramaLayerManifest_Save(void) {
 
   int active = 0;
   for (int i = 0; i < s_layer_overrides.count; i++)
-    if (DioramaLayerOrder_RoomIsActive(&s_layer_overrides.rooms[i])) active++;
+    if (DioramaLayerOrder_RoomIsActive(s_layer_overrides.rooms[i])) active++;
   fprintf(stderr, "[diorama-layers] wrote %s (%d room(s), comments preserved)\n", path, active);
   return true;
 }

@@ -282,15 +282,12 @@ static bool GroundCoverCapValid(const DioramaGroundCoverCap *cap) {
   }
   return true;
 }
-static bool DioramaGroundCover_BuildCap(DioramaGroundCoverCache *cache,
-    DioramaGroundCoverOwner owner,const ActionGroundCoverBank *bank,
-    const ActionGroundCoverPressure *pressure,const DioramaGroundCoverCap *cap,float tolerance,
+static bool DioramaGroundCover_BuildCap(const DioramaGroundCoverAssociation *a,
+    const ActionGroundCoverBank *bank,const ActionGroundCoverPressure *pressure,const DioramaGroundCoverCap *cap,
     DioramaGroundCoverVertex *out,unsigned capacity,unsigned *count) {
   if(!count)return false;
   *count=0;
   if(!GroundCoverCapValid(cap))return false;
-  const DioramaGroundCoverAssociation *a;
-  if(!DioramaGroundCover_Associate(cache,owner,bank,cap->from,cap->to,tolerance,cap->receiver,&a))return false;
   GroundCoverInkRect ink[kGroundCoverInkRects];
   const unsigned ink_count=GroundCoverInkRects(cap->top_pixels,ink);
   if(!ink_count)return true;
@@ -350,9 +347,8 @@ static bool GroundCoverLipInsert(float value,float cuts[kGroundCoverLipCuts],uns
   memmove(cuts+at+1,cuts+at,(*count-at)*sizeof(*cuts));
   cuts[at]=value;++*count;return true;
 }
-static bool DioramaGroundCover_BuildLip(DioramaGroundCoverCache *cache,
-    DioramaGroundCoverOwner owner,const ActionGroundCoverBank *bank,
-    const ActionGroundCoverPressure *pressure,const DioramaGroundCoverCap *cap,float tolerance,
+static bool DioramaGroundCover_BuildLip(const DioramaGroundCoverAssociation *association,
+    const ActionGroundCoverBank *bank,const ActionGroundCoverPressure *pressure,const DioramaGroundCoverCap *cap,
     DioramaGroundCoverVertex *out,unsigned capacity,unsigned *count) {
   if(!count)return false;
   *count=0;
@@ -362,9 +358,6 @@ static bool DioramaGroundCover_BuildLip(DioramaGroundCoverCache *cache,
    * a new front edge of a snow-covered core rim. */
   if(cap->corners[0].depth_fraction>.000001f||cap->corners[1].depth_fraction>.000001f||
       (cap->corners[2].depth_fraction<=.000001f&&cap->corners[3].depth_fraction<=.000001f))return true;
-  const DioramaGroundCoverAssociation *association;
-  if(!DioramaGroundCover_Associate(cache,owner,bank,cap->from,cap->to,tolerance,
-      cap->receiver,&association))return false;
   unsigned written=0;
   for(unsigned span=0;span<association->count;++span) {
     float cuts[kGroundCoverLipCuts];unsigned n=0;
@@ -425,16 +418,17 @@ static bool GroundCoverAssociationEnd(const DioramaGroundCoverAssociation *a,uns
   return false;
 }
 static bool DioramaGroundCover_BuildClosingRisers(DioramaGroundCoverCache *cache,
-    DioramaGroundCoverOwner owner,const ActionGroundCoverBank *bank,
+    const DioramaGroundCoverAssociation *a,const ActionGroundCoverBank *bank,
     const ActionSceneEffectFrame *frame,const ActionGroundCoverPressure *pressure,
-    const DioramaGroundCoverCap *cap,float tolerance,
+    const DioramaGroundCoverCap *cap,
     DioramaGroundCoverVertex *out,unsigned capacity,unsigned *count) {
   if(!count)return false;*count=0;
   if(!cap->closing_riser[0]&&!cap->closing_riser[1])return true;
   if(!GroundCoverCapValid(cap)||!cap->receiver||cap->from.x>=cap->to.x||
       cap->from.y!=cap->to.y)return false;
-  const DioramaGroundCoverAssociation *a;
-  if(!DioramaGroundCover_Associate(cache,owner,bank,cap->from,cap->to,tolerance,cap->receiver,&a))return false;
+  /* A lower trace can evict the original lookup from the direct-mapped cache. */
+  const DioramaGroundCoverOwner owner=a->owner;
+  const float tolerance=a->tolerance;
   const bool supported[2]={GroundCoverAssociationEnd(a,0),GroundCoverAssociationEnd(a,1)};
   unsigned written=0;
   for(unsigned end=0;end<2;++end) {

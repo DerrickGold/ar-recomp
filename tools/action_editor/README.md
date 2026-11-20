@@ -462,6 +462,11 @@ artwork. The ordinary Diorama and Off modes retain their existing paths.
 These dedicated-room contracts live in
 `assets/environments/northwall-tree-side-materials.json`; regenerate with
 `python3 tools/generate_trunk_side_materials.py` and verify with `--check`.
+Reviewed `passage_colors` describe tunnel-matte ownership independently of RGB
+palette values. Recoloring does not change aperture clearance or subdivision.
+Room construction prepares the front-cell subdivision table once; primary and
+supplemental captures reuse it until edited room assets are rebuilt. Native
+floor/ramp contacts share one collision helper with the ordinary voxel compiler.
 In Voxel mode, the decorative central shaft also sits behind the player,
 aligned with the backs of the branch platforms. Native collision quarters
 stay at the original walking depth and receive connecting caps. The primary

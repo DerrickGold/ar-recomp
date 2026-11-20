@@ -1279,7 +1279,6 @@ static void DesertAnimation(const ActionRoomScene *source,ActionVoxelGeometry *a
     ActionVoxelGeometry *b,ActionVoxelSettings settings) {
   static ActionRoomScene live,reference;
   size_t offset,bytes;
-  assert(ActionVoxel_AnimationCacheCandidate(kActionVoxelProfile_KassandoraDesert));
   assert(ActionVoxel_AnimationMatches(source,source->characters,&offset,&bytes));
   assert(ActionVoxel_AnimationIsPresentationOnly(source,source,NULL,NULL,0));
   unsigned changed=0;
@@ -1925,6 +1924,7 @@ static unsigned MarahnaTempleFixtures(const char *directory) {
 #include "action_voxel_waterfall_foam.inc"
 #include "action_voxel_regional_spikes.inc"
 #include "action_trunk_side_fixtures.inc"
+#include "action_native_contact.inc"
 #include "action_trunk_detail_backing.inc"
 #include "action_voxel_root_backing.inc"
 #include "action_voxel_aitos_cliff_foot.inc"
@@ -1982,6 +1982,7 @@ static void RearTrimAttachmentChecks(void) {
   ActionVoxel_Release(g);
 }
 int main(int argc,char **argv) {
+  NativeContactChecks();
   RearTrimAttachmentChecks();
   if(argc>1 && !strcmp(argv[1],"--surface-inventory"))return SurfaceFixtureInventory(argc,argv);
   SummitCrestFixtures(getenv("AR_VOXEL_SUMMIT_CREST_FIXTURES"));

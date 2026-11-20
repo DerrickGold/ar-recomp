@@ -38,12 +38,12 @@ static void WetSurfacePrepare(const DioramaScene *scene, const DioramaViewGeomet
   s_wet_surface.patches = s_wet_surface.quads = 0;
   s_wet_surface.left = s_wet_surface.top = INFINITY;
   s_wet_surface.right = s_wet_surface.bottom = -INFINITY;
-  const ActionSceneEffectFrame *frame = scene->trunk_effects;
+  const ActionSceneEffectFrame *frame = scene->environment_effects;
   if (!frame || !g->depth_sink || scene->render->voxel_inspection == kDioramaVoxelInspect_Backing ||
       !ActionVoxel_Active(scene->voxel_geometry, scene->map_group, scene->map_number)) return;
   const float fade = 1.f - scene->native_bloom_dimming;
   const ActionVoxelProfile profile = ActionVoxel_Profile(scene->voxel_geometry);
-  if (profile == kActionVoxelProfile_FillmoreCave && scene->trunk_lighting && frame->water_field_valid &&
+  if (profile == kActionVoxelProfile_FillmoreCave && scene->environment_lighting && frame->water_field_valid &&
       !frame->decoration_overflow && frame->decoration_count <= kActionSceneDecorationMaxInstances) {
     const ActionWaterField *field = &frame->water_field;
     for (unsigned i = 0; i < frame->decoration_count; ++i) {
@@ -72,7 +72,7 @@ static void WetSurfacePrepare(const DioramaScene *scene, const DioramaViewGeomet
       }
     }
   }
-  if (!scene->trunk_particles || frame->authored_count > kActionAuthoredMaxInstances) return;
+  if (!scene->environment_particles || frame->authored_count > kActionAuthoredMaxInstances) return;
   for (unsigned i = 0; i < frame->authored_count; ++i) {
     const ActionEffectInstance *e = &frame->authored[i];
     if (!(e->flags & kActionEffectFlag_Visible) || e->projection_plane != kActionEffectProjectionPlane_Bg1) continue;

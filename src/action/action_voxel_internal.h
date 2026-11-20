@@ -5,6 +5,10 @@
 /* Northwall's climbing cave includes over650 native void cells in addition to
  * its sparse architecture repairs. Capacity is allocated only when used. */
 enum { kVoxelPassLists = 4, kVoxelMaxRearFills = 1024, kVoxelMaxLintelReturns = 32 };
+void ActionVoxel_FreeBuffers(ActionVoxelGeometry *c);
+/* The buffer must be zero initialized and sized to width * height. */
+void ActionVoxel_FillRecordOwners(const DioramaVoxelEdits *edits, int x, int y,
+    int width, int height, uint16_t *owners);
 typedef struct VoxelRearFill {
   short x, y;
   bool preserve_existing, replace_front; /* Reviewed baked shadows may need both native split images repaired. */
@@ -27,11 +31,13 @@ struct ActionVoxelGeometry {
   unsigned authored_contour_count,authored_contour_capacity;
   unsigned build_error;
   unsigned char *front;
+  uint8_t *split_rules; /* Immutable rear/front ownership for the complex split. */
   unsigned char *semantic_cells; /* Native roles per16px cell, before authored overlays. */
   unsigned char *native_priority_decks; /* Per16px quadrant mask of reviewed solid native-priority beams. */
   unsigned char *cutouts; /* Optional BG1 matte mask, bit 7 leftmost, width/8 bytes per row. */
   unsigned char *branch_pixels; /* Optional one-bit depth tag per world pixel. */
   unsigned char *front_recess; /* Optional recession tag per 8px world cell. */
+  uint8_t *front_classes; /* Combined immutable front topology inputs. */
   unsigned char *thin_trim_cells; /* Reviewed foreground timber uses a shallow depth per 8px cell. */
   unsigned char *raised_scenery_cells; /* Reviewed rear architecture projects slightly beyond adjacent trim. */
   unsigned char *pixel_recess_cells; /* One-based sparse mask owner per 8px cell. */
@@ -73,10 +79,13 @@ struct ActionVoxelGeometry {
   VoxelEdgeChunk pass_chunks[kVoxelPassLists][(kVoxelMaxEdges+kVoxelEdgeChunkSize-1)/kVoxelEdgeChunkSize];
   ActionVoxelSettings settings;
   bool ready;
+  bool edge_chunks_ready;
   bool mixed_scenery; /* Reviewed front trim and rear-mounted details coexist. */
   bool contact_scenery; /* Reviewed shallow objects follow native actor contact. */
   bool material_rear_mounted; /* Mapped reviewed relief enables the rear-face policy. */
 };
+void ActionVoxel_PrepareFrontClasses(ActionVoxelGeometry *c);
+void ActionVoxel_PrepareSplitRules(ActionVoxelGeometry *c);
 static inline float ActionVoxel_LocalTrimDepth(const ActionVoxelGeometry *c,bool thin) {
   return thin ? ActionVoxel_Depth(c)*.10f : ActionVoxel_TrimDepth(c);
 }

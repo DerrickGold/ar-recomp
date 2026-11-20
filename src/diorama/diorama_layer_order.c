@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "deterministic_hash.h"
 
 /* Files may preserve deliberately extreme experiments beyond the interactive
  * editor's ergonomic range, but still need a finite parse ceiling. */
@@ -211,7 +212,7 @@ static int FindSectionIndex(const DioramaLayerOrderTable *table,
                             uint8_t section) {
   if (!table) return -1;
   for (int i = 0; i < table->count; i++) {
-    const DioramaRoomOverride *room = &table->rooms[i];
+    const DioramaRoomOverride *room = table->rooms[i];
     if (room->used && room->map_group == map_group &&
         room->map_number == map_number && room->section == section)
       return i;
@@ -224,7 +225,7 @@ const DioramaRoomOverride *DioramaLayerOrder_FindSection(
     uint8_t map_number, uint8_t section) {
   const int index = FindSectionIndex(
       table, map_group, map_number, section);
-  return index >= 0 ? &table->rooms[index] : NULL;
+  return index >= 0 ? table->rooms[index] : NULL;
 }
 
 DioramaRoomOverride *DioramaLayerOrder_FindMutableSection(
@@ -232,7 +233,7 @@ DioramaRoomOverride *DioramaLayerOrder_FindMutableSection(
     uint8_t map_number, uint8_t section) {
   const int index = FindSectionIndex(
       table, map_group, map_number, section);
-  return index >= 0 ? &table->rooms[index] : NULL;
+  return index >= 0 ? table->rooms[index] : NULL;
 }
 
 DioramaRoomOverride *DioramaLayerOrder_FindOrAdd(
@@ -251,8 +252,8 @@ DioramaRoomOverride *DioramaLayerOrder_FindOrAddSection(
   if (existing) return existing;
   /* Reuse a slot vacated by a reset before growing. */
   for (int i = 0; i < table->count; i++) {
-    if (!table->rooms[i].used) {
-      DioramaRoomOverride *room = &table->rooms[i];
+    if (!table->rooms[i]->used) {
+      DioramaRoomOverride *room = table->rooms[i];
       memset(room, 0, sizeof(*room));
       room->used = true;
       room->map_group = map_group;
@@ -262,13 +263,13 @@ DioramaRoomOverride *DioramaLayerOrder_FindOrAddSection(
     }
   }
   if (table->count >= kDioramaRoomOverrideMax) return NULL;
-  DioramaRoomOverride *room = &table->rooms[table->count];
-  memset(room, 0, sizeof(*room));
+  DioramaRoomOverride *room = calloc(1, sizeof(*room));
+  if (!room) return NULL;
   room->used = true;
   room->map_group = map_group;
   room->map_number = map_number;
   room->section = section;
-  table->count++;
+  table->rooms[table->count++] = room;
   return room;
 }
 
@@ -306,13 +307,26 @@ bool DioramaLayerOrder_VirtualLayerHasClassification(
 
 static unsigned TerrainMask(unsigned mask) { return mask ? mask : 1u; }
 
-static size_t StampHash(int x, int y) {
+static size_t CellHash(int x, int y) {
   return (uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u;
+}
+
+static size_t PixelCellSlot(const DioramaPixelLayerOverride *layer, int x, int y) {
+  _Static_assert((kDioramaPixelEditMax & (kDioramaPixelEditMax - 1)) == 0,
+      "Pixel cell table must have power-of-two capacity");
+  const size_t mask = sizeof(layer->cell_index) / sizeof(*layer->cell_index) - 1;
+  size_t slot = CellHash(x, y) & mask;
+  while (layer->cell_index[slot]) {
+    const DioramaPixelEdit *edit = &layer->edits[layer->cell_index[slot] - 1];
+    if (edit->x == x && edit->y == y) break;
+    slot = (slot + 1) & mask;
+  }
+  return slot;
 }
 
 static size_t StampSlot(const DioramaStampLayerOverride *layer, int x, int y,
                          unsigned terrain, bool match_terrain) {
-  size_t slot = StampHash(x, y) & (layer->index_capacity - 1);
+  size_t slot = CellHash(x, y) & (layer->index_capacity - 1);
   while (layer->cell_index[slot]) {
     const DioramaTileStamp *cell = &layer->cells[layer->cell_index[slot] - 1];
     if (cell->x == x && cell->y == y &&
@@ -347,7 +361,7 @@ static bool ReserveStamps(DioramaStampLayerOverride *layer, size_t count) {
     size_t *index = calloc(capacity, sizeof(*index));
     if (!index) return false;
     for (size_t i = 0; i < layer->count; i++) {
-      size_t slot = StampHash(layer->cells[i].x, layer->cells[i].y) & (capacity - 1);
+      size_t slot = CellHash(layer->cells[i].x, layer->cells[i].y) & (capacity - 1);
       while (index[slot]) slot = (slot + 1) & (capacity - 1);
       index[slot] = i + 1;
     }
@@ -407,16 +421,142 @@ void DioramaLayerOrder_ClearRoom(DioramaRoomOverride *room) {
 
 void DioramaLayerOrder_ClearTable(DioramaLayerOrderTable *table) {
   if (!table) return;
-  for (int i = 0; i < table->count; i++)
-    DioramaLayerOrder_ClearRoom(&table->rooms[i]);
+  for (int i = 0; i < table->count; i++) {
+    DioramaLayerOrder_ClearRoom(table->rooms[i]);
+    free(table->rooms[i]);
+  }
   memset(table, 0, sizeof(*table));
+}
+
+/* Read the same inputs for hashing and exact comparison. This keeps room
+ * entry and the live cache in agreement when a field starts affecting geometry. */
+static bool VoxelInputBytes(uint64_t *hash, const void *a, const void *b, size_t size) {
+  if (hash) {
+    *hash = DeterministicHash_Fnv1a64(*hash, a, size);
+    return true;
+  }
+  return !size || memcmp(a, b, size) == 0;
+}
+
+#define VOXEL_INPUT_FIELD(a, b, member) \
+  VoxelInputBytes(hash, &(a)->member, &(b)->member, sizeof((a)->member))
+
+static bool VoxelCellInputs(uint64_t *hash, const DioramaVoxelCell *a, const DioramaVoxelCell *b) {
+  const uint16_t a_size[] = {DioramaVoxelCell_Width(a), DioramaVoxelCell_Height(a)};
+  const uint16_t b_size[] = {DioramaVoxelCell_Width(b), DioramaVoxelCell_Height(b)};
+  if (!VOXEL_INPUT_FIELD(a, b, x) || !VOXEL_INPUT_FIELD(a, b, y) ||
+      !VoxelInputBytes(hash, a_size, b_size, sizeof(a_size)) ||
+      !VOXEL_INPUT_FIELD(a, b, fields) || !VOXEL_INPUT_FIELD(a, b, terrain_mask)) return false;
+
+#define VOXEL_CELL_FIELD(flag, member) \
+  if ((a->fields & kDioramaVoxelCell_##flag) && !VOXEL_INPUT_FIELD(a, b, member)) return false
+  VOXEL_CELL_FIELD(Front, front);
+  VOXEL_CELL_FIELD(Back, back);
+  VOXEL_CELL_FIELD(Width, width);
+  VOXEL_CELL_FIELD(Offset, offset_x);
+  VOXEL_CELL_FIELD(Backing, backing);
+  VOXEL_CELL_FIELD(Faces, faces);
+  VOXEL_CELL_FIELD(Shape, shape);
+  if ((a->fields & kDioramaVoxelCell_Shape) && a->shape != kDioramaVoxelShape_Box &&
+      (!VOXEL_INPUT_FIELD(a, b, shape_y) || !VOXEL_INPUT_FIELD(a, b, shape_h))) return false;
+  VOXEL_CELL_FIELD(FrontEnd, front_end);
+  VOXEL_CELL_FIELD(BackEnd, back_end);
+  VOXEL_CELL_FIELD(Bend, bend.axis);
+  VOXEL_CELL_FIELD(Bend, bend.anchor);
+  VOXEL_CELL_FIELD(Bend, bend.tip);
+  VOXEL_CELL_FIELD(Bend, bend.dx);
+  VOXEL_CELL_FIELD(Bend, bend.dy);
+  VOXEL_CELL_FIELD(Bend, bend.dz);
+  VOXEL_CELL_FIELD(Transform, transform.px);
+  VOXEL_CELL_FIELD(Transform, transform.py);
+  VOXEL_CELL_FIELD(Transform, transform.pz);
+  VOXEL_CELL_FIELD(Transform, transform.dx);
+  VOXEL_CELL_FIELD(Transform, transform.dy);
+  VOXEL_CELL_FIELD(Transform, transform.dz);
+  VOXEL_CELL_FIELD(Transform, transform.sx);
+  VOXEL_CELL_FIELD(Transform, transform.sy);
+  VOXEL_CELL_FIELD(Transform, transform.sz);
+#undef VOXEL_CELL_FIELD
+
+  const DioramaVoxelArtField *fields = DioramaVoxelCell_ArtFields();
+  for (unsigned i = 0; i < kDioramaVoxelArtSlotCount; ++i) {
+    if (!(a->fields & fields[i].flag)) continue;
+    const DioramaVoxelArt *left = DioramaVoxelCell_Art(a, &fields[i]);
+    const DioramaVoxelArt *right = DioramaVoxelCell_Art(b, &fields[i]);
+    if (!VOXEL_INPUT_FIELD(left, right, set)) return false;
+    if (left->set && (!VOXEL_INPUT_FIELD(left, right, words) ||
+        !VOXEL_INPUT_FIELD(left, right, bg) || !VOXEL_INPUT_FIELD(left, right, x) ||
+        !VOXEL_INPUT_FIELD(left, right, y) || !VOXEL_INPUT_FIELD(left, right, size))) return false;
+  }
+  return true;
+}
+
+static bool VoxelObjectInputs(uint64_t *hash, const DioramaVoxelObject *a, const DioramaVoxelObject *b) {
+  if (!VOXEL_INPUT_FIELD(a, b, source) || !VOXEL_INPUT_FIELD(a, b, selector_fields) ||
+      !VOXEL_INPUT_FIELD(a, b, fields) || !VOXEL_INPUT_FIELD(a, b, terrain_mask)) return false;
+  if ((a->selector_fields & kDioramaVoxelObject_Parent) && !VOXEL_INPUT_FIELD(a, b, parent)) return false;
+  if ((a->selector_fields & kDioramaVoxelObject_Animation) && !VOXEL_INPUT_FIELD(a, b, animation)) return false;
+  if ((a->fields & kDioramaVoxelObject_Mode) && !VOXEL_INPUT_FIELD(a, b, mode)) return false;
+  if ((a->fields & kDioramaVoxelObject_Offset) && !VOXEL_INPUT_FIELD(a, b, offset)) return false;
+  if ((a->fields & kDioramaVoxelObject_Thickness) && !VOXEL_INPUT_FIELD(a, b, thickness)) return false;
+  if ((a->fields & kDioramaVoxelObject_Width) && !VOXEL_INPUT_FIELD(a, b, width_scale)) return false;
+  return true;
+}
+
+static bool VoxelEditInputs(uint64_t *hash, const DioramaVoxelEdits *a, const DioramaVoxelEdits *b) {
+  if (!a || !b || a->cell_count > kDioramaVoxelCellMax || a->object_count > kDioramaVoxelObjectMax ||
+      !VOXEL_INPUT_FIELD(a, b, cell_count) || !VOXEL_INPUT_FIELD(a, b, object_count)) return false;
+  for (unsigned i = 0; i < a->cell_count; ++i)
+    if (!VoxelCellInputs(hash, &a->cells[i], &b->cells[i])) return false;
+  for (unsigned i = 0; i < a->object_count; ++i)
+    if (!VoxelObjectInputs(hash, &a->objects[i], &b->objects[i])) return false;
+  return true;
+}
+
+static bool VoxelRoomEditInputs(uint64_t *hash, const DioramaRoomOverride *a,
+    const DioramaRoomOverride *b, bool include_bg2) {
+  if (!a || !b) return a == b;
+  for (unsigned bg = 0; bg < (include_bg2 ? 2u : 1u); ++bg) {
+    const DioramaStampLayerOverride *left = &a->stamp_layers[bg], *right = &b->stamp_layers[bg];
+    if (!VOXEL_INPUT_FIELD(left, right, set_bounds)) return false;
+    if (left->set_bounds && (!VOXEL_INPUT_FIELD(left, right, x0) || !VOXEL_INPUT_FIELD(left, right, y0) ||
+        !VOXEL_INPUT_FIELD(left, right, x1) || !VOXEL_INPUT_FIELD(left, right, y1))) return false;
+    if (!VOXEL_INPUT_FIELD(left, right, count) ||
+        !VoxelInputBytes(hash, left->cells, right->cells, left->count * sizeof(*left->cells))) return false;
+    const DioramaPixelLayerOverride *left_pixels = &a->pixel_layers[bg], *right_pixels = &b->pixel_layers[bg];
+    if (left_pixels->count > kDioramaPixelEditMax ||
+        !VOXEL_INPUT_FIELD(left_pixels, right_pixels, count)) return false;
+    for (unsigned i = 0; i < left_pixels->count; ++i) {
+      const DioramaPixelEdit *p = &left_pixels->edits[i], *q = &right_pixels->edits[i];
+      if (!VOXEL_INPUT_FIELD(p, q, by_cell) || !VOXEL_INPUT_FIELD(p, q, metatile) ||
+          !VOXEL_INPUT_FIELD(p, q, terrain_mask) || !VOXEL_INPUT_FIELD(p, q, x) ||
+          !VOXEL_INPUT_FIELD(p, q, y) || !VOXEL_INPUT_FIELD(p, q, black) ||
+          !VOXEL_INPUT_FIELD(p, q, transparent)) return false;
+    }
+  }
+  return VoxelEditInputs(hash, &a->voxel, &b->voxel);
+}
+#undef VOXEL_INPUT_FIELD
+
+uint64_t DioramaLayerOrder_VoxelGeometryKey(const DioramaRoomOverride *room, bool include_bg2) {
+  uint64_t hash = DETERMINISTIC_HASH_FNV1A64_OFFSET;
+  if (room && room->voxel_geometry_keys[include_bg2]) return room->voxel_geometry_keys[include_bg2];
+  VoxelRoomEditInputs(&hash, room, room, include_bg2);
+  return hash;
+}
+
+bool DioramaLayerOrder_VoxelGeometryInputsEqual(const DioramaRoomOverride *a,
+    const DioramaRoomOverride *b, bool include_bg2) {
+  return VoxelRoomEditInputs(NULL, a, b, include_bg2);
 }
 
 bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
                                   unsigned profile, DioramaRoomOverride *out) {
   if (!room || !out || profile >= kDioramaTerrainProfileCount || room == out ||
       room->voxel.cell_count > kDioramaVoxelCellMax ||
-      room->voxel.object_count > kDioramaVoxelObjectMax)
+      room->voxel.object_count > kDioramaVoxelObjectMax ||
+      room->pixel_layers[0].count > kDioramaPixelEditMax ||
+      room->pixel_layers[1].count > kDioramaPixelEditMax)
     return false;
   for (unsigned bg = 0; bg < 2; bg++)
     if (!ReserveStamps(&out->stamp_layers[bg], room->stamp_layers[bg].count))
@@ -424,6 +564,7 @@ bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
   const DioramaStampLayerOverride buffers[2] = {
       out->stamp_layers[0], out->stamp_layers[1]};
   *out = *room;
+  memset(out->voxel_geometry_keys,0,sizeof(out->voxel_geometry_keys));
   for (unsigned bg = 0; bg < 2; bg++) {
     out->stamp_layers[bg].cells = buffers[bg].cells;
     out->stamp_layers[bg].capacity = buffers[bg].capacity;
@@ -450,19 +591,17 @@ bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
         v->cell_spans[v->cell_span_count++] = source->cell_spans[i];
     DioramaPixelLayerOverride *pixels = &out->pixel_layers[bg];
     pixels->count = 0;
+    memset(pixels->cell_index, 0, sizeof(pixels->cell_index));
+    memset(pixels->metatile_index, 0, sizeof(pixels->metatile_index));
     for (unsigned i = 0; i < room->pixel_layers[bg].count; i++) {
       const DioramaPixelEdit *edit = &room->pixel_layers[bg].edits[i];
       if (!(TerrainMask(edit->terrain_mask) & bit)) continue;
-      unsigned index = pixels->count;
-      for (unsigned j = 0; j < pixels->count; j++) {
-        const DioramaPixelEdit *old = &pixels->edits[j];
-        if (old->by_cell == edit->by_cell && (edit->by_cell
-            ? old->x == edit->x && old->y == edit->y
-            : old->metatile == edit->metatile)) { index = j; break; }
-      }
-      pixels->edits[index] = *edit;
-      if (index == pixels->count) pixels->count++;
+      uint16_t *index = edit->by_cell ? &pixels->cell_index[PixelCellSlot(pixels, edit->x, edit->y)]
+          : &pixels->metatile_index[edit->metatile];
+      if (!*index) *index = ++pixels->count;
+      pixels->edits[*index - 1] = *edit;
     }
+    pixels->indexed = true;
     DioramaStampLayerOverride *stamps = &out->stamp_layers[bg];
     stamps->count = 0;
     stamps->occupied_bounds = (DioramaMapBounds){0};
@@ -571,7 +710,7 @@ void DioramaLayerOrder_ResetPlaneOverridesSection(
     uint8_t section) {
   if (!table) return;
   for (int i = 0; i < table->count; i++) {
-    DioramaRoomOverride *room = &table->rooms[i];
+    DioramaRoomOverride *room = table->rooms[i];
     if (!room->used || room->map_group != map_group ||
         room->map_number != map_number || room->section != section)
       continue;
@@ -587,7 +726,7 @@ void DioramaLayerOrder_ResetSection(DioramaLayerOrderTable *table,
                                     uint8_t section) {
   if (!table) return;
   for (int i = 0; i < table->count; i++) {
-    DioramaRoomOverride *room = &table->rooms[i];
+    DioramaRoomOverride *room = table->rooms[i];
     if (room->used && room->map_group == map_group &&
         room->map_number == map_number && room->section == section) {
       DioramaLayerOrder_ClearRoom(room);
@@ -1016,6 +1155,13 @@ const DioramaPixelEdit *DioramaLayerOrder_PixelEditAt(
     int cell_y, int metatile) {
   if (!room || bg >= 2) return NULL;
   const DioramaPixelLayerOverride *layer = &room->pixel_layers[bg];
+  if (!layer->count) return NULL;
+  if (layer->indexed) {
+    unsigned index = layer->cell_index[PixelCellSlot(layer, cell_x, cell_y)];
+    if (!index && (unsigned)metatile < 256) index = layer->metatile_index[metatile];
+    return index ? &layer->edits[index - 1] : NULL;
+  }
+  /* Unresolved authoring and callers that assemble records directly. */
   const DioramaPixelEdit *fallback = NULL;
   for (unsigned i = 0; i < layer->count; i++) {
     const DioramaPixelEdit *edit = &layer->edits[i];
@@ -1096,6 +1242,7 @@ static bool ParsePixelLine(DioramaRoomOverride *room, unsigned bg,
   }
   layer->edits[index] = edit;
   if (index == layer->count) layer->count++;
+  layer->indexed = false;
   return true;
 invalid:
   if (out_error) *out_error = "expected cell:x,y or metatile:HH and non-overlapping black:64hex / transparent:64hex masks";
@@ -1348,27 +1495,6 @@ static bool ParseVoxelCell(DioramaRoomOverride *room, unsigned terrain,
       while (i < 4 && strcmp(value, names[i])) ++i;
       if (i == 4) goto bad;
       next.backing = (uint8_t)i;
-    } else if (!strcmp(word, "back-art")) {
-      flag = kDioramaVoxelCell_BackArt;
-      if (!ParseVoxelArt(value, &next.backing_art)) goto bad;
-    } else if (!strcmp(word, "top-art")) {
-      flag = kDioramaVoxelCell_TopArt;
-      if (!ParseVoxelArt(value, &next.top_art)) goto bad;
-    } else if (!strcmp(word, "side-art")) {
-      flag = kDioramaVoxelCell_SideArt;
-      if (!ParseVoxelArt(value, &next.side_art)) goto bad;
-    } else if (!strcmp(word, "front-art")) {
-      flag = kDioramaVoxelCell_FrontArt;
-      if (!ParseVoxelArt(value, &next.front_art)) goto bad;
-    } else if (!strcmp(word, "left-art")) {
-      flag = kDioramaVoxelCell_LeftArt;
-      if (!ParseVoxelArt(value, &next.left_art)) goto bad;
-    } else if (!strcmp(word, "right-art")) {
-      flag = kDioramaVoxelCell_RightArt;
-      if (!ParseVoxelArt(value, &next.right_art)) goto bad;
-    } else if (!strcmp(word, "bottom-art")) {
-      flag = kDioramaVoxelCell_BottomArt;
-      if (!ParseVoxelArt(value, &next.bottom_art)) goto bad;
     } else if (!strcmp(word, "faces")) {
       flag = kDioramaVoxelCell_Faces;
       if (!ParseVoxelFaces(value, &next.faces)) goto bad;
@@ -1406,7 +1532,14 @@ static bool ParseVoxelCell(DioramaRoomOverride *room, unsigned terrain,
         if(!VoxelFloat(value,lo[i],hi[i],fields[i]))goto bad;
         if(comma)value=comma+1;
       }
-    } else goto bad;
+    } else {
+      const DioramaVoxelArtField *fields = DioramaVoxelCell_ArtFields();
+      unsigned i = 0;
+      while (i < kDioramaVoxelArtSlotCount && strcmp(word, fields[i].token)) ++i;
+      if (i == kDioramaVoxelArtSlotCount ||
+          !ParseVoxelArt(value, DioramaVoxelCell_MutableArt(&next, &fields[i]))) goto bad;
+      flag = fields[i].flag;
+    }
     if (seen & flag) goto bad;
     seen |= flag;
   }
@@ -2272,16 +2405,19 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
       static const char *const names[] = {"auto", "none", "fill", "replace"};
       APPEND(" backing:%s", names[cell->backing < 4 ? cell->backing : 0]);
     }
-    const DioramaVoxelArt *arts[] = {&cell->backing_art, &cell->top_art, &cell->side_art,
-        &cell->front_art, &cell->left_art, &cell->right_art, &cell->bottom_art};
-    static const char *const tokens[] = {"back-art", "top-art", "side-art", "front-art",
-        "left-art", "right-art", "bottom-art"};
-    for (unsigned j = 0; j < 7; ++j) if (cell->fields & (kDioramaVoxelCell_BackArt << j)) {
-      const DioramaVoxelArt *art = arts[j];
-      APPEND(" %s:", tokens[j]);
-      if (!art->set) APPEND("auto");
-      else APPEND("%u,%04X,%04X,%04X,%04X,%u,%u,%u", art->bg,
-          art->words[0], art->words[1], art->words[2], art->words[3], art->x, art->y, art->size);
+    const DioramaVoxelArtField *art_fields = DioramaVoxelCell_ArtFields();
+    for (uint32_t flag = kDioramaVoxelCell_BackArt; flag <= kDioramaVoxelCell_BottomArt; flag <<= 1) {
+      if (!(cell->fields & flag)) continue;
+      for (unsigned j = 0; j < kDioramaVoxelArtSlotCount; ++j) {
+        const DioramaVoxelArtField *field = &art_fields[j];
+        if (field->flag != flag) continue;
+        const DioramaVoxelArt *art = DioramaVoxelCell_Art(cell, field);
+        APPEND(" %s:", field->token);
+        if (!art->set) APPEND("auto");
+        else APPEND("%u,%04X,%04X,%04X,%04X,%u,%u,%u", art->bg,
+            art->words[0], art->words[1], art->words[2], art->words[3], art->x, art->y, art->size);
+        break;
+      }
     }
     if (cell->fields & kDioramaVoxelCell_Faces) {
       APPEND(" faces:");
@@ -2465,7 +2601,7 @@ size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
         skipping_managed_body = true;
         /* Mark it written so it is not appended again below. */
         for (int i = 0; i < table->count; i++)
-          if (&table->rooms[i] == room) { written[i] = true; break; }
+          if (table->rooms[i] == room) { written[i] = true; break; }
         cursor += line_len;
         continue;
       }
@@ -2516,7 +2652,7 @@ size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
     total = 0;
     OUT_TEXT(default_preamble);
     for (int i = 0; i < table->count; i++) {
-      const DioramaRoomOverride *room = &table->rooms[i];
+      const DioramaRoomOverride *room = table->rooms[i];
       if (!DioramaLayerOrder_RoomIsActive(room)) continue;
       DioramaLayerOrder_FormatRoomBody(room, &total, buffer, size);
       OUT("\n");
@@ -2529,7 +2665,7 @@ size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
   /* Append any active room that had no section in the file. A blank line before
    * each keeps them readable against whatever preceded. */
   for (int i = 0; i < table->count; i++) {
-    const DioramaRoomOverride *room = &table->rooms[i];
+    const DioramaRoomOverride *room = table->rooms[i];
     if (written[i] || !DioramaLayerOrder_RoomIsActive(room)) continue;
     /* Separate from prior content with a blank line, unless the file is empty. */
     if (total > 0) OUT("\n");
