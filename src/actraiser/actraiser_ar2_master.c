@@ -1132,8 +1132,7 @@ RecompReturn ActRaiser_Ar2MasterControl(CpuState *cpu) {
     RunScript(cpu, player, m);
   }
 
-  /* Motion programs, AR2's air steering helper ($82:8CE8) and AR1's
-   * slow-zone halving (flag $8000, rounding down as $00:84EC does). */
+  /* Motion programs and AR2's air steering helper ($82:8CE8). */
   int16_t dx = Ar2MotionAxis_Step(&s_assets, &m->motion_x);
   if (m->facing_left) dx = (int16_t)-dx;
   const int16_t dy = Ar2MotionAxis_Step(&s_assets, &m->motion_y);
@@ -1147,10 +1146,11 @@ RecompReturn ActRaiser_Ar2MasterControl(CpuState *cpu) {
     }
   }
   uint16_t flags = Field(cpu, player, kActRaiserActionObject_Flags);
-  if (flags & kFlagSlowZone) {
-    flags &= (uint16_t)~kFlagSlowZone;
-    dx = (int16_t)(dx >> 1);
-  }
+  /* Keep AR2's authored speed in AR1 water/slowing zones. AR1's integer
+   * half-step turns +1 into 0 but -1 into -1, trapping the slower Master.
+   * Consume the contact request as the native decoder would; any future
+   * proportional slowdown must retain fractional motion in both directions. */
+  flags &= (uint16_t)~kFlagSlowZone;
   flags = (uint16_t)((flags & ~kFlagBusy) | (m->invulnerable ? kFlagBusy : 0) | kFlagAttacker);
   SetField(cpu, player, kActRaiserActionObject_Flags, flags);
 

@@ -448,7 +448,7 @@ static void ControlTick(CpuState *cpu, uint16_t buttons) {
   assert(ActRaiser_Ar2MasterControl(cpu) == RECOMP_RETURN_TAILCALL && s_tail == 0x9D4F);
 }
 
-static void StartSoundScenario(CpuState *cpu, bool grounded) {
+static void StartControlScenario(CpuState *cpu, bool grounded) {
   static uint8_t map;
   memset(g_ram, 0, sizeof(g_ram));
   g_ram[kActRaiserWram_MapGroup] = 1;
@@ -465,6 +465,53 @@ static void StartSoundScenario(CpuState *cpu, bool grounded) {
   s_swings = s_blocks = 0;
   ControlTick(cpu, 0);
   assert(s_swings == 0 && s_blocks == 0);
+}
+
+static void TestSlowZones(CpuState *cpu) {
+  const unsigned player = kActRaiserWram_PlayerObject;
+  for (unsigned left = 0; left < 2; left++) {
+    const uint16_t buttons = left ? 0x0200 : 0x0100;
+    const int16_t dx = left ? -1 : 1;
+    StartControlScenario(cpu, true);
+    /* Enter and leave a slowing zone while walking through several animation
+     * and motion loops. A one-pixel step must survive in both directions. */
+    for (unsigned tick = 0; tick < 96; tick++) {
+      const bool wet = tick >= 16 && tick < 80;
+      Put(player + kActRaiserActionObject_Flags, wet ? 0xA001 : 0x2001);
+      ControlTick(cpu, buttons);
+      assert((int16_t)Get(player + kActRaiserActionObject_VelocityX) == dx);
+      assert(Get(player + kActRaiserActionObject_VelocityY) == 0);
+      assert(Get(player + kActRaiserActionObject_Flags) == 0x2001);
+      /* The native terrain tail owns actual movement. Feed its unobstructed
+       * result back into the next controller update. */
+      Put(player + kActRaiserActionObject_WorldX,
+          (uint16_t)(Get(player + kActRaiserActionObject_WorldX) + dx));
+    }
+    assert(Get(player + kActRaiserActionObject_WorldX) == 500 + 96 * dx);
+    Put(player + kActRaiserActionObject_Flags, 0x8001);
+    ControlTick(cpu, 0);
+    assert(Get(player + kActRaiserActionObject_VelocityX) == 0); /* No drift. */
+
+    /* The same flag can arrive during airborne steering. */
+    StartControlScenario(cpu, false);
+    Put(player + kActRaiserActionObject_Flags, 0x8001);
+    ControlTick(cpu, buttons);
+    assert((int16_t)Get(player + kActRaiserActionObject_VelocityX) == dx);
+    assert(Get(player + kActRaiserActionObject_Flags) == 1);
+  }
+
+  /* Switching back to AR1 in water preserves the request for its native
+   * decoder. Native hurt handling must retain it too. */
+  StartControlScenario(cpu, true);
+  Put(player + kActRaiserActionObject_Flags, 0x8001);
+  g_settings.ar2_master = false;
+  assert(ActRaiser_Ar2MasterControl(cpu) == RECOMP_RETURN_TAILCALL && s_tail == 0x9832);
+  assert(Get(player + kActRaiserActionObject_Flags) == 0x8001);
+  assert(!ActRaiser_Ar2MasterControlEntry(cpu));
+  StartControlScenario(cpu, true);
+  Put(player + kActRaiserActionObject_Flags, 0x8009);
+  ControlTick(cpu, 0);
+  assert(Get(player + kActRaiserActionObject_Flags) == 0x8009);
 }
 
 static void ExpectSwing(CpuState *cpu, uint16_t buttons) {
@@ -488,14 +535,14 @@ static void TestSwingSounds(CpuState *cpu) {
   /* Standing, crouching, upward and airborne sword swings use COP $01. */
   const uint16_t attacks[] = {0x4000, 0x4400, 0x4800, 0x4000};
   for (unsigned i = 0; i < sizeof(attacks) / sizeof(attacks[0]); i++) {
-    StartSoundScenario(cpu, i != 3);
+    StartControlScenario(cpu, i != 3);
     ExpectSwing(cpu, attacks[i]);
     ControlTick(cpu, 0);
     ExpectSwing(cpu, attacks[i]);
   }
   /* Both glide phases can swing. Reach them using ordinary jump input. */
   for (unsigned animation = 0x14; animation <= 0x15; animation++) {
-    StartSoundScenario(cpu, true);
+    StartControlScenario(cpu, true);
     ControlTick(cpu, 0x8000);
     s_grounded = false;
     for (unsigned tick = 0; tick < 20; tick++)
@@ -533,7 +580,7 @@ static void TestBlockSounds(CpuState *cpu) {
   const unsigned shot = kActRaiserWram_PlayerObject + kActRaiserActionObjectStride;
   const unsigned shooter = shot + kActRaiserActionObjectStride;
   for (unsigned m_flag = 0; m_flag <= 1; m_flag++) {
-    StartSoundScenario(cpu, true);
+    StartControlScenario(cpu, true);
     cpu->m_flag = m_flag;
     cpu->P = m_flag ? CPU_P_M : 0;
     cpu->Y = 0x1234;
@@ -603,6 +650,14 @@ int main(void) {
   assert(!ActRaiserAr2Master_Available() && !ActRaiser_Ar2MasterControlEntry(&cpu));
   uint8_t data[kAr2MasterFixtureBytes];
   const size_t size = Ar2MasterFixture(data, true);
+  /* Synthetic walking motion: four one-pixel updates, repeated. Keep the
+   * visual fixture ROM-free while exercising the real motion interpreter. */
+  ByteOrder_WriteLe16(data + 80, 0x6100);
+  ByteOrder_WriteLe16(data + 80 + 0x102, 3);
+  ByteOrder_WriteLe16(data + 80 + 0x104, 1);
+  ByteOrder_WriteLe16(data + 80 + 0x106, 0xFFFF);
+  ByteOrder_WriteLe16(data + 80 + 0x108, 0x6102);
+  assert(sr_support_sha256(data + 48, size - 48, data + 16));
   const char *path = "ar2-master-runtime-test.armaster";
   FILE *file = fopen(path, "wb");
   assert(file && fwrite(data, 1, size, file) == size && fclose(file) == 0);
@@ -626,6 +681,7 @@ int main(void) {
   TestNativePoses(&cpu);
   TestStageClearHandoff(&cpu);
   TestHitReaction(&cpu);
+  TestSlowZones(&cpu);
   TestSwingSounds(&cpu);
   TestBlockSounds(&cpu);
   ActRaiserAr2Master_Shutdown();
