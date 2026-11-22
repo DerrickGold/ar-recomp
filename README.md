@@ -15,7 +15,7 @@ action stages and towns depth with optional 3D views.
 
 [![Total GitHub release downloads](https://img.shields.io/github/downloads/DerrickGold/ar-recomp/total)](https://github.com/DerrickGold/ar-recomp/releases)
 ![Downloads for the latest GitHub release](https://img.shields.io/github/downloads-pre/DerrickGold/ar-recomp/latest/total)
-![GitHub commits since the release tag](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0901)
+![GitHub commits since the release tag](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0950)
 
 ## AI disclosure
 
