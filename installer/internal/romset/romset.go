@@ -32,6 +32,11 @@ func (plan *Plan) LanguageSources() []*localization.AuthorProject { return slice
 
 const SequelID = "ar2-us"
 
+// SupportedReleases lists the headerless ROM identities in checklist order.
+func SupportedReleases() []gamerom.Release {
+	return append(gamerom.Releases(), gamerom.Release{ID: SequelID, SHA256: fmt.Sprintf("%x", ar2rom.Digest)})
+}
+
 // Identify checks the supported clean ROM identities without extracting content.
 func Identify(data []byte) (string, []byte, error) {
 	if normalized, err := ar2rom.Normalize(data); err == nil {

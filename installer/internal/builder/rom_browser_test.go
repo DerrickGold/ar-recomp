@@ -232,6 +232,34 @@ func TestFirstBuildRejectsBadOrUnnecessaryLauncherROMs(t *testing.T) {
 	}
 }
 
+func TestJapaneseLauncherROMRequiresUSABaseForNewBuild(t *testing.T) {
+	directory := os.Getenv("AR_ROM_SET_DIR")
+	if directory == "" {
+		t.Skip("set AR_ROM_SET_DIR to a local ROM fixture directory")
+	}
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(), BuildOnFirstRun: true,
+		LaunchROMs: []string{filepath.Join(directory, "ar-jp.sfc")},
+		Detect:     func() InstallState { return InstallState{CanRebuild: true} },
+	}, "tok")
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, httptest.NewRequest("GET", "/tok/status", nil))
+	var state status
+	if err := json.Unmarshal(w.Body.Bytes(), &state); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("status: %d %s", w.Code, w.Body.String())
+	}
+	if !state.HasSelectedROMs || state.SelectedROM != "" || state.BuildOnFirstRun {
+		t.Fatalf("a regional extra should be selected without enabling a first build: %+v", state)
+	}
+	for _, firstRun := range []string{"true", "false"} {
+		w = httptest.NewRecorder()
+		app.ServeHTTP(w, buildROMRequest(t, map[string]string{"useSelectedROMs": "true", "firstRun": firstRun}))
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "ActRaiser (USA)") {
+			t.Fatalf("firstRun=%s: expected a request for the USA base, got %d %s", firstRun, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestControllerAndLauncherROMSelectionsReachBuild(t *testing.T) {
 	fixture := os.Getenv("AR_BUILDER_TEST_ROM")
 	if fixture == "" {

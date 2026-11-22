@@ -5,15 +5,46 @@
   "inputs": [
     {
       "id": "rom",
-      "label": "Your ActRaiser (USA) ROM",
-      "optional": true,
-      "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]
+      "label": "ActRaiser (USA) ROM — required base game",
+      "optional": false,
+      "formats": [{"type": "file", "extensions": ["sfc", "smc"]}],
+      "dumps": [{"name": "ActRaiser (USA) (Rev 0)", "size": 1048576, "crc32": "eac3358d"}]
     },
-    {"id": "rom-jp", "label": "ActRaiser (Japan) ROM — regional text, art and music", "optional": true, "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]},
-    {"id": "rom-eu-en", "label": "ActRaiser (Europe, English) ROM — regional text, art and music", "optional": true, "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]},
-    {"id": "rom-de", "label": "ActRaiser (Germany) ROM — regional text, art and music", "optional": true, "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]},
-    {"id": "rom-fr", "label": "ActRaiser (France) ROM — regional text, art and music", "optional": true, "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]},
-    {"id": "rom-ar2-us", "label": "ActRaiser 2 (USA) ROM — bonus character and development content", "optional": true, "formats": [{"type": "file", "extensions": ["sfc", "smc"]}]}
+    {
+      "id": "rom-jp",
+      "label": "ActRaiser (Japan) ROM — optional regional text, art and music",
+      "optional": true,
+      "formats": [{"type": "file", "extensions": ["sfc", "smc"]}],
+      "dumps": [{"name": "ActRaiser (Japan) (Rev 0)", "size": 1048576, "crc32": "bee9b30c"}]
+    },
+    {
+      "id": "rom-eu-en",
+      "label": "ActRaiser (Europe, English) ROM — optional regional text, art and music",
+      "optional": true,
+      "formats": [{"type": "file", "extensions": ["sfc", "smc"]}],
+      "dumps": [{"name": "ActRaiser (Europe, English) (Rev 0)", "size": 1048576, "crc32": "09097b2b"}]
+    },
+    {
+      "id": "rom-de",
+      "label": "ActRaiser (Germany) ROM — optional regional text, art and music",
+      "optional": true,
+      "formats": [{"type": "file", "extensions": ["sfc", "smc"]}],
+      "dumps": [{"name": "ActRaiser (Germany) (Rev 0)", "size": 1048576, "crc32": "29a78af9"}]
+    },
+    {
+      "id": "rom-fr",
+      "label": "ActRaiser (France) ROM — optional regional text, art and music",
+      "optional": true,
+      "formats": [{"type": "file", "extensions": ["sfc", "smc"]}],
+      "dumps": [{"name": "ActRaiser (France) (Rev 0)", "size": 1048576, "crc32": "a27e2664"}]
+    },
+    {
+      "id": "rom-ar2-us",
+      "label": "ActRaiser 2 (USA) ROM — optional bonus character and development content",
+      "optional": true,
+      "formats": [{"type": "file", "extensions": ["sfc", "smc"]}],
+      "dumps": [{"name": "ActRaiser 2 (USA) (Rev 0)", "size": 1572864, "crc32": "4901f718"}]
+    }
   ],
   "start": {
     "program": ["ActRaiserRecompBuilder.exe"],
@@ -23,8 +54,8 @@
   },
   "saves": ["{install}/ActRaiserRecomp/saves"],
   "folders": {
-    "saves": "{install}/ActRaiserRecomp/saves",
-    "logs": "{install}/ActRaiserRecomp/logs"
+    "saves": [{"path": "{install}/ActRaiserRecomp/saves"}],
+    "logs": [{"path": "{install}/ActRaiserRecomp/logs"}]
   },
   "looks": {
     "allowed": false,

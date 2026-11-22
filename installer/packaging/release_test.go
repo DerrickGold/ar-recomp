@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +12,65 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/romset"
 )
+
+func TestLauncherROMRequirementsAndChecksums(t *testing.T) {
+	profile, err := os.ReadFile(filepath.Join("..", "desktop-shell", "recomplauncher.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Inputs []struct {
+			ID, SHA256 string
+			Optional   bool
+			Dumps      []struct {
+				Name, CRC32 string
+				Size        int
+			}
+		}
+	}
+	if err := json.Unmarshal(profile, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"rom": "ar.sfc", "rom-jp": "ar-jp.sfc", "rom-eu-en": "ar-eu.sfc",
+		"rom-de": "ar-ger.sfc", "rom-fr": "ar-fra.sfc", "rom-ar2-us": "ar2.sfc",
+	}
+	directory := os.Getenv("AR_ROM_SET_DIR")
+	for _, input := range manifest.Inputs {
+		file, ok := files[input.ID]
+		if !ok {
+			continue
+		}
+		delete(files, input.ID)
+		if input.Optional != (input.ID != "rom") {
+			t.Errorf("%s: only the base ActRaiser (USA) ROM should be required in Easy Setup", input.ID)
+		}
+		if input.SHA256 != "" || len(input.Dumps) != 1 {
+			t.Fatalf("%s should advertise its headerless dump and allow copier headers", input.ID)
+		}
+		if directory == "" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(directory, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, payload, err := romset.Identify(raw)
+		if err != nil || (input.ID != "rom-"+id && !(input.ID == "rom" && id == "us")) {
+			t.Fatalf("input %s: unexpected ROM identity %q (%v)", input.ID, id, err)
+		}
+		dump := input.Dumps[0]
+		if dump.Name == "" || dump.Size != len(payload) || !strings.EqualFold(dump.CRC32, fmt.Sprintf("%08x", crc32.ChecksumIEEE(payload))) {
+			t.Errorf("%s: dump metadata does not match %s: %+v", input.ID, file, dump)
+		}
+	}
+	if len(files) > 0 {
+		t.Fatalf("missing launcher inputs: %v", files)
+	}
+}
 
 func releaseCMake(t *testing.T) string {
 	t.Helper()

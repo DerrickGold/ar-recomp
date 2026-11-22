@@ -7,15 +7,35 @@
     const unavailableNote = document.querySelector("#rom-checklist-unavailable");
     const importButton = document.querySelector("#rom-import-selected");
     const picker = document.querySelector("#rom-picker");
+    const checksumsButton = document.getElementById("rom-checksums-open");
+    const checksumsDialog = document.getElementById("rom-checksums-dialog");
     const ui = window.workshopI18n;
     let inventory = [], unavailable = [], operationStatus = null;
     let loading = 0, canPlay = false, busy = false, importing = false, selecting = false, slot = "";
     const bigScreen = () => document.body.dataset.bigScreen === "true";
 
+    const releaseLabel = id => "builder.roms.name_" + id.replaceAll("-", "_");
+
+    checksumsButton.addEventListener("click", () => {
+      const list = document.getElementById("rom-checksums-list");
+      list.replaceChildren();
+      for (const entry of inventory) {
+        const name = document.createElement("dt");
+        ui.set(name, releaseLabel(entry.id));
+        const value = document.createElement("dd");
+        const digest = document.createElement("code");
+        digest.textContent = entry.sha256;
+        value.append(digest);
+        list.append(name, value);
+      }
+      checksumsDialog.showModal();
+      document.getElementById("rom-checksums-content").scrollTop = 0;
+    });
+
     function browseEntry(entry) {
       if (busy || importing || selecting) return;
       if (bigScreen()) {
-        browse({...entry, label: ui.text("builder.roms.name_" + entry.id.replaceAll("-", "_"))});
+        browse({...entry, label: ui.text(releaseLabel(entry.id))});
       } else {
         slot = entry.id;
         picker.value = "";
@@ -91,7 +111,7 @@
       const restoreFocus = focused && rows.contains(focused);
       const browseID = restoreFocus && focused.closest(".rom-slot-card")?.querySelector(".rom-slot").id;
       const cards = inventory.map(entry => {
-        const label = ui.text("builder.roms.name_" + entry.id.replaceAll("-", "_"));
+        const label = ui.text(releaseLabel(entry.id));
         const purpose = entry.id === "us" ? "main" : entry.id === "ar2-us" ? "sequel" : "region";
         const card = document.createElement("div");
         card.className = "rom-slot-card";
@@ -150,6 +170,7 @@
         return card;
       });
       rows.replaceChildren(...cards);
+      checksumsButton.disabled = !inventory.length;
       updateActions();
       if (restoreFocus) {
         const target = document.getElementById(focused.id) || (browseID && document.getElementById(browseID));

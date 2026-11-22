@@ -47,7 +47,7 @@ func runGUI(args []string) error {
 		roms = append(roms, path)
 		return nil
 	})
-	firstBuild := flags.Bool("build-on-first-run", false, "build automatically when a ROM is supplied for a new installation")
+	firstBuild := flags.Bool("build-on-first-run", false, "build automatically when the ActRaiser (USA) ROM is supplied for a new installation")
 	desktopGate := flags.Bool("desktop-start-gate", false, "wait for desktop process supervision before initializing")
 	flags.StringVar(&values.buildWorkspace, "build-workspace", "", "private scratch directory; enables read-only bundled source")
 	flags.StringVar(&values.inputID, "input-id", "", "verified bundled payload identity")

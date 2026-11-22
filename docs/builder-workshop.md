@@ -113,6 +113,21 @@ language. For example, the value picker inserts `{master_name}`, not a translate
 identifier. Switching languages also preserves expanded tree branches, search
 results, reference text, font order, coverage results and unsaved credit notices.
 
+## Supported ROM checksums
+
+A first build requires **ActRaiser (USA), revision 0**. The other five ROMs are optional sources of extra content. All six supported cartridge releases are revision 0. Open **ROM checksums** on the Builder’s ROM checklist to see the accepted SHA-256 values in desktop or Big Screen mode.
+
+The sizes and checksums below cover the cartridge data. The Builder accepts `.sfc` and `.smc` files with or without a 512-byte copier header and omits that header before verifying SHA-256. When checking a dump yourself, exclude the header to reproduce these values.
+
+| Cartridge | Bytes without copier header | CRC32 | SHA-256 |
+|---|---:|---|---|
+| ActRaiser (USA) | 1,048,576 | `EAC3358D` | `b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0` |
+| ActRaiser (Japan) | 1,048,576 | `BEE9B30C` | `3655833fd0fb4985c3dbbf28141f65564f7a228ee92d81a12982ef7cb952a51b` |
+| ActRaiser (Europe, English) | 1,048,576 | `09097B2B` | `146a68436fa9dbe728ddc7355821384765325e356cb8b9b193a4f22333ed52a0` |
+| ActRaiser (Germany) | 1,048,576 | `29A78AF9` | `01923db83e0e8b19d476483649d956e3e24cfc918ca04a6aa04faa29ba8e4c41` |
+| ActRaiser (France) | 1,048,576 | `A27E2664` | `6cc2cadfcb4fba4c1abb2a1d06b49b840bec65d75acaa0ac8831576442e7e96a` |
+| ActRaiser 2 (USA) | 1,572,864 | `4901F718` | `71bdd448a30b88725864e55594ebb67a118b1f197a3f9e5dd39dbf23399efa15` |
+
 ## Import game content
 
 Optional content is not required to build or play ActRaiser.

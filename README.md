@@ -55,9 +55,10 @@ swaps stages between games is an idea for later.
 
 ## Quick start
 
-You need your own unmodified **ActRaiser (USA)** cartridge dump. The Builder
+You need your own unmodified **ActRaiser (USA), revision 0** cartridge dump. The Builder
 checks it before building. The download includes the build tools, and the
-build runs offline on your computer. You supply the ROM separately.
+build runs offline on your computer. The [supported ROM checksums](docs/builder-workshop.md#supported-rom-checksums)
+cover the USA game and all five optional ROMs.
 
 <details>
 <summary>How to identify the USA ROM</summary>

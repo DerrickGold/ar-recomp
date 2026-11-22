@@ -73,16 +73,23 @@ or run the existing game. The Builder waits while the game runs and returns
 its exit status when it closes. RecompLauncher uses the generated
 `ActRaiserRecomp` folder for saves and game logs.
 
-Easy Setup accepts up to six local `.sfc` or `.smc` files. Select ActRaiser (USA)
-for the core game. The Japanese, European English, German, and French ROMs add
-regional text references, artwork, and music. ActRaiser 2 (USA) adds Winged
-Master and ActRaiser 2 development content.
+RecompLauncher Easy Setup requires **ActRaiser (USA), revision 0** as a local
+`.sfc` or `.smc` file, including when configuring an existing build. All
+five other ROMs are optional. The Japanese, European English, German, and
+French ROMs add regional text references, artwork, and music. ActRaiser 2
+(USA) adds Winged Master and ActRaiser 2 development content.
 
-On first Play with a valid ActRaiser (USA) ROM selected, the Builder starts the
-local build and imports any supplied extras. In Big Screen, Play is focused
-when the build finishes. All Easy Setup fields can be skipped so an existing
-installation can use its saved ROM or build. You can also select files in the
-Builder.
+Each ROM input in `recomplauncher.json` has a `dumps` entry with the retail
+revision, headerless size and CRC32. RecompLauncher can show a verified badge
+when a file matches. A dump with a 512-byte copier header may miss the badge
+and can still be selected. The Builder strips that header and enforces the
+[expected SHA-256 for each release](builder-workshop.md#supported-rom-checksums)
+before using the ROM.
+
+On first Play for a new installation, the Builder verifies the USA ROM, starts
+the local build and imports any supplied extras. In Big Screen, Play is focused
+when the build finishes. An existing game can launch immediately after setup.
+The standalone Builder can reuse its saved USA ROM for rebuilds.
 
 To bring over an existing installation in a different folder, use the Builder's
 [installation import](../README.md#4-update-or-import-an-existing-installation).

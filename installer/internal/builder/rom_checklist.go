@@ -12,7 +12,6 @@ import (
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/ar2game"
 	"github.com/DerrickGold/ar-recomp/installer/internal/ar2master"
-	"github.com/DerrickGold/ar-recomp/installer/internal/gamerom"
 	"github.com/DerrickGold/ar-recomp/installer/internal/regionalmedia"
 	"github.com/DerrickGold/ar-recomp/installer/internal/romset"
 )
@@ -39,7 +38,7 @@ func (app *application) selectUploadedROMs(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusBadRequest, "choose a ROM from the checklist")
 		return
 	}
-	if len(files) > len(supportedROMIDs()) {
+	if len(files) > len(romset.SupportedReleases()) {
 		writeJSONError(w, http.StatusBadRequest, "select up to six supported ROMs")
 		return
 	}
@@ -89,14 +88,6 @@ func (app *application) initializeROMChoices() {
 	}
 }
 
-func supportedROMIDs() []string {
-	ids := []string{}
-	for _, release := range gamerom.Releases() {
-		ids = append(ids, release.ID)
-	}
-	return append(ids, romset.SequelID)
-}
-
 func (app *application) foundROMs() map[string]romChoice {
 	found := make(map[string]romChoice)
 	for _, location := range []string{"game", "builder"} {
@@ -134,6 +125,7 @@ func (app *application) foundROMs() map[string]romChoice {
 func (app *application) serveROMChecklist(w http.ResponseWriter) {
 	type row struct {
 		ID            string `json:"id"`
+		SHA256        string `json:"sha256"`
 		Selected      string `json:"selected,omitempty"`
 		Found         string `json:"found,omitempty"`
 		Origin        string `json:"origin,omitempty"`
@@ -154,9 +146,10 @@ func (app *application) serveROMChecklist(w http.ResponseWriter) {
 	_, savedErr := reusableBuildROM(app.options.ProjectRoot)
 	choices := app.snapshotROMChoices()
 	rows := []row{}
-	for _, id := range supportedROMIDs() {
+	for _, release := range romset.SupportedReleases() {
+		id := release.ID
 		selection := choices[id]
-		item := row{ID: id, Selected: selection.name, Found: found[id].name, Media: available[id]}
+		item := row{ID: id, SHA256: release.SHA256, Selected: selection.name, Found: found[id].name, Media: available[id]}
 		if selection.launchPath != "" {
 			item.Origin = "launcher"
 		} else if selection.name != "" {
@@ -213,7 +206,7 @@ func (app *application) selectChecklistROM(w http.ResponseWriter, r *http.Reques
 		}
 		release, _, err := romset.Identify(input.Data)
 		if err != nil {
-			writeJSONError(w, http.StatusBadRequest, "select a supported clean ActRaiser or ActRaiser 2 ROM")
+			writeJSONError(w, http.StatusBadRequest, "Choose a supported clean ActRaiser or ActRaiser 2 ROM. See ROM checksums in the checklist.")
 			return
 		}
 		if id != "" && id != release {
@@ -264,7 +257,8 @@ func (app *application) snapshotROMChoices() map[string]romChoice {
 
 func (app *application) readROMChoices(choices map[string]romChoice) ([]romset.Input, error) {
 	var inputs []romset.Input
-	for _, id := range supportedROMIDs() {
+	for _, expected := range romset.SupportedReleases() {
+		id := expected.ID
 		choice, ok := choices[id]
 		if !ok {
 			continue

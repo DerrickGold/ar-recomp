@@ -86,7 +86,7 @@ func runDesktop() error {
 		}
 		return err
 	})
-	firstBuild := flag.Bool("build-on-first-run", false, "build automatically when a ROM is supplied for a new installation")
+	firstBuild := flag.Bool("build-on-first-run", false, "build automatically when the ActRaiser (USA) ROM is supplied for a new installation")
 	flag.Parse()
 	developmentPayload := *payload != ""
 	if *jobs < 0 {

@@ -689,6 +689,14 @@ input[type=checkbox] {
   max-width:850px
 }
 #build-rom-checklist { max-width:850px; }
+#rom-checksums-dialog { --dialog-width:52rem; }
+#rom-checksums-dialog[open] { display:flex; flex-direction:column; }
+#rom-checksums-content { min-height:0; overflow:auto; }
+#rom-checksums-content p { margin:.75rem 0; }
+#rom-checksums-list { margin:0; }
+#rom-checksums-list dt { padding-top:.65em; border-top:1px solid var(--line); font-weight:650; }
+#rom-checksums-list dd { margin:.2em 0 .65em; color:var(--muted); overflow-wrap:anywhere; }
+#rom-checksums-list code { user-select:all; }
 #build-view > h1 { margin-bottom:16px; }
 #build-view #state { display:block; margin:12px 0; }
 #build-view #state[data-kind=succeeded] { color:var(--ok); }

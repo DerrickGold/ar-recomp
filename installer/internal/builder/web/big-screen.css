@@ -168,8 +168,12 @@ body[data-pad-family]:not([data-pad-family=keyboard]) .big-keyboard-glyph { disp
   border:1px solid var(--line);
   border-radius:12px;
 }
+.rom-checklist-heading {
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;
+  margin-bottom:10px;
+}
 #rom-checklist h2 {
-  margin:0 0 10px;
+  margin:0;
   color:var(--gold);
 }
 #rom-checklist-rows {
@@ -198,7 +202,7 @@ body[data-pad-family]:not([data-pad-family=keyboard]) .big-keyboard-glyph { disp
 [data-big-screen=true] .home-hero:has(#big-screen-menu:not([hidden]) #big-screen-rom:not([hidden]))
   :is(.home-companion,.big-screen-heading,.big-screen-brand,.big-screen-controls) { display:none; }
 #big-screen-rom #rom-checklist { padding:0; background:none; border:0; }
-#big-screen-rom #rom-checklist-title { color:var(--ink); font-size:clamp(22px,2.5vw,34px); line-height:1.25; margin-bottom:8px; }
+#big-screen-rom #rom-checklist-title { color:var(--ink); font-size:clamp(22px,2.5vw,34px); line-height:1.25; }
 #big-screen-rom #rom-checklist-rows {
   grid-template-columns:minmax(0,1fr);
   align-content:start;

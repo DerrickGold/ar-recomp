@@ -188,7 +188,10 @@
     <p class="notice" data-language-status data-i18n="builder.language.source_checking" role="status">Checking the native US language source…</p>
     <div id="build-rom-checklist">
       <section id="rom-checklist" aria-labelledby="rom-checklist-title">
-        <h2 id="rom-checklist-title" data-i18n="builder.roms.title">ROM checklist</h2>
+        <div class="rom-checklist-heading">
+          <h2 id="rom-checklist-title" data-i18n="builder.roms.title">ROM checklist</h2>
+          <button id="rom-checksums-open" type="button" class="quiet" aria-haspopup="dialog" disabled data-i18n="builder.roms.checksums">ROM checksums</button>
+        </div>
         <p id="rom-checklist-help" class="muted" data-i18n="builder.roms.desktop_picker">Select a checklist entry or drop .sfc and .smc files here.</p>
         <input id="rom-picker" type="file" accept=".sfc,.smc" hidden>
         <div id="rom-checklist-rows" data-big-page-list></div>
@@ -512,6 +515,16 @@
 <dialog id="big-mod-actions-dialog" class="builder-dialog" aria-labelledby="big-mod-actions-title">
   <h2 id="big-mod-actions-title"></h2>
   <form method="dialog" class="dialog-actions" data-big-band><div id="big-mod-options"></div><button class="quiet" autofocus data-i18n="common.cancel">Cancel</button></form>
+</dialog>
+<dialog id="rom-checksums-dialog" class="builder-dialog" aria-labelledby="rom-checksums-title">
+  <header class="big-dialog-heading">
+    <h2 id="rom-checksums-title" data-i18n="builder.roms.checksums">ROM checksums</h2>
+    <form method="dialog"><button class="quiet" data-i18n="builder.feedback.close">Close</button></form>
+  </header>
+  <div id="rom-checksums-content" tabindex="0" data-big-scroll role="region" aria-labelledby="rom-checksums-title">
+    <p data-i18n="builder.roms.checksum_help">A first build requires ActRaiser (USA). The other ROMs are optional. Compare SHA-256 against the ROM data after omitting any 512-byte copier header.</p>
+    <dl id="rom-checksums-list"></dl>
+  </div>
 </dialog>
 <dialog id="big-rom-dialog" class="builder-dialog" aria-labelledby="big-rom-title">
   <header class="big-dialog-heading">
