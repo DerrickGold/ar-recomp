@@ -131,9 +131,11 @@ Select the globe and current language beside **ActRaiser** to change the Builder
 interface. On desktop, the same globe appears beside build status in the top bar.
 
 In **Manage Mods**, press Up or Down to highlight a pack, or Left to reach
-the **Mod type** filter. Use the bottom face button to enable or disable
+**Filter mods**. Use the bottom face button to enable or disable
 the highlighted pack, the left face button for **Preview**, and the top
-face button for **Actions** such as reviewing a conflict or uninstalling.
+face button for **Actions** such as uninstalling. Choose **Conflicting mods** in the
+filter to see affected packs. Open either pack’s **Preview** to choose which
+one supplies a shared track, artwork or manual.
 Shoulder buttons page through the list. **Game music** has original ROM
 previews and existing manifest replacements. Use the desktop Workshop to
 author packs and edit translations.

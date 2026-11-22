@@ -255,7 +255,7 @@ body[data-pad-family]:not([data-pad-family=keyboard]) .big-keyboard-glyph { disp
 }
 #big-customize-content { flex:1; min-height:0; max-height:none; margin-block:0; }
 .big-mod-heading { display:flex; align-items:center; gap:12px; min-width:0; }
-#big-customize-paging { color:var(--muted); font-size:.85em; flex-wrap:nowrap; white-space:nowrap; }
+:is(#big-customize-paging,#mod-source-paging) { color:var(--muted); font-size:.85em; flex-wrap:nowrap; white-space:nowrap; }
 .big-mod-header,.big-build-header {
   display:flex;
   align-items:center;
@@ -273,12 +273,13 @@ body[data-pad-family]:not([data-pad-family=keyboard]) .big-keyboard-glyph { disp
 }
 .big-choice-grid { display:grid; gap:8px; }
 .big-choice-grid > div { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.big-choice-grid > div:has(> [hidden]:only-child) { display:none; }
 .big-choice-grid button { min-height:42px; font-size:inherit; }
 .big-choice-grid button[aria-pressed=true] { background:#314252; color:var(--gold); border-color:#b79250; }
 #big-screen-language-status { margin:8px 0 0; color:var(--muted); }
 #big-screen-language-options button[aria-disabled=true] { opacity:.6; cursor:wait; }
-:is(#big-mod-filter,#big-screen-language) { display:inline-flex; align-items:center; gap:.45em; }
-:is(#big-mod-filter,#big-screen-language)::after {
+:is(#big-mod-filter,#big-screen-language,.mod-source-controls [aria-haspopup=dialog]) { display:inline-flex; align-items:center; gap:.45em; }
+:is(#big-mod-filter,#big-screen-language,.mod-source-controls [aria-haspopup=dialog])::after {
   content:"";
   width:.42em;
   height:.42em;
@@ -378,7 +379,6 @@ body:not([data-pad-family=keyboard]) :is([data-pad-button=confirm],[data-pad-but
   border-color:#b7925080;
 }
 .big-screen-row { display:block; width:100%; }
-.big-screen-row.big-conflict-target { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:.25em 1em; }
 .big-screen-row small {
   display:block;
   color:var(--muted);
@@ -510,6 +510,7 @@ body:not([data-pad-family=keyboard]) :is([data-pad-button=confirm],[data-pad-but
   line-height:1.25;
   overflow-wrap:anywhere;
 }
+[data-big-screen=true] .mod-asset-include { min-height:46px; }
 [data-big-screen=true] dialog .dialog-actions {
   display:flex;
   flex-wrap:wrap;

@@ -33,6 +33,10 @@ func modExportTracks(root string) ([]modExportTrack, error) {
 	if err != nil {
 		return nil, err
 	}
+	return modExportManifestTracks(root, manifest, manifestPath)
+}
+
+func modExportManifestTracks(root, manifest, manifestPath string) ([]modExportTrack, error) {
 	var rows = []modExportTrack{}
 	for _, section := range manifestSections(manifest) {
 		id, music := strings.CutPrefix(section.Name, "music:")
@@ -51,6 +55,7 @@ func modExportTracks(root string) ([]modExportTrack, error) {
 			row.Error = "This song or condition cannot be represented as a music pack assignment."
 		} else {
 			row.Track, row.Region = spec.Song.ID, spec.Region
+			var err error
 			row.path, err = filepath.Rel(filepath.Join(root, "game-assets"), file)
 			if err != nil {
 				return nil, err
@@ -122,7 +127,11 @@ func exportMusicMod(root string, out io.Writer, request modExportRequest) error 
 	if (request.ID != "" && !modIDPattern.MatchString(request.ID)) || len(request.Targets) == 0 || len(request.Targets) > len(musicModTargets) {
 		return fmt.Errorf("select at least one valid music replacement")
 	}
-	tracks, err := modExportTracks(root)
+	manifest, manifestPath, err := readAssetManifest(root)
+	if err != nil {
+		return err
+	}
+	tracks, err := modExportManifestTracks(root, manifest, manifestPath)
 	if err != nil {
 		return err
 	}
@@ -160,13 +169,21 @@ func exportMusicMod(root string, out io.Writer, request modExportRequest) error 
 		digests = append(digests, fmt.Sprintf("%x", digest.Sum(nil)))
 		payload.Tracks = append(payload.Tracks, row.assignment)
 	}
+	extras, err := readMusicDraftSource(manifest).archiveExtras(assets)
+	if err != nil {
+		return err
+	}
+	digests, err = writeModExtras(archive, extras, maxModBytes-2*maxModMetadata-total, digests)
+	if err != nil {
+		return err
+	}
 	return finishModArchive(archive, request.modMetadata, payload, digests)
 }
 
-func exportTitleMod(out io.Writer, metadata modMetadata, id string, source io.Reader) error {
+func exportTitleMod(out io.Writer, metadata modMetadata, id string, source io.Reader, extras ...modExtra) error {
 	const name = "art/title.png"
 	payload := modPayload{Format: 1, Type: titleModType, Game: modGameID, ID: id, Artwork: name}
-	return exportFileMod(out, metadata, payload, name, source, func(out io.Writer, input io.Reader) error {
+	return exportFileMod(out, metadata, payload, name, source, extras, func(out io.Writer, input io.Reader) error {
 		if id == "" {
 			return writeModTitle(out, input, true)
 		}
@@ -174,16 +191,16 @@ func exportTitleMod(out io.Writer, metadata modMetadata, id string, source io.Re
 	})
 }
 
-func exportManualMod(out io.Writer, metadata modMetadata, id string, source io.Reader) error {
+func exportManualMod(out io.Writer, metadata modMetadata, id string, source io.Reader, extras ...modExtra) error {
 	const name = "manual/manual.pdf"
 	payload := modPayload{Format: 1, Type: manualModType, Game: modGameID, ID: id, Manual: name}
-	return exportFileMod(out, metadata, payload, name, source, func(out io.Writer, input io.Reader) error {
+	return exportFileMod(out, metadata, payload, name, source, extras, func(out io.Writer, input io.Reader) error {
 		_, err := copyModManual(out, input)
 		return err
 	})
 }
 
-func exportFileMod(out io.Writer, metadata modMetadata, payload modPayload, name string, source io.Reader, copyAsset func(io.Writer, io.Reader) error) error {
+func exportFileMod(out io.Writer, metadata modMetadata, payload modPayload, name string, source io.Reader, extras []modExtra, copyAsset func(io.Writer, io.Reader) error) error {
 	archive := zip.NewWriter(out)
 	member, err := archive.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
 	if err != nil {
@@ -193,7 +210,11 @@ func exportFileMod(out io.Writer, metadata modMetadata, payload modPayload, name
 	if err := copyAsset(io.MultiWriter(member, digest), source); err != nil {
 		return err
 	}
-	return finishModArchive(archive, metadata, payload, []string{fmt.Sprintf("%x", digest.Sum(nil))})
+	digests, err := writeModExtras(archive, extras, maxModBytes-2*maxModMetadata, []string{fmt.Sprintf("%x", digest.Sum(nil))})
+	if err != nil {
+		return err
+	}
+	return finishModArchive(archive, metadata, payload, digests)
 }
 
 func finishModArchive(archive *zip.Writer, metadata modMetadata, payload modPayload, digests []string) error {

@@ -24,7 +24,9 @@ type State struct {
 	Directories         []string            `json:"directories,omitempty"`
 	RelativeDirectories []string            `json:"relativeDirectories,omitempty"`
 	Disabled            map[string]bool     `json:"disabled"`
+	ExcludedTargets     map[string][]string `json:"excludedTargets,omitempty"`
 	Preferred           map[string][]string `json:"preferred"`
+	ReviewedSources     map[string][]string `json:"reviewedSources,omitempty"` // eligible pack IDs when the player chose a source for a target
 	Automatic           map[string]string   `json:"automatic,omitempty"`
 	LanguageProjects    map[string]string   `json:"languageProjects,omitempty"`
 	LanguageChoice      map[string]string   `json:"languageChoice,omitempty"`
@@ -126,7 +128,7 @@ func (s *State) Register(root, full string) error {
 }
 
 func (s State) HasChoices() bool {
-	return len(s.Disabled)+len(s.Preferred)+len(s.Automatic)+len(s.LanguageChoice)+len(s.LanguageProjects)+len(s.BundledTitles) != 0
+	return len(s.Disabled)+len(s.ExcludedTargets)+len(s.Preferred)+len(s.Automatic)+len(s.LanguageChoice)+len(s.LanguageProjects)+len(s.BundledTitles) != 0
 }
 
 func (s State) Header() ([]byte, error) {

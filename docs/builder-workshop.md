@@ -163,13 +163,19 @@ under `game-assets/imports/`, which game packaging carries automatically.
   **Title artwork** first. Use the **Enabled**
   checkbox to turn a pack on or off. **Preview** opens a dialog for music
   tracks, title artwork, language samples or manual pages, including disabled
-  packs. The conflict count beside a pack opens its affected targets. Choose
-  a track or region to see the competing packs. A single conflict takes you
-  straight to that choice. In Big Screen, open **Actions** on the selected pack.
-  If you temporarily disable a selected pack, its priority returns when you
-  enable it again.
+  packs. When enabled packs offer the same asset, each affected mod shows a
+  conflict flag. Choose **Conflicting mods** in the filter to see them together.
+  Open either pack’s **Preview** and choose the source for the shared asset.
+  This clears that conflict from every affected row. If a pack was already
+  supplying the asset, it keeps playing while you decide. You can revisit
+  the choice in either preview. In a multi-track pack, **Exclude this asset**
+  skips just that track or regional variant. **Include this asset** restores it.
+  For example, a soundtrack can supply the title theme while a standalone
+  theme stays installed and shows **Inactive**. The standalone theme can
+  take over if you disable the soundtrack. Re-enabling the soundtrack
+  restores its priority and remembers its individual track settings.
   A filtered view shows **Clear filter**. Multi-file installs report each
-  file and open **All types** when the batch spans multiple mod types.
+  file and open **All mods** when the batch spans multiple mod types.
   On desktop, choose **Languages** to search installed packs by name, locale,
   ID, or archive filename and see how many matches are enabled or disabled.
   Competing language releases show their filenames in both views. If launcher
@@ -194,7 +200,8 @@ under `game-assets/imports/`, which game packaging carries automatically.
 - **Workshop** opens saved projects and authoring tools on desktop.
   **Languages** includes translation creation, cloning, reference extraction
   and sharing. **Music** includes original-ROM music extraction, replacement
-  previews, per-region variants and music pack export. **Save** stores
+  previews, per-region variants and music pack export. The track picker marks
+  songs with custom music and identifies songs with regional replacements only. **Save** stores
   edits in Workshop. **Save draft and continue** saves pending changes before
   packaging. **Discard all changes…** lists the affected tracks and regions
   before clearing unsaved music edits. In the pack dialog, **Close** keeps the
@@ -206,6 +213,18 @@ under `game-assets/imports/`, which game packaging carries automatically.
   shareable archive. The Builder generates an ID from the pack's contents and
   metadata. Music replacements use Ogg Vorbis. Convert
   MP3s to Vorbis-encoded `.ogg` files before selecting them.
+- To revise a published music bundle, open **Workshop → Music → Import .o2r…**.
+  Import restores the Ogg files to their track and region slots, including loop
+  points and gain. Matching assignments are replaced in the saved draft. Other
+  Workshop tracks stay available. Add or replace songs, then choose **Install
+  or export…**. The pack details are filled in, and the imported tracks and newly
+  filled slots are selected. You can change the selection and version before export.
+  **Finish editing** clears the pack details and keeps your saved music available for the next pack.
+  **Create title artwork pack** and **Create manual pack** offer the same import
+  action for their PNG or PDF. For a translation, use **Languages → Import for
+  editing**. Original archives and installed mods are only affected by a separate
+  export or install action. Supported README, license and icon files carry forward. Revised music, artwork and manual packs receive a new
+  content-derived ID and can coexist with an earlier installed revision.
 - **Builder Settings** contains scenery, help and project
   links. Enable **Close Builder when the game launches** to close the standalone
   Builder after a successful launch. The game keeps running. Unsaved Workshop

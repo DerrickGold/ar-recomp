@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  window.workshopAudioTransport = (group, parent, {url, name, description}, onError) => {
+  window.workshopAudioTransport = (group, parent, {url, name, description, heading}, onError) => {
     const ui = window.workshopI18n;
     const key = name => "builder.audio." + name;
     const player = document.createElement("div");
@@ -9,14 +9,16 @@
     player.setAttribute("role", "group");
     ui.attribute(player, "aria-label", key("preview"));
 
-    const title = document.createElement("strong");
-    title.textContent = name;
+    if (!heading) {
+      heading = document.createElement("strong");
+      heading.textContent = name;
+    }
     const time = document.createElement("span");
     time.className = "audio-time";
     time.setAttribute("aria-hidden", "true");
     const timeline = document.createElement("div");
     timeline.className = "audio-timeline";
-    timeline.append(title, time);
+    timeline.append(heading, time);
     const seek = document.createElement("input");
     seek.type = "range";
     seek.min = "0";

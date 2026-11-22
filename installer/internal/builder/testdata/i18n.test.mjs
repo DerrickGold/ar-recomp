@@ -170,7 +170,7 @@ test("pack publishing keeps metadata and regional selections per draft through c
   selections.append=node=>selections.children.push(node);
   selections.querySelectorAll=selector=>selections.children.map(label=>label.children[0])
     .filter(input=>selector==="input"||input.checked);
-  const fields=["","1.0.0"].map(defaultValue=>({value:defaultValue,defaultValue}));
+  const fields=[{name:"name",defaultValue:""},{name:"version",defaultValue:"1.0.0"}].map(field=>({...field,value:field.defaultValue}));
   get("asset-pack-export-form").querySelectorAll=()=>fields;
   const dialog=get("asset-pack-export");
   dialog.showModal=()=>{dialog.open=true;};
@@ -234,6 +234,15 @@ test("pack publishing keeps metadata and regional selections per draft through c
   assert.equal(fields[0].value,"First track");
   assert.deepEqual(selected(),["song-09","song-09-fillmore"]);
   assert.equal(submit.disabled,false);
+
+  publishing.clearMusicDetails();
+  const source={name:"Imported songs",version:"1.4.1",excluded:["song-11"]};
+  tracks.push({id:"song-02",track:"song-02"});
+  assert.deepEqual(await open(()=>publishing.openMusic("song-11",source)),["Imported songs","1.4.1"]);
+  assert.deepEqual(selected(),["song-09","song-09-fillmore","song-02"]);
+  assert.equal(publishing.hasMusicDetails(),false,"reopening a pack is clean");
+  fields[1].value="2.0.0";
+  assert.deepEqual(await open(()=>publishing.openMusic("song-02",source)),["Imported songs","2.0.0"]);
 });
 
 // Run the actual application alongside i18n, with a deliberately small DOM.
@@ -299,7 +308,10 @@ function setupAssetApp(tracks=[["song-09","Track 09"],["song-01","Sky Palace"]],
     if(selector==="dialog[open]")return openDialog||null;
     return {".tabs":tabsHost,".workspace-bar":header,".asset-track-picker":pickerHost}[selector]??assert.fail(`unexpected document selector ${selector}`);
   };
-  s.doc.createElement=tag=>{const n=new Node(tag);n.focus=()=>{s.doc.activeElement=n;};n.click=()=>n.fire("click");return n;};
+  s.doc.createElement=tag=>{const n=new Node(tag);n.focus=()=>{s.doc.activeElement=n;};n.click=()=>n.fire("click");
+    n.append=(...children)=>n.children.push(...children);
+    Object.defineProperty(n,"firstElementChild",{get:()=>n.children[0]});
+    return n;};
   s.doc.body=new Node("body");
   if(desktopShell)s.doc.body.dataset.desktopShell="true";
   let closeRequests;
@@ -848,6 +860,43 @@ test("real asset controller keeps unsaved files, playback, search and form state
   }
 });
 
+test("track picker marks custom and regional audio independently from unsaved edits",async()=>{
+  const s=setupAssetApp(),[base,other]=s.rows,[button,untouched]=s.list.children;
+  const [,music,edited]=button.children;
+  const check=(label,dirty)=>{
+    for(const mark of [music,s.node("asset-selected-music")]){
+      assert.equal(mark.hidden,!label);
+      if(label) assert.equal(mark.textContent,label);
+    }
+    assert.equal(edited.hidden,!dirty);
+    assert.equal(s.node("asset-selected-edit").hidden,!dirty);
+    assert.ok(untouched.children[1].hidden && untouched.children[2].hidden);
+  };
+  check("",false);
+  base.dataset.installed="true";
+  await button.fire("click");
+  check("Custom music",false);
+  await base.clear.fire("click");
+  check("",true);
+  await base.clear.fire("click");
+  check("Custom music",false);
+
+  base.dataset.installed="false";
+  // Reuse a row-shaped fixture for a regional replacement.
+  const variant={dataset:{},querySelector:other.querySelector};
+  base.nextElementSibling={classList:{contains:name=>name==="asset-variants"},children:[variant],querySelectorAll:()=>[]};
+  variant.dataset.pendingSplit="true";
+  await button.fire("click");
+  check("",true);
+  variant.dataset.installed="true";
+  variant.dataset.pendingSplit="false";
+  await button.fire("click");
+  check("Regional only",false);
+  base.file.files=[{name:"new.ogg"}];
+  await base.file.fire("change");
+  check("Custom music",true);
+});
+
 test("music track mouse clicks retain search focus through WebKit's default focus fallback",async()=>{
   const s=setupAssetApp([["title-theme","Title Theme"],["song-13","Track 13"]]);
   const toggle=s.node("asset-track-toggle"),options=s.node("asset-track-options"),search=s.node("asset-search");
@@ -871,7 +920,7 @@ test("music track mouse clicks retain search focus through WebKit's default focu
   await track.fire("mouseup",{target:track,button:0});
   await track.fire("click",{target:track,button:0});
   assert.equal(s.rows[0].hidden,true);assert.equal(s.rows[1].hidden,false);
-  assert.equal(s.node("asset-selected-track").textContent,track.textContent);
+  assert.equal(s.node("asset-selected-track").textContent,track.firstElementChild.textContent);
   assert.equal(options.hidden,true);assert.equal(s.doc.activeElement,toggle);
   // Secondary presses retain their native behavior and never select a track.
   await toggle.fire("click");
@@ -895,7 +944,7 @@ test("music track clicks survive WebKit's null focusout and preserve pending upl
   assert.equal(options.hidden,false,"the pressed track must remain available until click");
   await palaceButton.fire("click");
   assert.equal(title.hidden,true);assert.equal(palace.hidden,false);
-  assert.equal(s.node("asset-selected-track").textContent,palaceButton.textContent);
+  assert.equal(s.node("asset-selected-track").textContent,palaceButton.firstElementChild.textContent);
   assert.equal(palaceButton.getAttribute("aria-current"),"true");
   assert.equal(options.hidden,true);assert.equal(toggle.getAttribute("aria-expanded"),"false");
   assert.equal(s.doc.activeElement,toggle);
@@ -933,7 +982,7 @@ test("music track picker keeps keyboard navigation, search selection and Escape"
   assert.equal(s.list.children[0].hidden,true);assert.equal(s.list.children[1].hidden,false);
   await key("Enter",search);
   assert.equal(s.rows[0].hidden,true);assert.equal(s.rows[1].hidden,false);
-  assert.equal(options.hidden,true);assert.equal(s.node("asset-selected-track").textContent,s.list.children[1].textContent);
+  assert.equal(options.hidden,true);assert.equal(s.node("asset-selected-track").textContent,s.list.children[1].firstElementChild.textContent);
 });
 
 test("asset errors use stable actionable codes and retain raw details and pending files",async()=>{

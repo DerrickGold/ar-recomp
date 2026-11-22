@@ -27,27 +27,23 @@ test("a catalog read stays distinct from pending mod writes", async () => {
   assert.equal(requests.isWriting(), false);
 });
 
-test("an installed alternative offers a shortcut to its slot without changing the winner", () => {
+test("install feedback directs new overlaps to Preview and respects settled choices", () => {
   const {context,ui} = setup();
   runInNewContext(readFileSync(new URL("../web/mod-packs.js", import.meta.url), "utf8"), context);
   const {musicType, renderInstallFeedback} = context.window.workshopModPacks;
-  const status = new Node("p"), review = new Node("button"), choice = new Node("button");
-  let focused = false;
-  choice.dataset.modControl = "select:song-09-fillmore:second";
-  choice.focus = () => { focused = true; };
-  const rows = {querySelectorAll: () => [choice]};
+  const status = new Node("p");
   const catalog = {
     installedId: "second", installedName: "New Fillmore", installedType: musicType,
     packs: [{id: "second", enabled: true}],
     slots: [{id: "song-09-fillmore", track: "song-09", region: "fillmore", type: musicType,
       candidates: ["first", "second"], winner: "first"}],
   };
-  renderInstallFeedback(status, review, rows, catalog);
+  catalog.slots[0].needsChoice = true;
+  renderInstallFeedback(status, catalog);
+  assert.equal(status.textContent, ui.text("builder.mods.installed_conflict", {name: "New Fillmore"}));
+  catalog.slots[0].needsChoice = false;
+  renderInstallFeedback(status, catalog);
   assert.equal(status.textContent, ui.text("builder.mods.installed_alternate", {name: "New Fillmore"}));
-  assert.match(review.textContent, /Fillmore/);
-  assert.equal(review.hidden, false);
-  review.onclick();
-  assert.equal(focused, true);
   assert.equal(catalog.slots[0].winner, "first");
 });
 
@@ -346,76 +342,53 @@ function setupConflictRows() {
   return {doc,context,rows,make};
 }
 
-test("reviewing a pack with multiple conflicts focuses its candidate for the chosen region", async () => {
-  const {doc,context,rows,make}=setupConflictRows();
-  const {musicType:type,renderRows}=context.window.workshopModPacks;
-  const dialog=make("dialog"),list=make("div"),heading=make("h2");
-  doc.getElementById=id=>({"mod-conflict-review":dialog,"mod-conflict-targets":list,"mod-conflict-heading":heading})[id];
-  dialog.showModal=()=>{dialog.open=true;};
-  dialog.close=()=>{dialog.open=false;};
-  const packs=["first","second"].map(id=>({id,name:id,type,enabled:true}));
-  const slots=["","fillmore","bloodpool"].map(region=>({
-    id:region || "song-09", type, track:"song-09", region, candidates:["first","second"], winner:region==="bloodpool"?"first":"",
-  }));
-  renderRows(rows,{packs,slots},()=>assert.fail("review must preserve activation"),{type});
-  const review=rows.querySelectorAll("[data-mod-control]").find(button=>button.dataset.modControl==="conflict:pack:second");
-  assert.equal(review.textContent,"2 unresolved conflicts");
-  await review.fire("click");
-  assert.equal(dialog.open,true);
-  assert.equal(list.children.length,2);
-  assert.match(list.children[1].children[0].textContent,/Fillmore/);
-  await list.children[1].fire("click");
-  assert.equal(dialog.open,false);
-  assert.equal(doc.activeElement.dataset.modControl,"select:fillmore:second");
+test("both providers get a passive flag and each Preview opens the first pending asset", async () => {
+  const {context, rows} = setupConflictRows();
+  const {musicType: type, renderRows} = context.window.workshopModPacks;
+  const targets = ["song-09", "song-09-fillmore", "title-theme"];
+  const packs = ["suite", "other"].map(id => ({id, name:id, type, enabled:true, targets}));
+  const slots = targets.map(id => ({id, type, track:id, candidates:["suite","other"], winner:"suite", needsChoice:id !== "title-theme"}));
+  const catalog = {packs, slots};
+  let details;
+  const paint = () => renderRows(rows, catalog, () => assert.fail("opening a preview changed activation"), {
+    type, preview: value => { details = value; },
+  });
+  const flags = () => rows.querySelectorAll("span").filter(node => node.dataset.state === "problem");
+  paint();
+  assert.deepEqual(flags().map(flag => flag.textContent), ["2 unresolved conflicts","2 unresolved conflicts"]);
+  assert.equal(rows.querySelectorAll("button").length, 2, "only the two preview buttons are needed");
+  for (const pack of packs) {
+    const preview = rows.querySelectorAll("button").find(button => button.dataset.modControl === "details:" + pack.id);
+    await preview.fire("click");
+    assert.equal(details.pack.id, pack.id);
+    assert.equal(details.target, targets[0]);
+  }
+  slots[0].needsChoice = false;
+  paint();
+  assert.deepEqual(flags().map(flag => flag.textContent), ["Conflict","Conflict"]);
+  slots[1].needsChoice = false;
+  paint();
+  assert.equal(flags().length, 0);
+  assert.ok(rows.querySelectorAll("span").some(node => node.textContent === "Inactive"));
+  slots[1].winner = "other";
+  paint();
+  assert.ok(rows.querySelectorAll("span").some(node => node.textContent === "2 of 3 assets active"));
 });
 
 for (const [typeKey, slot] of [
-  ["titleType", "title-artwork"],
-  ["manualType", "in-game-manual"],
-]) test(`${slot} conflicts use one controller-selectable slot and restore focus`, async () => {
-  const {doc,context,rows}=setupConflictRows();
-  const actions=[];
-  const {renderRows, musicType, captureFocus, restoreFocus} = context.window.workshopModPacks;
-  const type = context.window.workshopModPacks[typeKey];
-  const packs = [
-    {type, id:"first", name:"First", enabled:true, previews:["mods/image/first.png"]},
-    {type, id:"second", name:"Second", enabled:true, previews:["mods/image/second.png"]},
-    {type:musicType, id:"music", name:"Music", enabled:true},
-  ];
-  const choice = {type, id:slot, candidates:["first","second"], winner:""};
-  const music = {type:musicType, id:"title-theme", track:"title-theme", candidates:["music"]};
-  const previews = [];
-  const paint = () => {
-    const focus = captureFocus(rows);
-    renderRows(rows, {packs, slots:[choice,music]}, action => actions.push(action), {
-      big: true, type, preview: ({pack}) => previews.push(pack.id),
-    });
-    restoreFocus(rows, focus);
-  };
-  paint();
-  assert.equal(rows.children[0].tagName, "TABLE");
-  assert.equal(rows.children[1].className, "mod-conflicts");
-  const find = id => rows.querySelectorAll("[data-mod-control]").find(control => control.dataset.modControl === id);
-  assert.equal(find("pack:music"), undefined);
-  assert.equal(rows.querySelectorAll("img").length, 0, "pack artwork is only shown in the modal");
-  assert.equal(find("pack:first").checked, true);
-  await find("details:first").fire("click");
-  assert.equal(previews[0], "first");
-  const selection = `select:${slot}:second`;
-  const use = find(selection);
-  use.focus();
-  await use.fire("click");
-  assert.equal(actions[0].action, "select");
-  assert.equal(actions[0].pack, "second");
-  assert.equal(actions[0].slot, slot);
-  choice.winner = "second";
-  paint();
-  assert.equal(doc.activeElement, find(selection));
-  assert.equal(doc.activeElement.getAttribute("aria-pressed"), "true");
-  const enabled = find("pack:first");
-  enabled.checked = false;
-  await enabled.fire("click");
-  assert.deepEqual({...actions[1]}, {action: "disable", pack: "first"});
+  ["titleType", "title-artwork"], ["manualType", "in-game-manual"],
+]) test(`${slot} opens the right preview under the conflict filter`, async () => {
+  const {context,rows} = setupConflictRows();
+  const mods = context.window.workshopModPacks;
+  const type = mods[typeKey];
+  const packs = ["first", "second"].map(id => ({id, name:id, type, enabled:true, targets:[slot]}));
+  const choice = {type, id:slot, candidates:["first","second"], needsChoice:true};
+  let preview;
+  mods.renderRows(rows, {packs, slots:[choice]}, () => assert.fail("list changed the source"),
+    {type:"conflicts", preview:details => {preview = details;}});
+  await rows.querySelectorAll("button").find(control => control.dataset.modControl === "details:second").fire("click");
+  assert.equal(preview.type, type);
+  assert.equal(preview.target, slot);
 });
 
 function setupModPanel() {
@@ -426,7 +399,8 @@ function setupModPanel() {
   function make(tag) {
     const node = new Node(tag);
     node.append = (...children) => node.children.push(...children);
-    node.replaceChildren = () => { node.children = []; };
+    node.replaceChildren = (...children) => { node.children = children; };
+    node.querySelector = selector => node.querySelectorAll(selector)[0];
     node.querySelectorAll = selector => node.children.flatMap(child => {
       const match = selector === "[data-mod-mutation]" ? child.hasAttribute("data-mod-mutation") :
         selector === "[data-mod-control]" ? child.dataset.modControl : child.tagName.toLowerCase() === selector;
@@ -443,6 +417,152 @@ function setupModPanel() {
   runInNewContext(readFileSync(new URL("../web/mod-packs.js", import.meta.url), "utf8"), context);
   return {doc, context, nodes, make, setDialog(dialog) { openDialog = dialog; }};
 }
+
+test("the conflict filter keeps one row per affected mod and stays selected when the last flag clears", async () => {
+  const {context, doc, nodes} = setupModPanel();
+  const type = context.window.workshopModPacks.musicType;
+  const targets = Array.from({length:24}, (_,i) => "song-" + i);
+  const packs = Array.from({length:96}, (_,i) => ({id:"pack-" + i, name:"Pack " + i, enabled:true, type, targets}));
+  const candidates = packs.map(pack => pack.id);
+  const catalog = {packs, slots:targets.map((id,i) => ({id, track:id, type, candidates:i < 3 ? candidates.slice(i,80) : candidates, winner:candidates[i], needsChoice:i < 3}))};
+  let preview;
+  const panel = context.window.workshopAssetPackPanel(async () => catalog, () => {}, options => { preview = options; });
+  await panel.load();
+  const rows = nodes.get("asset-pack-list"), filter = nodes.get("asset-pack-type");
+  const controls = () => rows.querySelectorAll("[data-mod-control]");
+  assert.equal(rows.querySelectorAll("input").length, 96);
+  filter.value = "conflicts";
+  await filter.fire("change");
+  assert.equal(rows.querySelectorAll("input").length, 80);
+  for (const locale of ["de", "en"]) {
+    const ui = context.window.workshopI18n;
+    ui.setLocale(locale);
+    await doc.fire("workshop:language");
+    assert.ok(rows.querySelectorAll("small")[0].textContent.startsWith(ui.text("builder.mods.title")));
+    assert.equal(filter.value, "conflicts");
+  }
+  assert.equal(controls().some(control => control.dataset.modControl.startsWith("select:")), false);
+  await controls().find(control => control.dataset.modControl === "details:pack-0").fire("click");
+  assert.equal(preview.type, type);
+  assert.equal(preview.target, targets[0]);
+  catalog.slots[0].needsChoice = false;
+  preview.onChanged(catalog);
+  assert.equal(rows.querySelectorAll("input").length, 79);
+  catalog.slots.forEach(slot => { slot.needsChoice = false; });
+  preview.onChanged(catalog);
+  assert.equal(rows.children[0].textContent, "No mods have unresolved conflicts.");
+  assert.equal(filter.value, "conflicts");
+  const clear = nodes.get("asset-pack-clear-filter");
+  assert.equal(clear.hidden, false);
+  await clear.fire("click");
+  assert.equal(rows.querySelectorAll("input").length, 96);
+});
+
+test("both music previews switch just the shared track and preserve the mounted player", async () => {
+  const {context, doc, nodes, make} = setupModPanel();
+  const mods = context.window.workshopModPacks;
+  const create = doc.createElement;
+  doc.createElement = tag => {
+    const node = create(tag);
+    node.contains = child => node === child || node.children.some(item => item.contains?.(child));
+    return node;
+  };
+  const dialog = doc.getElementById("mod-preview-dialog");
+  dialog.showModal = () => { dialog.open = true; };
+  dialog.close = () => { dialog.open = false; return dialog.fire("close"); };
+  doc.body = make("body");
+  context.window.workshopAudioTransport = (_group, row, {heading}) => {
+    const player = doc.createElement("button");
+    row.append(heading, player);
+    return player;
+  };
+  context.window.workshopStopAudio = () => {};
+  const type = mods.musicType, title = "title-theme", region = "song-09-fillmore";
+  const solo = {id:"solo", name:"Solo", type, enabled:true, targets:[title], tracks:[{track:title}], previews:["solo.ogg"]};
+  const suite = {id:"suite", name:"Suite", type, enabled:true, targets:[title,region],
+    tracks:[{track:title}, {track:"song-09",region:"fillmore"}], previews:["suite.ogg","fillmore.ogg"]};
+  const initial = {packs:[solo,suite], slots:[
+    {id:title, type, candidates:["solo","suite"], winner:"solo", needsChoice:true},
+    {id:region, type, candidates:["suite"], winner:"suite"},
+  ]};
+  let catalog = initial;
+  const writes = [];
+  let preferred = "solo";
+  const request = async (path, options) => {
+    assert.equal(path, "mods/activation");
+    const {action,pack,slot} = JSON.parse(options.body);
+    assert.equal(slot, title);
+    writes.push([action, pack]);
+    const excluded = action === "exclude-target";
+    if (action === "select") preferred = pack;
+    return {...catalog, packs:[solo,{...suite, excludedTargets:excluded ? [title] : []}], slots:[
+      {...initial.slots[0], needsChoice:false, candidates:excluded ? ["solo"] : ["solo","suite"], winner:excluded ? "solo" : preferred},
+      initial.slots[1],
+    ]};
+  };
+  runInNewContext(readFileSync(new URL("../web/mod-preview.js", import.meta.url), "utf8"), context);
+  const open = context.window.workshopModPreview(request);
+  const preview = pack => open({pack, type, catalog, target:title, onChanged:next => { catalog = next; }});
+  const body = nodes.get("mod-preview-content");
+  const apply = () => body.querySelectorAll("button").find(button => button.dataset.i18n === "builder.mods.apply_source");
+  async function stage(provider) {
+    const field = body.querySelector("select");
+    field.value = provider;
+    await field.fire("change");
+  }
+  preview(solo);
+  assert.equal(body.querySelector("select").value, "solo");
+  assert.equal(apply().disabled, false, "an automatic winner can be confirmed without switching away");
+  await apply().fire("click");
+  assert.equal(catalog.slots[0].needsChoice, false);
+  assert.equal(apply().disabled, true);
+  await stage("suite");
+  assert.equal(catalog.slots[0].winner, "solo", "browsing options leaves the current override intact");
+  await apply().fire("click");
+  assert.equal(catalog.slots[0].winner, "suite");
+  await dialog.close();
+  preview(suite);
+  const [titleCard, regionCard] = body.querySelectorAll("li");
+  const player = titleCard.querySelector("button");
+  const include = titleCard.querySelector("input");
+  assert.equal(titleCard.dataset.sourceState, "active");
+  assert.equal(regionCard.querySelector("select"), undefined, "a unique track has no source picker");
+  assert.equal(regionCard.querySelector("input").checked, true, "the unique track can still be excluded");
+  await stage("solo");
+  apply().focus();
+  await apply().fire("click");
+  assert.equal(titleCard.dataset.sourceState, "alternate");
+  assert.equal(doc.activeElement, titleCard.querySelector("select"), "priority change keeps focus on the same asset");
+  include.focus();
+  await include.fire("change");
+  assert.equal(doc.activeElement, include);
+  assert.equal(include.checked, false);
+  assert.match(include.getAttribute("aria-label"), /Excluded.*Title Theme/);
+  assert.equal(titleCard.querySelector("select"), undefined);
+  assert.equal(titleCard.hasAttribute("data-source-state"), false);
+  await include.fire("change");
+  assert.equal(include.checked, true);
+  assert.equal(titleCard.querySelector("select").value, "solo");
+  assert.deepEqual(writes, [["select","solo"],["select","suite"],["select","solo"],["exclude-target","suite"],["include-target","suite"]]);
+  assert.equal(titleCard.querySelector("button"), player);
+  assert.equal(catalog.slots[1].winner, "suite");
+  await dialog.close();
+
+  const alternates = Array.from({length:64}, (_, i) => ({id:"alternate-" + i, name:i < 2 ? "Remix" : "Remix " + i}));
+  catalog = {packs:[solo, suite, ...alternates], slots:[
+    {...initial.slots[0], winner:"", candidates:["solo","suite", ...alternates.map(pack => pack.id)]},
+    initial.slots[1],
+  ]};
+  preview(suite);
+  const field = body.querySelector("select");
+  assert.equal(body.querySelectorAll("select").length, 1);
+  assert.equal(field.value, "");
+  assert.equal(apply().disabled, true, "opening a picker without an incumbent must not choose a winner");
+  const labels = field.children.map(option => option.textContent);
+  assert.equal(labels.length, 67, "one placeholder followed by all 66 sources");
+  assert.equal(new Set(labels).size, labels.length, "same-name sources are distinguishable");
+  assert.ok(labels.indexOf("Remix 9") < labels.indexOf("Remix 10"));
+});
 
 test("installed language search finds releases without scanning or changing their activation", async () => {
   const {context, nodes} = setupModPanel();

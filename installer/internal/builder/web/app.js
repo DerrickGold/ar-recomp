@@ -315,11 +315,14 @@ syncHeaderHeight();
 let selectedTrack=assetRows.find(row=>!row.dataset.variant)?.dataset.track;
 const trackButtons=new Map();
 const trackList=document.querySelector("#asset-track-list");
+const selectedTrackName=document.querySelector("#asset-selected-track");
+const selectedMusicMark=document.querySelector("#asset-selected-music");
+const selectedEditMark=document.querySelector("#asset-selected-edit");
 const trackToggle=document.querySelector("#asset-track-toggle"), trackOptions=document.querySelector("#asset-track-options"), trackSearch=document.querySelector("#asset-search");
 function closeTrackPicker(focus=false){ trackOptions.hidden=true; trackToggle.setAttribute("aria-expanded","false"); if(focus) trackToggle.focus(); }
 function filterTracks(){
   const query=trackSearch.value.trim().toLocaleLowerCase(ui.locale);
-  for(const button of trackButtons.values()) button.hidden=![button.textContent,button.dataset.track,button.dataset.nativeName]
+  for(const button of trackButtons.values()) button.hidden=![button.firstElementChild.textContent,button.dataset.track,button.dataset.nativeName]
     .some(text=>text.toLocaleLowerCase(ui.locale).includes(query));
   document.querySelector("#asset-search-empty").hidden=[...trackButtons.values()].some(button=>!button.hidden);
 }
@@ -350,7 +353,15 @@ for(const row of assetRows.filter(row=>!row.dataset.variant)){
   const label=row.querySelector(".asset-copy label");
   button.dataset.nativeName=label.textContent;
   const key="builder.assets.track."+row.dataset.track.replaceAll("-","_");
-  ui.set(label,"builder.assets.replacement_file"); ui.set(button,key);
+  const name=document.createElement("span");
+  const music=document.createElement("small");
+  const edited=document.createElement("small");
+  music.className="asset-track-music";
+  edited.className="asset-track-edited";
+  ui.set(name,key);
+  ui.set(edited,"builder.assets.track_unsaved");
+  button.append(name,music,edited);
+  ui.set(label,"builder.assets.replacement_file");
   ui.set(row.querySelector(".asset-source"),"builder.assets.source",{id:row.dataset.track,source:row.dataset.source});
   button.dataset.track=row.dataset.track;
   // WebKit may focus the enclosing tabindex=-1 workspace instead of this
@@ -360,6 +371,17 @@ for(const row of assetRows.filter(row=>!row.dataset.variant)){
   button.addEventListener("click",()=>{ selectedTrack=row.dataset.track; syncAssetSelection(); closeTrackPicker(true); });
   trackButtons.set(row.dataset.track,button); trackList.append(button);
 }
+function hasDraftAudio(row){
+  const state=rowState(row);
+  return state==="installed"||state==="pending";
+}
+
+function showTrackMarks(music,edited,musicKey,dirty){
+  music.hidden=!musicKey;
+  if(musicKey && music.dataset.i18n!==musicKey) ui.set(music,musicKey);
+  edited.hidden=!dirty;
+}
+
 function syncAssetSelection(){
   for(const row of assetRows.filter(row=>!row.dataset.variant)){
     const on=row.dataset.track===selectedTrack; row.hidden=!on;
@@ -368,9 +390,19 @@ function syncAssetSelection(){
     if(host) host.hidden=!on;
     if(!on){ row.querySelectorAll("audio").forEach(audio=>audio.pause()); host?.querySelectorAll("audio").forEach(audio=>audio.pause()); }
     const button=trackButtons.get(row.dataset.track);
-    button?.setAttribute("aria-current",String(on));
-    if(on&&button) ui.set(document.querySelector("#asset-selected-track"),button.dataset.i18n);
-    if(button) button.dataset.dirty=String(!!row.dataset.pending || !!host?.querySelector('[data-pending="pending"],[data-pending="removed"],[data-pending-split="true"]') || row.querySelector(".split-change")?.value==="1");
+    const variants=host ? Array.from(host.children) : [];
+    let musicKey="";
+    if(hasDraftAudio(row)) musicKey="builder.assets.track_custom";
+    else if(variants.some(hasDraftAudio)) musicKey="builder.assets.track_regional";
+    const dirty=!!row.dataset.pending || row.querySelector(".split-change")?.value==="1" ||
+      variants.some(variant=>variant.dataset.pending||variant.dataset.pendingSplit==="true");
+    const [name,music,edited]=button.children;
+    button.setAttribute("aria-current",String(on));
+    showTrackMarks(music,edited,musicKey,dirty);
+    if(on){
+      if(selectedTrackName.dataset.i18n!==name.dataset.i18n) ui.set(selectedTrackName,name.dataset.i18n);
+      showTrackMarks(selectedMusicMark,selectedEditMark,musicKey,dirty);
+    }
   }
 }
 trackSearch.addEventListener("input",filterTracks);
@@ -463,7 +495,9 @@ function paintRow(row){
 /* One place decides whether there is anything to save, so the two Save buttons,
  * Discard, and the toolbar's own wording can never disagree about it. */
 const packageMusic = document.querySelector("#asset-pack-export-open");
+const importMusicButton = document.getElementById("asset-pack-music-import-open");
 let savingMusicDraft = false;
+let importGeneration = 0;
 function refreshAssetDirtyState(){
   let changes=0;
   assetRows.forEach(row=>{
@@ -477,6 +511,7 @@ function refreshAssetDirtyState(){
   discardAssets.hidden=!dirty;
   discardAssets.disabled=!dirty||savingMusicDraft;
   packageMusic.disabled=savingMusicDraft;
+  importMusicButton.disabled=savingMusicDraft;
   ui.set(packageMusic,dirty?"builder.mods.save_draft_and_continue":"builder.mods.install_export");
   ui.set(assetBarNote,dirty?"builder.assets.unsaved":"builder.assets.no_changes",{count:changes});
   syncAssetSelection();
@@ -542,6 +577,9 @@ let lastAssetConfig={tracks:[]};
 
 function paintAssetConfiguration(config){
   lastAssetConfig=config;
+  const heading=document.querySelector("#asset-bar-title");
+  if(config.source) ui.set(heading,"builder.mods.editing_pack",{name:config.source.name});
+  else ui.set(heading,"builder.assets.music_draft");
   (config.tracks||[]).forEach(track=>{
     const row=document.querySelector('.asset-row[data-track="'+track.id+'"]');
     if(row) syncSplitPanel(row,track);
@@ -564,12 +602,14 @@ function paintAssetConfiguration(config){
 }
 
 async function loadAssetConfiguration(){
+  const generation=importGeneration;
   window.workshopFeedback?.clear(assetState);
   assetState.hidden=false;
   assetState.dataset.kind="loading";
   ui.set(assetState,"builder.assets.loading");
   try {
     const config=await responseJSON(await fetchResponse("music-draft",{cache:"no-store"}));
+    if(generation!==importGeneration) return;
     // A read started on tab entry must not overwrite a change made while the
     // request was in flight. Keeping the existing draft also keeps file inputs.
     if(assetBar.dataset.dirty==="true"){
@@ -889,7 +929,6 @@ function reconcileVariantRows(track){
      and idempotent, so re-painting the reused rows costs nothing and keeps one
      path responsible for what a row says. */
   rows.forEach(paintRow);
-  syncAssetSelection();
 }
 
 function syncVariantRows(tracks){
@@ -917,7 +956,7 @@ async function saveMusicDraft(){
     .filter(control=>!control.disabled);
   for(const control of controls) control.disabled=true;
   window.workshopFeedback?.clear(assetState);
-  packageMusic.disabled=true;
+  packageMusic.disabled=importMusicButton.disabled=true;
   saveAssetsTop.disabled=true; discardAssets.disabled=true;
   ui.set(assetBarNote,"builder.assets.saving");
   assetState.hidden=false;
@@ -949,7 +988,7 @@ packageMusic.addEventListener("click",async ()=>{
   const trackID=selectedTrack;
   if(await saveMusicDraft()&&activeTab===assetTab&&!closed) {
     packageMusic.focus();
-    await publishing.openMusic(trackID);
+    await publishing.openMusic(trackID,lastAssetConfig.source);
   }
 });
 
@@ -1638,7 +1677,7 @@ const legacyMods=window.workshopLegacyMods?.(async (...args)=>responseJSON(await
 });
 const modRequest=async (...args)=>responseJSON(await fetchResponse(...args));
 const modRequests=window.workshopModPacks.createRequests(modRequest);
-const modPreview=window.workshopModPreview?.(modRequest);
+const modPreview=window.workshopModPreview?.(modRequest,modRequests);
 const assetPacks=window.workshopAssetPackPanel(
   modRequest,
   showInstalledMods,
@@ -1670,7 +1709,56 @@ window.workshopShowInstalledMods=async (type,catalog)=>{
 };
 const publishing=window.workshopPublishing(modRequest,modRequests,result=>{
   if(showInstalledMods({type:result.installedType,catalog:result})) assetPacks.showInstalled(result);
+},fetchResponse,async ()=>{
+  const form=new FormData();
+  form.set("finish-pack","1");
+  const result=await modRequests.write(()=>modRequest("music-draft",{method:"POST",body:form}));
+  importGeneration++;
+  paintAssetConfiguration(result.config);
 });
+
+function bindPackImport(button,input,handle){
+  button.addEventListener("click",()=>input.click());
+  input.addEventListener("change",async ()=>{
+    const file=input.files[0];
+    input.value="";
+    if(!file||button.disabled||button.hasAttribute("aria-busy")) return;
+    button.setAttribute("aria-busy","true");
+    try {
+      await handle(file);
+    } catch(error){
+      window.workshopFeedback.show(button,error,{operation:"Import Workshop pack"});
+    } finally {
+      button.removeAttribute("aria-busy");
+    }
+  });
+}
+
+bindPackImport(importMusicButton,document.getElementById("asset-pack-music-import-file"),async file=>{
+  const hasDraft=!assetsLoaded||lastAssetConfig.source||assetBar.dataset.dirty==="true"||publishing.hasMusicDetails()||
+    lastAssetConfig.tracks.some(track=>track.configured||track.variants?.some(variant=>variant.configured));
+  if(hasDraft&&!await window.workshopConfirm("builder.language.import_edit","builder.mods.import_music_prompt",{name:file.name})) return;
+  assetForm.inert=true;
+  try {
+    if(!await saveMusicDraft()) return;
+    const body=new FormData();
+    body.set("pack",file);
+    const config=await modRequests.write(()=>modRequest("mods/import-draft?type="+window.workshopModPacks.musicType,{method:"POST",body}));
+    importGeneration++;
+    publishing.clearMusicDetails();
+    const included=id=>!config.source.excluded?.includes(id);
+    const first=config.tracks.find(track=>(track.configured&&included(track.id))||
+      track.variants?.some(variant=>variant.configured&&included(variant.name)));
+    if(first) selectedTrack=first.id;
+    paintAssetConfiguration(config);
+    assetState.hidden=true;
+    assetsLoaded=true;
+  } finally {
+    assetForm.inert=false;
+    if(activeTab===assetTab) importMusicButton.focus();
+  }
+});
+bindPackImport(document.getElementById("asset-pack-file-import-open"),document.getElementById("asset-pack-file-import-file"),publishing.importFilePack);
 document.querySelector("#loc-manage-mods").addEventListener("click",()=>window.workshopShowInstalledMods(window.workshopModPacks.languageType));
 const dropHint = document.getElementById("builder-drop-hint");
 const localDrop = target => target?.closest?.('input[type="file"],.file-control,#loc-import-source');

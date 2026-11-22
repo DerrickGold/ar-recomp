@@ -151,7 +151,7 @@
     return rows;
   }
 
-  function packRow(rows, {name, details, status, statusArgs, kind, enabled, id, disabled, toggle, reviewConflict}) {
+  function packRow(rows, {name, details, status, statusArgs, kind, enabled, id, disabled, toggle}) {
     const row = document.createElement("tr");
     row.dataset.bigRow = "";
     const check = document.createElement("td");
@@ -195,20 +195,10 @@
       mod.append(detail);
     }
     if (status) {
-      const badge = document.createElement(reviewConflict ? "button" : "span");
+      const badge = document.createElement("span");
       badge.className = "mod-status";
       badge.dataset.state = kind;
       ui.set(badge, key(status), statusArgs);
-      if (reviewConflict) {
-        badge.type = "button";
-        badge.className += " quiet";
-        badge.dataset.modControl = "conflict:" + id;
-        title.id = "mod-name-" + id;
-        badge.setAttribute("aria-describedby", title.id);
-        ui.attribute(badge, "title", key("review_conflict"), {name});
-        if (statusArgs.count > 1) badge.setAttribute("aria-haspopup", "dialog");
-        badge.addEventListener("click", reviewConflict);
-      }
       heading.append(badge);
     }
 
@@ -263,66 +253,6 @@
     return actions;
   }
 
-  function reviewTargets(container, pack, slots) {
-    const focusChoice = slot => {
-      const id = "select:" + slot.id + ":" + pack.id;
-      modControls(container).find(control => control.dataset.modControl === id)?.focus();
-    };
-    if (slots.length === 1) return focusChoice(slots[0]);
-    const dialog = document.getElementById("mod-conflict-review");
-    const list = document.getElementById("mod-conflict-targets");
-    ui.set(document.getElementById("mod-conflict-heading"), key("review_pack_targets"), {name: pack.name || pack.filename});
-    list.replaceChildren();
-    for (const slot of slots) {
-      button(list, modSlotName(slot), () => {
-        dialog.close();
-        focusChoice(slot);
-      });
-    }
-    dialog.showModal();
-  }
-
-  function renderCandidates(group, slot, byID, change, preview, controller) {
-    const type = slot.type;
-    for (const id of slot.candidates) {
-      const pack = byID.get(id);
-      const name = pack?.name || id;
-      const {control, actions} = choiceRow(group, name, () => change({action: "select", pack: id, slot: slot.id}), {
-        message: key("select"), args: {name},
-        id: "select:" + slot.id + ":" + id, pressed: slot.winner === id,
-      }, controller);
-      ui.attribute(control, "aria-label", key("select_for_target"), {name, target: modSlotName(slot)});
-      if (preview && type === musicType) {
-        const trackIndex = pack?.tracks?.findIndex(track => track.track === slot.track &&
-          (track.region || "") === (slot.region || ""));
-        if (trackIndex >= 0 && pack.previews?.[trackIndex])
-          previewAction(actions, name, "preview:" + slot.id + ":" + id, () => preview({pack, type, slots: [slot], trackIndex}));
-      }
-    }
-  }
-
-  function renderConflicts(container, conflicts, byID, type, change, preview) {
-    if (!conflicts.length) return;
-    const section = document.createElement("section");
-    section.className = "mod-conflicts";
-    const heading = document.createElement("h3");
-    ui.set(heading, key("conflicts"));
-    section.append(heading);
-    container.append(section);
-    for (const slot of conflicts) {
-      const group = document.createElement("div");
-      group.className = "mod-pack-conflict";
-      const title = document.createElement("h4");
-      const state = document.createElement("p");
-      group.append(title, state);
-      section.append(group);
-      title.textContent = modSlotName(slot);
-      if (slot.winner) ui.set(state, key("current"), {name: byID.get(slot.winner)?.name || slot.winner});
-      else ui.set(state, key(type === titleType ? "unresolved_title" : type === manualType ? "unresolved_manual" : "unresolved"));
-      renderCandidates(group, slot, byID, change, preview);
-    }
-  }
-
   function unclassifiedPacks(catalog) {
     return (catalog.packs || []).filter(pack => !Object.hasOwn(typeTitles, pack.type) && pack.error);
   }
@@ -361,13 +291,23 @@
 
   function renderRows(container, catalog, change, {type = musicType, preview, controller} = {}) {
     container.replaceChildren();
-    const packs = (catalog.packs || []).filter(pack => pack.type === type);
+    const conflictsOnly = type === "conflicts";
+    const slots = (catalog.slots || []).filter(slot => conflictsOnly || slot.type === type);
+    const pending = new Map(), active = new Map();
+    for (const slot of slots) {
+      if (slot.winner) active.set(slot.winner, (active.get(slot.winner) || 0) + 1);
+      if (!slot.needsChoice) continue;
+      for (const id of slot.candidates) {
+        if (!pending.has(id)) pending.set(id, []);
+        pending.get(id).push(slot);
+      }
+    }
+    const packs = (catalog.packs || []).filter(pack => conflictsOnly ?
+      pack.enabled && !pack.error && pending.has(pack.id) : pack.type === type);
     if (controller) {
       const names = new Intl.Collator(ui.locale, {numeric: true});
       packs.sort((a, b) => names.compare(a.name || a.filename, b.name || b.filename));
     }
-    const slots = (catalog.slots || []).filter(slot => slot.type === type);
-    const conflicts = slots.filter(slot => slot.candidates.length > 1);
     if (type === titleType) {
       for (const id of catalog.titleBundleConflicts || []) {
         const warning = document.createElement("p");
@@ -377,38 +317,28 @@
       }
     }
     if (!packs.length) {
-      emptyList(container, key(type === titleType ? "empty_title" : type === manualType ? "empty_manual" : "empty"));
+      emptyList(container, key(conflictsOnly ? "no_conflicting_mods" : type === titleType ? "empty_title" : type === manualType ? "empty_manual" : "empty"));
       return;
     }
     const rows = controller ? container : packTable(container, key("installed_packs"));
-    const pending = new Map();
-    for (const slot of conflicts) {
-      if (!slot.winner) for (const id of slot.candidates) {
-        if (!pending.has(id)) pending.set(id, []);
-        pending.get(id).push(slot);
-      }
-    }
-    const active = new Set(slots.map(slot => slot.winner).filter(Boolean));
     for (const pack of packs) {
       const name = pack.name || pack.filename;
       const source = ui.text(key(pack.bundled ? "included" : pack.external ? "external" : "local"));
       const unresolved = pending.get(pack.id) || [];
       const problem = pack.enabled && unresolved.length > 0;
-      const status = pack.error ? "needs_attention" : problem ? (controller ? "conflict_badge" : unresolved.length === 1 ? "choice_needed" : "choices_needed") :
-        pack.enabled && active.has(pack.id) ? "active_pack" : "";
+      const used = active.get(pack.id) || 0, total = pack.targets?.length || 1;
+      const activity = !pack.enabled ? "" : !used ? "inactive" : used < total ? "partly_active" : "active_pack";
+      const status = pack.error ? "needs_attention" : problem ? (unresolved.length === 1 ? "conflict_badge" : "choices_needed") :
+        activity;
       const controls = listPack(rows, {
-        name, details: [pack.version, pack.author, source, pack.error], enabled: pack.enabled,
+        name, details: [conflictsOnly && ui.text(typeTitles[pack.type]), pack.version, pack.author, source, pack.error], enabled: pack.enabled,
         id: "pack:" + (pack.id || pack.filename), disabled: pack.error,
-        status, statusArgs: {count: unresolved.length}, kind: problem || pack.error ? "problem" : "enabled",
+        status, statusArgs: {count: unresolved.length, used, total}, kind: problem || pack.error ? "problem" : used ? "enabled" : "inactive",
         toggle: enabled => change({action: enabled ? "enable" : "disable", pack: pack.id}),
-        reviewConflict: !controller && !pack.error && problem
-          ? () => reviewTargets(container, pack, unresolved)
-          : undefined,
       }, controller);
-      if (preview && !pack.error) previewAction(controls, name, "details:" + pack.id, () => preview({pack, type, slots}));
+      if (preview && !pack.error) previewAction(controls, name, "details:" + pack.id, () => preview({pack, type: pack.type, target: unresolved[0]?.id}));
       uninstallAction(controls, pack, name, change);
     }
-    if (!controller) renderConflicts(container, conflicts, new Map(packs.map(pack => [pack.id, pack])), type, change, preview);
   }
 
   const modControls = container =>
@@ -593,43 +523,33 @@
     }));
   }
 
-  function renderInstallFeedback(status, review, rows, catalog, install = catalog) {
+  function renderInstallFeedback(status, catalog, install = catalog) {
     const {installedId: id, installedName: name, installedType: type, installedLegacyManual} = install;
     const pack = (type === languageType ? catalog.languages : catalog.packs)
       ?.find(item => (type === languageType ? item.modId : item.id) === id);
     const slots = (catalog.slots || []).filter(slot => slot.candidates.includes(id));
-    const targets = slots.filter(slot => slot.candidates.length > 1 && slot.winner !== id);
 
     let message = "installed_named";
     if (installedLegacyManual) message = "fallback_installed";
     else if (!name) message = "installed";
     else if (pack?.enabled === false) message = "installed_disabled";
-    else if (targets.some(slot => !slot.winner)) message = "installed_conflict";
+    else if (slots.some(slot => slot.needsChoice)) message = "installed_conflict";
     else if (type === languageType) {
       message = pack?.choices?.length && !pack.release ? "installed_language_release" : "installed_language";
     } else if (slots.length && !slots.some(slot => slot.winner === id)) message = "installed_alternate";
     status.hidden = false;
     ui.set(status, key(message), {name});
-    if (!review) return;
-    const visible = new Set(modControls(rows).map(control => control.dataset.modControl));
-    const reviewable = targets.filter(slot => visible.has("select:" + slot.id + ":" + id));
-    review.hidden = !reviewable.length;
-    if (!review.hidden) {
-      if (reviewable.length === 1) ui.set(review, key("review_installed_conflict"), {target: modSlotName(reviewable[0])});
-      else ui.set(review, key("review_choices"), {count: reviewable.length});
-      review.onclick = () => reviewTargets(rows, {id, name}, reviewable);
-    }
+
   }
 
-  window.workshopModPacks = {renderRows, renderGroups, renderLanguages, renderLanguageRows, jsonOptions, targetName, modSlotName, renderCandidates, createRequests, markMutations,
+  window.workshopModPacks = {renderRows, renderGroups, renderLanguages, renderLanguageRows, jsonOptions, targetName, modSlotName, createRequests, markMutations,
     musicType, titleType, manualType, languageType, allTypes, canInstall,
     captureFocus, restoreFocus, unclassifiedPacks, renderPackIssues, renderUploadResults, renderInstallFeedback};
 
-  window.workshopAssetPackPanel = (request, onInstalled, preview, requests = createRequests(request)) => {
+  window.workshopAssetPackPanel = (request, onInstalled, openPreview, requests = createRequests(request)) => {
     const panel = document.getElementById("asset-packs");
     const rows = document.getElementById("asset-pack-list");
     const status = document.getElementById("asset-pack-status");
-    const review = document.getElementById("asset-pack-review-conflict");
     const batch = document.getElementById("asset-pack-batch");
     const batchList = document.getElementById("asset-pack-batch-list");
     const batchDismiss = document.getElementById("asset-pack-batch-dismiss");
@@ -644,11 +564,22 @@
     const legacyManual = document.getElementById("asset-pack-legacy-manual");
     const refresh = document.getElementById("asset-pack-refresh");
     let viewType = allTypes, catalog;
+    const preview = openPreview && function(options) {
+      const saved = () => {
+        show(key("settings_saved"));
+        paint();
+      };
+      openPreview({...options, catalog, onChanged: next => {
+        catalog = next;
+        const dialog = document.getElementById("mod-preview-dialog");
+        if (dialog.open) dialog.addEventListener("close", saved, {once: true});
+        else saved();
+      }});
+    };
     let pendingLoad, focusFilterAfterPaint = false;
     let uploadQueue = Promise.resolve();
 
     function show(message, args = {}) {
-      review.hidden = true;
       status.hidden = !message;
       if (message) ui.set(status, message, args);
     }
@@ -691,7 +622,7 @@
     }
 
     function setType(type) {
-      if (type !== allTypes && !Object.hasOwn(typeTitles, type)) return;
+      if (type !== allTypes && type !== "conflicts" && !Object.hasOwn(typeTitles, type)) return;
       languageSearch.value = "";
       languageSearchField.hidden = type !== languageType;
       languageCounts.hidden = true;
@@ -797,7 +728,7 @@
         if (outcomes.some(item => item.detail)) {
           const report = outcomes.map(item => ui.text(uploadOutcomeKey(item), item)).join("\n");
           fail(new Error(report), "Install mods");
-        } else if (shown && outcomes.length === 1) renderInstallFeedback(status, review, rows, catalog);
+        } else if (shown && outcomes.length === 1) renderInstallFeedback(status, catalog);
       });
       return uploadQueue;
     }
@@ -819,6 +750,7 @@
     });
     filter.addEventListener("change", () => filterRows(filter.value));
     languageSearch.addEventListener("input", paint);
+    document.addEventListener("workshop:language", paint);
     install.addEventListener("click", () => input.click());
     input.addEventListener("change", async () => {
       if (input.files.length) await upload([...input.files]);
@@ -829,7 +761,7 @@
     function showInstalled(next) {
       catalog = next;
       paint();
-      renderInstallFeedback(status, review, rows, catalog);
+      renderInstallFeedback(status, catalog);
     }
 
     return {load, upload, setType, showInstalled};

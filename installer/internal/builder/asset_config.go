@@ -67,6 +67,7 @@ type assetVariantStatus struct {
 }
 
 type assetConfiguration struct {
+	Source       *musicDraftSource  `json:"source,omitempty"`
 	Title        assetTitleStatus   `json:"title"`
 	Tracks       []assetTrackStatus `json:"tracks"`
 	ManifestPath string             `json:"manifestPath"`
@@ -150,6 +151,7 @@ func loadAssetConfiguration(root string) (assetConfiguration, error) {
 	configuration := assetConfiguration{
 		ManifestPath: filepath.ToSlash(filepath.Join("game-assets", "manifest.ini")),
 	}
+	configuration.Source = readMusicDraftSource(manifest)
 	logo, logoFound := manifestSectionValue(manifest, "replace:title-logo", "image")
 	swirl, swirlFound := manifestSectionValue(manifest, "replace:title-swirl", "image")
 	configuration.Title.File = logo

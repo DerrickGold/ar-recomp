@@ -124,6 +124,128 @@ func TestMusicModConflictsAndExternalRemoval(t *testing.T) {
 	}
 }
 
+func TestPerAssetChoicesSurviveRescan(t *testing.T) {
+	root, external := t.TempDir(), t.TempDir()
+	title := modTrack{Track: "title-theme", File: "audio/theme.ogg"}
+	regional := modTrack{Track: "song-09", Region: "fillmore", File: "audio/fillmore.ogg"}
+	solo := testMusicMod(t, "solo", []modTrack{title}, "")
+	suite := testMusicMod(t, "suite", []modTrack{title, regional}, "")
+	soloPath, suitePath := filepath.Join(external, "solo.o2r"), filepath.Join(external, "suite.o2r")
+	if err := os.WriteFile(soloPath, solo, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := updateModCatalog(root, []string{external}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(suitePath, suite, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(change *modChange, titleWinner, regionWinner string) {
+		t.Helper()
+		catalog, err := updateModCatalog(root, nil, nil, change)
+		if err != nil {
+			t.Fatal(err)
+		}
+		overlay, err := os.ReadFile(filepath.Join(root, "game-assets", modOverlayName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for target, winner := range map[string]string{title.target(): titleWinner, regional.target(): regionWinner} {
+			i := slices.IndexFunc(catalog.Slots, func(slot modSlot) bool { return slot.ID == target })
+			if winner == "" {
+				if i >= 0 || bytes.Contains(overlay, []byte("[music:"+target+"]")) {
+					t.Fatalf("expected manifest fallback for %s, slots %+v", target, catalog.Slots)
+				}
+				continue
+			}
+			if i < 0 || catalog.Slots[i].Winner != winner {
+				t.Fatalf("wanted %s for %s, slots %+v", winner, target, catalog.Slots)
+			}
+			for _, pack := range catalog.Packs {
+				if pack.ID != winner {
+					continue
+				}
+				file := pack.cacheFilename(pack.digest, slices.Index(pack.Targets, target))
+				_, rest, found := strings.Cut(string(overlay), "[music:"+target+"]")
+				section, _, _ := strings.Cut(rest, "\n[")
+				if !found || !strings.Contains(section, "file = mods-cache/"+file+"\n") {
+					t.Fatalf("expected %s in %s", file, section)
+				}
+			}
+		}
+	}
+	check(nil, "solo", "suite")
+	check(&modChange{Action: "select", Pack: "suite", Slot: title.target()}, "suite", "suite")
+	check(&modChange{Action: "exclude-target", Pack: "suite", Slot: title.target()}, "solo", "suite")
+	check(&modChange{Action: "exclude-target", Pack: "suite", Slot: regional.target()}, "solo", "")
+	check(nil, "solo", "")
+	if _, err := updateModCatalog(root, nil, nil, &modChange{Action: "select", Pack: "suite", Slot: title.target()}); err == nil {
+		t.Fatal("selected an excluded asset")
+	}
+	if _, err := updateModCatalog(root, nil, nil, &modChange{Action: "exclude-target", Pack: "solo", Slot: regional.target()}); err == nil {
+		t.Fatal("excluded an asset the pack does not supply")
+	}
+	check(&modChange{Action: "disable", Pack: "suite"}, "solo", "")
+	check(&modChange{Action: "enable", Pack: "suite"}, "solo", "")
+	check(&modChange{Action: "include-target", Pack: "suite", Slot: title.target()}, "suite", "")
+	check(&modChange{Action: "include-target", Pack: "suite", Slot: regional.target()}, "suite", "suite")
+	check(&modChange{Action: "select", Pack: "solo", Slot: title.target()}, "solo", "suite")
+	for path, original := range map[string][]byte{soloPath: solo, suitePath: suite} {
+		if data, err := os.ReadFile(path); err != nil || !bytes.Equal(data, original) {
+			t.Fatalf("activation changed %s: %v", path, err)
+		}
+	}
+}
+
+func TestInstalledSharedTargetNeedsExplicitChoice(t *testing.T) {
+	root := t.TempDir()
+	theme := modTrack{Track: "title-theme", File: "audio/title.ogg"}
+	install := func(id string, tracks ...modTrack) modCatalog {
+		t.Helper()
+		catalog, err := updateModCatalog(root, nil, bytes.NewReader(testMusicMod(t, id, tracks, "")), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return catalog
+	}
+	update := func(change *modChange) modCatalog {
+		t.Helper()
+		catalog, err := updateModCatalog(root, nil, nil, change)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return catalog
+	}
+	check := func(catalog modCatalog, winner string, needsChoice bool) {
+		t.Helper()
+		for _, slot := range catalog.Slots {
+			if slot.ID == theme.target() {
+				if slot.Winner != winner || slot.NeedsChoice != needsChoice {
+					t.Fatalf("expected %s, needsChoice=%t, got %+v", winner, needsChoice, slot)
+				}
+			} else if slot.NeedsChoice {
+				t.Fatalf("unrelated track flagged: %+v", slot)
+			}
+		}
+		if !slices.ContainsFunc(catalog.Slots, func(slot modSlot) bool { return slot.ID == theme.target() }) {
+			t.Fatal("missing title theme")
+		}
+	}
+	selectTheme := func(id string) modCatalog {
+		return update(&modChange{Action: "select", Pack: id, Slot: theme.target()})
+	}
+	check(install("solo", theme), "solo", false)
+	check(install("suite", theme, modTrack{Track: "song-09", Region: "fillmore", File: "audio/fillmore.ogg"}), "solo", true)
+	check(selectTheme("solo"), "solo", false)
+	check(update(nil), "solo", false)
+	check(install("third", theme), "solo", true)
+	check(update(&modChange{Action: "disable", Pack: "third"}), "solo", false)
+	check(update(&modChange{Action: "enable", Pack: "third"}), "solo", true)
+	check(selectTheme("suite"), "suite", false)
+	check(update(nil), "suite", false)
+}
+
 func TestModIndexReusesAndRepairsCachedAssets(t *testing.T) {
 	root, external := t.TempDir(), t.TempDir()
 	path := filepath.Join(external, "music.o2r")

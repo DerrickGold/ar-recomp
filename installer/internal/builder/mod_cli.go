@@ -118,7 +118,7 @@ func RunMods(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\n", pack.ID, pack.Filename, state)
 	}
 	for _, slot := range catalog.Slots {
-		if len(slot.Candidates) > 1 {
+		if slot.NeedsChoice {
 			fmt.Fprintf(stdout, "Conflict: %s (%s)\n", slot.ID, strings.Join(slot.Candidates, ", "))
 		}
 	}

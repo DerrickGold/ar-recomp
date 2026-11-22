@@ -301,8 +301,10 @@ func (payload modPayload) validateMusic() error {
 
 func (pack modArchive) validateAssetMembers() error {
 	used := map[string]bool{
-		"manifest.json": true, "pack.json": true, "README.md": true,
-		"LICENSE": true, "LICENSE.txt": true, "LICENSE.md": true, "icon.png": true,
+		"manifest.json": true, "pack.json": true,
+	}
+	for _, name := range modExtraNames {
+		used[name] = true
 	}
 	for _, name := range pack.assetPaths() {
 		entry := pack.files[name]

@@ -9,7 +9,6 @@
     const section = $("big-screen-customize"), menu = $("big-screen-menu");
     const choices = $("big-customize-menu");
     const filterDialog = $("big-mod-filter-dialog"), filterButton = $("big-mod-filter");
-    const conflictButton = $("big-mod-conflicts");
     const primaryButton = $("big-mod-primary"), previewButton = $("big-mod-preview-open"), moreButton = $("big-mod-more");
     const moreDialog = $("big-mod-actions-dialog"), moreOptions = $("big-mod-options");
     const issues = choices.querySelector('[data-big-page="issues"]');
@@ -23,12 +22,12 @@
     const filters = [...choices.querySelectorAll("[data-big-page]")];
     const modTypes = {
       all: modPacks.allTypes, title: modPacks.titleType, packs: modPacks.musicType,
-      manual: modPacks.manualType, languages: modPacks.languageType,
+      manual: modPacks.manualType, languages: modPacks.languageType, conflicts: "conflicts",
     };
     const desktopDestinations = {title: "title", packs: "music", languages: "languages"};
     const items = new Map();
-    let selected, conflictID;
-    const options = {preview: previewPack, controller: {row: modRow}};
+    let selected;
+    const options = {preview: previewPack && (details => previewPack({...details, catalog, onChanged: previewChanged})), controller: {row: modRow}};
     let page = "", filter = "all", stamp = 0, saving = false, timer = 0;
     let catalog, installResult, pendingCatalog;
     let music = [], originals = {}, trackID = "";
@@ -192,15 +191,10 @@
       const focus = modPacks.captureFocus(rows);
       const selectionID = selected?.control.dataset.modControl;
       const scroll = content.scrollTop;
+      const footerFocused = [previewButton, primaryButton, moreButton].includes(document.activeElement);
       items.clear();
       issues.hidden = !modPacks.unclassifiedPacks(catalog).length;
       if (filter === "issues" && issues.hidden) setFilter("all");
-      const conflicts = filteredConflicts();
-      conflictButton.hidden = !conflicts.length;
-      if (conflicts.length) {
-        const pending = conflicts.filter(slot => !slot.winner).length;
-        ui.set(conflictButton, pending ? "builder.mods.review_conflicts" : "builder.mods.edit_choices", {count: pending || conflicts.length});
-      }
       if (filter === "all") modPacks.renderGroups(rows, catalog, changePack, changeLanguage, options);
       else if (filter === "languages") modPacks.renderLanguages(rows, catalog, changeLanguage, options);
       else if (filter === "issues") modPacks.renderPackIssues(rows, catalog, changePack, options.controller);
@@ -211,7 +205,7 @@
       const first = rows.querySelector("[data-mod-control]");
       selectRow(items.get(selectionID) || items.values().next().value);
       content.scrollTop = focusList ? 0 : scroll;
-      if (focusList) (first || filterButton).focus();
+      if (focusList || (!first && footerFocused)) (first || filterButton).focus();
       else if (focus && !modPacks.restoreFocus(rows, focus)) (first || filterButton).focus();
       syncBusy();
     }
@@ -223,7 +217,7 @@
       else content.tabIndex = 0;
       modPacks.renderUploadResults(installResults, installResults.hidden ? [] : outcomes);
       if (installResult?.catalog && catalog && installResults.hidden) {
-        modPacks.renderInstallFeedback(report, null, rows, catalog, installResult.catalog);
+        modPacks.renderInstallFeedback(report, catalog, installResult.catalog);
       }
     }
 
@@ -236,42 +230,23 @@
     }
 
     function updateDesktopShortcut() {
-      desktop.hidden = page === "targets" || page === "candidates" || (page === "library" && !desktopDestinations[filter]);
+      desktop.hidden = page === "library" && !desktopDestinations[filter];
     }
 
-    function filteredConflicts() {
-      return (catalog?.slots || [])
-        .filter(slot => slot.candidates.length > 1 && (filter === "all" || slot.type === modTypes[filter]))
-        .sort((a, b) => Number(!!a.winner) - Number(!!b.winner));
+    function previewChanged(next) {
+      catalog = next;
+      installResult = undefined;
+      const dialog = $("mod-preview-dialog");
+      if (dialog.open) dialog.addEventListener("close", paintAfterPreview, {once: true});
+      else paintAfterPreview();
     }
 
-    function paintChoices(focus) {
-      const slots = filteredConflicts();
-      const byID = new Map(catalog.packs.map(pack => [pack.id, pack]));
-      const slot = slots.find(item => item.id === conflictID);
-      if (!slots.length) return render("library", conflictButton.id);
-      if (page === "candidates" && slot) {
-        ui.unbind($("big-customize-title"));
-        $("big-customize-title").textContent = modPacks.modSlotName(slot);
-        status("builder.mods.choose_pack");
-        modPacks.renderCandidates(rows, slot, byID, changePack, previewPack, options.controller);
-        const winner = items.get("select:" + slot.id + ":" + slot.winner);
-        (items.get(focus)?.control || winner?.control || rows.firstElementChild).focus();
-        return;
+    function paintAfterPreview() {
+      if (page === "library") {
+        paintLibrary();
+        showInstallResult();
+        status("builder.mods.settings_saved");
       }
-      page = "targets";
-      ui.set($("big-customize-title"), slots.some(target => !target.winner) ? "builder.mods.conflicts" : "builder.mods.selected_packs");
-      for (const target of slots) {
-        const state = target.winner ? ui.text("builder.mods.current", {name: byID.get(target.winner)?.name || target.winner}) :
-          ui.text("builder.mods.no_choice");
-        const button = action(modPacks.modSlotName(target), state, () => {
-          conflictID = target.id;
-          render("candidates");
-        });
-        button.classList.add("big-conflict-target");
-        button.dataset.target = target.id;
-      }
-      ([...rows.children].find(button => button.dataset.target === focus) || rows.firstElementChild).focus();
     }
 
     function loadLibrary(quiet = false, focusList = false) {
@@ -285,12 +260,6 @@
         const dialog = document.querySelector("dialog[open]");
         if (dialog) {
           dialog.addEventListener("close", refreshOnFocus, {once: true});
-          return;
-        }
-        if (page === "targets" || page === "candidates") {
-          const current = document.activeElement;
-          render(page, current.dataset.target || current.dataset.modControl);
-          if (current.matches("button") && current.getClientRects().length) current.focus();
           return;
         }
         paintLibrary(focusList && document.activeElement === filterButton);
@@ -308,7 +277,7 @@
     }
 
     function refreshOnFocus() {
-      if (!["library", "targets", "candidates"].includes(page)) return;
+      if (page !== "library") return;
       const dialog = document.querySelector("dialog[open]");
       if (dialog) {
         dialog.addEventListener("close", refreshOnFocus, {once: true});
@@ -403,7 +372,6 @@
       menu.hidden = !!page;
       section.hidden = !page;
       actions.hidden = !library;
-      conflictButton.hidden = true;
       paging.hidden = page === "track";
       rows.replaceChildren();
       items.clear();
@@ -416,19 +384,17 @@
       if (library) {
         ui.set($("big-customize-title"), "builder.nav.mods");
         setFilter(filter);
-        const resume = focus === soundtrack.id && !soundtrack.hidden ? soundtrack :
-          focus === conflictButton.id ? conflictButton : null;
+        const resume = focus === soundtrack.id && !soundtrack.hidden;
         filterButton.focus();
         if (catalog) {
           paintLibrary(!resume);
-          if (resume && !resume.hidden) resume.focus();
+          if (resume) soundtrack.focus();
           showInstallResult();
         } else loadLibrary(false, true);
         return;
       }
       soundtrack.hidden = true;
       updateDesktopShortcut();
-      if (page === "targets" || page === "candidates") return paintChoices(focus);
       ui.set($("big-customize-title"), "builder.mods.rom_music");
       if (page === "track") {
         ui.unbind($("big-customize-title"));
@@ -472,10 +438,6 @@
       return save(async () => {
         installResult = undefined;
         catalog = await request("mods/activation", modPacks.jsonOptions(value));
-        if (page === "candidates") {
-          render("targets", conflictID);
-          return;
-        }
         paintLibrary();
         showInstallResult();
         status(value.action === "uninstall" ? "builder.mods.uninstalled" : "builder.mods.settings_saved");
@@ -484,9 +446,7 @@
 
     function back() {
       if (saving) return;
-      if (page === "candidates") render("targets", conflictID);
-      else if (page === "targets") render("library", conflictButton.id);
-      else if (page === "track") render("music", trackID);
+      if (page === "track") render("music", trackID);
       else if (page === "music") render("library", soundtrack.id);
       else { render(""); onClose(); }
     }
@@ -495,9 +455,6 @@
       if (saving || filterDialog.open) return;
       filterDialog.showModal();
       activeFilter().focus();
-    });
-    conflictButton.addEventListener("click", () => {
-      if (!saving && filteredConflicts().length) render("targets");
     });
     for (const button of filters) button.addEventListener("click", () => {
       if (saving) return;

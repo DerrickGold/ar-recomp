@@ -17,6 +17,12 @@ Desktop and Big Screen read the same installation, availability, and conflict ch
 
 For example, adding a new pack type gives it an entry in the existing type filter, a preview, and the applicable install and activation actions. A conflict choice or a disable action leaves the competing packs installed. Reserve removal for an explicit, confirmed uninstall.
 
+Flag every eligible pack when a shared asset needs a decision. The **Conflicting mods** filter shows the same flagged rows. Keep source selection in the pack preview and clear the flag when a pack’s last conflict is resolved. Distinguish enabling a pack from how many of its assets are active.
+
+In a preview, keep the asset, its inclusion control, and its source choices inside one card. Show source names only when eligible packs compete for that asset. Pair the conflict or priority color with a visible state label.
+
+Use a native source dropdown and an **Apply** button on desktop. A controller opens a scrollable source picker with shoulder-button paging. Browsing sources keeps the current override until the player confirms a choice.
+
 ## Size and align by purpose
 
 | Element | Use the existing pattern |

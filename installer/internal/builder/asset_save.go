@@ -63,6 +63,11 @@ func (app *application) saveAssetConfiguration(response http.ResponseWriter, req
 	}
 	plan := assetSavePlan{root: root, manifest: manifest, manifestPath: manifestPath}
 	defer plan.discardStaged()
+	finishPack := draft && request.FormValue("finish-pack") == "1"
+	if finishPack {
+		plan.manifest = removeManifestSection(manifest, draftSourceSection)
+		plan.changed = plan.manifest != manifest
+	}
 	if !draft {
 		if err := plan.prepareTitle(request); err != nil {
 			status := http.StatusInternalServerError
@@ -103,6 +108,9 @@ func (app *application) saveAssetConfiguration(response http.ResponseWriter, req
 		return
 	}
 
+	if finishPack {
+		pruneWorkshopImports(manifestPath, plan.manifest, nil)
+	}
 	configuration, err := loadAssetView(root, draft)
 	if err != nil {
 		writeJSONError(response, http.StatusInternalServerError, err.Error())

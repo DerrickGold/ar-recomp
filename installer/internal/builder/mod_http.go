@@ -75,6 +75,9 @@ func (app *application) serveMods(response http.ResponseWriter, request *http.Re
 	case strings.HasPrefix(endpoint, "manual-page/") && request.Method == http.MethodGet:
 		app.serveModManualPage(response, request, strings.TrimPrefix(endpoint, "manual-page/"))
 		return
+	case endpoint == "import-draft" && request.Method == http.MethodPost:
+		app.serveWorkshopImport(response, request)
+		return
 	case endpoint == "language-preview" && request.Method == http.MethodGet:
 		app.serveLanguagePreview(response, request)
 		return
@@ -464,24 +467,41 @@ func (app *application) serveFileModExport(response http.ResponseWriter, request
 		field, maximum, export = "manual", maxManualBytes, exportManualMod
 		readError, missing = "could not read the selected manual", "select a PDF for the manual pack"
 	}
-	request.Body = http.MaxBytesReader(response, request.Body, maximum+maxModMetadata)
+	request.Body = http.MaxBytesReader(response, request.Body, maxModBytes+maxModMetadata)
 	if err := request.ParseMultipartForm(maxModMetadata); err != nil {
 		writeJSONError(response, http.StatusBadRequest, readError)
 		return
 	}
 	defer request.MultipartForm.RemoveAll()
-	file, _, err := request.FormFile(field)
+	file, header, err := request.FormFile(field)
 	if err != nil {
 		writeJSONError(response, http.StatusBadRequest, missing)
 		return
 	}
 	defer file.Close()
+	if header.Size > maximum {
+		writeJSONError(response, http.StatusBadRequest, "the selected asset exceeds its size limit")
+		return
+	}
+	var extras []modExtra
+	total := header.Size
+	for _, name := range modExtraNames {
+		if files := request.MultipartForm.File["attachment:"+name]; len(files) > 0 {
+			header := files[0]
+			total += header.Size
+			if len(files) != 1 || header.Size > maxTrackBytes || total > maxModBytes-2*maxModMetadata {
+				writeJSONError(response, http.StatusBadRequest, "invalid or oversized pack attachment")
+				return
+			}
+			extras = append(extras, modExtra{name: name, open: func() (io.ReadCloser, error) { return header.Open() }})
+		}
+	}
 	metadata := modMetadata{
 		Name: request.FormValue("name"), Version: request.FormValue("version"),
-		Author: request.FormValue("author"), License: request.FormValue("license"),
+		Author: request.FormValue("author"), License: request.FormValue("license"), Description: request.FormValue("description"),
 	}
 	app.prepareModDownload(response, request.URL.Query().Get("install") == "true", func(output io.Writer) error {
-		return export(output, metadata, "", file)
+		return export(output, metadata, "", file, extras...)
 	})
 }
 

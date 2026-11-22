@@ -25,7 +25,7 @@
 
   window.workshopBigScreenNavigation = (panel, goBack, {isActive=()=>true, toggleView, navigationRoot=panel}={}) => {
     const pressed = new Map();
-    const controls = "button, a[href], input[type=file], input[type=checkbox], input[type=radio], input[type=range], summary, [data-big-scroll][tabindex='0']";
+    const controls = "button, a[href], input[type=file], input[type=checkbox], input[type=radio], input[type=range], select[data-pad-picker], summary, [data-big-scroll][tabindex='0']";
     const hints = [...panel.querySelectorAll("[data-pad-button]"), ...document.querySelectorAll("dialog [data-pad-button]")];
     const moveHint = panel.querySelector("#big-screen-move");
     const launcherHint = document.body.dataset.controllerHint;
@@ -265,7 +265,10 @@
           const target = document.activeElement;
           const scope = activeDialog() || navigationRoot;
           if (scope.contains(target) && target.matches(controls) && availableControl(target)) {
-            if (target.type !== "range" && target.getAttribute?.("aria-disabled") !== "true") target.click();
+            if (target.type !== "range" && target.getAttribute?.("aria-disabled") !== "true") {
+              if (target.hasAttribute?.("data-pad-picker")) target.dispatchEvent(new Event("workshop:pick"));
+              else target.click();
+            }
           }
           else move("down");
         } else if (isActive() && (west && !previous.west || north && !previous.north)) {

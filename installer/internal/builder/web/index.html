@@ -125,8 +125,7 @@
                 <span class="big-screen-prompt" id="big-customize-paging" role="group" data-i18n-aria="builder.big_screen.page_list" data-i18n-title="builder.big_screen.page_list" hidden><span class="controller-glyph" role="img" data-pad-button="left" aria-label="Page Up">PgUp</span><span class="controller-glyph" role="img" data-pad-button="right" aria-label="Page Down">PgDn</span><span data-i18n="builder.big_screen.page">Page</span></span>
               </div>
               <div id="big-mod-actions" class="big-screen-footer" data-big-band>
-                <button class="secondary" id="big-mod-filter" type="button" aria-haspopup="dialog"><span class="sr-only" data-i18n="builder.mods.filter">Mod type</span><strong id="big-mod-filter-value" data-i18n="builder.mods.all_types">All types</strong></button>
-                <button class="secondary" id="big-mod-conflicts" type="button" hidden></button>
+                <button class="secondary" id="big-mod-filter" type="button" aria-haspopup="dialog"><span class="sr-only" data-i18n="builder.mods.filter">Filter mods</span><strong id="big-mod-filter-value" data-i18n="builder.mods.all_types">All mods</strong></button>
                 <button class="secondary" id="big-mod-install" type="button" data-i18n="builder.mods.install_action">Install mod</button>
                 <button class="quiet" id="big-mod-refresh" type="button" data-i18n="builder.mods.refresh">Refresh packs</button>
               </div>
@@ -290,9 +289,10 @@
         <button id="asset-pack-install" type="button" data-i18n="builder.mods.install_action" aria-describedby="asset-pack-formats">Install mod</button>
         <span id="asset-pack-formats" class="sr-only" data-i18n="builder.mods.install_legacy">Install mods (.o2r, .arlang, .pdf)</span>
         <input id="asset-pack-file" type="file" accept=".o2r,.arlang,.pdf" multiple data-validate-batch hidden>
-        <label><span data-i18n="builder.mods.filter">Mod type</span>
+        <label><span data-i18n="builder.mods.filter">Filter mods</span>
           <select id="asset-pack-type">
-            <option value="all" data-i18n="builder.mods.all_types">All types</option>
+            <option value="all" data-i18n="builder.mods.all_types">All mods</option>
+            <option value="conflicts" data-i18n="builder.mods.conflicting_mods">Conflicting mods</option>
             <option value="actraiser-music" data-i18n="builder.assets.music">Music</option>
             <option value="actraiser-title" data-i18n="builder.assets.title_art">Title artwork</option>
             <option value="actraiser-language" data-i18n="builder.nav.languages">Languages</option>
@@ -317,7 +317,6 @@
       <div id="asset-pack-legacy-manual" class="legacy-manual-actions" hidden></div>
       <div class="mod-install-feedback">
         <p id="asset-pack-status" role="status" hidden></p>
-        <button id="asset-pack-review-conflict" type="button" class="secondary" hidden></button>
       </div>
       <div id="asset-pack-list"></div>
     </section>
@@ -354,13 +353,33 @@
             <span id="asset-bar-note" role="status" data-i18n="builder.assets.loading">Loading the current configuration…</span>
           </div>
           <button type="button" id="discard-assets" class="quiet" hidden disabled data-i18n="builder.assets.discard_all_menu">Discard all changes…</button>
+          <input id="asset-pack-music-import-file" type="file" accept=".o2r" hidden>
+          <button type="button" id="asset-pack-music-import-open" class="secondary" data-i18n="builder.mods.import_edit">Import .o2r…</button>
           <button type="button" id="asset-pack-export-open" class="secondary" data-i18n="builder.mods.install_export">Install or export…</button>
           <button type="submit" id="save-assets-top" disabled data-i18n="common.save">Save</button>
         </div>
       </div>
 
       <div class="asset-music" id="asset-music-view">
-        <div class="asset-browser"><div class="asset-track-picker"><label for="asset-track-toggle" data-i18n="builder.assets.track">Music track</label><button id="asset-track-toggle" type="button" aria-expanded="false" aria-controls="asset-track-options"><span id="asset-selected-track" data-i18n="builder.assets.choose_track">Choose a track</span><span aria-hidden="true">▾</span></button><div id="asset-track-options" hidden><label for="asset-search" class="sr-only" data-i18n="builder.assets.search">Search music tracks</label><input id="asset-search" type="search" placeholder="Search Sky Palace, Fillmore…" autocomplete="off" data-i18n-placeholder="builder.assets.search_hint"><div id="asset-track-list" aria-label="Matching music tracks" data-i18n-aria="builder.assets.matches"></div><p id="asset-search-empty" class="muted" role="status" hidden data-i18n="builder.assets.no_matches">No matching tracks.</p></div></div><div class="asset-detail">
+        <div class="asset-browser">
+          <div class="asset-track-picker">
+            <label for="asset-track-toggle" id="asset-track-label" data-i18n="builder.assets.track">Music track</label>
+            <button id="asset-track-toggle" type="button" aria-expanded="false" aria-controls="asset-track-options" aria-labelledby="asset-track-label asset-track-value">
+              <span id="asset-track-value">
+                <span id="asset-selected-track" data-i18n="builder.assets.choose_track">Choose a track</span>
+                <small id="asset-selected-music" class="asset-track-music" hidden></small>
+                <small id="asset-selected-edit" class="asset-track-edited" data-i18n="builder.assets.track_unsaved" hidden>Unsaved</small>
+              </span>
+              <span aria-hidden="true">▾</span>
+            </button>
+            <div id="asset-track-options" hidden>
+              <label for="asset-search" class="sr-only" data-i18n="builder.assets.search">Search music tracks</label>
+              <input id="asset-search" type="search" placeholder="Search Sky Palace, Fillmore…" autocomplete="off" data-i18n-placeholder="builder.assets.search_hint">
+              <div id="asset-track-list" aria-label="Matching music tracks" data-i18n-aria="builder.assets.matches"></div>
+              <p id="asset-search-empty" class="muted" role="status" hidden data-i18n="builder.assets.no_matches">No matching tracks.</p>
+            </div>
+          </div>
+          <div class="asset-detail">
         <div class="preview-tools">
           <button id="generate-previews" type="button" class="secondary" disabled data-i18n="builder.assets.extract_previews">
             Extract original-audio previews
@@ -422,13 +441,18 @@
   <form id="asset-pack-export-form">
     <div class="pack-dialog-heading">
       <h2 id="asset-pack-export-heading" data-i18n="builder.mods.pack_music">Create music pack</h2>
-      <button type="button" id="asset-pack-export-close" class="quiet" data-i18n="builder.feedback.close">Close</button>
+      <div class="actions">
+        <input id="asset-pack-file-import-file" type="file" accept=".o2r" hidden>
+        <button type="button" id="asset-pack-file-import-open" class="secondary" data-i18n="builder.mods.import_edit">Import .o2r…</button>
+        <button type="button" id="asset-pack-export-close" class="quiet" data-i18n="builder.feedback.close">Close</button>
+      </div>
     </div>
     <div class="pack-metadata">
       <label><span data-i18n="builder.mods.name">Pack name</span><input name="name" maxlength="160" autofocus required></label>
-      <label><span data-i18n="builder.mods.author">Author</span><input name="author" maxlength="256" required></label>
-      <label><span data-i18n="builder.mods.version">Version</span><input name="version" value="1.0.0" maxlength="64" required></label>
+      <label><span data-i18n="builder.mods.author">Author</span><input name="author" maxlength="256"></label>
+      <label><span data-i18n="builder.mods.version">Version</span><input name="version" value="1.0.0" maxlength="64"></label>
       <label><span data-i18n="builder.mods.optional_license">License (optional)</span><input name="license" maxlength="256"></label>
+      <label class="pack-description"><span data-i18n="builder.mods.description">Description (optional)</span><textarea name="description" rows="2" maxlength="4096"></textarea></label>
     </div>
     <fieldset id="asset-pack-export-music"><legend data-i18n="builder.mods.tracks">Tracks to share</legend><div id="asset-pack-export-tracks"></div><p id="asset-pack-track-count" role="status" hidden></p></fieldset>
     <label id="asset-pack-export-image" hidden><span data-i18n="builder.mods.artwork_file">Title artwork (PNG)</span><input id="asset-pack-artwork" name="artwork" aria-describedby="asset-pack-artwork-guide asset-pack-artwork-status" type="file" accept=".png,image/png" disabled required></label>
@@ -443,13 +467,6 @@
       <button type="submit" id="asset-pack-export-install" disabled data-i18n="builder.language.install_game">Install in game</button>
     </div>
   </form>
-</dialog>
-
-<dialog id="mod-conflict-review" class="builder-dialog" aria-labelledby="mod-conflict-heading" aria-describedby="mod-conflict-help">
-  <h2 id="mod-conflict-heading"></h2>
-  <p id="mod-conflict-help" data-i18n="builder.mods.pick_target">Choose a target to see the mods that provide it.</p>
-  <div id="mod-conflict-targets"></div>
-  <form method="dialog" class="dialog-actions"><button class="quiet" data-i18n="common.back">Back</button></form>
 </dialog>
 
 <dialog id="builder-confirm-dialog" class="builder-dialog" aria-labelledby="builder-confirm-title" aria-describedby="builder-confirm-message">
@@ -471,20 +488,23 @@
 </dialog>
 <dialog id="big-mod-filter-dialog" class="builder-dialog" aria-labelledby="big-mod-filter-title">
   <header class="big-dialog-heading">
-    <h2 id="big-mod-filter-title" data-i18n="builder.mods.filter">Mod type</h2>
+    <h2 id="big-mod-filter-title" data-i18n="builder.mods.filter">Filter mods</h2>
     <form method="dialog"><button class="quiet" data-i18n="common.cancel">Cancel</button></form>
   </header>
   <div id="big-customize-menu" class="big-choice-grid">
     <div data-big-band>
-      <button class="secondary" type="button" data-big-page="all" aria-pressed="true" data-i18n="builder.mods.all_types">All types</button>
+      <button class="secondary" type="button" data-big-page="all" aria-pressed="true" data-i18n="builder.mods.all_types">All mods</button>
+      <button class="secondary" type="button" data-big-page="conflicts" aria-pressed="false" data-i18n="builder.mods.conflicting_mods">Conflicting mods</button>
+    </div>
+    <div data-big-band>
       <button class="secondary" type="button" data-big-page="title" aria-pressed="false" data-i18n="builder.assets.title_art">Title artwork</button>
-    </div>
-    <div data-big-band>
       <button class="secondary" type="button" data-big-page="packs" aria-pressed="false" data-i18n="builder.mods.title">Music packs</button>
-      <button class="secondary" type="button" data-big-page="languages" aria-pressed="false" data-i18n="builder.nav.languages">Languages</button>
     </div>
     <div data-big-band>
+      <button class="secondary" type="button" data-big-page="languages" aria-pressed="false" data-i18n="builder.nav.languages">Languages</button>
       <button class="secondary" type="button" data-big-page="manual" aria-pressed="false" data-i18n="builder.mods.manual_packs">Manual packs</button>
+    </div>
+    <div data-big-band>
       <button class="secondary" type="button" data-big-page="issues" aria-pressed="false" data-i18n="builder.mods.needs_attention" hidden>Needs attention</button>
     </div>
   </div>
@@ -535,6 +555,16 @@
   </div>
 </dialog>
 
+<dialog id="mod-source-dialog" class="builder-dialog" aria-labelledby="mod-source-title">
+  <header class="big-dialog-heading">
+    <div class="big-mod-heading">
+      <h2 id="mod-source-title"></h2>
+      <span id="mod-source-paging" class="big-screen-prompt" role="group" data-i18n-aria="builder.big_screen.page_list" hidden><span class="controller-glyph" role="img" data-pad-button="left" aria-label="Page Up">PgUp</span><span class="controller-glyph" role="img" data-pad-button="right" aria-label="Page Down">PgDn</span><span data-i18n="builder.big_screen.page">Page</span></span>
+    </div>
+    <form method="dialog"><button class="quiet" data-i18n="common.cancel">Cancel</button></form>
+  </header>
+  <div id="mod-source-list" class="big-screen-list big-screen-scroll" data-big-page-list></div>
+</dialog>
 <dialog id="mod-preview-dialog" class="builder-dialog" aria-labelledby="mod-preview-title">
   <h2 id="mod-preview-title"></h2>
   <p id="mod-preview-status" role="status"></p>

@@ -29,6 +29,8 @@ type installedMod struct {
 	External          bool     `json:"external"`
 	Bundled           bool     `json:"bundled,omitempty"`
 	Enabled           bool     `json:"enabled"`
+	Targets           []string `json:"targets,omitempty"`
+	ExcludedTargets   []string `json:"excludedTargets,omitempty"`
 	Error             string   `json:"error,omitempty"`
 	Previews          []string `json:"previews,omitempty"`
 	UninstallRevision string   `json:"uninstallRevision,omitempty"`
@@ -42,12 +44,13 @@ type installedMod struct {
 }
 
 type modSlot struct {
-	ID         string   `json:"id"`
-	Track      string   `json:"track,omitempty"`
-	Type       string   `json:"type"`
-	Region     string   `json:"region,omitempty"`
-	Candidates []string `json:"candidates"`
-	Winner     string   `json:"winner,omitempty"`
+	ID          string   `json:"id"`
+	Track       string   `json:"track,omitempty"`
+	Type        string   `json:"type"`
+	Region      string   `json:"region,omitempty"`
+	Candidates  []string `json:"candidates"`
+	Winner      string   `json:"winner,omitempty"`
+	NeedsChoice bool     `json:"needsChoice,omitempty"`
 }
 
 type modCatalog struct {
@@ -379,8 +382,13 @@ func (s *modStore) render(catalog *modCatalog) ([]byte, error) {
 	targets := map[string][]candidate{}
 	for i := range catalog.Packs {
 		pack := &catalog.Packs[i]
+		pack.Targets = pack.targets()
+		pack.ExcludedTargets = s.settings.ExcludedTargets[pack.ID]
 		if pack.Enabled {
-			for index, target := range pack.targets() {
+			for index, target := range pack.Targets {
+				if slices.Contains(pack.ExcludedTargets, target) {
+					continue
+				}
 				targets[target] = append(targets[target], candidate{pack, index})
 			}
 		}
@@ -428,6 +436,7 @@ func (s *modStore) render(catalog *modCatalog) ([]byte, error) {
 				writeModMusicSection(&sections, key, spec, option.pack.Tracks[option.index], file)
 			}
 		}
+		slot.NeedsChoice = s.targetNeedsChoice(slot)
 		catalog.Slots = append(catalog.Slots, slot)
 	}
 	header, err := s.settings.Header()
@@ -437,7 +446,27 @@ func (s *modStore) render(catalog *modCatalog) ([]byte, error) {
 	return append(header, sections.String()...), nil
 }
 
+func (s *modStore) targetNeedsChoice(slot modSlot) bool {
+	if !slices.Contains(s.settings.Preferred[slot.ID], slot.Winner) {
+		// An automatic winner keeps playing while the player decides.
+		return len(slot.Candidates) > 1
+	}
+	reviewed, known := s.settings.ReviewedSources[slot.ID]
+	if !known {
+		// Record a fresh selection, or adopt the existing choices in an older installation.
+		if s.settings.ReviewedSources == nil {
+			s.settings.ReviewedSources = map[string][]string{}
+		}
+		s.settings.ReviewedSources[slot.ID] = slot.Candidates
+		return false
+	}
+	return len(slot.Candidates) > 1 && slices.ContainsFunc(slot.Candidates, func(id string) bool {
+		return !slices.Contains(reviewed, id)
+	})
+}
+
 func (s *modStore) remember(slot, id string) {
+	delete(s.settings.ReviewedSources, slot)
 	previous := s.settings.Preferred[slot]
 	if len(previous) != 0 && previous[0] == id {
 		return
@@ -545,11 +574,32 @@ func (s *modStore) change(catalog *modCatalog, request modChange) error {
 			s.settings.Disabled[pack.ID] = true
 			pack.Enabled = false
 		}
-	case "select":
+	case "select", "exclude-target", "include-target":
 		if !pack.Enabled || !slices.Contains(pack.targets(), request.Slot) {
 			return fmt.Errorf("enable the mod and choose a slot it supplies")
 		}
-		s.remember(request.Slot, pack.ID)
+		excluded := s.settings.ExcludedTargets[pack.ID]
+		switch request.Action {
+		case "select":
+			if slices.Contains(excluded, request.Slot) {
+				return fmt.Errorf("include this asset before selecting it")
+			}
+			s.remember(request.Slot, pack.ID)
+		case "exclude-target":
+			if !slices.Contains(excluded, request.Slot) {
+				if s.settings.ExcludedTargets == nil {
+					s.settings.ExcludedTargets = map[string][]string{}
+				}
+				s.settings.ExcludedTargets[pack.ID] = append(excluded, request.Slot)
+			}
+		case "include-target":
+			excluded = slices.DeleteFunc(excluded, func(slot string) bool { return slot == request.Slot })
+			if len(excluded) == 0 {
+				delete(s.settings.ExcludedTargets, pack.ID)
+			} else {
+				s.settings.ExcludedTargets[pack.ID] = excluded
+			}
+		}
 	default:
 		return fmt.Errorf("unknown mod action %q", request.Action)
 	}
