@@ -2803,6 +2803,41 @@ static bool BuildGeometry(ActionVoxelGeometry *c, const ActionVoxelBuildSource *
   return true;
 }
 
+bool ActionVoxel_BuildInputsEqual(const ActionVoxelBuildSource *a,
+    const ActionVoxelBuildSource *b) {
+  const ActionRoomScene *x = a->scene, *y = b->scene;
+  if (x->group != y->group || x->map != y->map ||
+      x->have_palette != y->have_palette ||
+      x->have_extra_characters != y->have_extra_characters ||
+      memcmp(x->have_character_bank, y->have_character_bank, sizeof(x->have_character_bank)) ||
+      memcmp(x->characters, y->characters, sizeof(x->characters)) ||
+      (x->have_extra_characters &&
+       memcmp(x->extra_characters, y->extra_characters, sizeof(x->extra_characters))) ||
+      memcmp(x->palette, y->palette, sizeof(x->palette)) ||
+      ActionRoomScene_CharacterAnimationTarget(x) != ActionRoomScene_CharacterAnimationTarget(y) ||
+      ActionRoomScene_CharacterAnimationStride(x) != ActionRoomScene_CharacterAnimationStride(y) ||
+      ActionRoomScene_CharacterAnimationPhaseCount(x) != ActionRoomScene_CharacterAnimationPhaseCount(y) ||
+      ActionRoomScene_HasCharacterAnimation(x) != ActionRoomScene_HasCharacterAnimation(y))
+    return false;
+  const bool bg2 = ActionVoxel_UsesBg2Characters(ActionVoxel_ProfileForRoom(x->group, x->map), x->map);
+  for (unsigned i = 0; i < (bg2 ? 2u : 1u); ++i) {
+    const ActionRoomSceneBg *xb = &x->bg[i], *yb = &y->bg[i];
+    if (xb->map_size != yb->map_size || xb->map_size > sizeof(xb->map) ||
+        xb->pages_wide != yb->pages_wide || xb->pages_high != yb->pages_high ||
+        xb->have_map != yb->have_map || xb->have_metatiles != yb->have_metatiles ||
+        ActionRoomScene_BgAttributes(x, i + 1) != ActionRoomScene_BgAttributes(y, i + 1) ||
+        memcmp(xb->map, yb->map, xb->map_size) ||
+        memcmp(xb->metatiles, yb->metatiles, sizeof(xb->metatiles)))
+      return false;
+  }
+  if (!DioramaLayerOrder_VoxelGeometryInputsEqual(a->terrain, b->terrain, bg2) ||
+      !!a->tiles != !!b->tiles || a->tile_pitch != b->tile_pitch)
+    return false;
+  return !a->tiles || (a->tile_pitch == ActionRoomScene_TileWidth(x, 1) &&
+      !memcmp(a->tiles, b->tiles,
+          a->tile_pitch * ActionRoomScene_TileHeight(x, 1) * sizeof(*a->tiles)));
+}
+
 bool ActionVoxel_BuildFromSource(ActionVoxelGeometry *c, const ActionVoxelBuildSource *source,
     ActionVoxelSettings settings) {
   const ActionRoomScene *s = source->scene;

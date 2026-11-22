@@ -101,14 +101,8 @@ static bool EnsureScene(SDL_Renderer *renderer, int width, int height) {
   /* Use the renderer's preferred texture format so the fullscreen resolve does
    * not introduce a format conversion. This target remains backend-owned and
    * crosses the public boundary only as an opaque ArRenderTexture handle. */
-  SDL_PixelFormat format = SDL_PIXELFORMAT_RGBA8888;
-  const SDL_PixelFormat *formats = (const SDL_PixelFormat *)
-      SDL_GetPointerProperty(SDL_GetRendererProperties(renderer),
-                             SDL_PROP_RENDERER_TEXTURE_FORMATS_POINTER, NULL);
-  if (formats && formats[0] != SDL_PIXELFORMAT_UNKNOWN) format = formats[0];
-
-  s_scene = SDL_CreateTexture(
-      renderer, format, SDL_TEXTUREACCESS_TARGET, width, height);
+  s_scene = SDL_CreateTexture(renderer, ArSdlRenderBackend_PreferredTextureFormat(renderer),
+      SDL_TEXTUREACCESS_TARGET, width, height);
   if (!s_scene) {
     RuntimeLog_Printf("[crt] scene target %dx%d failed: %s\n",
             width, height, SDL_GetError());
@@ -171,6 +165,10 @@ static bool EnsureShader(ArRenderDevice *device, SDL_Renderer *renderer) {
 
 bool CrtPost_Prepare(ArRenderDevice *device) {
   return EnsureShader(device, ArSdlRenderBackend_Renderer(device));
+}
+
+bool CrtPost_RequiresTarget(const CrtPostConfig *config) {
+  return Mode(config) != kCrtMode_Off;
 }
 
 bool CrtPost_Begin(ArRenderDevice *device, const CrtPostConfig *config) {

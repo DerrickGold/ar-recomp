@@ -15,48 +15,63 @@
  * returns the defaults verbatim in built-in order, so an unedited game is
  * bit-identical to before this existed. */
 static DioramaLayerOrderTable s_layer_overrides;
-static DioramaRoomOverride s_terrain_room;
-static const DioramaRoomOverride *s_terrain_source;
-static unsigned s_terrain_profile;
-static bool s_terrain_valid;
+/* Keep the active room and a speculative destination resolved at once. */
+static struct TerrainView {
+  DioramaRoomOverride room;
+  const DioramaRoomOverride *source;
+  unsigned profile;
+} s_terrain_views[2];
+static unsigned s_recent_terrain_view;
+
+static void InvalidateTerrainViews(void) {
+  for (unsigned i = 0; i < sizeof(s_terrain_views) / sizeof(s_terrain_views[0]); ++i)
+    s_terrain_views[i].source = NULL;
+}
 
 const DioramaLayerOrderTable *DioramaLayerManifest_Table(void) { return &s_layer_overrides; }
 DioramaLayerOrderTable *DioramaLayerManifest_Edit(void) {
-  s_terrain_valid = false;
+  InvalidateTerrainViews();
   return &s_layer_overrides;
 }
 
 const DioramaRoomOverride *DioramaLayerManifest_TerrainRoom(
     const DioramaRoomOverride *room, unsigned profile) {
   if (!room) return NULL;
-  if (!s_terrain_valid || s_terrain_source != room || s_terrain_profile != profile) {
-    s_terrain_valid = false;
-    if (!DioramaLayerOrder_ForTerrain(room, profile, &s_terrain_room)) return NULL;
-    /* Only this immutable cached view carries occupied bounds. Pure mutable
-     * ForTerrain callers can still edit cells and use the uncached extent path. */
-    for (unsigned bg = 0; bg < 2; ++bg) {
-      DioramaStampLayerOverride *stamps = &s_terrain_room.stamp_layers[bg];
-      for (size_t i = 0; i < stamps->count; ++i) {
-        const DioramaTileStamp *cell = &stamps->cells[i];
-        DioramaMapBounds *bounds = &stamps->occupied_bounds;
-        if (!bounds->set) {
-          *bounds = (DioramaMapBounds){.set = true, .x0 = cell->x, .y0 = cell->y,
-              .x1 = cell->x + 1, .y1 = cell->y + 1};
-        } else {
-          if (cell->x < bounds->x0) bounds->x0 = cell->x;
-          if (cell->y < bounds->y0) bounds->y0 = cell->y;
-          if (cell->x >= bounds->x1) bounds->x1 = cell->x + 1;
-          if (cell->y >= bounds->y1) bounds->y1 = cell->y + 1;
-        }
+  for (unsigned i = 0; i < 2; ++i) {
+    struct TerrainView *view = &s_terrain_views[i];
+    if (view->source == room && view->profile == profile) {
+      s_recent_terrain_view = i;
+      return &view->room;
+    }
+  }
+  const unsigned index = s_recent_terrain_view ^ 1u;
+  struct TerrainView *view = &s_terrain_views[index];
+  view->source = NULL;
+  if (!DioramaLayerOrder_ForTerrain(room, profile, &view->room)) return NULL;
+  /* Only this immutable cached view carries occupied bounds. Pure mutable
+   * ForTerrain callers can still edit cells and use the uncached extent path. */
+  for (unsigned bg = 0; bg < 2; ++bg) {
+    DioramaStampLayerOverride *stamps = &view->room.stamp_layers[bg];
+    for (size_t i = 0; i < stamps->count; ++i) {
+      const DioramaTileStamp *cell = &stamps->cells[i];
+      DioramaMapBounds *bounds = &stamps->occupied_bounds;
+      if (!bounds->set) {
+        *bounds = (DioramaMapBounds){.set = true, .x0 = cell->x, .y0 = cell->y,
+            .x1 = cell->x + 1, .y1 = cell->y + 1};
+      } else {
+        if (cell->x < bounds->x0) bounds->x0 = cell->x;
+        if (cell->y < bounds->y0) bounds->y0 = cell->y;
+        if (cell->x >= bounds->x1) bounds->x1 = cell->x + 1;
+        if (cell->y >= bounds->y1) bounds->y1 = cell->y + 1;
       }
     }
-    for(unsigned i=0;i<2;++i)
-      s_terrain_room.voxel_geometry_keys[i]=DioramaLayerOrder_VoxelGeometryKey(&s_terrain_room,i!=0);
-    s_terrain_source = room;
-    s_terrain_profile = profile;
-    s_terrain_valid = true;
   }
-  return &s_terrain_room;
+  for(unsigned i=0;i<2;++i)
+    view->room.voxel_geometry_keys[i]=DioramaLayerOrder_VoxelGeometryKey(&view->room,i!=0);
+  view->source = room;
+  view->profile = profile;
+  s_recent_terrain_view = index;
+  return &view->room;
 }
 
 /* ── layer manifest I/O ──────────────────────────────────────────────────
@@ -208,7 +223,7 @@ bool DioramaLayerManifest_Load(void) {
     return false;
   }
   DioramaLayerOrder_ClearTable(&s_layer_overrides);
-  s_terrain_valid = false;
+  InvalidateTerrainViews();
   s_layer_overrides = *loaded;
   free(loaded);
   RuntimeLog_Printf("[diorama-layers] loaded %s: %d room(s), %d plane override(s)%s\n", path, rooms,
@@ -298,7 +313,7 @@ static bool ReadExistingManifest(const char *path, char **out) {
 }
 
 bool DioramaLayerManifest_Save(void) {
-  s_terrain_valid = false;
+  InvalidateTerrainViews();
   char path[kHostPathCapacity];
   UserDataFile(path, sizeof path, kLayerManifestLeaf);
 
@@ -328,37 +343,10 @@ bool DioramaLayerManifest_Save(void) {
     return false;
   }
 
-  /* Write to a temp file and rename, so a crash mid-write cannot leave the
-   * user's manifest truncated -- this file may hold hand-authored content that
-   * is not reproducible from the table. */
-  /* Room for the manifest path plus the ".tmp" suffix. */
-  char tmp[sizeof(path) + 64];
-  snprintf(tmp, sizeof tmp, "%s.tmp", path);
-  FILE *file = sr_fopen(tmp, "wb");
-  if (!file) {
-    free(out);
-    RuntimeLog_Printf("[diorama-layers] cannot write %s\n", tmp);
-    return false;
-  }
-  size_t put = fwrite(out, 1, wrote, file);
+  const bool published = AtomicReplace_WriteBytes(path, out, wrote, false);
   free(out);
-  bool complete = put == wrote && fflush(file) == 0;
-  if (fclose(file) != 0) complete = false;
-  if (!complete) {
-    sr_remove(tmp);
-    RuntimeLog_Printf("[diorama-layers] incomplete write to %s -- original kept\n", tmp);
-    return false;
-  }
-  /* One atomic replace on both platforms. A bare rename() FAILS on Windows when
-   * the destination exists (packaging builds windows-x86_64/arm64), so every save
-   * after the first would silently stop persisting the user's edits -- the same
-   * trap handled by the ActRaiser Builder's ROM storage. See atomic_replace.h;
-   * this file may
-   * contain hand-authored rooms that cannot be reproduced from the table, so
-   * "original kept" below must be TRUE. */
-  if (!AtomicReplaceFile(tmp, path)) {
-    sr_remove(tmp);
-    RuntimeLog_Printf("[diorama-layers] could not replace %s -- original kept\n", path);
+  if (!published) {
+    RuntimeLog_Printf("[diorama-layers] could not write %s -- original kept\n", path);
     return false;
   }
 

@@ -13,17 +13,14 @@
 #include <string.h>
 
 /* Pipelines: 0 opaque writers (color + order MRT, depth), 1 alpha tail, 2 additive tail. */
-enum { kAlphaPipelineCount = 3 };
 typedef struct AlphaVertex { DioramaDepthVertex vertex; float ordinal; } AlphaVertex;
 _Static_assert(sizeof(AlphaVertex)==52 && offsetof(AlphaVertex,ordinal)==48,
     "fractional world vertex layout");
 typedef struct ArGpuDioramaDepthAlpha {
-  SDL_GPUGraphicsPipeline *pipeline[kGpuDioramaMaterialCount][kAlphaPipelineCount];
   SDL_GPUTexture *opaque_order;
   SDL_GPUBuffer *vertices;
   SDL_GPUTransferBuffer *upload;
   unsigned width, height, capacity;
-  SDL_GPUTextureFormat order_format;
 } ArGpuDioramaDepthAlpha;
 
 #define BLOBS(n) (GpuShaderBlobs){k##n##MSL,k##n##MSLSize,k##n##SPV,k##n##SPVSize,k##n##DXIL,k##n##DXILSize}
@@ -31,15 +28,22 @@ typedef struct ArGpuDioramaDepthAlpha {
 void ArGpuDioramaDepthAlpha_Destroy(ArGpuDioramaDepthPass *p) {
   ArGpuDioramaDepthAlpha *a=p?p->alpha:NULL;
   if(!a)return;
-  for(unsigned m=0;m<kGpuDioramaMaterialCount;++m)for(unsigned k=0;k<kAlphaPipelineCount;++k)
-    if(a->pipeline[m][k])SDL_ReleaseGPUGraphicsPipeline(p->device,a->pipeline[m][k]);
   if(a->opaque_order)SDL_ReleaseGPUTexture(p->device,a->opaque_order);
   if(a->vertices)SDL_ReleaseGPUBuffer(p->device,a->vertices);
   if(a->upload)SDL_ReleaseGPUTransferBuffer(p->device,a->upload);
   free(a);p->alpha=NULL;
 }
 
-static SDL_GPUGraphicsPipeline *Pipeline(ArGpuDioramaDepthPass *p,
+void ArGpuDioramaDepthAlpha_ReleasePipelines(ArGpuDioramaDepthResources *r) {
+  for (unsigned m = 0; m < kGpuDioramaMaterialCount; ++m)
+    for (unsigned k = 0; k < kAlphaPipelineCount; ++k)
+      if (r->alpha_pipelines[m][k])
+        SDL_ReleaseGPUGraphicsPipeline(r->device, r->alpha_pipelines[m][k]);
+  memset(r->alpha_pipelines, 0, sizeof(r->alpha_pipelines));
+  r->hybrid_ready = false;
+}
+
+static SDL_GPUGraphicsPipeline *Pipeline(ArGpuDioramaDepthResources *r,
     SDL_GPUShader *vs,SDL_GPUShader *fs,unsigned kind) {
   const bool tail=kind!=0;
   const SDL_GPUVertexBufferDescription buffer={.slot=0,.pitch=sizeof(AlphaVertex),
@@ -50,7 +54,7 @@ static SDL_GPUGraphicsPipeline *Pipeline(ArGpuDioramaDepthPass *p,
     {2,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,32},
     {3,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,48},
     {4,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,40}};
-  SDL_GPUColorTargetDescription colors[2]={{.format=p->color_format},{.format=p->alpha->order_format}};
+  SDL_GPUColorTargetDescription colors[2]={{.format=r->color_format},{.format=r->order_format}};
   if(tail)colors[0].blend_state=(SDL_GPUColorTargetBlendState){.enable_blend=true,
     .src_color_blendfactor=SDL_GPU_BLENDFACTOR_SRC_ALPHA,
     .dst_color_blendfactor=kind==2?SDL_GPU_BLENDFACTOR_ONE:SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
@@ -69,38 +73,37 @@ static SDL_GPUGraphicsPipeline *Pipeline(ArGpuDioramaDepthPass *p,
     .target_info={.color_target_descriptions=colors,.num_color_targets=tail?1:2,
       .has_depth_stencil_target=!tail,
       .depth_stencil_format=tail?SDL_GPU_TEXTUREFORMAT_INVALID:SDL_GPU_TEXTUREFORMAT_D32_FLOAT}};
-  return GpuShaderBlob_CreateGraphicsPipeline(p->device,&info,"action fractional world");
+  return GpuShaderBlob_CreateGraphicsPipeline(r->device,&info,"action fractional world");
 }
 
-static bool Init(ArGpuDioramaDepthPass *p) {
-  if(p->alpha)return true;
-  p->alpha=calloc(1,sizeof(*p->alpha));
-  if(!p->alpha)return false;
+bool ArGpuDioramaDepthAlpha_PreparePipelines(ArGpuDioramaDepthResources *r) {
+  if (r->hybrid_ready) return true;
   const SDL_GPUTextureUsageFlags usage=SDL_GPU_TEXTUREUSAGE_COLOR_TARGET|SDL_GPU_TEXTUREUSAGE_SAMPLER;
-  bool supports_order=SDL_GPUTextureSupportsFormat(p->device,SDL_GPU_TEXTUREFORMAT_R32_FLOAT,SDL_GPU_TEXTURETYPE_2D,usage);
+  bool supports_order=SDL_GPUTextureSupportsFormat(r->device,SDL_GPU_TEXTUREFORMAT_R32_FLOAT,SDL_GPU_TEXTURETYPE_2D,usage);
 #ifdef AR_DIORAMA_ALPHA_TEST_FORCE_RGBA32
   /* Defined only by the independent GPU parity test translation unit. */
   supports_order=false;
 #endif
-  p->alpha->order_format=DioramaDepthAlpha_SelectOrderFormat(supports_order);
+  r->order_format=DioramaDepthAlpha_SelectOrderFormat(supports_order);
   const GpuShaderBlobs vertex=BLOBS(DioramaAlphaVert);
   const GpuShaderBlobs fragment[]={BLOBS(DioramaAlphaFrag),BLOBS(SceneryAlphaFrag),
       BLOBS(ActorAlphaFrag),BLOBS(SceneryBankAlphaFrag)};
-  SDL_GPUShader *vs=GpuShaderBlob_Create(p->device,&vertex,"action fractional world",SDL_GPU_SHADERSTAGE_VERTEX,0,0);
+  SDL_GPUShader *vs=GpuShaderBlob_Create(r->device,&vertex,"action fractional world",SDL_GPU_SHADERSTAGE_VERTEX,0,0);
   bool ok=vs!=NULL;
   for(unsigned m=0;ok&&m<kGpuDioramaMaterialCount;++m) {
-    SDL_GPUShader *fs=GpuShaderBlob_CreateFragment(p->device,&fragment[m],"action fractional material",
+    SDL_GPUShader *fs=GpuShaderBlob_CreateFragment(r->device,&fragment[m],"action fractional material",
         m==2||m==kGpuDioramaBankMaterial?6:m==1?4:3,m?2:1);
     ok=fs!=NULL;
     for(unsigned k=0;ok&&k<(m==kGpuDioramaBankMaterial?2u:kAlphaPipelineCount);++k) {
-      p->alpha->pipeline[m][k]=Pipeline(p,vs,fs,k);
-      ok=p->alpha->pipeline[m][k]!=NULL;
+      r->alpha_pipelines[m][k]=Pipeline(r,vs,fs,k);
+      ok=r->alpha_pipelines[m][k]!=NULL;
     }
-    if(fs)SDL_ReleaseGPUShader(p->device,fs);
+    if(fs)SDL_ReleaseGPUShader(r->device,fs);
   }
-  if(vs)SDL_ReleaseGPUShader(p->device,vs);
-  if(ok)return true;
-  ArGpuDioramaDepthAlpha_Destroy(p);return false;
+  if(vs)SDL_ReleaseGPUShader(r->device,vs);
+  if (!ok) ArGpuDioramaDepthAlpha_ReleasePipelines(r);
+  r->hybrid_ready = ok;
+  return ok;
 }
 
 static SDL_GPUTexture *Texture(ArGpuDioramaDepthPass *p,unsigned width,unsigned height,
@@ -113,10 +116,11 @@ static SDL_GPUTexture *Texture(ArGpuDioramaDepthPass *p,unsigned width,unsigned 
 
 static bool PrepareAlpha(ArGpuDioramaDepthPass *p,unsigned width,unsigned height,
     unsigned indices) {
-  if(!Init(p))return false;
+  if (!ArGpuDioramaDepthAlpha_PreparePipelines(p->resources)) return false;
+  if (!p->alpha && !(p->alpha = calloc(1, sizeof(*p->alpha)))) return false;
   ArGpuDioramaDepthAlpha *a=p->alpha;
   if(a->width!=width||a->height!=height) {
-    SDL_GPUTexture *order=Texture(p,width,height,a->order_format);
+    SDL_GPUTexture *order=Texture(p,width,height,p->resources->order_format);
     if(!order)return false;
     if(a->opaque_order)SDL_ReleaseGPUTexture(p->device,a->opaque_order);
     a->opaque_order=order;
@@ -254,13 +258,13 @@ static void DrawRange(ArGpuDioramaDepthPass *p,SDL_GPUCommandBuffer *cmd,SDL_GPU
     const unsigned material=ArGpuDioramaDepthMaterialKind(materials?&materials[i]:NULL);
     const unsigned blend=d->blend==kArRenderBlendMode_Add?2:d->blend==kArRenderBlendMode_Alpha?1:0;
     const unsigned pipeline=mode?(blend==2?2:1):0;
-    SDL_GPUGraphicsPipeline *selected=a->pipeline[material][pipeline];
+    SDL_GPUGraphicsPipeline *selected=p->resources->alpha_pipelines[material][pipeline];
     const bool pipeline_changed=selected!=bound_pipeline;
     if(pipeline_changed) {
       SDL_BindGPUGraphicsPipeline(pass,selected);
       bound_pipeline=selected;
     }
-    SDL_GPUTextureSamplerBinding samples[6]={{d->textured?sources[i]:p->white,d->nearest?p->nearest_sampler:p->sampler}};
+    SDL_GPUTextureSamplerBinding samples[6]={{d->textured?sources[i]:p->resources->white,d->nearest?p->resources->nearest_sampler:p->resources->sampler}};
     const unsigned n=material==2?4:material!=0?2:1;
     if(material==2) {
       DioramaActorUniforms u;DioramaActorUniforms_Init(&u,materials[i].scenery,a->width,a->height);
@@ -268,23 +272,23 @@ static void DrawRange(ArGpuDioramaDepthPass *p,SDL_GPUCommandBuffer *cmd,SDL_GPU
         SDL_PushGPUFragmentUniformData(cmd,0,&u,sizeof(u));
         bound_actor=u;
       }
-      samples[1]=(SDL_GPUTextureSamplerBinding){materials[i].attributes?materials[i].attributes:p->neutral_attributes,p->sampler};
-      samples[2]=(SDL_GPUTextureSamplerBinding){materials[i].illumination?materials[i].illumination:p->black,p->sampler};
-      samples[3]=(SDL_GPUTextureSamplerBinding){materials[i].enemy_illumination?materials[i].enemy_illumination:p->black,p->sampler};
+      samples[1]=(SDL_GPUTextureSamplerBinding){materials[i].attributes?materials[i].attributes:p->resources->neutral_attributes,p->resources->sampler};
+      samples[2]=(SDL_GPUTextureSamplerBinding){materials[i].illumination?materials[i].illumination:p->resources->black,p->resources->sampler};
+      samples[3]=(SDL_GPUTextureSamplerBinding){materials[i].enemy_illumination?materials[i].enemy_illumination:p->resources->black,p->resources->sampler};
     } else if(material!=0) {
       DioramaSceneryUniforms u;DioramaSceneryUniforms_Init(&u,materials[i].scenery,a->width,a->height);
       if(pipeline_changed || memcmp(&u,&bound_scenery,sizeof(u))) {
         SDL_PushGPUFragmentUniformData(cmd,0,&u,sizeof(u));
         bound_scenery=u;
       }
-      samples[1]=(SDL_GPUTextureSamplerBinding){materials[i].illumination?materials[i].illumination:p->black,p->sampler};
+      samples[1]=(SDL_GPUTextureSamplerBinding){materials[i].illumination?materials[i].illumination:p->resources->black,p->resources->sampler};
     }
-    samples[n]=(SDL_GPUTextureSamplerBinding){mode?p->depth:p->black,p->nearest_sampler};
-    samples[n+1]=(SDL_GPUTextureSamplerBinding){mode?a->opaque_order:p->black,p->nearest_sampler};
+    samples[n]=(SDL_GPUTextureSamplerBinding){mode?p->depth:p->resources->black,p->resources->nearest_sampler};
+    samples[n+1]=(SDL_GPUTextureSamplerBinding){mode?a->opaque_order:p->resources->black,p->resources->nearest_sampler};
     unsigned sample_count=n+2;
     if(material==kGpuDioramaBankMaterial) {
-      samples[sample_count++]=(SDL_GPUTextureSamplerBinding){materials[i].additional[0],p->nearest_sampler};
-      samples[sample_count++]=(SDL_GPUTextureSamplerBinding){materials[i].additional[1],p->nearest_sampler};
+      samples[sample_count++]=(SDL_GPUTextureSamplerBinding){materials[i].additional[0],p->resources->nearest_sampler};
+      samples[sample_count++]=(SDL_GPUTextureSamplerBinding){materials[i].additional[1],p->resources->nearest_sampler};
     }
     bool samples_changed=pipeline_changed;
     for(unsigned j=0;!samples_changed && j<sample_count;++j)

@@ -2467,7 +2467,7 @@ static void TestLiveVoxelAuthoringCache(Ppu *ppu, const ActionRoomScene *scene) 
   revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
   CHECK(revision != next);
   ppu->vram[0x1ff * 16] ^= 1;
-  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) != revision);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == next);
   CHECK(DioramaLayerOrder_ParseLine(&terrain,
       "voxel-cell = cell:0,0 width:8 backing:fill top-art:1,0200,0200,0200,0200,0,0,16", NULL));
   revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
@@ -2484,14 +2484,14 @@ static void TestLiveVoxelAuthoringCache(Ppu *ppu, const ActionRoomScene *scene) 
     CHECK(diagnostics->voxel_geometry_build_attempts == before_rejection + 1);
   }
   donor->size = 16;
-  revision = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
-  CHECK(diagnostics->voxel_geometry_build_attempts == before_rejection + 2);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == revision);
+  CHECK(diagnostics->voxel_geometry_build_attempts == before_rejection + 1);
   const uint64_t warm_plans = diagnostics->voxel_character_plan_builds;
   ppu->vram[0x3000] ^= 1;
   next = PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain);
   CHECK(next != revision);
   ppu->vram[0x3000] ^= 1;
-  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) != next);
+  CHECK(PrepareVoxelWithoutChangingNativeArt(ppu, group, room, &terrain) == revision);
   CHECK(diagnostics->voxel_character_plan_builds == warm_plans);
 
   /* A group transform is persisted presentation state: each change must
@@ -2687,6 +2687,48 @@ static void TestWarmVoxelAnimation(Ppu *ppu, const ActionRoomScene *scene) {
       scene->group, scene->map, voxel_terrain, animation.phases, revisions);
 }
 
+static bool room_worker_audit;
+
+static bool CountRoomBuild(void *context) {
+  ++*(unsigned *)context;
+  return true;
+}
+
+static void TestChangingRoomWorkerInputs(Ppu *ppu, unsigned group, unsigned room) {
+  unsigned jobs = 0;
+  ActRaiserActionBg_SetVoxelPrebuildWake(CountRoomBuild, &jobs);
+  const uint16_t color = ppu->cgram[1];
+  for (unsigned frame = 0; frame < 8; ++frame) {
+    ppu->cgram[1] = color ^ (frame & 1);
+    ActRaiserActionBg_PrepareVoxel(true, NULL);
+    /* The worker produces the preceding palette. From frame two on, both
+     * completed variants must be available to match the current palette. */
+    CHECK(!!ActRaiserActionBg_VoxelGeometry(group, room) == (frame >= 2));
+    ActRaiserActionBg_BuildVoxelPrebuild();
+  }
+  CHECK(jobs == 2);
+  const ActRaiserActionBgDiagnostics *diagnostics = ActRaiserActionBg_GetDiagnostics();
+  const uint64_t builds = diagnostics->voxel_geometry_build_attempts;
+  for (unsigned frame = 0; frame < 8; ++frame) {
+    ppu->cgram[1] = color ^ (32u + (frame & 1));
+    ActRaiserActionBg_PrepareVoxel(true, NULL);
+    CHECK(ActRaiserActionBg_VoxelGeometry(group, room));
+    CHECK(diagnostics->voxel_geometry_build_attempts == builds + (frame == 0 ? 1 : 2));
+  }
+  CHECK(jobs == 2);
+  ActRaiserActionBg_PrepareVoxel(false, NULL);
+  /* Unrepeatable live inputs must still publish eventually. */
+  bool published = false;
+  for (unsigned frame = 0; frame < 12 && !published; ++frame) {
+    ppu->cgram[1] = color ^ (frame + 2);
+    ActRaiserActionBg_PrepareVoxel(true, NULL);
+    published = ActRaiserActionBg_VoxelGeometry(group, room) != NULL;
+    ActRaiserActionBg_BuildVoxelPrebuild();
+  }
+  CHECK(published);
+  ActRaiserActionBg_SetVoxelPrebuildWake(NULL, NULL);
+}
+
 static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t map_number) {
   if (animation_audit && !ActionVoxel_Room(group, map_number)) return;
   FILE *file=fopen(path,"rb");CHECK(file);if(!file)return;
@@ -2727,6 +2769,10 @@ static void TestLiveVoxelPublication(const char *path, uint8_t group, uint8_t ma
   CHECK(ActRaiserActionBg_InitRoomScenes(rom,(size_t)size));
   ActRaiserActionBg_BeginRoomVariants(voxel_terrain,0,(ArRegionalMediaBytes){0});
   BindFakePpu(ppu);
+  if (room_worker_audit) {
+    TestChangingRoomWorkerInputs(ppu, group, map_number);
+    goto cleanup;
+  }
   ActRaiserActionBg_PrepareVoxel(true,NULL);
   const ActionVoxelGeometry *closed=ActionVoxel_Retain(ActRaiserActionBg_VoxelGeometry(group,map_number));CHECK(closed);
   if (animation_audit) {
@@ -3027,6 +3073,10 @@ int main(int argc, char **argv) {
     for(voxel_terrain=0;voxel_terrain<3;++voxel_terrain) {
       TestLiveVoxelPublication(argv[1],2,3);TestLiveVoxelPublication(argv[1],2,5);
     }
+  if (argc == 3 && !strcmp(argv[2], "--room-worker")) {
+    room_worker_audit = true;
+    TestLiveVoxelPublication(argv[1], 2, 8);
+  }
   if (argc == 3 && !strcmp(argv[2], "--animation-cache")) {
     animation_audit = true;
     for (voxel_terrain = 0; voxel_terrain < kDioramaTerrainProfileCount; ++voxel_terrain)

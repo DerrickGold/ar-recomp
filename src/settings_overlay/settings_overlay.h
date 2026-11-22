@@ -108,6 +108,8 @@ typedef struct SettingsOverlayManualHooks {
 void SettingsOverlay_SetManualHooks(const SettingsOverlayManualHooks *hooks);
 
 bool SettingsOverlay_IsOpen(void);
+void SettingsOverlay_ReportSaveFailure(void);
+void SettingsOverlay_ReportVoxelUnavailable(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);
 /* Imported sessions share host preferences while their campaign/save/editor

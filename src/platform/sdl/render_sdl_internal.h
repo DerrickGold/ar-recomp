@@ -79,4 +79,10 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
                              ArSdlRenderBackend *backend,
                              SDL_Renderer *renderer);
 
+static inline SDL_PixelFormat ArSdlRenderBackend_PreferredTextureFormat(SDL_Renderer *renderer) {
+  const SDL_PixelFormat *formats = SDL_GetPointerProperty(SDL_GetRendererProperties(renderer),
+      SDL_PROP_RENDERER_TEXTURE_FORMATS_POINTER, NULL);
+  return formats && formats[0] != SDL_PIXELFORMAT_UNKNOWN ? formats[0] : SDL_PIXELFORMAT_RGBA8888;
+}
+
 #endif /* AR_RENDER_SDL_INTERNAL_H */

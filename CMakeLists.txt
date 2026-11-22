@@ -1740,7 +1740,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_diagnostic_writer_test
         tests/diagnostic_writer_test.c src/platform/sdl/diagnostic_writer_sdl.c
-        src/app/frame_trace.c)
+        src/app/frame_trace.c src/host/atomic_replace.c)
     target_include_directories(actraiser_diagnostic_writer_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_diagnostic_writer_test PRIVATE SDL3::SDL3)
@@ -2415,6 +2415,18 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_bg COMMAND actraiser_action_bg_test)
+    set(ACTRAISER_TEST_ROM "${PROJECT_SOURCE_DIR}/ar.sfc" CACHE FILEPATH
+        "Local US ActRaiser ROM for the Voxel cache regressions")
+    if(EXISTS "${ACTRAISER_TEST_ROM}")
+        add_test(NAME actraiser_voxel_room_worker
+            COMMAND actraiser_action_bg_test "${ACTRAISER_TEST_ROM}" --room-worker)
+        add_test(NAME actraiser_voxel_animation_cache
+            COMMAND actraiser_action_bg_test "${ACTRAISER_TEST_ROM}" --animation-cache)
+        add_test(NAME actraiser_voxel_authored_cache
+            COMMAND actraiser_action_bg_test "${ACTRAISER_TEST_ROM}" --voxel-edits)
+        add_test(NAME actraiser_voxel_castle_animation
+            COMMAND actraiser_action_bg_test "${ACTRAISER_TEST_ROM}" --castle-animation)
+    endif()
 
     if(Python3_Interpreter_FOUND)
         add_test(NAME actraiser_bg_hle_census
@@ -4988,7 +5000,8 @@ if(BUILD_TESTING)
     add_executable(actraiser_diorama_layer_manifest_test
         tests/diorama_layer_manifest_test.c
         src/diorama/diorama_layer_manifest.c
-        src/diorama/diorama_layer_order.c)
+        src/diorama/diorama_layer_order.c
+        src/host/atomic_replace.c)
     target_include_directories(actraiser_diorama_layer_manifest_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_diorama_layer_manifest_test PRIVATE snesrecomp::sdk)

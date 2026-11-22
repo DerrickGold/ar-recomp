@@ -543,10 +543,6 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   DioramaFrameGeneration_AllowSourceProjection(SourceProjectionQualified(slot));
   s_diorama_skybox_view.texture = ArRenderTexture_Invalid();
   if (!ArRenderDevice_IsReady(device)) return;
-  /* Prepare during the Voxel mode's menu/SIM packets as well as action upload.
-   * Off and ordinary Diorama do not allocate the extra visibility targets.
-   * Begin checks preparation before drawing if this optional warm-up failed. */
-  if (slot->diorama_voxel_mode) (void)DioramaDepthGpu_Prepare(device);
   const uint64_t revision = ActionVoxel_Revision(slot->diorama_voxel);
   s_voxel_sprite_pair = revision && revision == s_voxel_sprite_revision &&
       slot->timestamp_ns > s_voxel_sprite_timestamp &&
@@ -971,6 +967,20 @@ static PresentationOutcome DrawCompletionBackdrop(void *userdata, ArRenderRectI 
       context->slot, viewport, CompletionPlayer(context->slot, context->projection), context->art));
 }
 
+static void RecoverVoxelDepthDraw(ArRenderDevice *device, DioramaPerformanceScope performance) {
+  PresentActionHeat_Cancel(device);
+  DioramaPerformance_End(performance);
+  DioramaPerformance_PresentCompleted();
+  /* The packet contains Voxel-only masks. The game owner will recapture
+   * for Diorama once the current targets are restored. */
+  if (!SessionFatal_Requested() &&
+      (!ArRenderSceneScale_Cancel(device) ||
+       !ArRenderOutput_UseFull(device, NULL, NULL) ||
+       !ArRenderDevice_Clear(device, (ArRenderColorF){0, 0, 0, 1})))
+    SessionFatal_Request("Cannot restore the action output (%s).",
+        ArRenderDevice_LastError(device));
+}
+
 void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float alpha) {
   DioramaPerformanceScope presentation_performance =
       DioramaPerformance_Begin(kDioramaPerformance_Total);
@@ -1277,13 +1287,11 @@ retry_projection:;
       (ActionVoxel_Active(scene.voxel_geometry,scene.map_group,scene.map_number) ||
        (scene.trunk&&scene.trunk_settings.enabled));
   if (shared_depth) {
-    scene.depth_sink=DioramaDepthGpu_Begin(device);
+    scene.depth_sink = DioramaDepthGpu_Begin(device,
+        ActionVoxel_Active(scene.voxel_geometry, scene.map_group, scene.map_number) &&
+        scene.additive_plane_mask != 0);
     if (!scene.depth_sink) {
-      PresentActionHeat_Cancel(device);
-      DioramaPerformance_End(presentation_performance);
-      DioramaPerformance_PresentCompleted();
-      SessionFatal_Request("Cannot prepare Voxel world visibility (%s).",
-          ArRenderDevice_LastError(device));
+      RecoverVoxelDepthDraw(device, presentation_performance);
       return;
     }
   }
@@ -1295,6 +1303,10 @@ retry_projection:;
   }
   const PresentationOutcome diorama = Diorama_Composite(
       device, &capture, &view, &scene, &action_projection);
+  if (shared_depth && DioramaDepthGpu_DrawFailed()) {
+    RecoverVoxelDepthDraw(device, presentation_performance);
+    return;
+  }
   if (PresentationOutcome_IsUsable(diorama))
     Diorama_SetAutoCameraDistance(action_projection.auto_distance);
   if ((!PresentationOutcome_IsUsable(diorama) ||

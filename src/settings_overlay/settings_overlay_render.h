@@ -44,6 +44,8 @@ bool SettingsOverlay_DrawGameFrame(ArRenderRectI rect, int scale);
 /* `game_viewport` is used only to resolve the HUD's "Match game" scale. The
  * menu itself covers the complete render output. */
 void SettingsOverlay_Render(ArRenderRectI game_viewport);
+void SettingsOverlay_RenderVoxelPreparation(ArRenderRectI game_viewport,
+                                             ArRenderExtentI output);
 
 /* Compact report panel for host debug tools. `text` may contain newlines; the
  * initial placement chooses the output half opposite `avoid_point`. */

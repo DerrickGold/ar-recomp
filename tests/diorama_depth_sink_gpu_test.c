@@ -7,8 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include "diorama/diorama_effect_backend.h"
+#include "diorama/diorama_depth_gpu.h"
 #include "diorama/diorama_performance.h"
 #include "platform/sdl/diorama_depth_sink_sdl.h"
+#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/render_sdl_internal.h"
 #include "platform/sdl/render_sdl_interop.h"
 #include "support/test_assert.h"
 
@@ -305,12 +308,92 @@ static void PerspectiveChecks(ArSdlDioramaDepthSink *state,ArRenderDevice *devic
 
 #include "diorama_owned_heat_sink.inc"
 
+static void CheckLiveDepthRecovery(ArRenderDevice *device) {
+  const DioramaDepthSink *sink = DioramaDepthGpu_Begin(device, false);
+  assert(sink && sink->clear(sink->userdata, device));
+  const ArRenderColorF color = {1, 1, 1, 1};
+  const ArRenderVertex2D vertices[] = {
+    {{0, 0}, color, {0, 0}}, {{4, 0}, color, {0, 0}}, {{0, 4}, color, {0, 0}},
+  };
+  const float depths[] = {.5f, .5f, .5f};
+  const int32_t invalid_indices[] = {0, 1, 3};
+  const DioramaDepthSubmission draw = {
+    .vertices = vertices, .depths = depths, .indices = invalid_indices,
+    .vertex_count = 3, .index_count = 3, .blend = kArRenderBlendMode_Opaque,
+  };
+  assert(sink->submit(sink->userdata, device, &draw));
+  assert(!sink->finish(sink->userdata, device, true));
+  assert(DioramaDepthGpu_DrawFailed() && !DioramaDepthGpu_Begin(device, false));
+  assert(DioramaDepthGpu_TakeDrawFailure() && !DioramaDepthGpu_TakeDrawFailure());
+  assert(ArRenderDevice_Clear(device, (ArRenderColorF){0, 0, 0, 1}));
+  sink = DioramaDepthGpu_Begin(device, false);
+  assert(sink && sink->finish(sink->userdata, device, true));
+  assert(submit_scopes == 1 && submit_ends == 1);
+  submit_scopes = submit_ends = 0;
+}
+
+static void CheckWarmTargetSwitch(ArRenderDevice *device) {
+  ArSdlRenderBackend *backend = device->context;
+  SDL_Texture *original = backend->output_target;
+  const SDL_PixelFormat format = SDL_GetNumberProperty(SDL_GetTextureProperties(original),
+      SDL_PROP_TEXTURE_FORMAT_NUMBER, SDL_PIXELFORMAT_UNKNOWN);
+  SDL_Texture *other = SDL_CreateTexture(ArSdlRenderBackend_Renderer(device),
+      format == SDL_PIXELFORMAT_ARGB8888 ? SDL_PIXELFORMAT_ABGR8888 : SDL_PIXELFORMAT_ARGB8888,
+      SDL_TEXTUREACCESS_TARGET, W, H);
+  assert(other);
+  backend->output_target = other;
+  const DioramaDepthPreparation cold = DioramaDepthGpu_Request(device, kDioramaDepthTarget_Output);
+  backend->output_target = original;
+  assert(cold == kDioramaDepthPreparation_Pending);
+  assert(DioramaDepthGpu_Request(device, kDioramaDepthTarget_Output) == kDioramaDepthPreparation_Ready);
+  DioramaDepthPreparation worker;
+  const Uint64 deadline = SDL_GetTicks() + 5000;
+  while ((worker = DioramaDepthGpu_Poll(device)) == kDioramaDepthPreparation_Pending) {
+    assert(SDL_GetTicks() < deadline);
+    SDL_Delay(1);
+  }
+  assert(worker == kDioramaDepthPreparation_Cancelled || worker == kDioramaDepthPreparation_Ready);
+  SDL_DestroyTexture(other);
+}
+
 int main(int argc,char **argv) {
   hybrid=argc==2 && !strcmp(argv[1],"--hybrid");
   if(!SDL_Init(SDL_INIT_VIDEO))return 77;
   SDL_Window *window=SDL_CreateWindow("Deferred depth ordering",W,H,SDL_WINDOW_HIDDEN);
   ArRenderDevice device={0};
   if(!window || !ArSdlRenderBackend_CreateForWindow(&device,window,NULL))return 77;
+  if (hybrid) {
+    ArRenderDevice unavailable = {0};
+    assert(DioramaDepthGpu_Request(&unavailable, kDioramaDepthTarget_Output) ==
+        kDioramaDepthPreparation_Failed);
+    assert(DioramaDepthGpu_Request(&device, kDioramaDepthTarget_Output) ==
+        kDioramaDepthPreparation_Pending);
+    const Uint64 deadline = SDL_GetTicks() + 5000;
+    DioramaDepthPreparation result;
+    while ((result = DioramaDepthGpu_Poll(&device)) == kDioramaDepthPreparation_Pending) {
+      assert(SDL_GetTicks() < deadline);
+      assert(ArRenderDevice_Clear(&device, (ArRenderColorF){0, 0, 0, 1}));
+      assert(ArSdlRenderBackend_SubmitPending(&device));
+      SDL_Delay(1);
+    }
+    assert(result == kDioramaDepthPreparation_Ready);
+    CheckWarmTargetSwitch(&device);
+    CheckLiveDepthRecovery(&device);
+    DioramaDepthGpu_Reset(&device);
+    assert(DioramaDepthGpu_Request(&device, kDioramaDepthTarget_SceneScale) ==
+        kDioramaDepthPreparation_Pending);
+    DioramaDepthGpu_CancelPreparation();
+    const Uint64 cancel_deadline = SDL_GetTicks() + 5000;
+    while ((result = DioramaDepthGpu_Poll(&device)) == kDioramaDepthPreparation_Pending) {
+      assert(SDL_GetTicks() < cancel_deadline);
+      SDL_Delay(1);
+    }
+    assert(result == kDioramaDepthPreparation_Cancelled);
+    assert(DioramaDepthGpu_Request(&device, kDioramaDepthTarget_SceneScale) ==
+        kDioramaDepthPreparation_Pending);
+    DioramaDepthGpu_Reset(&device);
+    assert(DioramaDepthGpu_Poll(&device) == kDioramaDepthPreparation_Idle);
+  }
   ArRenderTexture target=Make(&device,true,0),other=Make(&device,true,0);
   ArRenderTexture white=Make(&device,false,0xffffffff),black=Make(&device,false,0xff000000);
   ArRenderTexture mutable=Make(&device,false,0xffff0000);
@@ -323,6 +406,8 @@ int main(int argc,char **argv) {
   assert(ArSdlDioramaDepthSink_PrepareTarget(&state,&device,other,1024,1536));
   assert(ArSdlDioramaDepthSink_PrepareTarget(&state,&device,ArRenderTexture_Invalid(),1024,1536));
   assert(state.targets[0].target!=state.targets[1].target && !state.owner);
+  assert(state.targets[0].pass.resources == state.targets[1].pass.resources);
+  assert(state.targets[0].pass.depth != state.targets[1].pass.depth);
   assert(SDL_GetRenderTarget(ArSdlRenderBackend_Renderer(&device))==bound);
   const ArGpuDioramaDepthPass prepared[3]={state.targets[0].pass,state.targets[1].pass,state.targets[2].pass};
   const DioramaDepthVertex *prepared_vertices=state.vertices;
@@ -466,7 +551,7 @@ int main(int argc,char **argv) {
     const ArGpuDioramaDepthPass *current=&state.targets[i].pass;
     assert(current->vertices==prepared[i].vertices && current->indices==prepared[i].indices &&
         current->upload==prepared[i].upload && current->depth==prepared[i].depth);
-    assert(!memcmp(current->pipelines,prepared[i].pipelines,sizeof(current->pipelines)));
+    assert(current->resources == prepared[i].resources);
   }
   TestOwnedHeatQueue(&state,&device,target,white,black);
   ArSdlDioramaDepthSink_Reset(&state);

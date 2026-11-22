@@ -1,10 +1,12 @@
 #include "platform/sdl/diagnostic_writer_sdl.h"
 #include "app/frame_trace.h"
+#include "host/atomic_replace.h"
 #include "snesrecomp/support/utf8_fs.h"
 #include "support/test_assert.h"
 
 #include <SDL3/SDL.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct BlockedRecord {
@@ -147,9 +149,21 @@ static void CheckTraceCollision(const char *directory) {
   assert(SDL_CreateDirectory(directory));
   char path[1024];
   assert(snprintf(path, sizeof(path), "%s/shared.csv", directory) < (int)sizeof(path));
+  char partial[1024];
+  assert(snprintf(partial, sizeof(partial), "%s.partial", path) < (int)sizeof(partial));
+  FILE *abandoned = sr_fopen(partial, "wbx");
+  assert(abandoned && fputs("interrupted capture\n", abandoned) >= 0 && fclose(abandoned) == 0);
+  FrameTrace *incomplete = FrameTrace_Open(path, kFrameTrace_Stream);
+  assert(incomplete);
+  const unsigned char oversized[sizeof(FrameStreamTraceRow) + 1] = {0};
+  FrameTrace_Record(incomplete, oversized, sizeof(oversized));
+  FrameTrace_CloseAll(&incomplete, 1);
   FrameTrace *stream = FrameTrace_Open(path, kFrameTrace_Stream);
   assert(stream);
   assert(!FrameTrace_Open(path, kFrameTrace_Pacing));
+  char alias[1024];
+  assert(snprintf(alias, sizeof(alias), "%s/./shared.csv", directory) < (int)sizeof(alias));
+  assert(!FrameTrace_Open(alias, kFrameTrace_Pacing));
   const FrameStreamTraceRow row = {.start_ns = 123, .complete_ns = 456};
   FrameTrace_Record(stream, &row, sizeof(row));
   FrameTrace_CloseAll(&stream, 1);
@@ -161,6 +175,34 @@ static void CheckTraceCollision(const char *directory) {
   assert(fgets(line, sizeof(line), output) && !strncmp(line, "123,456,", 8));
   assert(!fgets(line, sizeof(line), output));
   fclose(output);
+  abandoned = sr_fopen(partial, "rb");
+  assert(abandoned && fgets(line, sizeof(line), abandoned) &&
+      !strcmp(line, "interrupted capture\n"));
+  fclose(abandoned);
+}
+
+static void CheckIndependentStaging(const char *directory) {
+  char path[1024];
+  assert(snprintf(path, sizeof(path), "%s/published.txt", directory) < (int)sizeof(path));
+  assert(AtomicReplace_WriteBytes(path, "old\n", 4, true));
+  char *first, *second;
+  FILE *a = AtomicReplace_OpenTemporary(path, "tmp", &first);
+  FILE *b = AtomicReplace_OpenTemporary(path, "tmp", &second);
+  assert(a && b && strcmp(first, second));
+  assert(!AtomicReplace_SameFile(first, second));
+  assert(fputs("first\n", a) >= 0 && fclose(a) == 0);
+  assert(fputs("second\n", b) >= 0 && fclose(b) == 0);
+  assert(AtomicReplaceFile(first, path));
+  FILE *output = sr_fopen(path, "rb");
+  char line[16];
+  assert(output && fgets(line, sizeof(line), output) && !strcmp(line, "first\n"));
+  assert(fclose(output) == 0);
+  assert(AtomicReplaceFile(second, path));
+  output = sr_fopen(path, "rb");
+  assert(output && fgets(line, sizeof(line), output) && !strcmp(line, "second\n"));
+  assert(fclose(output) == 0);
+  free(first);
+  free(second);
 }
 
 int main(int argc, char **argv) {
@@ -169,6 +211,7 @@ int main(int argc, char **argv) {
   CheckConcurrentProducers();
   CheckByteLimit();
   CheckTraceCollision(argv[1]);
+  CheckIndependentStaging(argv[1]);
   CheckTimedFinish();
   return 0;
 }

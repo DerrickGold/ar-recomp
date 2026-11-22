@@ -20,6 +20,7 @@ typedef struct SettingsPersistenceReport {
   bool failed;
 } SettingsPersistenceReport;
 SettingsPersistenceReport SettingsPersistence_TakeReport(SettingsPersistence *writer);
-/* Drains and joins before returning. False means the latest write failed. */
+/* Drains, retries the latest failed snapshot once, and joins before returning.
+ * False means the final write failed. */
 bool SettingsPersistence_Destroy(SettingsPersistence *writer);
 #endif

@@ -11,6 +11,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 _Static_assert(sizeof(DioramaDepthVertex) == 48 &&
@@ -27,45 +28,52 @@ static int BlendIndex(ArRenderBlendMode blend) {
   }
 }
 
-void ArGpuDioramaDepthPass_Destroy(ArGpuDioramaDepthPass *p) {
-  if (!p || !p->device) return;
-  ArGpuDioramaDepthAlpha_Destroy(p);
+void ArGpuDioramaDepthResources_Destroy(ArGpuDioramaDepthResources *r) {
+  if (!r) return;
+  ArGpuDioramaDepthAlpha_ReleasePipelines(r);
   for (unsigned m = 0; m < kGpuDioramaMaterialCount; ++m)
     for (unsigned d = 0; d < kDioramaDepth_Count; ++d)
       for (unsigned b = 0; b < 3; ++b)
-        if (p->pipelines[m][d][b]) SDL_ReleaseGPUGraphicsPipeline(p->device, p->pipelines[m][d][b]);
-  if (p->sampler) SDL_ReleaseGPUSampler(p->device, p->sampler);
-  if (p->nearest_sampler) SDL_ReleaseGPUSampler(p->device, p->nearest_sampler);
+        if (r->pipelines[m][d][b]) SDL_ReleaseGPUGraphicsPipeline(r->device, r->pipelines[m][d][b]);
+  if (r->sampler) SDL_ReleaseGPUSampler(r->device, r->sampler);
+  if (r->nearest_sampler) SDL_ReleaseGPUSampler(r->device, r->nearest_sampler);
+  if (r->white) SDL_ReleaseGPUTexture(r->device, r->white);
+  if (r->black) SDL_ReleaseGPUTexture(r->device, r->black);
+  if (r->neutral_attributes) SDL_ReleaseGPUTexture(r->device, r->neutral_attributes);
+  free(r);
+}
+
+void ArGpuDioramaDepthPass_Destroy(ArGpuDioramaDepthPass *p) {
+  if (!p || !p->device) return;
+  ArGpuDioramaDepthAlpha_Destroy(p);
   if (p->depth) SDL_ReleaseGPUTexture(p->device, p->depth);
-  if (p->white) SDL_ReleaseGPUTexture(p->device, p->white);
-  if (p->black) SDL_ReleaseGPUTexture(p->device, p->black);
-  if (p->neutral_attributes) SDL_ReleaseGPUTexture(p->device, p->neutral_attributes);
   if (p->vertices) SDL_ReleaseGPUBuffer(p->device, p->vertices);
   if (p->indices) SDL_ReleaseGPUBuffer(p->device, p->indices);
   if (p->upload) SDL_ReleaseGPUTransferBuffer(p->device, p->upload);
+  if (p->owns_resources) ArGpuDioramaDepthResources_Destroy(p->resources);
   *p = (ArGpuDioramaDepthPass){0};
 }
 
-static bool CreateSolid(ArGpuDioramaDepthPass *p, SDL_GPUTexture **texture, uint32_t color) {
+static bool CreateSolid(ArGpuDioramaDepthResources *r, SDL_GPUTexture **texture, uint32_t color) {
   const SDL_GPUTextureCreateInfo desc = {.type = SDL_GPU_TEXTURETYPE_2D,
       .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, .width = 1, .height = 1,
       .layer_count_or_depth = 1, .num_levels = 1, .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER};
-  *texture = SDL_CreateGPUTexture(p->device, &desc);
+  *texture = SDL_CreateGPUTexture(r->device, &desc);
   const SDL_GPUTransferBufferCreateInfo info = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = 4};
-  SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(p->device, &info);
-  uint32_t *data = transfer ? SDL_MapGPUTransferBuffer(p->device, transfer, false) : NULL;
+  SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(r->device, &info);
+  uint32_t *data = transfer ? SDL_MapGPUTransferBuffer(r->device, transfer, false) : NULL;
   if (!*texture || !data) {
-    if (data) SDL_UnmapGPUTransferBuffer(p->device, transfer);
-    if (transfer) SDL_ReleaseGPUTransferBuffer(p->device, transfer);
+    if (data) SDL_UnmapGPUTransferBuffer(r->device, transfer);
+    if (transfer) SDL_ReleaseGPUTransferBuffer(r->device, transfer);
     return false;
   }
   *data = color;
-  SDL_UnmapGPUTransferBuffer(p->device, transfer);
-  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(p->device);
+  SDL_UnmapGPUTransferBuffer(r->device, transfer);
+  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(r->device);
   SDL_GPUCopyPass *copy = cmd ? SDL_BeginGPUCopyPass(cmd) : NULL;
   if (!copy) {
     if (cmd) SDL_CancelGPUCommandBuffer(cmd);
-    SDL_ReleaseGPUTransferBuffer(p->device, transfer);
+    SDL_ReleaseGPUTransferBuffer(r->device, transfer);
     return false;
   }
   const SDL_GPUTextureTransferInfo src = {.transfer_buffer = transfer};
@@ -73,12 +81,12 @@ static bool CreateSolid(ArGpuDioramaDepthPass *p, SDL_GPUTexture **texture, uint
   SDL_UploadToGPUTexture(copy, &src, &dst, false);
   SDL_EndGPUCopyPass(copy);
   const bool ok = SDL_SubmitGPUCommandBuffer(cmd);
-  SDL_ReleaseGPUTransferBuffer(p->device, transfer);
+  SDL_ReleaseGPUTransferBuffer(r->device, transfer);
   return ok;
 }
 
-static bool CreatePipelines(ArGpuDioramaDepthPass *p, unsigned material) {
-  SDL_GPUDevice *device = p->device;
+static bool CreatePipelines(ArGpuDioramaDepthResources *r, unsigned material) {
+  SDL_GPUDevice *device = r->device;
   const bool bank=material==kGpuDioramaBankMaterial;
   const GpuShaderBlobs vb = material==1 || bank
       ? (GpuShaderBlobs){kDioramaDepthVertMSL,kDioramaDepthVertMSLSize,
@@ -110,7 +118,7 @@ static bool CreatePipelines(ArGpuDioramaDepthPass *p, unsigned material) {
   for (unsigned d = 0; ok && d < kDioramaDepth_Count; ++d) for (unsigned b = 0; ok && b < 3; ++b) {
     if (bank && d != kDioramaDepth_Write) continue;
     if (d == kDioramaDepth_Write && b == 2) continue;
-    const SDL_GPUColorTargetDescription color = {.format = p->color_format,
+    const SDL_GPUColorTargetDescription color = {.format = r->color_format,
       .blend_state = {.enable_blend = b != 0,
         .src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA,
         .dst_color_blendfactor = b == 2 ? SDL_GPU_BLENDFACTOR_ONE : SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
@@ -130,29 +138,30 @@ static bool CreatePipelines(ArGpuDioramaDepthPass *p, unsigned material) {
           .enable_depth_write = d == kDioramaDepth_Write || d == kDioramaDepth_NativeActor},
       .target_info = {.color_target_descriptions = &color, .num_color_targets = 1,
           .depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT, .has_depth_stencil_target = true}};
-    p->pipelines[material][d][b] = GpuShaderBlob_CreateGraphicsPipeline(device, &info, "action shared depth");
-    ok = p->pipelines[material][d][b] != NULL;
+    r->pipelines[material][d][b] = GpuShaderBlob_CreateGraphicsPipeline(device, &info, "action shared depth");
+    ok = r->pipelines[material][d][b] != NULL;
   }
   if (vs) SDL_ReleaseGPUShader(device, vs);
   if (fs) SDL_ReleaseGPUShader(device, fs);
   if (!ok) for (unsigned d = 0; d < kDioramaDepth_Count; ++d) for (unsigned b = 0; b < 3; ++b) {
-    if (p->pipelines[material][d][b]) SDL_ReleaseGPUGraphicsPipeline(device, p->pipelines[material][d][b]);
-    p->pipelines[material][d][b] = NULL;
+    if (r->pipelines[material][d][b]) SDL_ReleaseGPUGraphicsPipeline(device, r->pipelines[material][d][b]);
+    r->pipelines[material][d][b] = NULL;
   }
   return ok;
 }
 
-bool ArGpuDioramaDepthPass_InitFormat(ArGpuDioramaDepthPass *p, SDL_GPUDevice *device,
+ArGpuDioramaDepthResources *ArGpuDioramaDepthResources_Create(SDL_GPUDevice *device,
     SDL_GPUTextureFormat format) {
-  if (!p || !device || (format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM &&
-      format != SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM)) return false;
-  *p = (ArGpuDioramaDepthPass){.device = device, .color_format = format};
-  if (!SDL_GPUTextureSupportsFormat(device, SDL_GPU_TEXTUREFORMAT_D32_FLOAT,
-      SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
-    ArGpuDioramaDepthPass_Destroy(p);
-    return false;
-  }
-  const bool ok = CreatePipelines(p, 0);
+  if (!device || (format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM &&
+      format != SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM) ||
+      !SDL_GPUTextureSupportsFormat(device, SDL_GPU_TEXTUREFORMAT_D32_FLOAT,
+          SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
+    return NULL;
+  ArGpuDioramaDepthResources *r = calloc(1, sizeof(*r));
+  if (!r) return NULL;
+  r->device = device;
+  r->color_format = format;
+  const bool ok = CreatePipelines(r, 0);
   const SDL_GPUSamplerCreateInfo linear = {.min_filter = SDL_GPU_FILTER_LINEAR,
       .mag_filter = SDL_GPU_FILTER_LINEAR, .mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
       .address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
@@ -160,17 +169,37 @@ bool ArGpuDioramaDepthPass_InitFormat(ArGpuDioramaDepthPass *p, SDL_GPUDevice *d
       .address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE};
   SDL_GPUSamplerCreateInfo nearest = linear;
   nearest.min_filter = nearest.mag_filter = SDL_GPU_FILTER_NEAREST;
-  p->sampler = SDL_CreateGPUSampler(device, &linear);
-  p->nearest_sampler = SDL_CreateGPUSampler(device, &nearest);
-  if (ok && p->sampler && p->nearest_sampler &&
-      CreateSolid(p, &p->white, UINT32_MAX) && CreateSolid(p, &p->black, 0) &&
-      CreateSolid(p, &p->neutral_attributes, SDL_Swap32LE(0xff000040u))) return true;
-  ArGpuDioramaDepthPass_Destroy(p);
-  return false;
+  r->sampler = SDL_CreateGPUSampler(device, &linear);
+  r->nearest_sampler = SDL_CreateGPUSampler(device, &nearest);
+  if (ok && r->sampler && r->nearest_sampler &&
+      CreateSolid(r, &r->white, UINT32_MAX) && CreateSolid(r, &r->black, 0) &&
+      CreateSolid(r, &r->neutral_attributes, SDL_Swap32LE(0xff000040u))) return r;
+  ArGpuDioramaDepthResources_Destroy(r);
+  return NULL;
+}
+
+bool ArGpuDioramaDepthResources_Prepare(ArGpuDioramaDepthResources *r) {
+  if (!r) return false;
+  if (r->cutout_ready) return true;
+  for (unsigned m = 1; m < kGpuDioramaMaterialCount; ++m)
+    if (!r->pipelines[m][kDioramaDepth_Write][0] && !CreatePipelines(r, m)) return false;
+  r->cutout_ready = true;
+  return true;
+}
+
+void ArGpuDioramaDepthPass_BorrowResources(ArGpuDioramaDepthPass *p,
+    ArGpuDioramaDepthResources *r) {
+  *p = (ArGpuDioramaDepthPass){.device = r->device, .resources = r};
 }
 
 bool ArGpuDioramaDepthPass_Init(ArGpuDioramaDepthPass *p, SDL_GPUDevice *device) {
-  return ArGpuDioramaDepthPass_InitFormat(p, device, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM);
+  if (!p) return false;
+  ArGpuDioramaDepthResources *r = ArGpuDioramaDepthResources_Create(
+      device, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM);
+  if (!r) return false;
+  ArGpuDioramaDepthPass_BorrowResources(p, r);
+  p->owns_resources = true;
+  return true;
 }
 
 static unsigned Capacity(unsigned needed, unsigned limit) {
@@ -226,12 +255,11 @@ static bool EnsureDepth(ArGpuDioramaDepthPass *p, unsigned width, unsigned heigh
 
 bool ArGpuDioramaDepthPass_Prepare(ArGpuDioramaDepthPass *p, unsigned width, unsigned height,
     unsigned vertices, unsigned indices) {
-  if (!p || !p->device || !p->white || !p->black || !p->neutral_attributes ||
+  if (!p || !p->device || !p->resources->white || !p->resources->black || !p->resources->neutral_attributes ||
       !width || !height || width > 16384 || height > 16384 ||
       vertices > kDioramaDepthMaximumVertices || indices > kDioramaDepthMaximumIndices) return false;
-  for (unsigned m = 1; m < kGpuDioramaMaterialCount; ++m)
-    if (!p->pipelines[m][kDioramaDepth_Write][0] && !CreatePipelines(p, m)) return false;
-  return Reserve(p, vertices, indices) && EnsureDepth(p, width, height);
+  return ArGpuDioramaDepthResources_Prepare(p->resources) &&
+      Reserve(p, vertices, indices) && EnsureDepth(p, width, height);
 }
 
 bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUCommandBuffer *cmd,
@@ -239,7 +267,7 @@ bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUComm
     const DioramaDepthDraw *draws, SDL_GPUTexture *const *sources,
     const ArGpuDioramaDepthMaterial *materials, unsigned count,
     SDL_GPULoadOp color_load, ArRenderColorF clear_color, bool clear_depth) {
-  if (!p || !p->device || !p->white || !p->black || !p->neutral_attributes || !cmd || !target || target == p->depth ||
+  if (!p || !p->device || !p->resources->white || !p->resources->black || !p->resources->neutral_attributes || !cmd || !target || target == p->depth ||
       !width || !height || width > 16384 || height > 16384 ||
       (color_load != SDL_GPU_LOADOP_CLEAR && color_load != SDL_GPU_LOADOP_LOAD) ||
       !Finite(&clear_color, sizeof(clear_color)) || count > kDioramaDepthMaximumDraws ||
@@ -253,7 +281,7 @@ bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUComm
     const int blend = BlendIndex(d->blend);
     if (!d->vertices || !d->indices || !d->vertex_count || !d->index_count || d->index_count % 3 ||
         (unsigned)d->depth_mode >= kDioramaDepth_Count || blend < 0 ||
-        !p->pipelines[0][d->depth_mode][blend] ||
+        !p->resources->pipelines[0][d->depth_mode][blend] ||
         (d->textured && !sources[i]) || sources[i] == target || (sources[i] && sources[i] == p->depth) ||
         d->vertex_count > kDioramaDepthMaximumVertices - nv ||
         d->index_count > kDioramaDepthMaximumIndices - ni ||
@@ -297,7 +325,7 @@ bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUComm
     nv += d->vertex_count; ni += d->index_count;
   }
   for (unsigned m = 1; m < kGpuDioramaMaterialCount; ++m)
-    if (material_needed[m] && !p->pipelines[m][kDioramaDepth_Write][0] && !CreatePipelines(p, m)) return false;
+    if (material_needed[m] && !p->resources->pipelines[m][kDioramaDepth_Write][0] && !CreatePipelines(p->resources, m)) return false;
   if (!Reserve(p, nv, ni) || !EnsureDepth(p, width, height)) return false;
   if (nv) {
     uint8_t *mapped = SDL_MapGPUTransferBuffer(p->device, p->upload, true);
@@ -336,31 +364,31 @@ bool ArGpuDioramaDepthPass_EncodeMaterials(ArGpuDioramaDepthPass *p, SDL_GPUComm
   for (unsigned i = 0; i < count; ++i) {
     const DioramaDepthDraw *d = &draws[i];
     const unsigned material = ArGpuDioramaDepthMaterialKind(materials?&materials[i]:NULL);
-    SDL_BindGPUGraphicsPipeline(pass, p->pipelines[material][d->depth_mode][BlendIndex(d->blend)]);
+    SDL_BindGPUGraphicsPipeline(pass, p->resources->pipelines[material][d->depth_mode][BlendIndex(d->blend)]);
     if (material == 2) {
       DioramaActorUniforms uniforms;
       DioramaActorUniforms_Init(&uniforms, materials[i].scenery, (int)width, (int)height);
       SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, sizeof(uniforms));
       const SDL_GPUTextureSamplerBinding samples[] = {
-          {materials[i].attributes ? materials[i].attributes : p->neutral_attributes, p->sampler},
-          {materials[i].illumination ? materials[i].illumination : p->black, p->sampler},
-          {materials[i].enemy_illumination ? materials[i].enemy_illumination : p->black, p->sampler}};
+          {materials[i].attributes ? materials[i].attributes : p->resources->neutral_attributes, p->resources->sampler},
+          {materials[i].illumination ? materials[i].illumination : p->resources->black, p->resources->sampler},
+          {materials[i].enemy_illumination ? materials[i].enemy_illumination : p->resources->black, p->resources->sampler}};
       SDL_BindGPUFragmentSamplers(pass, 1, samples, 3);
     } else if (material != 0) {
       DioramaSceneryUniforms uniforms;
       DioramaSceneryUniforms_Init(&uniforms, materials[i].scenery, (int)width, (int)height);
       SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, sizeof(uniforms));
       const SDL_GPUTextureSamplerBinding light = {
-          materials[i].illumination ? materials[i].illumination : p->black, p->sampler};
+          materials[i].illumination ? materials[i].illumination : p->resources->black, p->resources->sampler};
       SDL_BindGPUFragmentSamplers(pass, 1, &light, 1);
       if(material==kGpuDioramaBankMaterial) {
-        const SDL_GPUTextureSamplerBinding additional[]={{materials[i].additional[0],p->nearest_sampler},
-            {materials[i].additional[1],p->nearest_sampler}};
+        const SDL_GPUTextureSamplerBinding additional[]={{materials[i].additional[0],p->resources->nearest_sampler},
+            {materials[i].additional[1],p->resources->nearest_sampler}};
         SDL_BindGPUFragmentSamplers(pass,2,additional,2);
       }
     }
-    const SDL_GPUTextureSamplerBinding sample = {d->textured ? sources[i] : p->white,
-        d->nearest ? p->nearest_sampler : p->sampler};
+    const SDL_GPUTextureSamplerBinding sample = {d->textured ? sources[i] : p->resources->white,
+        d->nearest ? p->resources->nearest_sampler : p->resources->sampler};
     SDL_BindGPUFragmentSamplers(pass, 0, &sample, 1);
     const SDL_Rect clip = d->clip_enabled ? (SDL_Rect){d->clip.x, d->clip.y, d->clip.w, d->clip.h}
         : (SDL_Rect){0, 0, (int)width, (int)height};

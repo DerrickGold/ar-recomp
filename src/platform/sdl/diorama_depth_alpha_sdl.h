@@ -19,5 +19,7 @@ bool ArGpuDioramaDepthPass_EncodeHybridMaterials(ArGpuDioramaDepthPass *,
     const ArGpuDioramaDepthMaterial *, unsigned count,
     SDL_GPULoadOp color_load, ArRenderColorF clear_color, bool clear_depth);
 void ArGpuDioramaDepthAlpha_Destroy(ArGpuDioramaDepthPass *);
+bool ArGpuDioramaDepthAlpha_PreparePipelines(ArGpuDioramaDepthResources *);
+void ArGpuDioramaDepthAlpha_ReleasePipelines(ArGpuDioramaDepthResources *);
 
 #endif

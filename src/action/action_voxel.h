@@ -465,6 +465,10 @@ typedef struct ActionVoxelBuildSource {
 void ActionVoxelAuthoredLayout_Clear(ActionVoxelAuthoredLayout **layout);
 bool ActionVoxel_BuildFromSource(ActionVoxelGeometry *c, const ActionVoxelBuildSource *source,
     ActionVoxelSettings settings);
+/* Compare the immutable compiler inputs. Raster/camera metadata and authored
+ * lookup indices are outside this identity. Tile overrides must be dense. */
+bool ActionVoxel_BuildInputsEqual(const ActionVoxelBuildSource *a,
+    const ActionVoxelBuildSource *b);
 /* Exact native animation frames may share geometry when the material policy
  * proves every phase is presentation-only. The reference must retain all ROM
  * phases. Recheck the proof after other geometry inputs change. Native

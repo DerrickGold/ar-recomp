@@ -716,23 +716,32 @@ static void SetStatus(const char *text) {
  * on release. */
 void SettingsOverlay_SetStatus(const char *text) { SetStatus(text); }
 
+void SettingsOverlay_ReportSaveFailure(void) {
+  if (s_open) SetStatus(Ui("overlay.status.save_failed"));
+}
+
+void SettingsOverlay_ReportVoxelUnavailable(void) {
+  SettingsOverlay_Refresh();
+  if (s_open) SetStatus(Ui("overlay.status.voxel_unavailable"));
+}
+
 static void PersistChange(SettingChangeResult result) {
   char settings_file[kHostPathCapacity];
   const char *settings_path = getenv("AR_OVERLAY_TEST_SETTINGS_PATH");
   if (!settings_path || !settings_path[0])
     settings_path = UserDataFile(settings_file, sizeof settings_file,
                                  "settings.ini");
-  if (!Settings_Save(settings_path)) {
+  if (!Settings_SaveDeferred(settings_path)) {
     SetStatus(Ui("overlay.status.save_failed"));
     RuntimeLog_Printf("[settings-menu] could not save %s\n", settings_path);
     return;
   }
   if (result == kSettingChange_RestartPending)
-    SetStatus(Ui("overlay.status.restart_saved"));
+    SetStatus(Ui("overlay.status.restart_required"));
   else if (result == kSettingChange_AppliedStickyDisable)
-    SetStatus(Ui("overlay.status.sticky_saved"));
+    SetStatus(Ui("overlay.status.sticky_effects"));
   else
-    SetStatus(Ui("overlay.status.applied_saved"));
+    SetStatus(Ui("overlay.status.applied"));
 }
 
 static void SaveAcceptedChange(SettingChangeResult result) {
@@ -2174,7 +2183,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
 }
 
 static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
-                           const MenuSection *section) {
+                           const MenuSection *section, bool preparing_voxel) {
   const int margin = c->margin;
   const int panel_right = c->panel_right;
   const int bottom_y = c->bottom_y;
@@ -2195,12 +2204,22 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
    * through to the section blurb and say nothing about the selected row. */
   const bool layer_help = ActiveSectionIsCustom() && s_submenu_open &&
       LayerMenu_RowExists(ActiveTabIndex(), s_row);
-  if (s_status[0]) {
+  if (preparing_voxel || s_status[0]) {
     DrawSmallText(layout, description_x, header_y, Ui("overlay.tab.status"), kGameGold);
     FillLogicalRect(layout, description_x, header_y + 10,
                     bottom_width - 24, 1, structure_dim);
     DrawWrappedSmallText(layout, description_x, header_y + 14,
-                         s_status, description_chars, 4, ARGB(255, 208, 220, 232));
+                         preparing_voxel ? Ui("overlay.status.preparing_voxel") : s_status,
+                         description_chars, 4, ARGB(255, 208, 220, 232));
+    if (preparing_voxel) {
+      const int width = bottom_width - 24;
+      const int travel = width * 3 / 4;
+      const int phase = (int)(HostClock_Milliseconds() % 1200);
+      const int x = description_x + travel * (phase < 600 ? phase : 1200 - phase) / 600;
+      const int y = bottom_y + bottom_height - 12;
+      FillLogicalRect(layout, description_x, y, width, 2, structure_dim);
+      FillLogicalRect(layout, x, y, width - travel, 2, kGameGold);
+    }
   } else if (ActiveTabIsRegional() && s_submenu_open) {
     RegionalMenu_DrawDescription(layout, ActiveTab()->regional_page, s_row,
                                  description_x, header_y, bottom_width - 24);
@@ -2326,7 +2345,7 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
                 bottom_width - 24, &hints, kKeyColor, kHintColor);
 }
 
-static void DrawMenu(const MenuLayout *layout) {
+static void DrawMenu(const MenuLayout *layout, bool preparing_voxel) {
   const MenuChrome chrome = ComputeMenuChrome(layout);
 
   /* Three framed panels: nav column (left), submenu (top-right), and the
@@ -2362,11 +2381,11 @@ static void DrawMenu(const MenuLayout *layout) {
     const int rule_y = DrawMenuHeader(layout, &chrome, section);
     DrawMenuRows(layout, &chrome, rule_y, custom_rows);
   }
-  DrawMenuFooter(layout, &chrome, section);
+  DrawMenuFooter(layout, &chrome, section, preparing_voxel);
 }
 
 
-void SettingsOverlay_Render(ArRenderRectI game_viewport) {
+static void RenderMenu(ArRenderRectI game_viewport, bool preparing_voxel) {
   SettingsOverlay_Refresh();
   if (!s_open || !SettingsOverlayWidgets_RenderDevice() ||
       !ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->fonts[kText_Normal])) return;
@@ -2408,6 +2427,26 @@ void SettingsOverlay_Render(ArRenderRectI game_viewport) {
     return;
   }
   if(SaveSlotMenu_Active() || SaveSlotMenu_DecisionActive()){SaveSlotMenu_Draw(&layout);return;}
-  DrawMenu(&layout);
+  DrawMenu(&layout, preparing_voxel);
   SettingsOverlayPalette_Draw(&layout);
+}
+
+void SettingsOverlay_Render(ArRenderRectI game_viewport) {
+  RenderMenu(game_viewport, false);
+}
+
+void SettingsOverlay_RenderVoxelPreparation(ArRenderRectI game_viewport,
+                                             ArRenderExtentI output) {
+  if (s_open) {
+    RenderMenu(game_viewport, true);
+    return;
+  }
+  const char *text = Ui("overlay.status.preparing_voxel");
+  const ArRenderRectI line = {0, output.height / 2 - 16, output.width, 32};
+  if (!SettingsOverlay_DrawEnhancedLabel(line, 255, text)) {
+    const int scale = output.height >= 720 ? 2 : 1;
+    const int width = SettingsOverlay_GameTextWidth(text, scale);
+    SettingsOverlay_DrawGameText((output.width - width) / 2,
+        (output.height - kSettingsOverlayGlyphSize * scale) / 2, scale, 255, text);
+  }
 }

@@ -465,7 +465,19 @@ void ActRaiser_PrepareUpcomingVoxelRoom(uint8 group, uint8 room) {
   if (!ActRaiserRegional_PeekRoomVariants(&profile, &mosaic)) return;
   const DioramaRoomOverride *overrides = DioramaLayerOrder_FindSection(
       DioramaLayerManifest_Table(), group, room, kDioramaLayerSection_Room);
-  ActRaiserActionBg_RequestVoxelPrebuild(group, room, profile, mosaic, overrides);
+  const DioramaRoomOverride *terrain = DioramaLayerManifest_TerrainRoom(overrides, profile);
+  if (!overrides || terrain)
+    ActRaiserActionBg_RequestVoxelPrebuild(group, room, profile, mosaic, terrain);
+}
+
+bool ActRaiser_PrepareCurrentVoxelRoom(void) {
+  const uint8_t group = g_ram[kActRaiserWram_MapGroup];
+  const uint8_t room = g_ram[kActRaiserWram_CurrentMap];
+  const unsigned section = CurrentScenerySection();
+  if (g_settings.diorama_mode != kAction3D_Voxel ||
+      !ActRaiser_IsActionMap(group, room) || section != kDioramaLayerSection_Room)
+    return false;
+  return ActRaiserActionBg_PrepareLiveVoxelRoom(ActRaiser_CurrentVirtualLayerRoom());
 }
 
 static bool ActRaiser_CommitPpuFramePolicy(

@@ -145,6 +145,7 @@ uint8 ActRaiser_SelectedMagic(void);
 /* Stage the native level transition from a host debug action between ticks. */
 void ActRaiser_Warp(unsigned region, unsigned map);
 void ActRaiser_PrepareUpcomingVoxelRoom(uint8 group, uint8 room);
+bool ActRaiser_PrepareCurrentVoxelRoom(void);
 
 /* BG-only widescreen presentation helpers. The Sky Palace pair temporarily
  * decodes a box-free source map into only BG2's margin columns, then restores

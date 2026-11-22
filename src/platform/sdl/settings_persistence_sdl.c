@@ -13,8 +13,8 @@ struct SettingsPersistence {
   SDL_Condition *changed;
   SDL_Thread *thread;
   char *destination;
-  SettingsWrite pending;
-  bool active, stop, failed;
+  SettingsWrite pending, failed_write;
+  bool active, stop;
   SettingsPersistenceReport report;
 };
 
@@ -26,22 +26,30 @@ static void FreeWrite(SettingsWrite *write) {
 
 static int SDLCALL RunWriter(void *context) {
   SettingsPersistence *writer = context;
+  bool retried_at_shutdown = false;
   SDL_LockMutex(writer->mutex);
   for (;;) {
     while (!writer->pending.text && !writer->stop)
       SDL_WaitCondition(writer->changed, writer->mutex);
-    if (!writer->pending.text && writer->stop) break;
+    if (!writer->pending.text) {
+      if (retried_at_shutdown || !writer->failed_write.text) break;
+      /* Retry the latest accepted bytes after the queue has drained. */
+      writer->pending = writer->failed_write;
+      writer->failed_write = (SettingsWrite){0};
+      retried_at_shutdown = true;
+    }
     SettingsWrite write = writer->pending;
     writer->pending = (SettingsWrite){0};
+    FreeWrite(&writer->failed_write);
     writer->active = true;
     SDL_UnlockMutex(writer->mutex);
     const uint64_t start = SDL_GetTicksNS();
     const bool ok = Settings_WriteSnapshot(write.path, write.text, write.size);
     const uint64_t elapsed = SDL_GetTicksNS() - start;
-    FreeWrite(&write);
     SDL_LockMutex(writer->mutex);
+    if (ok) FreeWrite(&write);
+    else writer->failed_write = write;
     writer->active = false;
-    writer->failed = !ok;
     /* A newer durable success resolves any failure not yet collected by the
      * owner, including a synchronous retry through this same queue. */
     writer->report.failed = !ok;
@@ -96,7 +104,7 @@ static bool Drain(void *context) {
   SDL_LockMutex(writer->mutex);
   while (writer->active || writer->pending.text)
     SDL_WaitCondition(writer->changed, writer->mutex);
-  const bool ok = !writer->failed;
+  const bool ok = !writer->failed_write.text;
   SDL_UnlockMutex(writer->mutex);
   return ok;
 }
@@ -130,12 +138,13 @@ SettingsPersistenceReport SettingsPersistence_TakeReport(SettingsPersistence *wr
 
 bool SettingsPersistence_Destroy(SettingsPersistence *writer) {
   if (!writer) return true;
-  const bool ok = Drain(writer);
   SDL_LockMutex(writer->mutex);
   writer->stop = true;
   SDL_SignalCondition(writer->changed);
   SDL_UnlockMutex(writer->mutex);
   SDL_WaitThread(writer->thread, NULL);
+  const bool ok = !writer->failed_write.text;
+  FreeWrite(&writer->failed_write);
   free(writer->destination);
   SDL_DestroyCondition(writer->changed);
   SDL_DestroyMutex(writer->mutex);

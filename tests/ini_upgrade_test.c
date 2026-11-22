@@ -653,28 +653,38 @@ static void TestReleaseContentUpdatesAndRetries(void) {
   IniUpgrade_ApplyShippedDefaults();
   CHECK(FileTextEquals(live_path, second));
 
-  /* A failed atomic replacement must not advance the installed baseline.
-   * Its successful retry reuses the backup rather than making duplicates. */
+  /* An unavailable live file leaves the installed baseline unchanged. */
   CHECK(WriteFileText(default_path, third));
-  CHECK(sr_mkdir("diorama-layers.ini.tmp") == 0);
+  CHECK(sr_replace_file(live_path, "parked-live.ini"));
+  CHECK(sr_mkdir(live_path) == 0);
   IniUpgrade_ApplyShippedDefaults();
-  CHECK(FileTextEquals(live_path, second));
   CHECK(FileTextEquals(baseline_path, second));
-  CHECK(FileTextEquals("diorama-layers.ini.pre-update-2", second));
-  CHECK(rmdir("diorama-layers.ini.tmp") == 0);
+  CHECK(rmdir(live_path) == 0);
+  CHECK(sr_replace_file("parked-live.ini", live_path));
+  /* The previous fixed staging filename may still exist from an old run. */
+  CHECK(sr_mkdir("diorama-layers.ini.tmp") == 0);
   IniUpgrade_ApplyShippedDefaults();
   CHECK(FileTextEquals(live_path, third));
   CHECK(FileTextEquals(baseline_path, third));
+  CHECK(FileTextEquals("diorama-layers.ini.pre-update-2", second));
+  CHECK(rmdir("diorama-layers.ini.tmp") == 0);
   CHECK(FileSize("diorama-layers.ini.pre-update-3") == -1);
   CHECK(FileTextEquals("diorama-layers.ini.pre-update-1", local));
 
   /* Never replace a file when its pre-update copy cannot be preserved. */
   CHECK(WriteFileText(default_path, first));
-  CHECK(sr_mkdir("diorama-layers.ini.pre-update-3.tmp") == 0);
+  char unavailable_backup[64];
+  for (unsigned i = 3; i <= 1000; ++i) {
+    snprintf(unavailable_backup, sizeof(unavailable_backup), "diorama-layers.ini.pre-update-%u", i);
+    CHECK(sr_mkdir(unavailable_backup) == 0);
+  }
   IniUpgrade_ApplyShippedDefaults();
   CHECK(FileTextEquals(live_path, third));
   CHECK(FileTextEquals(baseline_path, third));
-  CHECK(rmdir("diorama-layers.ini.pre-update-3.tmp") == 0);
+  for (unsigned i = 3; i <= 1000; ++i) {
+    snprintf(unavailable_backup, sizeof(unavailable_backup), "diorama-layers.ini.pre-update-%u", i);
+    CHECK(rmdir(unavailable_backup) == 0);
+  }
 
   /* An unreadable baseline is not a first installation. */
   CHECK(unlink(baseline_path) == 0);

@@ -4,17 +4,28 @@
 #include <SDL3/SDL.h>
 #include "diorama/diorama_depth_pass.h"
 
-typedef struct ArGpuDioramaDepthPass {
+enum { kGpuDioramaBankMaterial = 3, kGpuDioramaMaterialCount = 4, kAlphaPipelineCount = 3 };
+
+/* Device/format state shared by all compatible color targets in a sink. */
+typedef struct ArGpuDioramaDepthResources {
   SDL_GPUDevice *device;
   /* Basic, scenery, actor, scenery with a texture bank. */
-  SDL_GPUGraphicsPipeline *pipelines[4][kDioramaDepth_Count][3];
-  SDL_GPUTextureFormat color_format;
+  SDL_GPUGraphicsPipeline *pipelines[kGpuDioramaMaterialCount][kDioramaDepth_Count][3];
+  SDL_GPUGraphicsPipeline *alpha_pipelines[kGpuDioramaMaterialCount][kAlphaPipelineCount];
+  SDL_GPUTextureFormat color_format, order_format;
   SDL_GPUSampler *sampler, *nearest_sampler;
-  SDL_GPUTexture *depth, *white, *black, *neutral_attributes;
+  SDL_GPUTexture *white, *black, *neutral_attributes;
+  bool cutout_ready, hybrid_ready;
+} ArGpuDioramaDepthResources;
+
+typedef struct ArGpuDioramaDepthPass {
+  SDL_GPUDevice *device;
+  ArGpuDioramaDepthResources *resources;
+  SDL_GPUTexture *depth;
   SDL_GPUBuffer *vertices, *indices;
   SDL_GPUTransferBuffer *upload;
   unsigned width, height, vertex_capacity, index_capacity;
-  bool depth_initialized;
+  bool depth_initialized, owns_resources;
   struct ArGpuDioramaDepthAlpha *alpha;
 } ArGpuDioramaDepthPass;
 
@@ -25,7 +36,6 @@ typedef struct ArGpuDioramaDepthMaterial {
   SDL_GPUTexture *additional[2];
   bool actor; /* Native receiver/rim material, independent of depth policy. */
 } ArGpuDioramaDepthMaterial;
-enum { kGpuDioramaBankMaterial = 3, kGpuDioramaMaterialCount = 4 };
 static inline unsigned ArGpuDioramaDepthMaterialKind(const ArGpuDioramaDepthMaterial *material) {
   if (!material || !material->scenery) return 0;
   if (material->actor) return 2;
@@ -45,13 +55,17 @@ static inline unsigned ArGpuDioramaDepthMaterialKind(const ArGpuDioramaDepthMate
  * A whole batch uses one upload and render pass. Depth persists across batches
  * until clear_depth, resize or Destroy; clear it at every frame/scene boundary.
  * Resizing requires clear_depth. No implicit readback, fence or window present.
- * Textures are single-sample. Init uses an RGBA8 target; InitFormat also accepts
- * BGRA8. Scenery/actor UVs retain clamp-to-edge sampling outside [0,1]; the basic
+ * Textures are single-sample. Init uses an RGBA8 target. Shared resources also
+ * accept BGRA8. Scenery/actor UVs retain clamp-to-edge sampling outside [0,1]; the basic
  * shader reserves negative U for untextured geometry. NULL sources are allowed
  * only for untextured draws. On failure cancel the caller's command buffer and
  * clear depth before retrying. One thread owns an instance at a time. */
 bool ArGpuDioramaDepthPass_Init(ArGpuDioramaDepthPass *, SDL_GPUDevice *);
-bool ArGpuDioramaDepthPass_InitFormat(ArGpuDioramaDepthPass *, SDL_GPUDevice *, SDL_GPUTextureFormat);
+ArGpuDioramaDepthResources *ArGpuDioramaDepthResources_Create(SDL_GPUDevice *, SDL_GPUTextureFormat);
+void ArGpuDioramaDepthResources_Destroy(ArGpuDioramaDepthResources *);
+bool ArGpuDioramaDepthResources_Prepare(ArGpuDioramaDepthResources *);
+/* The owner keeps resources alive until every borrowing pass is destroyed. */
+void ArGpuDioramaDepthPass_BorrowResources(ArGpuDioramaDepthPass *, ArGpuDioramaDepthResources *);
 void ArGpuDioramaDepthPass_Destroy(ArGpuDioramaDepthPass *);
 /* Optional preparation outside gameplay: build every material pipeline and
  * reserve geometry/target storage. Idempotent within the retained capacities.

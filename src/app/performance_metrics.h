@@ -70,12 +70,13 @@ typedef enum PerformanceCount {
 typedef enum PerformanceScene {
   kPerformanceScene_Native, kPerformanceScene_Action,
   kPerformanceScene_Town, kPerformanceScene_World,
-  kPerformanceScene_Palace, kPerformanceScene_ActionFlat, kPerformanceScene_Count,
+  kPerformanceScene_Palace, kPerformanceScene_ActionFlat,
+  kPerformanceScene_Loading, kPerformanceScene_Count,
 } PerformanceScene;
 
 typedef struct PerformanceContext {
   PerformanceScene scene;
-  int host_mode; /* 0 game, 1 paused, 2 settings, 3 comparison */
+  int host_mode; /* 0 game, 1 paused, 2 settings, 3 comparison, 4 loading */
   int map_group, map_number, width, height, refresh_mode, limit_fps, pacing_source;
   bool vsync;
 } PerformanceContext;

@@ -11,6 +11,7 @@
 #include <SDL3/SDL.h>
 
 #include "actraiser/actraiser_rtl.h"
+#include "actraiser/actraiser_action_bg.h"
 #include "actraiser/actraiser_angel.h"
 #include "actraiser_game.h"
 #include "action/present_action_effects.h"
@@ -33,6 +34,7 @@
 #include "dev/host_runtime_diagnostics.h"
 #include "dev/oracle_trace.h"
 #include "diorama/diorama.h"
+#include "diorama/diorama_depth_gpu.h"
 #include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_performance.h"
 #include "host/host_comparison_window.h"
@@ -48,15 +50,18 @@
 #include "host/frame_playout.h"
 #include "manual/manual_reader.h"
 #include "platform/sdl/render_sdl.h"
+#include "present/display_geometry.h"
 #include "present/present.h"
 #include "present/presentation_frame_generation.h"
 #include "present/presentation_textures.h"
 #include "present/render_comparison.h"
 #include "present/render_preparation.h"
 #include "render/crt_post.h"
+#include "render/render_output.h"
 #include "replacements/hd_replacement_host.h"
 #include "save/save_slot_host.h"
 #include "settings_overlay/settings_overlay.h"
+#include "settings_overlay/settings_overlay_render.h"
 #include "sim/sim3d/sim3d.h"
 #include "sim/sim_frame_capture.h"
 #include "sim/sim_world_map.h"
@@ -375,6 +380,133 @@ static bool DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   return presented;
 }
 
+typedef struct VoxelActivation {
+  int mode;
+  DioramaDepthTarget target;
+  DioramaDepthPreparation depth;
+  bool waiting_for_room, target_dirty;
+  uint64_t started_ns, depth_started_ns, first_feedback_ns, last_feedback_ns;
+  double depth_ms;
+  unsigned feedback_frames;
+} VoxelActivation;
+
+static ArRenderRectI VoxelActivationViewport(ArRenderExtentI *output) {
+  return ComputePresentationViewportWithOutput(
+      &g_render_device, g_settings.ignore_aspect_ratio, g_settings.pixel_aspect,
+      g_snes_width - 2 * (g_ws_extra - g_ws_display_extra), g_snes_height, output);
+}
+
+static DioramaDepthTarget VoxelActivationTarget(void) {
+  const CrtPostConfig crt = Present_CaptureCrtConfig();
+  ArRenderExtentI output = {0};
+  if (ArRenderSceneScale_RequiresTarget(&g_render_device, VoxelActivationViewport(&output),
+          g_settings.render_resolution, g_settings.scene_supersampling,
+          g_settings.scene_antialiasing))
+    return kDioramaDepthTarget_SceneScale;
+  return CrtPost_RequiresTarget(&crt) ? kDioramaDepthTarget_Crt : kDioramaDepthTarget_Output;
+}
+
+static void PresentVoxelActivation(VoxelActivation *activation) {
+  const uint64_t now = SDL_GetTicksNS();
+  if (s_window_hidden || (activation->last_feedback_ns &&
+      now - activation->last_feedback_ns < kHostDisplayEmulationFrameIntervalNs))
+    return;
+  ArRenderExtentI output = {0};
+  const ArRenderRectI viewport = VoxelActivationViewport(&output);
+  if (!ArRenderOutput_UseFull(&g_render_device, NULL, NULL) ||
+      !ArRenderDevice_Clear(&g_render_device, (ArRenderColorF){0, 0, 0, 1}))
+    return;
+  SettingsOverlay_RenderVoxelPreparation(viewport, output);
+  if (HostDisplay_PresentCompositedFrame(kHostDisplayPresent_Loading)) {
+    activation->last_feedback_ns = SDL_GetTicksNS();
+    if (!activation->feedback_frames) {
+      activation->first_feedback_ns = activation->last_feedback_ns;
+      RuntimeLog_Printf("[voxel-activation] feedback-ns=%" PRIu64 "\n", activation->first_feedback_ns);
+    }
+    ++activation->feedback_frames;
+  }
+}
+
+static void FallBackFromVoxel(void) {
+  Settings_FallBackToDiorama();
+  SettingsOverlay_ReportVoxelUnavailable();
+}
+
+/* Called with runner ownership after polling input. Loading-frame presents
+ * have a separate metrics context, regardless of the surrounding scenes. */
+static bool ServiceVoxelActivation(VoxelActivation *activation) {
+  if (g_settings.diorama_mode != kAction3D_Voxel) {
+    if (activation->mode == kAction3D_Voxel) {
+      DioramaDepthGpu_CancelPreparation();
+      if (activation->started_ns) {
+        RuntimeLog_Printf("[voxel-activation] result=cancelled\n");
+        if (activation->feedback_frames) HostDisplay_LoadingCompleted();
+      }
+      *activation = (VoxelActivation){.mode = g_settings.diorama_mode};
+    }
+    (void)DioramaDepthGpu_Poll(&g_render_device); /* Reap a cancelled job without blocking. */
+    return false;
+  }
+  if (!ArRenderDevice_IsReady(&g_render_device)) return false;
+  const bool mode_changed = activation->mode != kAction3D_Voxel;
+  /* Check layout at activation and while settings can change it. An active
+   * renderer can also prepare an unusual bound target lazily. */
+  const DioramaDepthTarget target = (mode_changed || activation->target_dirty || SettingsOverlay_IsOpen())
+      ? VoxelActivationTarget() : activation->target;
+  activation->target_dirty = false;
+  if (mode_changed || target != activation->target || activation->depth == kDioramaDepthPreparation_Idle) {
+    if (mode_changed || !activation->started_ns)
+      *activation = (VoxelActivation){.mode = kAction3D_Voxel};
+    activation->target = target;
+    activation->depth_started_ns = SDL_GetTicksNS();
+    if (!activation->started_ns) activation->started_ns = activation->depth_started_ns;
+    activation->depth = DioramaDepthGpu_Request(&g_render_device, target);
+    if (mode_changed && activation->depth != kDioramaDepthPreparation_Failed && !ImportedWorldTravel_Active())
+      activation->waiting_for_room = ActRaiser_PrepareCurrentVoxelRoom();
+    if (!activation->waiting_for_room && activation->depth == kDioramaDepthPreparation_Ready) {
+      if (activation->feedback_frames) HostDisplay_LoadingCompleted();
+      activation->started_ns = 0;
+      return false;
+    }
+    AudioSession_SetPaused(true);
+  }
+  if (activation->depth != kDioramaDepthPreparation_Pending)
+    (void)DioramaDepthGpu_Poll(&g_render_device); /* Reap work displaced by a ready target. */
+  if (!activation->started_ns) return false;
+  if (activation->depth == kDioramaDepthPreparation_Pending) {
+    activation->depth = DioramaDepthGpu_Poll(&g_render_device);
+    if (activation->depth == kDioramaDepthPreparation_Cancelled ||
+        activation->depth == kDioramaDepthPreparation_Idle)
+      activation->depth = DioramaDepthGpu_Request(&g_render_device, activation->target);
+    if (activation->depth != kDioramaDepthPreparation_Pending)
+      activation->depth_ms = (double)(SDL_GetTicksNS() - activation->depth_started_ns) / 1e6;
+  }
+  const bool failed = activation->depth == kDioramaDepthPreparation_Failed;
+  const bool room_pending = !failed && activation->waiting_for_room &&
+      (ActRaiserActionBg_VoxelPrebuildPending() || ActRaiser_PrepareCurrentVoxelRoom());
+  if (activation->depth == kDioramaDepthPreparation_Pending || room_pending) {
+    SettingsOverlay_Tick();
+    HostDisplay_SetProducerPacing(false);
+    PresentVoxelActivation(activation);
+    SDL_Delay(1);
+    return true;
+  }
+
+  const uint64_t now = SDL_GetTicksNS();
+  const double interval_ms = activation->feedback_frames > 1
+      ? (double)(activation->last_feedback_ns - activation->first_feedback_ns) /
+          (1e6 * (activation->feedback_frames - 1)) : 0;
+  RuntimeLog_Printf("[voxel-activation] result=%s completed-ns=%" PRIu64 " elapsed-ms=%.1f "
+      "depth-ms=%.1f room-worker=%d feedback-frames=%u feedback-interval-ms=%.2f\n",
+      failed ? "failed" : "ready", now, (double)(now - activation->started_ns) / 1e6,
+      activation->depth_ms, activation->waiting_for_room, activation->feedback_frames, interval_ms);
+  if (activation->feedback_frames) HostDisplay_LoadingCompleted();
+  activation->started_ns = 0;
+  if (failed) FallBackFromVoxel();
+  /* Exclude time spent preparing from the next tick's catch-up budget. */
+  return true;
+}
+
 /* Host-side work that follows one or more completed emulation ticks. Catch-up
  * still coalesces it to one pass, but retained-frame redraws do not run it:
  * host presentation can outpace emulation (dramatically in Unlimited), and
@@ -436,7 +568,8 @@ static void AppLoop_HandleGraphicsReset(const GameSessionConfig *config, Uint32 
 
 /* Event routing stays flat; helpers own resource reset and modal input
  * precedence. Device add/remove and key release always reach their owners. */
-static void AppLoop_PumpEvents(const GameSessionConfig *config, bool *running) {
+static void AppLoop_PumpEvents(const GameSessionConfig *config, bool *running,
+    VoxelActivation *activation) {
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
     if (HostComparisonWindow_HandleEvent(&event) ||
@@ -449,10 +582,12 @@ static void AppLoop_PumpEvents(const GameSessionConfig *config, bool *running) {
       break;
 
     case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+      activation->target_dirty = true;
       HostDisplay_WindowDisplayChanged();
       HostInput_RequestPausedRedraw();
       break;
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+      activation->target_dirty = true;
       HostDisplay_WindowDisplayScaleChanged();
       HostInput_RequestPausedRedraw();
       break;
@@ -469,6 +604,7 @@ static void AppLoop_PumpEvents(const GameSessionConfig *config, bool *running) {
 
     case SDL_EVENT_WINDOW_RESIZED:
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+      activation->target_dirty = true;
       HostDisplay_RecomputeLogicalPresentation();
       HostInput_RequestPausedRedraw();
       break;
@@ -497,6 +633,9 @@ static void AppLoop_PumpEvents(const GameSessionConfig *config, bool *running) {
 
     case SDL_EVENT_RENDER_TARGETS_RESET:
     case SDL_EVENT_RENDER_DEVICE_RESET:
+      activation->target_dirty = true;
+      if (event.type == SDL_EVENT_RENDER_DEVICE_RESET)
+        activation->depth = kDioramaDepthPreparation_Idle;
       AppLoop_HandleGraphicsReset(config, event.type);
       break;
     case SDL_EVENT_RENDER_DEVICE_LOST:
@@ -615,6 +754,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
   const HostDisplayPresentMode emulated_frame_present_mode =
       HostDisplay_EmulatedFramePresentMode(
           config->headless, config->headless_video);
+  VoxelActivation voxel_activation = {0};
   while (running) {
     if (!config->headless) HostXboxUsbGamepad_Update();
     /* A reset request is valid only in the owner iteration that handled it.
@@ -637,6 +777,18 @@ void GameLoop_Run(const GameSessionConfig *config) {
         HostFrameProducer_Wait();
         stream_pending = false;
         running = false;
+        continue;
+      }
+      if (DioramaDepthGpu_DrawFailed()) {
+        HostFrameQueue_RequestPause(stream.queue);
+        HostFrameProducer_Wait();
+        while (HostFrameQueue_Read(stream.queue)) HostFrameQueue_Release(stream.queue);
+        stream_pending = false;
+        if (stream.stopped) running = false;
+        stream.next_ns = stream_endpoint_ns = 0;
+        accumulator = 0;
+        sync_reset = true;
+        last_time_ns = SDL_GetTicksNS();
         continue;
       }
       /* Handle game input and presentation controls without live runner reads.
@@ -880,7 +1032,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
     PerformanceMetrics_Configure(g_settings.performance_overlay != 0 || pipeline_log,
         pipeline_log);
     const PerformanceScope events = PerformanceMetrics_Begin(kPerformance_Events);
-    AppLoop_PumpEvents(config, &running);
+    AppLoop_PumpEvents(config, &running, &voxel_activation);
     PerformanceMetrics_End(events);
     if (!logged_input_ready) {
       logged_input_ready = true;
@@ -895,6 +1047,21 @@ void GameLoop_Run(const GameSessionConfig *config) {
     }
 
     if (!running) continue;
+    if (SettingsOverlay_IsOpen()) {
+      SettingsSession_PollWrites();
+      if (SettingsSession_TakeWriteFailure()) SettingsOverlay_ReportSaveFailure();
+    }
+    if (DioramaDepthGpu_TakeDrawFailure() && g_settings.diorama_mode == kAction3D_Voxel)
+      FallBackFromVoxel();
+    const bool show_voxel_feedback = !config->headless && !config->headless_video;
+    if (show_voxel_feedback && ServiceVoxelActivation(&voxel_activation)) {
+      HostDisplay_SetProducerPacing(false);
+      stream.next_ns = stream_endpoint_ns = 0;
+      accumulator = 0;
+      sync_reset = true;
+      last_time_ns = SDL_GetTicksNS();
+      continue;
+    }
     if (!ImportedWorldTravel_Active() && ImportedWorldTravel_Pending())
       ImportedWorldTravel_Begin();
     if (ImportedWorldTravel_Active()) {
@@ -982,6 +1149,9 @@ void GameLoop_Run(const GameSessionConfig *config) {
     ScheduledSettings_ApplyIfDue();
     if (RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None)
       continue; /* An import/reset must not execute another old-session tick. */
+    if (show_voxel_feedback && voxel_activation.mode != g_settings.diorama_mode &&
+        g_settings.diorama_mode == kAction3D_Voxel)
+      continue; /* Present the activation cue before the first Voxel capture. */
 
     if (config->headless) {
       /* Headless mode is uncapped by default and advances exactly one tick per

@@ -19,7 +19,9 @@ typedef struct GpuCompileLogState {
   void *observer_context;
 } GpuCompileLogState;
 
-static GpuCompileLogState s_log;
+/* A preparation worker owns a separate bracket. Unbracketed late builds
+ * remain on the render owner, which also reads and resets the totals. */
+static _Thread_local GpuCompileLogState s_log;
 static struct {
   unsigned builds, failures;
   uint64_t total_ns, maximum_ns;

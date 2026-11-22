@@ -2,6 +2,7 @@
 #define AR_ATOMIC_REPLACE_H
 
 #include <stdbool.h>
+#include <stdio.h>
 
 /* Replace `path` with `temporary` as one operation, on both platforms.
  *
@@ -31,5 +32,19 @@
  * failure the destination is untouched, so a caller's "original kept" message
  * is true. Callers remove the temp file themselves. */
 bool AtomicReplaceFile(const char *temporary, const char *path);
+
+/* Open an exclusive same-directory staging file. The caller owns the stream
+ * and the returned path. The suffix identifies abandoned files for inspection. */
+FILE *AtomicReplace_OpenTemporary(const char *path, const char *suffix,
+    char **temporary);
+
+/* Explicit durability for saves. Directory synchronization is best effort. */
+bool AtomicReplace_FlushFileData(FILE *file);
+void AtomicReplace_SyncContainingDirectory(const char *path);
+/* Publish a byte buffer, optionally flushing file data and its directory. */
+bool AtomicReplace_WriteBytes(const char *path, const void *data, size_t size, bool durable);
+
+/* Test whether two existing paths resolve to the same filesystem object. */
+bool AtomicReplace_SameFile(const char *a, const char *b);
 
 #endif /* AR_ATOMIC_REPLACE_H */

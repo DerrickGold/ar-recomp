@@ -18,14 +18,6 @@
 #include <string.h>
 #include <time.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#include <io.h>       /* _get_osfhandle/_fileno: WriteAtomic durability */
-#else
-#include <fcntl.h>    /* open: directory fsync after rename */
-#include <unistd.h>   /* fsync/fileno/close: WriteAtomic durability */
-#endif
-
 const SaveFieldDesc g_save_region_fields[kActRaiserSaveRegionCount] = {
   { "fillmore",  "Fillmore",  0x1200 },
   { "bloodpool", "Bloodpool", 0x1202 },
@@ -456,52 +448,11 @@ bool Save_LoadFile(SaveFileFormat format, const char *path,
 typedef bool (*WriteBodyFn)(FILE *file, const void *context,
                             SaveError *error);
 
-/* Flush this file's data blocks to stable storage. Portable half of the
- * atomic-write durability recipe (see WriteAtomic). */
-static bool FlushFileData(FILE *file) {
-#ifdef _WIN32
-  HANDLE h = (HANDLE)_get_osfhandle(_fileno(file));
-  if (h == INVALID_HANDLE_VALUE) return false;
-  return FlushFileBuffers(h) != 0;
-#else
-  return fsync(fileno(file)) == 0;
-#endif
-}
-
-/* fsync the directory holding `path` so the rename that published the file is
- * itself durable (POSIX fsync(2) explicitly does not cover the containing
- * directory entry). No-op on Windows, where directories are not openable as
- * files and MoveFileEx's metadata write-through covers the entry. */
-static void SyncContainingDirectory(const char *path) {
-#ifndef _WIN32
-  char dir[kHostPathCapacity];
-  snprintf(dir, sizeof dir, "%s", path);
-  char *slash = strrchr(dir, '/');
-  if (slash) *slash = '\0';
-  else snprintf(dir, sizeof dir, ".");
-  int fd = open(dir[0] ? dir : "/", O_RDONLY);
-  if (fd < 0) return;
-  (void)fsync(fd);
-  close(fd);
-#else
-  (void)path;
-#endif
-}
-
 static bool WriteAtomic(const char *path, WriteBodyFn body,
                         const void *context, SaveError *error) {
-  size_t length = strlen(path);
-  char *temporary = (char *)malloc(length + 5);
-  if (!temporary) return Fail(error, "out of memory writing %s", path);
-  memcpy(temporary, path, length);
-  memcpy(temporary + length, ".tmp", 5);
-  FILE *file = sr_fopen(temporary, "wb");
-  if (!file) {
-    bool result = Fail(error, "cannot write %s: %s", temporary,
-                       strerror(errno));
-    free(temporary);
-    return result;
-  }
+  char *temporary;
+  FILE *file = AtomicReplace_OpenTemporary(path, "tmp", &temporary);
+  if (!file) return Fail(error, "cannot stage %s: %s", path, strerror(errno));
   bool success = body(file, context, error);
   if (fflush(file) != 0 || ferror(file))
     success = Fail(error, "error flushing %s", temporary);
@@ -512,12 +463,12 @@ static bool WriteAtomic(const char *path, WriteBodyFn body,
    *   - POSIX fsync(2): "Calling fsync() does not necessarily ensure that the
    *     entry in the directory containing the file has also reached disk. For
    *     that an explicit fsync() on a file descriptor for the directory is
-   *     also needed." -> SyncContainingDirectory below, after the rename.
+   *     also needed." See the directory sync below, after the rename.
    *   - Windows: MOVEFILE_WRITE_THROUGH's documented flush guarantee is worded
    *     for the copy-and-delete (cross-volume) case; our temp file is a
    *     SAME-directory rename, so do not rely on it for the data blocks —
    *     FlushFileBuffers the handle explicitly. */
-  if (success && !FlushFileData(file))
+  if (success && !AtomicReplace_FlushFileData(file))
     success = Fail(error, "error syncing %s: %s", temporary, strerror(errno));
   if (fclose(file) != 0)
     success = Fail(error, "error closing %s", temporary);
@@ -526,7 +477,7 @@ static bool WriteAtomic(const char *path, WriteBodyFn body,
   /* Make the directory entry itself durable, so the rename cannot be lost
    * while the (already-synced) file contents survive. Best-effort: a failure
    * here does not invalidate a save that is otherwise written and renamed. */
-  if (success) SyncContainingDirectory(path);
+  if (success) AtomicReplace_SyncContainingDirectory(path);
   if (!success) sr_remove(temporary);
   free(temporary);
   return success;
@@ -1436,7 +1387,7 @@ bool SaveSystem_CreateRecoveryCopy(const char *directory, SaveError *error) {
   if (ok && sr_mkdir(directory) != 0)
     ok = Fail(error, "cannot reserve recovery directory %s: %s", directory, strerror(errno));
   if (ok) {
-    SyncContainingDirectory(directory);
+    AtomicReplace_SyncContainingDirectory(directory);
     ok = SaveCheckpoint_CommitSnapshot(kSaveFileFormat_NativeSrm, path, NULL, snapshot,
                                        ValidatePayload, &s_runtime.commit_host, error);
   }

@@ -14,6 +14,7 @@
  * Direct SDL/GPU callers must SubmitPending before recording outside work. */
 typedef struct ArSdlDioramaDepthSink {
   SDL_GPUDevice *device;
+  ArGpuDioramaDepthResources *formats[2];
   ArRenderDevice *owner;
   DioramaDepthSink sink;
   struct {
@@ -21,6 +22,11 @@ typedef struct ArSdlDioramaDepthSink {
     ArGpuDioramaDepthPass pass;
     bool valid;
   } targets[4];
+  struct {
+    SDL_Texture *target;
+    SDL_GPUTexture *attachment;
+    unsigned slot, width, height;
+  } prepared;
   DioramaDepthVertex *vertices;
   int32_t *indices;
   struct ArSdlDioramaDepthBatch *batch;

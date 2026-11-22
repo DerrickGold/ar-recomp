@@ -2465,10 +2465,15 @@ static void TestSaveSlotParentNavigation(void) {
   SettingsOverlay_SetSaveSlotHooks(NULL);
 }
 
-static uint64_t SlotFrameHash(SDL_Renderer *renderer, SDL_Surface *surface) {
+static uint64_t MenuFrameHash(SDL_Renderer *renderer, SDL_Surface *surface, bool preparing_voxel) {
   CHECK(SDL_SetRenderDrawColor(renderer, 12, 22, 34, 255));
   CHECK(SDL_RenderClear(renderer));
-  SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+  const ArRenderRectI viewport = {0, 0, surface->w, surface->h};
+  if (preparing_voxel) {
+    SettingsOverlay_RenderVoxelPreparation(viewport, (ArRenderExtentI){surface->w, surface->h});
+  } else {
+    SettingsOverlay_Render(viewport);
+  }
   CHECK(SDL_RenderPresent(renderer));
   uint64_t hash = UINT64_C(14695981039346656037);
   const uint8_t *pixels = surface->pixels;
@@ -2478,6 +2483,30 @@ static uint64_t SlotFrameHash(SDL_Renderer *renderer, SDL_Surface *surface) {
   }
   return hash;
 }
+
+static uint64_t SlotFrameHash(SDL_Renderer *renderer, SDL_Surface *surface) {
+  return MenuFrameHash(renderer, surface, false);
+}
+
+typedef struct VoxelSettingSave {
+  bool submitted_voxel;
+  unsigned submissions, drains;
+} VoxelSettingSave;
+
+static bool CaptureVoxelSetting(void *context, const char *path, const char *text, size_t size) {
+  CHECK(path && size);
+  VoxelSettingSave *save = context;
+  ++save->submissions;
+  save->submitted_voxel = strstr(text, "diorama_mode = Voxel 3D\n") != NULL;
+  return true;
+}
+
+static bool DrainVoxelSetting(void *context) {
+  VoxelSettingSave *save = context;
+  ++save->drains;
+  return true;
+}
+
 static void TestSaveSlotRandomizerGate(SDL_Renderer *renderer, SDL_Surface *surface) {
   const SettingsOverlaySaveSlotHooks hooks = {
       .scan = FakeSlotsScan, .draft = FakeSlotDraft, .view = FakeSlotView, .start = FakeSlotStart};
@@ -3998,8 +4027,18 @@ int main(int argc, char **argv) {
     Settings_SetLong(action_3d, kAction3D_Off);
     CHECK(SettingsOverlay_HandleKey(enable_keys[i], true, false));
     CHECK(g_settings.diorama_mode == kAction3D_Diorama);
+    VoxelSettingSave save = {0};
+    const SettingsSaveHost host = {&save, CaptureVoxelSetting, DrainVoxelSetting};
+    Settings_SetSaveHost(&host);
     CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
     CHECK(g_settings.diorama_mode == kAction3D_Voxel);
+    CHECK(save.submitted_voxel && save.submissions == 1 && save.drains == 0);
+    CHECK(MenuFrameHash(renderer, surface, true) != MenuFrameHash(renderer, surface, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
+    CHECK(g_settings.diorama_mode == kAction3D_Off);
+    CHECK(!save.submitted_voxel && save.submissions == 2 && save.drains == 0);
+    Settings_SetSaveHost(NULL);
+    Settings_SetLong(action_3d, kAction3D_Voxel);
     char caption[64];
     for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
       SettingsOverlay_LocalizedValue((ArUiLocale)locale, action_3d, caption, sizeof(caption));

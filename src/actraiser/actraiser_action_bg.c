@@ -702,11 +702,13 @@ static struct {
   ActionVoxelAnimation animation;
   uint16_t native_characters[kActionVoxelNativeCharacters];
   uint8_t extra_characters[kActionVoxelExtraCharacters];
-  unsigned native_character_count, extra_character_count;
-  bool source_valid, terrain_valid;
+  unsigned native_character_count, extra_character_count, queued_room_builds;
+  bool source_valid, terrain_valid, waiting_for_room;
 } s_voxel;
 
-enum { kVoxelRoomCacheSize = 3 };
+/* Keep enough distinct completed inputs for normal animation cycles without
+ * letting warm rooms accumulate for the lifetime of a session. */
+enum { kVoxelRoomCacheSize = 6 };
 typedef struct VoxelRoomBuild {
   ActionRoomScene scene;
   DioramaRoomOverride *terrain;
@@ -747,34 +749,38 @@ static bool VoxelRoomVariantMatches(const VoxelRoomBuild *entry,
       entry->profile == profile && entry->mosaic == mosaic;
 }
 
-static unsigned VoxelRoomCacheSlot(uint8_t group, uint8_t room, uint8_t profile, uint8_t mosaic) {
-  unsigned oldest = 0;
-  for (unsigned i = 0; i < kVoxelRoomCacheSize; ++i) {
-    const VoxelRoomBuild *entry = s_voxel_room_cache[i];
-    if (VoxelRoomVariantMatches(entry, group, room, profile, mosaic)) return i;
-    if (!entry || (s_voxel_room_cache[oldest] &&
-        entry->last_used < s_voxel_room_cache[oldest]->last_used)) oldest = i;
-  }
-  return oldest;
+static ActionVoxelBuildSource VoxelRoomSource(const VoxelRoomBuild *entry) {
+  return (ActionVoxelBuildSource){.scene = &entry->scene, .terrain = entry->terrain,
+      .tiles = entry->tiles, .tile_pitch = ActionRoomScene_TileWidth(&entry->scene, 1)};
 }
 
 static void PublishVoxelRoomBuild(VoxelRoomBuild *entry) {
-  const unsigned i = VoxelRoomCacheSlot(entry->group, entry->room, entry->profile, entry->mosaic);
+  unsigned i = 0;
+  const ActionVoxelBuildSource input = VoxelRoomSource(entry);
+  for (unsigned slot = 0; slot < kVoxelRoomCacheSize; ++slot) {
+    const VoxelRoomBuild *previous = s_voxel_room_cache[slot];
+    if (VoxelRoomVariantMatches(previous, entry->group, entry->room, entry->profile, entry->mosaic)) {
+      const ActionVoxelBuildSource candidate = VoxelRoomSource(previous);
+      if (ActionVoxel_BuildInputsEqual(&input, &candidate)) {
+        i = slot;
+        break;
+      }
+    }
+    if (!previous || (s_voxel_room_cache[i] && previous->last_used < s_voxel_room_cache[i]->last_used))
+      i = slot;
+  }
   DestroyVoxelRoomBuild(s_voxel_room_cache[i]);
   entry->last_used = ++s_voxel_room_use;
   s_voxel_room_cache[i] = entry;
 }
 
-static void CollectVoxelPrebuild(void) {
-  if (atomic_load_explicit(&s_voxel_prebuild.state, memory_order_acquire) != kVoxelPrebuildDone)
-    return;
+static void CollectVoxelPrebuild(int state) {
+  if (state != kVoxelPrebuildDone) return;
   VoxelRoomBuild *entry = s_voxel_prebuild.job;
-  const VoxelRoomBuild *resident = s_voxel_room_cache[VoxelRoomCacheSlot(
-      entry->group, entry->room, entry->profile, entry->mosaic)];
-  const bool already_compiled_live = VoxelRoomVariantMatches(resident,
-      entry->group, entry->room, entry->profile, entry->mosaic) && resident->from_live;
-  if (entry->geometry && !already_compiled_live) {
-    RuntimeLog_Printf("[voxel-room-prebuild] ready map=%02x/%02x\n", entry->group, entry->room);
+  if (entry->geometry || entry->from_live) {
+    RuntimeLog_Printf("[voxel-room-prebuild] %s map=%02x/%02x source=%s\n",
+        entry->geometry ? "ready" : "rejected", entry->group, entry->room,
+        entry->from_live ? "live" : "rom");
     PublishVoxelRoomBuild(entry);
   } else {
     DestroyVoxelRoomBuild(entry);
@@ -788,41 +794,91 @@ void ActRaiserActionBg_SetVoxelPrebuildWake(ActRaiserVoxelPrebuildWake wake, voi
   s_voxel_prebuild.wake_context = context;
 }
 
-void ActRaiserActionBg_RequestVoxelPrebuild(uint8_t group, uint8_t room,
-    uint8_t profile, uint8_t mosaic, const DioramaRoomOverride *overrides) {
-  if (!s_voxel_prebuild.wake || !s_observer.rom || !ActionVoxel_Room(group, room)) return;
-  CollectVoxelPrebuild();
-  if (atomic_load_explicit(&s_voxel_prebuild.state, memory_order_relaxed) != kVoxelPrebuildIdle) return;
-  const VoxelRoomBuild *resident =
-      s_voxel_room_cache[VoxelRoomCacheSlot(group, room, profile, mosaic)];
-  if (VoxelRoomVariantMatches(resident, group, room, profile, mosaic)) return;
-  VoxelRoomBuild *entry = calloc(1, sizeof(*entry));
-  if (!entry) return;
-  if (overrides) {
-    entry->terrain = calloc(1, sizeof(*entry->terrain));
-    if (!entry->terrain || !DioramaLayerOrder_ForTerrain(overrides, profile, entry->terrain)) {
-      DestroyVoxelRoomBuild(entry);
-      return;
-    }
-  }
-  entry->group = group;
-  entry->room = room;
-  entry->profile = profile;
-  entry->mosaic = mosaic;
+bool ActRaiserActionBg_VoxelPrebuildPending(void) {
+  return atomic_load_explicit(&s_voxel_prebuild.state, memory_order_acquire) == kVoxelPrebuildPending;
+}
+
+static bool QueueVoxelRoomBuild(VoxelRoomBuild *entry) {
   s_voxel_prebuild.rom = s_observer.rom;
   s_voxel_prebuild.rom_size = s_observer.rom_size;
   s_voxel_prebuild.job = entry;
-  RuntimeLog_Printf("[voxel-room-prebuild] queued map=%02x/%02x terrain=%u mosaic=%u\n",
-      group, room, profile, mosaic);
   atomic_store_explicit(&s_voxel_prebuild.state, kVoxelPrebuildPending, memory_order_release);
   if (!s_voxel_prebuild.wake(s_voxel_prebuild.wake_context)) {
     atomic_store_explicit(&s_voxel_prebuild.state, kVoxelPrebuildIdle, memory_order_relaxed);
     s_voxel_prebuild.job = NULL;
     DestroyVoxelRoomBuild(entry);
+    return false;
   }
+  RuntimeLog_Printf("[voxel-room-prebuild] queued map=%02x/%02x terrain=%u mosaic=%u source=%s\n",
+      entry->group, entry->room, entry->profile, entry->mosaic, entry->from_live ? "live" : "rom");
+  return true;
 }
 
-static void CompileVoxelPrebuild(VoxelRoomBuild *entry, const uint8_t *rom, size_t size) {
+/* Both sources retain their resolved edits before handing them to the worker. */
+static DioramaRoomOverride *CopyVoxelTerrain(const DioramaRoomOverride *terrain) {
+  DioramaRoomOverride *copy = malloc(sizeof(*copy));
+  if (!copy) return NULL;
+  *copy = *terrain;
+  for (unsigned layer = 0; layer < 2; ++layer) {
+    DioramaStampLayerOverride *stamps = &copy->stamp_layers[layer];
+    stamps->cells = NULL;
+    stamps->cell_index = NULL;
+    stamps->capacity = stamps->index_capacity = 0;
+  }
+  for (unsigned layer = 0; layer < 2; ++layer) {
+    const DioramaStampLayerOverride *input = &terrain->stamp_layers[layer];
+    DioramaStampLayerOverride *stamps = &copy->stamp_layers[layer];
+    if (!input->count) continue;
+    const size_t cell_bytes = input->count * sizeof(*input->cells);
+    const size_t index_bytes = input->index_capacity * sizeof(*input->cell_index);
+    stamps->cells = malloc(cell_bytes);
+    if (index_bytes) stamps->cell_index = malloc(index_bytes);
+    if (!stamps->cells || (index_bytes && !stamps->cell_index)) {
+      DioramaLayerOrder_ClearRoom(copy);
+      free(copy);
+      return NULL;
+    }
+    memcpy(stamps->cells, input->cells, cell_bytes);
+    if (index_bytes) memcpy(stamps->cell_index, input->cell_index, index_bytes);
+    stamps->capacity = input->count;
+    stamps->index_capacity = input->index_capacity;
+  }
+  return copy;
+}
+
+static bool VoxelRoomTerrainMatches(const VoxelRoomBuild *entry,
+    const DioramaRoomOverride *terrain) {
+  const bool include_bg2 = ActionVoxel_UsesBg2Characters(
+      ActionVoxel_ProfileForRoom(entry->group, entry->room), entry->room);
+  return DioramaLayerOrder_VoxelGeometryInputsEqual(entry->terrain, terrain, include_bg2);
+}
+
+bool ActRaiserActionBg_RequestVoxelPrebuild(uint8_t group, uint8_t room,
+    uint8_t profile, uint8_t mosaic, const DioramaRoomOverride *terrain) {
+  if (!s_voxel_prebuild.wake || !s_observer.rom || !ActionVoxel_Room(group, room)) return false;
+  const int state = atomic_load_explicit(&s_voxel_prebuild.state, memory_order_acquire);
+  if (state == kVoxelPrebuildPending) return false; /* Only speculative work here. */
+  CollectVoxelPrebuild(state);
+  for (unsigned i = 0; i < kVoxelRoomCacheSize; ++i) {
+    const VoxelRoomBuild *resident = s_voxel_room_cache[i];
+    if (VoxelRoomVariantMatches(resident, group, room, profile, mosaic) &&
+        resident->geometry && VoxelRoomTerrainMatches(resident, terrain))
+      return false;
+  }
+  VoxelRoomBuild *entry = calloc(1, sizeof(*entry));
+  if (!entry) return false;
+  if (terrain && !(entry->terrain = CopyVoxelTerrain(terrain))) {
+    DestroyVoxelRoomBuild(entry);
+    return false;
+  }
+  entry->group = group;
+  entry->room = room;
+  entry->profile = profile;
+  entry->mosaic = mosaic;
+  return QueueVoxelRoomBuild(entry);
+}
+
+static bool LoadVoxelPrebuildInputs(VoxelRoomBuild *entry, const uint8_t *rom, size_t size) {
   ActionRoomScene *scene = &entry->scene;
   /* The common Western BG3 upload replaces the first palette bank.
    * CGRAM entry zero still comes from the room backdrop. The live compiler
@@ -831,24 +887,35 @@ static void CompileVoxelPrebuild(VoxelRoomBuild *entry, const uint8_t *rom, size
   if (size < kHudPaletteRomOffset + kSharedHudPaletteBytes ||
       !ActionRoomScene_Load(scene, rom, size, entry->group, entry->room) ||
       (entry->profile && !ActionRoomTerrain_Project(scene, entry->profile)) ||
-      (entry->mosaic && !ActionRoomMosaic_Project(scene, entry->mosaic))) return;
+      (entry->mosaic && !ActionRoomMosaic_Project(scene, entry->mosaic))) return false;
   memcpy(scene->palette + 2, rom + kHudPaletteRomOffset + 2, kSharedHudPaletteBytes - 2);
   const unsigned width = ActionRoomScene_TileWidth(scene, 1);
   const unsigned height = ActionRoomScene_TileHeight(scene, 1);
-  if (!ActionVoxel_ValidBounds(0, 0, width * 8, height * 8)) return;
+  if (!ActionVoxel_ValidBounds(0, 0, width * 8, height * 8)) return false;
   entry->tiles = malloc((size_t)width * height * sizeof(*entry->tiles));
-  if (!entry->tiles) return;
+  if (!entry->tiles) return false;
   for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < width; ++x) {
-    if (!ActionRoomScene_LookupTile(scene, 1, x, y, &entry->tiles[y * width + x], NULL)) return;
+    if (!ActionRoomScene_LookupTile(scene, 1, x, y, &entry->tiles[y * width + x], NULL)) return false;
   }
+  return true;
+}
+
+static ActionVoxelGeometry *CompileVoxelRoom(const ActionVoxelBuildSource *source) {
+  const uint8_t group = source->scene->group, room = source->scene->map;
   ActionVoxelGeometry *geometry = ActionVoxel_Create();
-  if (!geometry || !ActionVoxel_BuildWithTiles(geometry, scene, entry->terrain,
-          ActionVoxel_SettingsForRoom(entry->group, entry->room), entry->tiles, width) ||
-      !ActionVoxel_Active(geometry, entry->group, entry->room)) {
+  if (!geometry || !ActionVoxel_BuildFromSource(geometry, source,
+          ActionVoxel_SettingsForRoom(group, room)) ||
+      !ActionVoxel_Active(geometry, group, room)) {
     ActionVoxel_Release(geometry);
-    return;
+    return NULL;
   }
-  entry->geometry = geometry;
+  return geometry;
+}
+
+static void CompileVoxelPrebuild(VoxelRoomBuild *entry, const uint8_t *rom, size_t size) {
+  if (!entry->from_live && !LoadVoxelPrebuildInputs(entry, rom, size)) return;
+  const ActionVoxelBuildSource source = VoxelRoomSource(entry);
+  entry->geometry = CompileVoxelRoom(&source);
 }
 
 void ActRaiserActionBg_BuildVoxelPrebuild(void) {
@@ -863,7 +930,8 @@ static void ResetVoxel(void) {
   s_voxel.geometry = NULL;
   ActionVoxelAuthoredLayout_Clear(&s_voxel.authored_layout);
   ActionVoxelAnimationCache_Clear(&s_voxel.animation_cache);
-  s_voxel.source_valid = s_voxel.terrain_valid = false;
+  s_voxel.source_valid = s_voxel.terrain_valid = s_voxel.waiting_for_room = false;
+  s_voxel.queued_room_builds = 0;
 }
 const ActionVoxelGeometry *ActRaiserActionBg_VoxelGeometry(unsigned group, unsigned room) {
   return ActionVoxel_Active(s_voxel.geometry, group, room) ? s_voxel.geometry : NULL;
@@ -1401,68 +1469,82 @@ static bool CaptureMasksSupported(void) {
       s_runner_api->replace_ppu_capture_tiles;
 }
 
-/* A validated live result remains useful when ROM cannot predict a native
- * tile patch, animation phase, palette, or custom terrain. These copies are
- * for equality only, so stamp lookup indices can be omitted. */
-static void RememberLiveVoxelRoom(const ActionRoomScene *scene, const DioramaRoomOverride *terrain,
-                                  const uint16_t *tiles, size_t tile_count,
-                                  const ActionVoxelGeometry *geometry) {
+/* The worker owns this snapshot, including lookup indices for editor stamps. */
+static VoxelRoomBuild *CopyLiveVoxelRoom(const ActionVoxelBuildSource *source) {
+  const ActionRoomScene *scene = source->scene;
+  const size_t tile_count = source->tile_pitch * ActionRoomScene_TileHeight(scene, 1);
   VoxelRoomBuild *entry = calloc(1, sizeof(*entry));
-  if (!entry) return;
-  if (terrain) {
-    entry->terrain = malloc(sizeof(*entry->terrain));
-    if (!entry->terrain) { DestroyVoxelRoomBuild(entry); return; }
-    *entry->terrain = *terrain;
-    for (unsigned layer = 0; layer < 2; ++layer) {
-      DioramaStampLayerOverride *stamps = &entry->terrain->stamp_layers[layer];
-      stamps->cells = NULL;
-      stamps->cell_index = NULL;
-      stamps->capacity = stamps->index_capacity = 0;
-    }
-    for (unsigned layer = 0; layer < 2; ++layer) {
-      DioramaStampLayerOverride *stamps = &entry->terrain->stamp_layers[layer];
-      if (!stamps->count) continue;
-      const size_t bytes = stamps->count * sizeof(*stamps->cells);
-      stamps->cells = malloc(bytes);
-      if (!stamps->cells) { DestroyVoxelRoomBuild(entry); return; }
-      memcpy(stamps->cells, terrain->stamp_layers[layer].cells, bytes);
-    }
+  if (!entry) return NULL;
+  if (source->terrain && !(entry->terrain = CopyVoxelTerrain(source->terrain))) {
+    DestroyVoxelRoomBuild(entry);
+    return NULL;
   }
-  entry->tiles = malloc(tile_count * sizeof(*tiles));
-  if (!entry->tiles) { DestroyVoxelRoomBuild(entry); return; }
-  memcpy(entry->tiles, tiles, tile_count * sizeof(*tiles));
+  entry->tiles = malloc(tile_count * sizeof(*entry->tiles));
+  if (!entry->tiles) { DestroyVoxelRoomBuild(entry); return NULL; }
+  memcpy(entry->tiles, source->tiles, tile_count * sizeof(*entry->tiles));
   entry->scene = *scene;
   entry->group = scene->group;
   entry->room = scene->map;
   entry->profile = s_observer.terrain_profile;
   entry->mosaic = s_observer.mosaic_pattern;
-  entry->geometry = ActionVoxel_Retain(geometry);
   entry->from_live = true;
-  PublishVoxelRoomBuild(entry);
+  return entry;
 }
 
-static const ActionVoxelGeometry *FindVoxelRoomBuild(const ActionRoomScene *scene,
-    const DioramaRoomOverride *terrain, const uint16_t *tiles, size_t tile_count, bool include_bg2) {
-  CollectVoxelPrebuild();
-  const uint8_t group = scene->group, room = scene->map;
-  VoxelRoomBuild *entry = s_voxel_room_cache[VoxelRoomCacheSlot(
-      group, room, s_observer.terrain_profile, s_observer.mosaic_pattern)];
-  if (!VoxelRoomVariantMatches(entry, group, room,
-          s_observer.terrain_profile, s_observer.mosaic_pattern)) return NULL;
-  const bool same_scene = !memcmp(scene, &entry->scene, sizeof(*scene));
-  const bool same_edits = same_scene &&
-      DioramaLayerOrder_VoxelGeometryInputsEqual(entry->terrain, terrain, include_bg2);
-  const bool same_tiles = same_edits &&
-      !memcmp(entry->tiles, tiles, tile_count * sizeof(*tiles));
-  if (!same_tiles || (ActionVoxel_HasCutouts(entry->geometry) && !CaptureMasksSupported())) {
-    RuntimeLog_Printf("[voxel-room-prebuild] fallback map=%02x/%02x scene=%d edits=%d tiles=%d\n",
-        group, room, same_scene, same_edits, same_tiles);
+/* The same live snapshot that validates a ROM candidate is the worker input
+ * when the ROM candidate differs. Failed live inputs also get a cache entry
+ * so the same unsupported source cannot repeatedly enqueue a build. */
+static const ActionVoxelGeometry *ResolveVoxelRoomBuild(const ActionVoxelBuildSource *source,
+    bool can_queue, bool retain_variant, bool *waiting) {
+  const int state = atomic_load_explicit(&s_voxel_prebuild.state, memory_order_acquire);
+  CollectVoxelPrebuild(state);
+  const uint8_t group = source->scene->group, room = source->scene->map;
+  for (unsigned i = 0; i < kVoxelRoomCacheSize; ++i) {
+    VoxelRoomBuild *entry = s_voxel_room_cache[i];
+    if (!VoxelRoomVariantMatches(entry, group, room,
+            s_observer.terrain_profile, s_observer.mosaic_pattern)) continue;
+    const ActionVoxelBuildSource resident = VoxelRoomSource(entry);
+    if (!ActionVoxel_BuildInputsEqual(source, &resident)) continue;
+    entry->last_used = ++s_voxel_room_use;
+    if (entry->geometry && (!ActionVoxel_HasCutouts(entry->geometry) || CaptureMasksSupported())) {
+      if (can_queue)
+        RuntimeLog_Printf("[voxel-room-prebuild] match map=%02x/%02x source=%s\n",
+            group, room, entry->from_live ? "live" : "rom");
+      return ActionVoxel_Retain(entry->geometry);
+    }
     return NULL;
   }
-  entry->last_used = ++s_voxel_room_use;
-  RuntimeLog_Printf("[voxel-room-prebuild] match map=%02x/%02x source=%s\n",
-      group, room, entry->from_live ? "live" : "rom");
-  return ActionVoxel_Retain(entry->geometry);
+  if (can_queue && s_voxel_prebuild.wake) {
+    if (state == kVoxelPrebuildPending) {
+      *waiting = true;
+      return NULL;
+    }
+    /* Limit convergence to one cache's worth of live candidates. */
+    if (s_voxel.queued_room_builds < kVoxelRoomCacheSize) {
+      VoxelRoomBuild *live = CopyLiveVoxelRoom(source);
+      if (live && QueueVoxelRoomBuild(live)) {
+        ++s_voxel.queued_room_builds;
+        *waiting = true;
+        return NULL;
+      }
+    }
+  }
+  ++s_observer.diagnostics.voxel_geometry_build_attempts;
+  ActionVoxelGeometry *built = CompileVoxelRoom(source);
+  if (built && ActionVoxel_HasCutouts(built) && !CaptureMasksSupported()) {
+    ActionVoxel_Release(built);
+    return NULL;
+  }
+  /* The phase cache already owns ordinary animation misses. Retain other
+   * exact variants so a synchronous build is reusable just like a worker's. */
+  if (built && retain_variant) {
+    VoxelRoomBuild *live = CopyLiveVoxelRoom(source);
+    if (live) {
+      live->geometry = ActionVoxel_Retain(built);
+      PublishVoxelRoomBuild(live);
+    }
+  }
+  return built;
 }
 
 static bool VoxelSourceLayout(ActRaiserActionBgLayerSnapshot *live,
@@ -1650,7 +1732,6 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
         s_voxel.tiles[y * width + x] = vram.data[address];
       }
   }
-  const size_t tile_count = (size_t)width * height;
   const ActionRoomScene *reference = s_observer.room_scene;
   if (bounds_changed || terrain_changed)
     ActionVoxelAuthoredLayout_Clear(&s_voxel.authored_layout);
@@ -1692,7 +1773,7 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
   s_voxel.terrain_key = key;
   /* A rejected build also consumed this source. Wait for a new input before
    * retrying so an invalid edit cannot put a full build on every frame. */
-  if (!changed && !animation_changed) return;
+  if (!changed && !animation_changed && !s_voxel.waiting_for_room) return;
   if (changed) ActionVoxelAnimationCache_Clear(&s_voxel.animation_cache);
   const int phase = ActionVoxel_MatchAnimationPhase(reference, &s_voxel.animation,
       source->characters + s_voxel.animation.offset);
@@ -1707,42 +1788,36 @@ void ActRaiserActionBg_PrepareVoxel(bool enabled, const DioramaRoomOverride *ter
     }
     ActionVoxel_Release(s_voxel.geometry);
     s_voxel.geometry = next;
+    s_voxel.waiting_for_room = false;
     return;
   }
-  const bool cache_room = new_room && s_voxel_prebuild.wake;
-  if (cache_room) {
-    if (ActionVoxelAnimationCache_SharesPhases(&s_voxel.animation_cache) && phase != 0) {
-      /* The ROM prebuild uses phase zero. Compare with the normalized
-       * source only for lookup, then restore the actual live upload. */
-      const size_t offset = s_voxel.animation.offset, bytes = s_voxel.animation.bytes;
-      uint8_t live_animation[kActionRoomSceneAnimationWindowBytes];
-      memcpy(live_animation, source->characters + offset, bytes);
-      memcpy(source->characters + offset, reference->characters + offset, bytes);
-      next = FindVoxelRoomBuild(source, terrain, s_voxel.tiles, tile_count, water_source);
-      memcpy(source->characters + offset, live_animation, bytes);
-    } else {
-      next = FindVoxelRoomBuild(source, terrain, s_voxel.tiles, tile_count, water_source);
-    }
+  if (new_room || terrain_changed) s_voxel.queued_room_builds = 0;
+  const bool can_queue_room = new_room || terrain_changed || s_voxel.waiting_for_room;
+  s_voxel.waiting_for_room = false;
+  /* Normalize the snapshot only after the policy proves the geometry is
+   * shared. The live upload still uses its original bytes. */
+  const bool normalize = ActionVoxelAnimationCache_SharesPhases(&s_voxel.animation_cache) && phase != 0;
+  const size_t offset = s_voxel.animation.offset, bytes = s_voxel.animation.bytes;
+  uint8_t live_animation[kActionRoomSceneAnimationWindowBytes];
+  if (normalize) {
+    memcpy(live_animation, source->characters + offset, bytes);
+    memcpy(source->characters + offset, reference->characters + offset, bytes);
   }
-  if (!next) {
-    ++s_observer.diagnostics.voxel_geometry_build_attempts;
-    ActionVoxelGeometry *built = ActionVoxel_Create();
-    if (!built || !ActionVoxel_BuildFromSource(built, &build_source,
-            ActionVoxel_SettingsForRoom(group, room)) ||
-        (ActionVoxel_HasCutouts(built) && !CaptureMasksSupported())) {
-      ActionVoxel_Release(built);
-    } else {
-      next = built;
-      if (cache_room && ActionVoxel_Active(built, group, room))
-        RememberLiveVoxelRoom(source, terrain, s_voxel.tiles, tile_count, built);
-    }
-  }
+  next = ResolveVoxelRoomBuild(&build_source, can_queue_room, changed || can_queue_room || slot < 0,
+      &s_voxel.waiting_for_room);
+  if (normalize) memcpy(source->characters + offset, live_animation, bytes);
   if (ActionVoxel_Active(next, group, room))
     ActionVoxelAnimationCache_Store(&s_voxel.animation_cache, slot, next);
-  /* A failed build falls back to ordinary Diorama. Unknown art uses a build
-   * from its live bytes so capture cannot borrow a different phase's mask. */
+  /* Missing or unfinished geometry falls back to ordinary Diorama. Unknown
+   * art uses its live bytes so capture cannot borrow a different phase's mask. */
   ActionVoxel_Release(s_voxel.geometry);
   s_voxel.geometry = next;
+}
+
+bool ActRaiserActionBg_PrepareLiveVoxelRoom(const DioramaRoomOverride *terrain) {
+  if (!s_voxel_prebuild.wake) return false;
+  ActRaiserActionBg_PrepareVoxel(true, terrain);
+  return s_voxel.waiting_for_room;
 }
 
 static uint16_t ResolveAuthenticActionCameraX(

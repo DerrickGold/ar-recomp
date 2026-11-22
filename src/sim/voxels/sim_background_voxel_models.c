@@ -2,9 +2,11 @@
 
 #include <float.h>
 #include <math.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "sim/voxels/sim_background_voxel_model_key.h"
 #include "sim/voxels/sim_background_bridge.h"
 #include "sim/voxels/sim_background_voxel_region.h"
 
@@ -3754,13 +3756,68 @@ static void BuildAuthoredModel(
 
 }
 
+/* Cache authored bounds for each LOD and pose. The world-view workers and
+ * render owner can share these small entries without sharing mutable meshes.
+ * Collisions replace one entry, and contention just leaves a cache miss. */
+enum { kAuthoredBoundsCacheSize = 16384 };
+static struct AuthoredBoundsEntry {
+  atomic_bool busy;
+  bool valid;
+  SimBackgroundVoxelModelKey key;
+  SimBackgroundVoxelModelBounds bounds;
+} s_authored_bounds[kAuthoredBoundsCacheSize];
+
+static struct AuthoredBoundsEntry *LockAuthoredBounds(
+    const SimBackgroundVoxelObject *object, SimBackgroundVoxelDetail detail,
+    SimBackgroundVoxelStyle style, SimBackgroundVoxelModelKey *key) {
+  *key = SimBackgroundVoxelModelKey_Make(object, detail, style);
+  struct AuthoredBoundsEntry *entry =
+      &s_authored_bounds[SimBackgroundVoxelModelKey_Hash(key) & (kAuthoredBoundsCacheSize - 1)];
+  bool unlocked = false;
+  return atomic_compare_exchange_strong_explicit(&entry->busy, &unlocked, true,
+      memory_order_acquire, memory_order_relaxed) ? entry : NULL;
+}
+
+static bool ReadAuthoredBounds(const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail detail, SimBackgroundVoxelStyle style,
+    SimBackgroundVoxelModelBounds *bounds) {
+  SimBackgroundVoxelModelKey key;
+  struct AuthoredBoundsEntry *entry = LockAuthoredBounds(object, detail, style, &key);
+  if (!entry) return false;
+  const bool hit = entry->valid && SimBackgroundVoxelModelKey_Equals(&entry->key, &key);
+  if (hit) *bounds = entry->bounds;
+  atomic_store_explicit(&entry->busy, false, memory_order_release);
+  return hit;
+}
+
+static void RememberAuthoredBounds(const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail detail, SimBackgroundVoxelStyle style,
+    SimBackgroundVoxelModelBounds bounds) {
+  SimBackgroundVoxelModelKey key;
+  struct AuthoredBoundsEntry *entry = LockAuthoredBounds(object, detail, style, &key);
+  if (!entry) return;
+  entry->key = key;
+  entry->bounds = bounds;
+  entry->valid = true;
+  atomic_store_explicit(&entry->busy, false, memory_order_release);
+}
+
+static SimBackgroundVoxelModelBounds AuthoredBounds(const SimBackgroundVoxelModel *model) {
+  return (SimBackgroundVoxelModelBounds){model->min_x, model->min_y, model->min_z,
+      model->max_x, model->max_y, model->max_z};
+}
+
 void SimBackgroundVoxelModel_BuildStyled(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
     SimBackgroundVoxelStyle style,
     SimBackgroundVoxelModel *out) {
   BuildAuthoredModel(object, detail, style, out);
-  if (out && object) FinalizeModelSurface(out);
+  if (out && object) {
+    if (out->face_count)
+      RememberAuthoredBounds(object, detail, style, AuthoredBounds(out));
+    FinalizeModelSurface(out);
+  }
 }
 
 float SimBackgroundVoxelModel_HeightBound(
@@ -3784,29 +3841,32 @@ bool SimBackgroundVoxelModel_MeasureBounds(
       maximum_detail >= kSimBackgroundVoxelDetail_Count)
     maximum_detail = kSimBackgroundVoxelDetail_High;
   SimBackgroundVoxelObject pose = *object;
-  SimBackgroundVoxelModel model;
   bool measured = false;
   const int phases = object->kind == kSimBackgroundVoxel_Windmill ? 3 : 1;
   for (int phase = 0; phase < phases; phase++) {
     if (phases > 1) pose.animation_phase = (uint8_t)phase;
     for (int detail = kSimBackgroundVoxelDetail_Low;
          detail <= (int)maximum_detail; detail++) {
-      BuildAuthoredModel(&pose, (SimBackgroundVoxelDetail)detail, style, &model);
-      /* Surface finalization only removes faces and writes shading. Measure
-       * its input envelope without paying for duplicate removal/corner AO or
-       * filling the shared render cache with offscreen LODs. */
-      if (!model.face_count) continue;
+      SimBackgroundVoxelModelBounds bounds;
+      if (!ReadAuthoredBounds(&pose, (SimBackgroundVoxelDetail)detail, style, &bounds)) {
+        /* Use the pre-finalization envelope, including offscreen LODs and
+         * animation poses, without populating the visible mesh cache. */
+        SimBackgroundVoxelModel model;
+        BuildAuthoredModel(&pose, (SimBackgroundVoxelDetail)detail, style, &model);
+        if (!model.face_count) continue;
+        bounds = AuthoredBounds(&model);
+        RememberAuthoredBounds(&pose, (SimBackgroundVoxelDetail)detail, style, bounds);
+      }
       if (!measured) {
-        *out = (SimBackgroundVoxelModelBounds){model.min_x, model.min_y, model.min_z,
-            model.max_x, model.max_y, model.max_z};
+        *out = bounds;
         measured = true;
       } else {
-        out->min_x = fminf(out->min_x, model.min_x);
-        out->min_y = fminf(out->min_y, model.min_y);
-        out->min_z = fminf(out->min_z, model.min_z);
-        out->max_x = fmaxf(out->max_x, model.max_x);
-        out->max_y = fmaxf(out->max_y, model.max_y);
-        out->max_z = fmaxf(out->max_z, model.max_z);
+        out->min_x = fminf(out->min_x, bounds.min_x);
+        out->min_y = fminf(out->min_y, bounds.min_y);
+        out->min_z = fminf(out->min_z, bounds.min_z);
+        out->max_x = fmaxf(out->max_x, bounds.max_x);
+        out->max_y = fmaxf(out->max_y, bounds.max_y);
+        out->max_z = fmaxf(out->max_z, bounds.max_z);
       }
     }
   }

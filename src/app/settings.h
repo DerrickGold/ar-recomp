@@ -764,6 +764,7 @@ typedef struct SettingsSaveHost {
 } SettingsSaveHost;
 void Settings_SetSaveHost(const SettingsSaveHost *host);
 bool Settings_SaveDeferred(const char *path);
+void Settings_FallBackToDiorama(void);
 /* File-only operation: never reads the live registry. The host serializes
  * writers to a given path. Only the host invokes this while it is installed;
  * Settings_Save uses it directly when no host is installed. */

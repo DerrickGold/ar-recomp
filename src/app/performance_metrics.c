@@ -59,7 +59,7 @@ void PerformanceMetrics_AddTextureUpload(uint64_t calls, uint64_t bytes) {
 }
 const char *PerformanceMetrics_SceneName(PerformanceScene scene) {
   static const char *const names[kPerformanceScene_Count] = {
-    "Native/menu", "Action 3D", "Town 3D", "World 3D", "Sky Palace", "Action 2D",
+    "Native/menu", "Action 3D", "Town 3D", "World 3D", "Sky Palace", "Action 2D", "Loading",
   };
   return scene >= 0 && scene < kPerformanceScene_Count ? names[scene] : "unknown";
 }

@@ -3,6 +3,7 @@
 #include "save/save_system.h"
 #include "save/save_checkpoint.h"
 #include "byte_order.h"
+#include "snesrecomp/support/utf8_fs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -395,7 +396,7 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   char companion[128], journal[128], blocked[128], name[64];
   snprintf(companion, sizeof(companion), "%s.arname", path);
   snprintf(journal, sizeof(journal), "%s.archeckpoint", path);
-  snprintf(blocked, sizeof(blocked), "%s.archeckpoint.tmp", path);
+  snprintf(blocked, sizeof(blocked), "%s.archeckpoint.parked", path);
   RemoveSave(native);
   RemoveSave(ini);
   RemoveSave(companion);
@@ -447,15 +448,22 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   CHECK(SaveSystem_LoadActive(&error));
   CHECK(SaveSystem_CopyLocalizedPlayerName("RENEE", name, sizeof(name)));
   CHECK(!strcmp(name, "Renée"));
-  /* Name-only updates use the journal too. Failed writes leave the whole old
+  /* Name-only updates use the journal too. An unavailable journal leaves the old
    * snapshot intact; session edits cannot leak into a later metadata retry. */
   CHECK(SaveSystem_SetLocalizedPlayerName("René", "RENEE"));
+  CHECK(sr_replace_file(journal, blocked));
 #ifdef _WIN32
-  CHECK(_mkdir(blocked) == 0);
+  CHECK(_mkdir(journal) == 0);
 #else
-  CHECK(mkdir(blocked, 0700) == 0);
+  CHECK(mkdir(journal, 0700) == 0);
 #endif
   CHECK(!SaveSystem_AutoPersistIfChanged(&error));
+#ifdef _WIN32
+  CHECK(_rmdir(journal) == 0);
+#else
+  CHECK(rmdir(journal) == 0);
+#endif
+  CHECK(sr_replace_file(blocked, journal));
   CHECK(Save_LoadFile((SaveFileFormat)backend, path, disk, &error));
   CHECK(SaveCheckpoint_ReadSnapshot(path, disk, &snapshot, &error));
   CHECK(!strcmp(snapshot.name, "Renée"));
@@ -463,11 +471,6 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   SaveEditRequest_Clear(&edits);
   edits.master_level = 9;
   CHECK(SaveSystem_ApplyEdits(&edits, true, false, false, &error));
-#ifdef _WIN32
-  CHECK(_rmdir(blocked) == 0);
-#else
-  CHECK(rmdir(blocked) == 0);
-#endif
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
   CHECK(SaveCheckpoint_ReadSnapshot(path, disk, &snapshot, &error));
   CHECK(!memcmp(snapshot.image, disk, sizeof(disk)) && !strcmp(snapshot.name, "René"));
@@ -486,7 +489,7 @@ static void TestEditedNameExtension(SaveBackend backend) {
   const SaveFileFormat format = (SaveFileFormat)backend;
   char companion[128], temporary[128], name[64];
   snprintf(companion, sizeof(companion), "%s.arname", path);
-  snprintf(temporary, sizeof(temporary), "%s.archeckpoint.tmp", path);
+  snprintf(temporary, sizeof(temporary), "%s.archeckpoint.parked", path);
   RemoveSave(native);
   RemoveSave(ini);
   RemoveSave(companion);
@@ -528,24 +531,28 @@ static void TestEditedNameExtension(SaveBackend backend) {
 
   /* Snapshot preparation failure leaves the whole previous save exportable.
    * Session edits remain private while persistence is unavailable. */
+  char journal[128];
+  snprintf(journal, sizeof(journal), "%s.archeckpoint", path);
+  CHECK(sr_replace_file(journal, temporary));
 #ifdef _WIN32
-  CHECK(_mkdir(temporary) == 0);
+  CHECK(_mkdir(journal) == 0);
 #else
-  CHECK(mkdir(temporary, 0700) == 0);
+  CHECK(mkdir(journal, 0700) == 0);
 #endif
   edits.master_level = 12;
   CHECK(!SaveSystem_ApplyEdits(&edits, true, true, false, &error));
   CHECK(error.message[0]);
+#ifdef _WIN32
+  CHECK(_rmdir(journal) == 0);
+#else
+  CHECK(rmdir(journal) == 0);
+#endif
+  CHECK(sr_replace_file(temporary, journal));
   CHECK(Save_LoadFile(format, path, disk, &error));
   CHECK(disk[0x1442] == 11 && Save_ChecksumValid(disk));
   CHECK(SaveSystem_ExportCampaign(archive, &error));
   edits.master_level = 13;
   CHECK(SaveSystem_ApplyEdits(&edits, true, false, false, &error));
-#ifdef _WIN32
-  CHECK(_rmdir(temporary) == 0);
-#else
-  CHECK(rmdir(temporary) == 0);
-#endif
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
   CHECK(SaveSystem_ExportCampaign(archive, &error));
   CHECK(Save_LoadFile(format, path, disk, &error));

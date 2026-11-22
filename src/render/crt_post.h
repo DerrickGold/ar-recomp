@@ -26,6 +26,7 @@ typedef struct CrtPostConfig {
  * failure also returns false, but latches SessionFatal so the caller can end
  * the frame and session cleanly. */
 bool CrtPost_Begin(ArRenderDevice *device, const CrtPostConfig *config);
+bool CrtPost_RequiresTarget(const CrtPostConfig *config);
 
 /* Video-boot probe, independent of whether the user currently enables CRT. */
 bool CrtPost_Prepare(ArRenderDevice *device);

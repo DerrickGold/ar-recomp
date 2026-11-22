@@ -14,6 +14,7 @@
 static SDL_Semaphore *s_started, *s_release;
 static unsigned s_writes;
 static char s_last[32];
+static bool s_fail_once;
 
 bool Settings_WriteSnapshot(const char *path, const char *text, size_t size) {
   CHECK(!strcmp(path, "settings-probe.ini"));
@@ -25,6 +26,10 @@ bool Settings_WriteSnapshot(const char *path, const char *text, size_t size) {
   memcpy(s_last, text, size);
   s_last[size] = 0;
   ++s_writes;
+  if (!strcmp(text, "retry") && s_fail_once) {
+    s_fail_once = false;
+    return false;
+  }
   return strcmp(text, "fail") != 0;
 }
 
@@ -60,6 +65,16 @@ int main(void) {
   CHECK(host.submit(host.context, "settings-probe.ini", "shutdown", 8));
   CHECK(SettingsPersistence_Destroy(writer));
   CHECK(s_writes == 5 && !strcmp(s_last, "shutdown"));
+  writer = SettingsPersistence_Create();
+  CHECK(writer);
+  const SettingsSaveHost retry = SettingsPersistence_Host(writer);
+  s_fail_once = true;
+  char accepted[] = "retry";
+  CHECK(retry.submit(retry.context, "settings-probe.ini", accepted, 5));
+  CHECK(!retry.drain(retry.context));
+  memset(accepted, 'x', 5);
+  CHECK(SettingsPersistence_Destroy(writer));
+  CHECK(s_writes == 7 && !strcmp(s_last, "retry"));
   CHECK(SettingsPersistence_Destroy(NULL));
   SDL_DestroySemaphore(s_started);
   SDL_DestroySemaphore(s_release);

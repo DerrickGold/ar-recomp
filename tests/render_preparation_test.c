@@ -3,6 +3,7 @@
 #include "app/settings.h"
 #include "present/preparation_indicator.h"
 #include "diorama/diorama_bg_gpu.h"
+#include "diorama/diorama_trunk_gpu.h"
 #include "diorama/diorama_effect_backend.h"
 #include "diorama/diorama_frame_generation.h"
 #include "render/gpu_compile_log.h"
@@ -47,6 +48,7 @@ bool DioramaBgGpu_Prepare(ArRenderDevice *device) {
   ++bg_prepares;
   return true;
 }
+bool DioramaTrunkGpu_Prepare(ArRenderDevice *device) { return device != NULL; }
 bool DioramaFrameGeneration_PreparePipelines(ArRenderDevice *device, bool interpolation) {
   (void)device;
   ++action_prepares;
@@ -164,6 +166,13 @@ bool ArRenderDevice_DrawGeometryWithState(ArRenderDevice *device, ArRenderTextur
   (void)texture;
   assert(vertices && indices && vertex_count == 3 && index_count == 3);
   return state->blend != rejected_blend;
+}
+bool ArRenderDevice_DrawTextureWithState(ArRenderDevice *device, ArRenderTexture texture,
+                                        const ArRenderRectF *source,
+                                        const ArRenderRectF *destination,
+                                        const ArRenderDrawState *state) {
+  assert(device && texture.value && source && destination);
+  return state && state->scene_resolve == kArRenderSceneResolve_Fxaa;
 }
 int main(void) {
   ArRenderDevice device = {0};

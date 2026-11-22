@@ -21,6 +21,7 @@ typedef enum HostDisplayPresentMode {
   /* Replace an invalidated Voxel camera capture without advancing native
    * time. Retain its zero-tick image, but never count it as a native tick. */
   kHostDisplayPresent_CameraReseed,
+  kHostDisplayPresent_Loading,
 } HostDisplayPresentMode;
 
 /* Resolve whether an emulated tick is discarded, presented interactively, or
@@ -94,6 +95,7 @@ struct FrameSlot;
 /* Present an already composited scene using the common refresh policy and
  * completed-frame accounting. Imported sessions own their capture/clock. */
 bool HostDisplay_PresentCompositedFrame(HostDisplayPresentMode mode);
+void HostDisplay_LoadingCompleted(void);
 bool HostDisplay_StageOwnedFrame(const struct FrameSlot *frame);
 bool HostDisplay_CanPresentDuringProduction(void);
 /* Software-paced producer: prepare captures early, draw with measured lead,

@@ -36,10 +36,16 @@ struct ActionVoxelGeometry;
  * lifetime and joins it before releasing the action background session. */
 typedef bool (*ActRaiserVoxelPrebuildWake)(void *context);
 void ActRaiserActionBg_SetVoxelPrebuildWake(ActRaiserVoxelPrebuildWake wake, void *context);
-void ActRaiserActionBg_RequestVoxelPrebuild(uint8_t group, uint8_t room,
-    uint8_t profile, uint8_t mosaic, const struct DioramaRoomOverride *overrides);
+/* Queue a speculative ROM build using resolved terrain edits. Live inputs
+ * validate the candidate before adopting it. */
+bool ActRaiserActionBg_RequestVoxelPrebuild(uint8_t group, uint8_t room,
+    uint8_t profile, uint8_t mosaic, const struct DioramaRoomOverride *terrain);
+bool ActRaiserActionBg_VoxelPrebuildPending(void);
 void ActRaiserActionBg_BuildVoxelPrebuild(void);
 void ActRaiserActionBg_PrepareVoxel(bool enabled, const struct DioramaRoomOverride *terrain);
+/* Capture the held tick's live inputs for the same room worker used by
+ * gameplay. Returns true while live publication is waiting on that worker. */
+bool ActRaiserActionBg_PrepareLiveVoxelRoom(const struct DioramaRoomOverride *terrain);
 const struct ActionVoxelGeometry *ActRaiserActionBg_VoxelGeometry(unsigned group, unsigned room);
 const struct ActionTrunkAssets *ActRaiserActionBg_TrunkAssets(unsigned group,unsigned room,
     const struct DioramaRoomOverride *edits);

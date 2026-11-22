@@ -71,7 +71,7 @@ enum {
    * which is only true because of that distinction. Reporting it as absent
    * would replace the very file we refused to read. */
   kIniUpgradeMaxFileBytes = 4 << 20,
-  /* Room for a live path plus the ".tmp" suffix and the "defaults/" prefix. */
+  /* Room for a live path and the "defaults/" prefix. */
   kIniUpgradePathMax = 1088,
 };
 
@@ -123,32 +123,8 @@ static char *ReadWholeFile(const char *path, bool *out_absent) {
   return data;
 }
 
-/* Write `text` to `path` via a temp file + rename, so an interrupted write
- * cannot truncate a file that may hold unreproducible user content. */
 static bool WriteWholeFile(const char *path, const char *text, size_t length) {
-  char temporary[kIniUpgradePathMax];
-  snprintf(temporary, sizeof temporary, "%s.tmp", path);
-  FILE *file = sr_fopen(temporary, "wb");
-  if (!file) return false;
-  size_t put = fwrite(text, 1, length, file);
-  if (put != length || fflush(file) != 0) {
-    fclose(file);
-    sr_remove(temporary);
-    return false;
-  }
-  if (fclose(file) != 0) {
-    sr_remove(temporary);
-    return false;
-  }
-  /* One atomic replace on both platforms -- see atomic_replace.h for why a bare
-   * rename() is not portable here and why remove-then-rename is worse than the
-   * bug it fixes. On failure the live file is untouched, which is what makes the
-   * caller's "your file is unchanged" true. */
-  if (!AtomicReplaceFile(temporary, path)) {
-    sr_remove(temporary);
-    return false;
-  }
-  return true;
+  return AtomicReplace_WriteBytes(path, text, length, false);
 }
 
 /* Keep every distinct pre-update copy, including the legacy install on its

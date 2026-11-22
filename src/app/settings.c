@@ -65,14 +65,6 @@ static int SerializeDeathHeimRoster(char *out, int capacity, const void *field) 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
-#ifdef _WIN32
-#include <windows.h>
-#include <io.h>       /* _get_osfhandle/_fileno: Settings_Save durability */
-#else
-#include <fcntl.h>    /* open: directory fsync after rename */
-#include <unistd.h>   /* fsync/fileno/close: Settings_Save durability */
-#endif
-
 Settings g_settings;
 static SettingsChangeObserver s_change_observer;
 static SettingsActionObserver s_action_observer;
@@ -305,6 +297,9 @@ static void DioramaModeChanged(const SettingDesc *desc) {
   (void)desc;
   Diorama_OnModeChanged();
 }
+
+/* Keep the requested mode when a session cannot initialize optional depth. */
+static bool s_voxel_fallback;
 
 static int FormatHudScale(char *buffer, int buffer_size, const void *field) {
   int value = *(const int *)field;
@@ -3216,7 +3211,8 @@ SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value) {
     if (value != 0) return kSettingChange_Rejected;
     hardware->requested = false;
   }
-  if (old_value == value) return kSettingChange_Unchanged;
+  const bool replaces_voxel_fallback = desc->field == &g_settings.diorama_mode && s_voxel_fallback;
+  if (old_value == value && !replaces_voxel_fallback) return kSettingChange_Unchanged;
   if (desc->prepare_change && !desc->prepare_change(desc, value))
     return kSettingChange_Rejected;
 
@@ -3230,7 +3226,15 @@ SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value) {
     case kSettingType_Action:
       return kSettingChange_Rejected;
   }
+  if (replaces_voxel_fallback) s_voxel_fallback = false;
   return FinishChange(desc, desc->sticky && old_value != 0 && value == 0);
+}
+
+void Settings_FallBackToDiorama(void) {
+  if (g_settings.diorama_mode != kAction3D_Voxel) return;
+  g_settings.diorama_mode = kAction3D_Diorama;
+  s_voxel_fallback = true;
+  FinishChange(Settings_Find("diorama_mode"), false);
 }
 
 SettingChangeResult Settings_SetText(const SettingDesc *desc,
@@ -3687,6 +3691,7 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
 }
 
 void Settings_InitWithFile(const char *path) {
+  s_voxel_fallback = false;
   Settings_SetDeathHeimHost(NULL);
   SettingsChangeObserver observer = s_change_observer;
   s_change_observer = NULL;
@@ -3781,37 +3786,6 @@ bool Settings_Load(const char *path) {
   return Settings_LoadInternal(path, false, 0, false);
 }
 
-/* Durability half of the atomic write — see the long note in
- * save_system.c's WriteAtomic. MOVEFILE_WRITE_THROUGH's documented flush
- * guarantee is worded for the cross-volume copy+delete case, and POSIX
- * fsync(2) does not cover the containing directory entry, so both platforms
- * need an explicit data flush and POSIX needs a directory fsync. */
-static bool Settings_FlushFileData(FILE *file) {
-#ifdef _WIN32
-  HANDLE h = (HANDLE)_get_osfhandle(_fileno(file));
-  if (h == INVALID_HANDLE_VALUE) return false;
-  return FlushFileBuffers(h) != 0;
-#else
-  return fsync(fileno(file)) == 0;
-#endif
-}
-
-static void Settings_SyncContainingDirectory(const char *path) {
-#ifndef _WIN32
-  char dir[kHostPathCapacity];
-  snprintf(dir, sizeof dir, "%s", path);
-  char *slash = strrchr(dir, '/');
-  if (slash) *slash = '\0';
-  else snprintf(dir, sizeof dir, ".");
-  int fd = open(dir[0] ? dir : "/", O_RDONLY);
-  if (fd < 0) return;
-  (void)fsync(fd);
-  close(fd);
-#else
-  (void)path;
-#endif
-}
-
 /* Set false for diagnostic runs (see Settings_SetPersistenceEnabled). Owned
  * here rather than queried from input_replay.c so settings.c keeps no dependency
  * on the replay module -- several test targets compile settings.c without it. */
@@ -3869,6 +3843,8 @@ static bool SaveSettings(const char *path, bool deferred) {
     /* A launcher override and any subsequent window-mode changes apply to this session. */
     if (desc->field == &g_settings.window_mode && s_saved_window_mode != kWindowMode_Count)
       snprintf(value, sizeof(value), "%s", kWindowModeLabels[s_saved_window_mode]);
+    else if (desc->field == &g_settings.diorama_mode && s_voxel_fallback)
+      snprintf(value, sizeof(value), "%s", kAction3DModeLabels[kAction3D_Voxel]);
     else if (hardware && hardware->suppressed)
       snprintf(value, sizeof(value), "%s", hardware->requested ? "On" : "Off");
     else if (desc->serialize) desc->serialize(value, sizeof(value), desc->field);
@@ -3898,34 +3874,8 @@ bool Settings_SaveDeferred(const char *path) { return SaveSettings(path, true); 
 
 bool Settings_WriteSnapshot(const char *path, const char *text, size_t size) {
   if (!path || !path[0] || !text || !size) return false;
-  size_t path_length = strlen(path);
-  char *temporary = (char *)malloc(path_length + 5);
-  if (!temporary) return false;
-  memcpy(temporary, path, path_length);
-  memcpy(temporary + path_length, ".tmp", 5);
-
-  FILE *file = sr_fopen(temporary, "w");
-  if (!file) {
-    RuntimeLog_Printf("[settings] cannot write %s: %s\n", temporary,
-            strerror(errno));
-    free(temporary);
-    return false;
-  }
-
-  bool success = fwrite(text, 1, size, file) == size;
-  if (fflush(file) != 0 || ferror(file)) success = false;
-  if (success && !Settings_FlushFileData(file)) success = false;
-  if (fclose(file) != 0) success = false;
-
-  if (success && !AtomicReplaceFile(temporary, path)) {
-    RuntimeLog_Printf("[settings] cannot replace %s: %s\n", path,
-            strerror(errno));
-    success = false;
-  }
-  /* Best-effort: make the rename itself durable. */
-  if (success) Settings_SyncContainingDirectory(path);
-  if (!success) sr_remove(temporary);
-  free(temporary);
+  const bool success = AtomicReplace_WriteBytes(path, text, size, true);
+  if (!success) RuntimeLog_Printf("[settings] could not write %s\n", path);
   return success;
 }
 

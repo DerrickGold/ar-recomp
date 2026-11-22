@@ -176,15 +176,12 @@ void ArRenderOutputFrame_Abort(ArRenderOutputFrame *frame) {
   ResetFrame(frame);
 }
 
-ArRenderTargetBeginResult ArRenderSceneScale_Begin(
-    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset,
-    bool allow_supersampling, SceneAntiAliasing antialiasing) {
-  if (s_scene_scale.parent.valid) return kArRenderTargetBegin_StateLost;
+static ArRenderExtentI SceneScaleExtent(ArRenderDevice *device, ArRenderRectI destination,
+    RenderResolution preset, bool allow_supersampling, SceneAntiAliasing *antialiasing) {
   ArRenderExtentI extent =
       ArPresentationLayout_RenderExtent(destination, preset, allow_supersampling);
   const ArRenderCapabilities *caps = ArRenderDevice_Capabilities(device);
-  if (!caps || extent.width <= 0 || extent.height <= 0)
-    return kArRenderTargetBegin_Omitted;
+  if (!caps || extent.width <= 0 || extent.height <= 0) return (ArRenderExtentI){0};
   if (extent.height > destination.h &&
       ((caps->maximum_render_target_width > 0 &&
         extent.width > caps->maximum_render_target_width) ||
@@ -192,9 +189,24 @@ ArRenderTargetBeginResult ArRenderSceneScale_Begin(
         extent.height > caps->maximum_render_target_height)))
     extent = (ArRenderExtentI){destination.w, destination.h};
   if (!ArRenderCapabilities_Has(caps, kArRenderCapability_CustomShaders))
-    antialiasing = kSceneAntiAliasing_Off;
-  if (antialiasing == kSceneAntiAliasing_Off && extent.height == destination.h)
-    return kArRenderTargetBegin_Omitted;
+    *antialiasing = kSceneAntiAliasing_Off;
+  if (*antialiasing == kSceneAntiAliasing_Off && extent.height == destination.h)
+    return (ArRenderExtentI){0};
+  return extent;
+}
+
+bool ArRenderSceneScale_RequiresTarget(ArRenderDevice *device, ArRenderRectI destination,
+    RenderResolution preset, bool allow_supersampling, SceneAntiAliasing antialiasing) {
+  return SceneScaleExtent(device, destination, preset, allow_supersampling, &antialiasing).width > 0;
+}
+
+ArRenderTargetBeginResult ArRenderSceneScale_Begin(
+    ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset,
+    bool allow_supersampling, SceneAntiAliasing antialiasing) {
+  if (s_scene_scale.parent.valid) return kArRenderTargetBegin_StateLost;
+  const ArRenderExtentI extent =
+      SceneScaleExtent(device, destination, preset, allow_supersampling, &antialiasing);
+  if (!extent.width) return kArRenderTargetBegin_Omitted;
   if (s_scene_scale.device != device || !ArRenderTexture_IsValid(s_scene_scale.texture) ||
       extent.width != s_scene_scale.extent.width ||
       extent.height != s_scene_scale.extent.height) {

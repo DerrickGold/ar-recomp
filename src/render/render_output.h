@@ -66,6 +66,8 @@ void ArRenderOutputFrame_Abort(ArRenderOutputFrame *frame);
 ArRenderTargetBeginResult ArRenderSceneScale_Begin(
     ArRenderDevice *device, ArRenderRectI destination, RenderResolution preset,
     bool allow_supersampling, SceneAntiAliasing antialiasing);
+bool ArRenderSceneScale_RequiresTarget(ArRenderDevice *device, ArRenderRectI destination,
+    RenderResolution preset, bool allow_supersampling, SceneAntiAliasing antialiasing);
 bool ArRenderSceneScale_Viewport(ArRenderDevice *device, ArRenderRectI *viewport);
 bool ArRenderSceneScale_Resolve(
     ArRenderDevice *device, ArRenderRectI *viewport, ArRenderFilter filter);

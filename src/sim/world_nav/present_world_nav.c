@@ -660,6 +660,40 @@ static bool WorldNavigationInspecting(const FrameSlot *slot) {
   return slot->sim_camera.orbit_yaw != 0 || slot->sim_camera.orbit_pitch != 0;
 }
 
+typedef struct WorldNavigationBoundsWork {
+  const SimWorldNavigationTownObject *objects;
+  SimWorldNavigationTownObject *previous;
+  WorldNavigationModelBounds *bounds;
+  size_t reusable_count;
+  SimBackgroundVoxelDetail detail;
+  SimBackgroundVoxelStyle style;
+} WorldNavigationBoundsWork;
+
+static void MeasureWorldNavigationBounds(void *context, size_t first, size_t end) {
+  const WorldNavigationBoundsWork *work = context;
+  for (size_t i = first; i < end; ++i) {
+    const SimWorldNavigationTownObject *object = &work->objects[i];
+    if (i < work->reusable_count && !memcmp(&work->previous[i], object, sizeof(*object)))
+      continue;
+    const SimBackgroundVoxelProportions *proportions =
+        SimBackgroundVoxelProportions_Get((SimBackgroundVoxelKind)object->kind);
+    SimBackgroundVoxelModelBounds measured;
+    WorldNavigationModelBounds *bound = &work->bounds[i];
+    *bound = (WorldNavigationModelBounds){0};
+    if (SimBackgroundVoxelModel_MeasureBounds(object, work->detail, work->style, &measured)) {
+      const SimBackgroundBridgeBounds footprint = WorldNavigationObjectBounds(object);
+      const float extent_x = fmaxf(fabsf(measured.min_x - footprint.width * .5f),
+          fabsf(measured.max_x - footprint.width * .5f));
+      const float extent_y = fmaxf(fabsf(measured.min_y - footprint.depth * .5f),
+          fabsf(measured.max_y - footprint.depth * .5f));
+      bound->minimum_rise = measured.min_z * proportions->height_scale / kSimTownCellPixels;
+      bound->maximum_rise = measured.max_z * proportions->height_scale / kSimTownCellPixels;
+      bound->footprint_extent = hypotf(extent_x, extent_y) * proportions->footprint_scale;
+    }
+    memcpy(&work->previous[i], object, sizeof(*object));
+  }
+}
+
 static float WorldNavigationModelHeightBound(const FrameSlot *slot) {
   if (!slot->sim.world_navigation_models || !slot->sim.background_voxel_enabled)
     return 0.0f;
@@ -670,38 +704,30 @@ static float WorldNavigationModelHeightBound(const FrameSlot *slot) {
       g_world_nav_models.detail == slot->sim.background_voxel_detail &&
       g_world_nav_models.style == slot->sim.background_voxel_style;
   const float chart_radius = WorldNavigationChartRadius(slot);
-  if (same_bounds_basis && g_world_nav_models.chart_radius_tiles == chart_radius &&
+  const bool same_objects = same_bounds_basis &&
       g_world_nav_models.object_count == towns->object_count &&
       !memcmp(g_world_nav_models.objects, towns->objects,
-          towns->object_count * sizeof(towns->objects[0])))
+          towns->object_count * sizeof(towns->objects[0]));
+  if (same_objects && g_world_nav_models.chart_radius_tiles == chart_radius)
     return g_world_nav_models.maximum_rise;
+  if (!same_objects && towns->object_count) {
+    WorldNavigationBoundsWork work = {
+      .objects = towns->objects,
+      .previous = g_world_nav_models.objects,
+      .bounds = g_world_nav_models.bounds,
+      .reusable_count = same_bounds_basis ? g_world_nav_models.object_count : 0,
+      .detail = (SimBackgroundVoxelDetail)slot->sim.background_voxel_detail,
+      .style = (SimBackgroundVoxelStyle)slot->sim.background_voxel_style,
+    };
+    /* First globe entry measures the entire town set across LODs and
+     * animated poses. Each object writes its own cached envelope. */
+    HostParallelWork_Run(WorldNavigationWorkers(), towns->object_count, 8,
+        MeasureWorldNavigationBounds, &work);
+  }
   float maximum = 0.0f;
   for (uint16_t i = 0; i < towns->object_count; i++) {
-    const SimWorldNavigationTownObject *object = &towns->objects[i];
-    if (!same_bounds_basis || i >= g_world_nav_models.object_count ||
-        memcmp(&g_world_nav_models.objects[i], object, sizeof(*object))) {
-      const SimBackgroundVoxelProportions *proportions =
-          SimBackgroundVoxelProportions_Get((SimBackgroundVoxelKind)object->kind);
-      SimBackgroundVoxelModelBounds measured;
-      WorldNavigationModelBounds *bound = &g_world_nav_models.bounds[i];
-      *bound = (WorldNavigationModelBounds){0};
-      if (SimBackgroundVoxelModel_MeasureBounds(
-          object, (SimBackgroundVoxelDetail)slot->sim.background_voxel_detail,
-          (SimBackgroundVoxelStyle)slot->sim.background_voxel_style, &measured)) {
-        const SimBackgroundBridgeBounds footprint = WorldNavigationObjectBounds(object);
-        const float extent_x = fmaxf(fabsf(measured.min_x - footprint.width * .5f),
-            fabsf(measured.max_x - footprint.width * .5f));
-        const float extent_y = fmaxf(fabsf(measured.min_y - footprint.depth * .5f),
-            fabsf(measured.max_y - footprint.depth * .5f));
-        bound->minimum_rise = measured.min_z * proportions->height_scale / kSimTownCellPixels;
-        bound->maximum_rise = measured.max_z * proportions->height_scale / kSimTownCellPixels;
-        bound->footprint_extent = hypotf(extent_x, extent_y) * proportions->footprint_scale;
-      }
-      memcpy(&g_world_nav_models.objects[i], object, sizeof(*object));
-    }
-    /* Curvature changes the culling angle, not the authored model envelope.
-     * Keep the unscaled extent so switching view families avoids rebuilding
-     * every LOD and windmill pose and still matches a cold calculation. */
+    /* The authored extent is independent of curvature. Only the culling
+     * angle changes when moving between the Palace and navigation views. */
     WorldNavigationModelBounds *bound = &g_world_nav_models.bounds[i];
     bound->angular_radius = bound->footprint_extent / (kSimTownCellPixels * chart_radius);
     maximum = fmaxf(maximum, bound->maximum_rise);
@@ -709,7 +735,7 @@ static float WorldNavigationModelHeightBound(const FrameSlot *slot) {
   g_world_nav_models.object_count = towns->object_count;
   g_world_nav_models.detail = slot->sim.background_voxel_detail;
   g_world_nav_models.style = slot->sim.background_voxel_style;
-  g_world_nav_models.chart_radius_tiles = WorldNavigationChartRadius(slot);
+  g_world_nav_models.chart_radius_tiles = chart_radius;
   g_world_nav_models.maximum_rise = maximum;
   g_world_nav_models.revision++;
   /* The stereographic chart metric is at most one. This radial bound covers

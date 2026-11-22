@@ -19,6 +19,21 @@ class PacingTraceTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'still recording or incomplete'):
                 analyze(path)
 
+    def test_unique_partial_does_not_shadow_a_published_capture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'pacing[1].csv'
+            partial = path.with_name('pacing[1].csv.123.0.partial')
+            partial.touch()
+            for incomplete in (path, partial):
+                with self.assertRaisesRegex(ValueError, 'still recording or incomplete'):
+                    analyze(incomplete)
+            rows = self.rows()
+            with path.open('w', newline='') as f:
+                writer = csv.DictWriter(f, rows[0].keys())
+                writer.writeheader()
+                writer.writerows(rows)
+            self.assertEqual(analyze(path)['presentation_fps']['completed_presents'], 120)
+
     def rows(self):
         rows = []
         for tick in range(1200, 1320):

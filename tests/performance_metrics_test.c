@@ -292,6 +292,28 @@ static void TestParallelAndCapacity(void) {
   NEAR(snapshot.frame_p95_ms, 1);
 }
 
+static void TestLoadingSeparatesGameplayIntervals(void) {
+  Fresh();
+  const PerformanceContext game = {.scene = kPerformanceScene_Action};
+  const PerformanceContext loading = {.scene = kPerformanceScene_Loading, .host_mode = 4};
+  PerformanceMetrics_SetContext(&game);
+  PerformanceMetrics_PresentCompleted(10000000);
+  PerformanceMetrics_SetContext(&loading);
+  for (unsigned frame = 0; frame <= 50; ++frame)
+    PerformanceMetrics_PresentCompleted(250000000 + (uint64_t)frame * 20000000);
+  PerformanceSnapshot snapshot;
+  PerformanceMetrics_Snapshot(&snapshot);
+  CHECK(snapshot.ready && snapshot.context.scene == kPerformanceScene_Loading);
+  NEAR(snapshot.frame_max_ms, 20);
+
+  PerformanceMetrics_SetContext(&game);
+  for (unsigned frame = 0; frame <= 100; ++frame)
+    PerformanceMetrics_PresentCompleted(1500000000 + (uint64_t)frame * 10000000);
+  PerformanceMetrics_Snapshot(&snapshot);
+  CHECK(snapshot.ready && snapshot.context.scene == kPerformanceScene_Action);
+  NEAR(snapshot.frame_max_ms, 10);
+}
+
 static void TestOverlayLayout(void) {
   CHECK(!strcmp(PerformanceMetrics_SceneName(kPerformanceScene_ActionFlat), "Action 2D"));
   PerformanceSnapshot flat = {.ready = true, .context.scene = kPerformanceScene_ActionFlat};
@@ -443,6 +465,7 @@ static void TestCompleteReport(void) {
 
 int main(void) {
   TestToggleAndWindow();
+  TestLoadingSeparatesGameplayIntervals();
   TestParallelAndCapacity();
   TestBackgroundBatch();
   TestCompleteReport();

@@ -6,14 +6,20 @@
 #include <string.h>
 
 #include "app/runtime_log.h"
+#include "host/atomic_replace.h"
 #include "platform/sdl/diagnostic_writer_sdl.h"
 #include "snesrecomp/support/utf8_fs.h"
 
 struct FrameTrace {
   DiagnosticWriter *writer;
   DiagnosticWrite write;
+  struct FrameTrace *next;
+  char *partial;
   char path[];
 };
+
+/* The host owns trace creation and shutdown. One live schema per filename. */
+static FrameTrace *s_open_traces;
 
 typedef struct TracePublication {
   char *partial;
@@ -22,7 +28,8 @@ typedef struct TracePublication {
 
 static bool PublishTrace(void *context, bool complete) {
   TracePublication *publication = context;
-  const bool ok = !complete || sr_replace_file(publication->partial, publication->path);
+  const bool ok = !complete || AtomicReplaceFile(publication->partial, publication->path);
+  free(publication->partial);
   free(publication);
   return ok;
 }
@@ -103,32 +110,56 @@ static const struct {
   },
 };
 
+static bool SameTraceDestination(const FrameTrace *active, const char *path) {
+  if (!strcmp(path, active->path)) return true;
+  /* The destination may not exist yet. Look for this writer's unique staging
+   * name through the other spelling and let the filesystem resolve aliases. */
+  const char *suffix = active->partial + strlen(active->path);
+  const size_t path_length = strlen(path), suffix_size = strlen(suffix) + 1;
+  if (path_length > SIZE_MAX - suffix_size) return true;
+  char *alias = malloc(path_length + suffix_size);
+  if (!alias) return true;
+  memcpy(alias, path, path_length);
+  memcpy(alias + path_length, suffix, suffix_size);
+  const bool match = AtomicReplace_SameFile(alias, active->partial);
+  free(alias);
+  return match;
+}
+
 FrameTrace *FrameTrace_Open(const char *path, FrameTraceType type) {
   if (!path || !*path || (unsigned)type >= sizeof(kFormats) / sizeof(kFormats[0])) return NULL;
+  for (const FrameTrace *active = s_open_traces; active; active = active->next)
+    if (SameTraceDestination(active, path)) return NULL;
   const size_t size = strlen(path) + 1;
   FrameTrace *trace = malloc(sizeof(*trace) + size);
-  TracePublication *publication = malloc(sizeof(*publication) + 2 * size + sizeof(".partial") - 1);
+  TracePublication *publication = calloc(1, sizeof(*publication) + size);
+  if (trace) trace->partial = NULL;
   if (trace && publication) {
     memcpy(trace->path, path, size);
     memcpy(publication->path, path, size);
-    publication->partial = publication->path + size;
-    snprintf(publication->partial, size + sizeof(".partial") - 1, "%s.partial", path);
-    FILE *file = sr_fopen(publication->partial, "wbx");
+    FILE *file = AtomicReplace_OpenTemporary(path, "partial", &publication->partial);
     if (file) {
-      if (fputs(kFormats[type].header, file) >= 0) {
+      trace->partial = strdup(publication->partial);
+      if (trace->partial && fputs(kFormats[type].header, file) >= 0) {
         trace->write = kFormats[type].write;
         trace->writer = DiagnosticWriter_Create(file, 2048, kFormats[type].row_size,
             (DiagnosticWriterOptions){
               .close_output = true, .finalize = PublishTrace, .context = publication,
             });
-        if (trace->writer) return trace;
+        if (trace->writer) {
+          trace->next = s_open_traces;
+          s_open_traces = trace;
+          return trace;
+        }
       }
       fclose(file);
       sr_remove(publication->partial);
     }
   }
   RuntimeLog_Printf("[frame-trace] could not start writer for %s\n", path);
+  if (publication) free(publication->partial);
   free(publication);
+  if (trace) free(trace->partial);
   free(trace);
   return NULL;
 }
@@ -148,8 +179,12 @@ void FrameTrace_CloseAll(FrameTrace *const *traces, size_t count) {
     const DiagnosticWriterResult result =
         DiagnosticWriter_Finish(trace->writer, now < deadline ? (int)(deadline - now) : 0);
     if (result.dropped || result.failed || result.timed_out)
-      RuntimeLog_Printf("[frame-trace] incomplete %s.partial dropped=%zu failed=%d timed-out=%d\n",
-                        trace->path, result.dropped, result.failed, result.timed_out);
+      RuntimeLog_Printf("[frame-trace] incomplete %s dropped=%zu failed=%d timed-out=%d\n",
+                        trace->partial, result.dropped, result.failed, result.timed_out);
+    FrameTrace **link = &s_open_traces;
+    while (*link != trace) link = &(*link)->next;
+    *link = trace->next;
+    free(trace->partial);
     free(trace);
   }
 }

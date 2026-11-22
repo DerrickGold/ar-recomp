@@ -678,32 +678,23 @@ static void TestDeferredSettingsSnapshot(void) {
 }
 
 static void TestSettingsWriterRecovery(void) {
-  const char *path = "actraiser-settings-recovery-test.ini";
-  const char *blocked = "actraiser-settings-recovery-test.ini.tmp";
+  const char *directory = "actraiser-settings-recovery-test";
+  const char *path = "actraiser-settings-recovery-test/settings.ini";
   ClearSettingsEnv();
   Settings_Init();
   Settings_SetPersistenceEnabled(true);
   CHECK(SDL_Init(0));
   SDL_PathInfo info;
-  /* Never remove an existing fixture or unrelated file. An empty directory
-   * at the atomic temporary path deterministically fails opening the file,
-   * including on Windows and when the test runs with elevated privileges. */
-  const bool exists = SDL_GetPathInfo(blocked, &info);
+  /* A missing parent deterministically fails staging on every platform. */
+  const bool exists = SDL_GetPathInfo(directory, &info);
   CHECK(!exists);
   if (exists) {
-    SDL_Quit();
-    return;
-  }
-  const bool created = SDL_CreateDirectory(blocked);
-  CHECK(created);
-  if (!created) {
     SDL_Quit();
     return;
   }
   SettingsPersistence *writer = SettingsPersistence_Create();
   CHECK(writer);
   if (!writer) {
-    SDL_RemovePath(blocked);
     SDL_Quit();
     return;
   }
@@ -712,7 +703,7 @@ static void TestSettingsWriterRecovery(void) {
   g_settings.audio_master_volume = 20;
   CHECK(Settings_SaveDeferred(path));
   CHECK(!host.drain(host.context));
-  CHECK(SDL_RemovePath(blocked));
+  CHECK(SDL_CreateDirectory(directory));
   g_settings.audio_master_volume = 65;
   CHECK(Settings_Save(path));
   CHECK(FileContains(path, "audio_master_volume = 65%\n"));
@@ -727,6 +718,7 @@ static void TestSettingsWriterRecovery(void) {
   if (!drained) CHECK(Settings_Save(path));
   CHECK(FileContains(path, "audio_master_volume = 65%\n"));
   remove(path);
+  CHECK(SDL_RemovePath(directory));
   /* The converse matters too: a failed synchronous write must remain visible
    * at shutdown, and rejection of a different destination cannot erase it. */
   writer = SettingsPersistence_Create();
@@ -734,12 +726,10 @@ static void TestSettingsWriterRecovery(void) {
   if (writer) {
     const SettingsSaveHost retry_host = SettingsPersistence_Host(writer);
     Settings_SetSaveHost(&retry_host);
-    CHECK(SDL_CreateDirectory(blocked));
     CHECK(!Settings_Save(path));
     CHECK(!Settings_Save("actraiser-settings-other-test.ini"));
     CHECK(!SettingsPersistence_Destroy(writer));
     Settings_SetSaveHost(NULL);
-    CHECK(SDL_RemovePath(blocked));
   }
   SDL_Quit();
 }
@@ -2104,6 +2094,13 @@ static void TestAction3DMode(void) {
   CHECK(g_settings.diorama_mode==kAction3D_Voxel);
   CHECK(Settings_SetText(mode,"invalid")==kSettingChange_Rejected);
   CHECK(g_settings.diorama_mode==kAction3D_Voxel);
+  Settings_FallBackToDiorama();
+  CHECK(g_settings.diorama_mode==kAction3D_Diorama);
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "diorama_mode = Voxel 3D\n"));
+  CHECK(Settings_SetLong(mode, kAction3D_Diorama)==kSettingChange_Applied);
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "diorama_mode = Diorama\n"));
   CHECK(Settings_Reset(mode)==kSettingChange_Applied);
   CHECK(g_settings.diorama_mode==kAction3D_Off);
   remove(path);

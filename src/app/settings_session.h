@@ -8,10 +8,13 @@
 #include <stdbool.h>
 
 void SettingsSession_Start(void);
+/* Collect metrics and retain the latest failure until the UI sees it or a
+ * newer write succeeds. Taking the notification does not affect retry. */
 void SettingsSession_PollWrites(void);
-/* Drain the worker and retry a failed/fatal-session write synchronously.
- * Normal exits preserve session-only overrides; replays never write settings.
- * Returns false only when the final recovery write also fails. */
+bool SettingsSession_TakeWriteFailure(void);
+/* Drain the worker and retry the latest accepted snapshot if needed.
+ * Without a worker, a fatal session retains the synchronous fallback.
+ * Replays never write settings. Returns false if the final write fails. */
 bool SettingsSession_Finish(bool fatal_session);
 
 #endif /* AR_SETTINGS_SESSION_H */

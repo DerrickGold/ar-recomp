@@ -62,8 +62,8 @@ run metadata, dumps, and enabled diagnostics with bare output filenames.
 Third-party stdout and stderr remain on their original streams. Explicit
 output paths still go to the locations you specify. Preserved captures are
 exempt from automatic retention and the text-log size limit. If a trace cannot
-finish cleanly, its `.partial` file stays available for inspection. Use a
-different filename to start another trace and keep that partial capture.
+finish cleanly, its uniquely named `.partial` file stays available for
+inspection. You can reuse the requested output path on the next run.
 
 `--config <file>` **replaces** the default `config.ini` load entirely (the file
 you pass carries its own `[Graphics]`/`[Sound]` sections too), so

@@ -326,6 +326,7 @@ static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
     case kHostDisplayPresent_HeadlessVideo:
       return 0;
     case kHostDisplayPresent_Menu:
+    case kHostDisplayPresent_Loading:
       return HostDisplayPacing_UiIntervalNs(
           options, kHostDisplayEmulationFrameIntervalNs);
     case kHostDisplayPresent_Paused:
@@ -353,12 +354,32 @@ static bool ReportPresentFailure(void) {
   return false;
 }
 
+static bool s_first_gameplay_after_loading;
+static uint64_t s_first_gameplay_start_ns;
+
+void HostDisplay_LoadingCompleted(void) {
+  s_first_gameplay_after_loading = true;
+  s_first_gameplay_start_ns = 0;
+}
+
 bool HostDisplay_PresentCompositedFrame(HostDisplayPresentMode mode) {
+  if (mode == kHostDisplayPresent_Loading && PerformanceMetrics_Enabled()) {
+    PerformanceContext context = {
+      .scene = kPerformanceScene_Loading, .host_mode = 4,
+      .refresh_mode = g_settings.refresh_mode,
+      .vsync = HostDisplayStatus_VsyncActive(),
+      .pacing_source = HostDisplay_PacingSource(),
+    };
+    (void)ArRenderDevice_GetOutputSize(&g_render_device, &context.width, &context.height);
+    PerformanceMetrics_SetContext(&context);
+  }
   const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
   if (!s_producer_pacing)
     ThrottlePresent(s_vsync_guard.probing ? 0 : PresentIntervalNs(mode));
   PerformanceMetrics_End(pacing);
   const PerformanceScope swap = PerformanceMetrics_Begin(kPerformance_Swap);
+  const bool resumed_gameplay = s_first_gameplay_after_loading && mode == kHostDisplayPresent_GameTick;
+  const uint64_t swap_start_ns = resumed_gameplay ? SDL_GetTicksNS() : 0;
   if (s_present_trace_enabled) s_present_trace.submit_start_ns = SDL_GetTicksNS();
   const bool swapped = ArRenderDevice_Present(&g_render_device);
   PerformanceMetrics_End(swap);
@@ -366,6 +387,14 @@ bool HostDisplay_PresentCompositedFrame(HostDisplayPresentMode mode) {
   s_present_failure_reported = false;
 
   const uint64_t completed_at_ns = SDL_GetTicksNS();
+  if (resumed_gameplay) {
+    s_first_gameplay_after_loading = false;
+    const uint64_t started = s_first_gameplay_start_ns ? s_first_gameplay_start_ns : swap_start_ns;
+    RuntimeLog_Printf("[display-loading] first-gameplay-present-ns=%" PRIu64
+        " frame-ms=%.2f swap-ms=%.2f\n", completed_at_ns,
+        (double)(completed_at_ns - started) / 1e6,
+        (double)(completed_at_ns - swap_start_ns) / 1e6);
+  }
   PerformanceMetrics_PresentCompleted(completed_at_ns);
   const HostDisplayPacingOptions options = CurrentPacingOptions();
   const uint64_t nominal_ns = options.refresh_mode == kRefreshMode_Vsync && options.vsync_active &&
@@ -867,6 +896,8 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
       !ArRenderTexture_IsValid(g_texture))
     return false;
 
+  if (s_first_gameplay_after_loading && mode == kHostDisplayPresent_GameTick)
+    s_first_gameplay_start_ns = SDL_GetTicksNS();
   const bool performance_enabled = PresentPerformanceEnabled();
 
   const bool game_tick = mode == kHostDisplayPresent_GameTick ||
@@ -1007,6 +1038,7 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   const uint64_t draw_cpu_start = s_present_trace_enabled
       ? HostFrameProducer_ThreadCpuTimeNs() : 0;
   const uint64_t draw_started_ns = SDL_GetTicksNS();
+  if (s_first_gameplay_after_loading) s_first_gameplay_start_ns = draw_started_ns;
   if (s_present_trace_enabled) s_present_trace.draw_start_ns = draw_started_ns;
   PresentFrame(&s_retained_frame.slot,
                use_interpolation

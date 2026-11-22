@@ -169,7 +169,7 @@ int main(void) {
   assert(ArGpuDioramaDepthPass_Prepare(&pass,W,H,256,512));
   assert(!pass.depth_initialized);
   for(unsigned m=0;m<3;++m)for(unsigned d=0;d<kDioramaDepth_Count;++d)for(unsigned b=0;b<3;++b)
-    assert((pass.pipelines[m][d][b]!=NULL)==!(d==kDioramaDepth_Write && b==2));
+    assert((pass.resources->pipelines[m][d][b]!=NULL)==!(d==kDioramaDepth_Write && b==2));
   const ArGpuDioramaDepthPass prepared=pass;
   assert(!ArGpuDioramaDepthPass_Prepare(&pass,0,H,256,512));
   assert(!ArGpuDioramaDepthPass_Prepare(&pass,W,16385,256,512));
@@ -275,7 +275,7 @@ int main(void) {
   SDL_GPUBuffer *retained=pass.vertices;
   Check(&pass,target,draws,textures,pixels,2,0,NULL); assert(pass.vertices==retained);
   assert(pass.vertices==prepared.vertices && pass.indices==prepared.indices && pass.upload==prepared.upload);
-  assert(!memcmp(pass.pipelines,prepared.pipelines,sizeof(pass.pipelines)));
+  assert(pass.resources == prepared.resources);
   assert(SDL_WaitForGPUIdle(gpu));
   ArGpuDioramaDepthPass_Destroy(&pass); assert(!pass.device && !pass.depth);
   for (unsigned i=0;i<3;++i) SDL_ReleaseGPUTexture(gpu,textures[i]);

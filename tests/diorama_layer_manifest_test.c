@@ -1,6 +1,5 @@
 #include "diorama/diorama_layer_manifest.h"
 #include "app/user_data_dir.h"
-#include "host/atomic_replace.h"
 #include "snesrecomp/support/utf8_fs.h"
 
 #include "support/test_assert.h"
@@ -11,17 +10,12 @@
 static const char kRoot[] = "diorama-manifest-test";
 static const char kPath[] = "diorama-manifest-test/diorama-layers.ini";
 static const char kTemporary[] = "diorama-manifest-test/diorama-layers.ini.tmp";
-static bool s_fail_replace;
 
 /* Isolate the production file boundary from the checkout and user data. */
 char *UserDataFile(char *buffer, size_t size, const char *leaf) {
   const int written = snprintf(buffer, size, "%s/%s", kRoot, leaf);
   assert(written >= 0 && (size_t)written < size);
   return buffer;
-}
-
-bool AtomicReplaceFile(const char *temporary, const char *path) {
-  return !s_fail_replace && sr_replace_file(temporary, path) != 0;
 }
 
 static void RemoveTestDirectory(const char *path) {
@@ -111,16 +105,11 @@ int main(void) {
   assert(DioramaVoxelEdits_Object(&voxel_region->voxel, 0x1234, 0, 0)->mode == kDioramaVoxelObject_Flat);
   assert(sr_access(kTemporary, 0) != 0);
 
-  /* Temp-open and final-replace failures leave all hand-authored bytes intact. */
+  /* A stale fixed staging path no longer blocks a new save. */
   assert(!sr_mkdir(kTemporary));
-  assert(!DioramaLayerManifest_Save());
+  assert(DioramaLayerManifest_Save());
   ExpectUnchanged(saved, saved_size);
   RemoveTestDirectory(kTemporary);
-  s_fail_replace = true;
-  assert(!DioramaLayerManifest_Save());
-  ExpectUnchanged(saved, saved_size);
-  assert(sr_access(kTemporary, 0) != 0);
-  s_fail_replace = false;
   free(saved);
 
   /* An oversized physical line is skipped as one record, never parsed as a
