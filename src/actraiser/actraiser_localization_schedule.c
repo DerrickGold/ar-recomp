@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_schedule.h"
+#include "app/runtime_log.h"
 #include "actraiser/actraiser_rtl.h"
 #include "actraiser/actraiser_sim_menu.h"
 #include "actraiser/actraiser_miracle_text.h"
@@ -65,8 +66,7 @@ static bool CallPresentationRoutine(CpuState *cpu, NativeRoutine routine,
    * restoring registers and continuing would silently swallow native control
    * flow. Stop with evidence instead of pretending native fallback is safe. */
   if (result != RECOMP_RETURN_NORMAL || !balanced) {
-    fprintf(stderr,
-            "[localization] native presentation call failed: "
+    RuntimeLog_Printf("[localization] native presentation call failed: "
             "return=%d stack=$%04X expected=$%04X\n",
             (int)result, (unsigned)cpu->S, (unsigned)saved.s);
     abort();

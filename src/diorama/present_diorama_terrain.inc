@@ -1,3 +1,5 @@
+#include "app/runtime_log.h"
+
 typedef struct PresentTerrainRequest {
   ArRenderDevice *device;
   const DioramaTerrainSource *source;
@@ -140,8 +142,8 @@ static bool SplitLiveTerrain(const PresentTerrainRequest *request, uint32_t *spl
     }
     y += h;
   }
-  if (DioramaPerformance_Enabled())
-    fprintf(stderr, "[voxel-live-terrain] split pixels=%zu reused=%zu\n", count - reused_pixels, reused_pixels);
+  if (DioramaPerformance_LoggingEnabled())
+    RuntimeLog_Printf("[voxel-live-terrain] split pixels=%zu reused=%zu\n", count - reused_pixels, reused_pixels);
   *binary_alpha = alpha;
   return true;
 }
@@ -165,7 +167,7 @@ static bool UploadLiveTerrain(ArRenderDevice *device, const DioramaTerrainSource
     s_terrain_transfer_failed = true;
     ResetLiveTerrainTextures(device);
     *bytes = 0;
-    fprintf(stderr, "[voxel-live-terrain] texture transfer failed; restoring ordinary uploads\n");
+    RuntimeLog_Printf("[voxel-live-terrain] texture transfer failed; restoring ordinary uploads\n");
   } else if (s_terrain_view.bounds.w != bounds.w || s_terrain_view.bounds.h != bounds.h) {
     ResetLiveTerrainTextures(device);
   }
@@ -227,8 +229,8 @@ static bool CaptureLiveTerrain(void *userdata, const DioramaProjection *projecti
   static unsigned hits, uploads;
   for (unsigned i = 0; i < sizeof(s_resident_terrain) / sizeof(*s_resident_terrain); ++i) {
     if (source != s_resident_terrain[i]) continue;
-    if (DioramaPerformance_Enabled() && ++hits % 120 == 0)
-      fprintf(stderr, "[voxel-live-terrain] texture hits=%u uploads=%u\n", hits, uploads);
+    if (DioramaPerformance_LoggingEnabled() && ++hits % 120 == 0)
+      RuntimeLog_Printf("[voxel-live-terrain] texture hits=%u uploads=%u\n", hits, uploads);
     *out = s_terrain_view;
     out->visible = need;
     return true;
@@ -269,8 +271,8 @@ static bool CaptureLiveTerrain(void *userdata, const DioramaProjection *projecti
   s_resident_terrain[s_resident_terrain_next] = DioramaTerrainSource_Retain(source);
   s_resident_terrain_next = (s_resident_terrain_next + 1) %
       (sizeof(s_resident_terrain) / sizeof(*s_resident_terrain));
-  if (DioramaPerformance_Enabled())
-    fprintf(stderr, "[voxel-live-terrain] texture uploads=%u hits=%u bytes=%llu transfer=%d\n",
+  if (DioramaPerformance_LoggingEnabled())
+    RuntimeLog_Printf("[voxel-live-terrain] texture uploads=%u hits=%u bytes=%llu transfer=%d\n",
         ++uploads, hits, (unsigned long long)bytes, transferred);
   DioramaPerformance_End(scope);
   *out = s_terrain_view;

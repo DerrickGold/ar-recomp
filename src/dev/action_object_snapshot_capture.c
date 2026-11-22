@@ -1,4 +1,5 @@
 #include "dev/action_object_snapshot_capture.h"
+#include "app/runtime_log.h"
 
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
@@ -214,6 +215,6 @@ void ActionObjectSnapshotCapture_Capture(const FrameSlot *slot) {
   s_capture.last_frame = frame;
   s_capture.last_room = room;
   ++s_capture.serial;
-  fprintf(stderr, "[editor-object-capture] room=%04x gf=%u camera=%d,%d actors=%u props=%u bytes=%zu\n",
+  RuntimeLog_Printf("[editor-object-capture] room=%04x gf=%u camera=%d,%d actors=%u props=%u bytes=%zu\n",
       room, frame, view.camera_x, view.camera_y, view.actor_count, view.voxel_sprites.count, size);
 }

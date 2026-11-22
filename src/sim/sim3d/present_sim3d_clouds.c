@@ -6,6 +6,7 @@
  * present_sim3d_environment.h; material baking is shared with action and sky clouds. */
 
 #include "sim/sim3d/present_sim3d_clouds.h"
+#include "app/runtime_log.h"
 #include "sim/sim3d/present_sim3d_environment.h"
 #include "sim/sim3d/present_sim3d_project.h"
 
@@ -279,7 +280,7 @@ static ArRenderTexture EnsureSimCloudTexture(void) {
   if (!ArRenderDevice_CreateTexture(
           &g_render_device, &desc, &s_sim_cloud_texture)) {
     s_sim_cloud_alloc_failed = true;
-    fprintf(stderr, "[sim3d-cloud] shroud texture unavailable: %s\n",
+    RuntimeLog_Printf("[sim3d-cloud] shroud texture unavailable: %s\n",
             ArRenderDevice_LastError(&g_render_device));
     return ArRenderTexture_Invalid();
   }
@@ -304,7 +305,7 @@ static ArRenderTexture EnsureSimCloudTexture(void) {
       kSimCloudTexturePixels * (int)sizeof(*pixels));
   free(pixels);
   if (!uploaded) {
-    fprintf(stderr, "[sim3d-cloud] shroud upload failed: %s\n",
+    RuntimeLog_Printf("[sim3d-cloud] shroud upload failed: %s\n",
             ArRenderDevice_LastError(&g_render_device));
     ArRenderDevice_DestroyTexture(&g_render_device, s_sim_cloud_texture);
     s_sim_cloud_texture = ArRenderTexture_Invalid();

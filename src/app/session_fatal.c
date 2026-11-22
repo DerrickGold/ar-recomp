@@ -1,8 +1,9 @@
 #include "app/session_fatal.h"
 
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdatomic.h>
+
+#include "app/runtime_log.h"
 
 enum { kSessionFatalMessageCapacity = 1024 };
 
@@ -23,8 +24,8 @@ static void Request(SessionFailureKind kind, const char *format, va_list argumen
   } else {
     vsnprintf(s_message, sizeof(s_message), format, arguments);
   }
-  fprintf(stderr, "[fatal-session] %s\n", s_message);
   atomic_store_explicit(&s_state, 2, memory_order_release);
+  RuntimeLog_Printf("[fatal-session] %s\n", s_message);
 }
 
 void SessionFatal_Request(const char *format, ...) {

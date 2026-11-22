@@ -1,3 +1,5 @@
+#include "app/runtime_log.h"
+
 /* Layout migration runs under the unchanged collection lock. Layout 2 remains
  * authoritative until all copies are verified and the layout-3 index commits.
  * Exact originals survive in legacy-layout; a retry never replaces a conflict. */
@@ -153,7 +155,7 @@ static bool MigrateLayout(SaveSlots *slots,SaveError *error) {
 #endif
   next.dirty=true;
   if(!SaveSlots_Flush(&next,error))return false;
-  fprintf(stderr, "[saves] save collection migrated to layout 3%s\n",
+  RuntimeLog_Printf("[saves] save collection migrated to layout 3%s\n",
           slots->legacy_native ? " (legacy native adoption)" : "");
   *slots=next;return true;
 }

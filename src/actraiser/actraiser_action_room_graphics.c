@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_action_room_graphics.h"
+#include "app/runtime_log.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -176,8 +177,7 @@ static RecompReturn CallLzss(CpuState *cpu, uint16_t return_pc) {
 static void ReportDiagnostics(void) {
   if (!s_diagnostics.character_commands && !s_diagnostics.palette_commands)
     return;
-  fprintf(stderr,
-          "[action-room-gfx-hle] summary command7=%u command6=%u bytes=%zu\n",
+  RuntimeLog_Printf("[action-room-gfx-hle] summary command7=%u command6=%u bytes=%zu\n",
           s_diagnostics.character_commands, s_diagnostics.palette_commands,
           s_diagnostics.staged_bytes);
 }

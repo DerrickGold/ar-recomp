@@ -1,4 +1,5 @@
 #include "save/save_slot_host.h"
+#include "app/runtime_log.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -40,7 +41,7 @@ static void FlushTownVisit(bool final) {
     /* Optional presentation metadata must not make gameplay fatal. Bound
      * failed-I/O retries so a read-only disk cannot cause a per-frame hitch. */
     if (!s_town_visit_retry_ms || final)
-      fprintf(stderr, "[saves] town bookmark not saved: %s\n", error.message);
+      RuntimeLog_Printf("[saves] town bookmark not saved: %s\n", error.message);
     s_town_visit_retry_ms = now + 5000;
   }
 }
@@ -343,13 +344,12 @@ void SaveSlotHost_AttachBatterySave(bool headless) {
     if (staged && g_settings.save_edit_armed) {
       if (!SaveSystem_ApplyEdits(
               &edits, true, false, g_settings.save_autobackup, &error))
-        fprintf(stderr, "[save-editor] boot edits rejected: %s\n",
+        RuntimeLog_Printf("[save-editor] boot edits rejected: %s\n",
                 error.message);
       else
-        fprintf(stderr, "[save-editor] boot edits applied for this session\n");
+        RuntimeLog_Printf("[save-editor] boot edits applied for this session\n");
     } else if (staged) {
-      fprintf(stderr,
-              "[save-editor] staged boot edits ignored; save editing is not armed\n");
+      RuntimeLog_Printf("[save-editor] staged boot edits ignored; save editing is not armed\n");
     }
   }
 
@@ -392,7 +392,7 @@ void SaveSlotHost_InstallHooks(void) {
     SettingsOverlay_Open();
     if (!SettingsOverlay_OpenSaveSlots(false))
       Die("The new-game save menu could not be opened.");
-    fprintf(stderr, "[saves] no campaigns: opened save setup before the first game tick\n");
+    RuntimeLog_Printf("[saves] no campaigns: opened save setup before the first game tick\n");
   }
 }
 
@@ -424,7 +424,7 @@ void SaveSlotHost_AfterTicks(void) {
     PerformanceMetrics_End(save_scope);
     if (!saved) {
       if (!write_error_reported)
-        fprintf(stderr, "[saves] auto-persist failed: %s\n", error.message);
+        RuntimeLog_Printf("[saves] auto-persist failed: %s\n", error.message);
       write_error_reported = true;
       const uint64_t now_ms = SDL_GetTicks();
       if (!first_write_failure_ms) first_write_failure_ms = now_ms;
@@ -452,7 +452,7 @@ bool SaveSlotHost_FlushBatterySave(void) {
     SaveError error = {{0}};
     if (!SaveSystem_AutoPersistIfChanged(&error)) {
       save_flush_failed = true;
-      fprintf(stderr, "[saves] shutdown flush failed: %s\n", error.message);
+      RuntimeLog_Printf("[saves] shutdown flush failed: %s\n", error.message);
     }
     if (!save_flush_failed) FlushTownVisit(true);
   }

@@ -2,10 +2,12 @@
 #define AR_RUN_DIR_H
 
 #include <stddef.h>
+#include <stdbool.h>
+#include <stdio.h>
 
-/* Per-run artifact directory (runs/<YYYYMMDD-HHMMSS>/), created at startup so
- * every invocation — plain `./build/ActRaiserRecomp ar.sfc ...` included —
- * ringfences its own diagnostics: console.log (stdout+stderr tee),
+/* Each opted-in invocation gets a timestamped diagnostic directory with
+ * automatic retention or a preserved destination selected by --log-dir.
+ * It contains console.log,
  * run_info.txt (cmd line + AR_* env), anomaly captures, dumps, snapshots,
  * screenshots. Battery SRAM and save-state slots stay in saves/.
  *
@@ -14,10 +16,13 @@
  * AR_NO_RUN_DIR=1 always opts out. When disabled, explicitly requested bare
  * diagnostic output filenames fall back under saves/. */
 
-/* If enabled by the build/runtime policy, create the run dir, tee the console,
- * export AR_RUN_DIR, write run_info.txt, and update runs/latest. Trace capture
- * remains separately opt-in. Call once before anything prints. */
-void RunDirInit(int argc, char **argv);
+/* Initialize automatic storage or reserve a new/empty explicit destination.
+ * False means the explicit destination could not be opened. */
+bool RunDirInit(int argc, char **argv, const char *destination);
+void RunDirReport(void);
+/* The runtime logger owns the returned stream. Temporary captures are capped. */
+FILE *RunDirOpenRuntimeLog(void);
+bool RunDirIsTemporary(void);
 
 /* Rebase bare-filename output env vars (SNESRECOMP_TRACE_WATCH_FILE / SNESRECOMP_TRACE_FILE /
  * AR_INPUT_RECORD / AR_DRIFT_LOG / AR_MX_OUT / AR_WRAM_TRACE / AR_SIM3D_TRACE /

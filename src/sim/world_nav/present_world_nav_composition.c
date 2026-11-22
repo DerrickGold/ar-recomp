@@ -1,4 +1,5 @@
 #include "sim/world_nav/present_world_nav_composition.h"
+#include "app/runtime_log.h"
 #include "present/presentation_upload_mirror.h"
 #include "sim/world_nav/sim_world_navigation_capture.h"
 #include "host/host_video.h"
@@ -22,7 +23,7 @@ static ArRenderTexture EnsureWorldNavigationCompositionTexture(ArRenderTexture *
       .blend = kArRenderBlendMode_Alpha,
   };
   if (!ArRenderDevice_CreateTexture(&g_render_device, &desc, texture)) {
-    fprintf(stderr, "[world-navigation] composition texture unavailable: %s\n",
+    RuntimeLog_Printf("[world-navigation] composition texture unavailable: %s\n",
             ArRenderDevice_LastError(&g_render_device));
     return ArRenderTexture_Invalid();
   }

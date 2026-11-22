@@ -1,4 +1,5 @@
 #include "dev/dev_automation.h"
+#include "app/runtime_log.h"
 
 #include <limits.h>
 #include <math.h>
@@ -177,19 +178,19 @@ void DevAutomation_CaptureScheduledScreenshot(const struct FrameSlot *uploaded_f
       const bool closed = fclose(pf) == 0;
       if (!closed) shot_size.kind = kDevToolsCapture_Failed;
       if (shot_size.kind == kDevToolsCapture_Failed) {
-        fprintf(stderr, "[shot] capture=failed path=%s\n", fname);
+        RuntimeLog_Printf("[shot] capture=failed path=%s\n", fname);
         if (require_composite)
           SessionFatal_Request("Required final-composite screenshot could not be captured.");
       }
       int margin_left = 0;
       int margin_right = 0;
       ActRaiser_LiveMargins(&margin_left, &margin_right);
-      fprintf(stderr, "[shot] %s at gf=%u (%dx%d) margins=%d/%d mode=%s capture=%s\n",
+      RuntimeLog_Printf("[shot] %s at gf=%u (%dx%d) margins=%d/%d mode=%s capture=%s\n",
               fname, gf, shot_size.width, shot_size.height,
               margin_left, margin_right,
               Settings_DisplayModeName(g_settings.display_mode),
               DevToolsCaptureKind_Name(shot_size.kind));
-      fprintf(stderr, "[shot-state] gf=%u room=%02x%02x bg1=%d,%d bg2=%d,%d phase=%.3f generated=%03x gpu=%03x\n",
+      RuntimeLog_Printf("[shot-state] gf=%u room=%02x%02x bg1=%d,%d bg2=%d,%d phase=%.3f generated=%03x gpu=%03x\n",
               gf, g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
               (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
               (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY),
@@ -198,7 +199,7 @@ void DevAutomation_CaptureScheduledScreenshot(const struct FrameSlot *uploaded_f
               (double)shot_phase, DioramaFrameGeneration_GeneratedPlaneMask(),
               DioramaFrameGeneration_GpuPlaneMask());
     } else {
-      fprintf(stderr, "[shot] capture=failed cannot open %s\n", fname);
+      RuntimeLog_Printf("[shot] capture=failed cannot open %s\n", fname);
       if (require_composite)
         SessionFatal_Request("Required screenshot file could not be opened.");
     }
@@ -228,7 +229,7 @@ void DevAutomation_AfterTicks(void) {
     const char *value = getenv("AR_DEATH_HEIM_PROGRESS");
     if (value && value[0]) {
       g_ram[kActRaiserWram_DeathHeimProgress] = (uint8_t)strtoul(value, NULL, 0);
-      fprintf(stderr, "[warp] Death Heim progress set to %u at gf=%u\n",
+      RuntimeLog_Printf("[warp] Death Heim progress set to %u at gf=%u\n",
               g_ram[kActRaiserWram_DeathHeimProgress], gf);
     }
   }
@@ -244,7 +245,7 @@ void DevAutomation_AfterTicks(void) {
     const SettingDesc *mode = Settings_Find("diorama_mode");
     if (mode && Settings_IsAvailable(mode) && !g_settings.diorama_mode) {
       Settings_SetLong(mode, 1);
-      fprintf(stderr, "[diorama] ON via AR_DIORAMA_AT at gf=%u\n", gf);
+      RuntimeLog_Printf("[diorama] ON via AR_DIORAMA_AT at gf=%u\n", gf);
     }
   }
 }

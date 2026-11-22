@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "sim/sim3d/sim3d.h"
 #include "sim/voxels/sim_background_voxels.h"
@@ -781,7 +782,7 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
   } else {
     ok = false;
   }
-  fprintf(stderr, "[sim3d-d2] demo artifacts %s at gf=%u -> %s-*\n",
+  RuntimeLog_Printf("[sim3d-d2] demo artifacts %s at gf=%u -> %s-*\n",
           ok ? "written" : "failed", (unsigned)game_frame, prefix);
 }
 
@@ -1049,8 +1050,7 @@ static void ReportFidelityChange(uint32_t mismatch, uint16_t game_frame) {
   int current = mismatch ? 1 : 0;
   if (current == previous) return;
   if (previous != -1 || current)
-    fprintf(stderr,
-            "[sim3d-d2] gf=%u fidelity %s (mismatch=%u px, view retained)\n",
+    RuntimeLog_Printf("[sim3d-d2] gf=%u fidelity %s (mismatch=%u px, view retained)\n",
             (unsigned)game_frame, current ? "lost" : "regained",
             (unsigned)mismatch);
   previous = current;
@@ -1233,8 +1233,7 @@ void Sim3D_LogViewTransition(const SimFrameData *frame) {
       "Sky Palace globe",
     };
     if (previous != kLoggedView_Unknown)
-      fprintf(stderr,
-              "[sim3d-view] gf=%u %s -> %s (%s, view=%s, integrity=$%X,"
+      RuntimeLog_Printf("[sim3d-view] gf=%u %s -> %s (%s, view=%s, integrity=$%X,"
               " mismatch=%u px) after %u frame(s)\n",
               (unsigned)frame->game_frame,
               names[previous], names[current],
@@ -1249,8 +1248,7 @@ void Sim3D_LogViewTransition(const SimFrameData *frame) {
      * picker and dialogue flips. */
     if (previous != kLoggedView_Unknown &&
         frame->separated_status == kSim3DCapture_UnsupportedColorMath)
-      fprintf(stderr,
-              "[sim3d-view]   colour math: cgwsel=$%02X cgadsub=$%02X"
+      RuntimeLog_Printf("[sim3d-view]   colour math: cgwsel=$%02X cgadsub=$%02X"
               " fixed=$%04X screen=$%02X/$%02X brightness=%u\n",
               frame->separated_cgwsel, frame->separated_cgadsub,
               (unsigned)frame->separated_fixed_color,

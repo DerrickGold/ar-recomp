@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "scene_asset_dump.h"
 
@@ -59,7 +60,7 @@ static bool MakeDirectory(const char *path) {
 #else
   if (mkdir(path, 0755) == 0 || errno == EEXIST) return true;
 #endif
-  fprintf(stderr, "[scene-assets] cannot create %s: %s\n",
+  RuntimeLog_Printf("[scene-assets] cannot create %s: %s\n",
           path, strerror(errno));
   return false;
 }
@@ -71,7 +72,7 @@ bool WritePng(const char *path, const uint8_t *rgba, int width, int height) {
   if (!file) return false;
   bool ok = ArImage_WritePng(file, rgba, width, height, width * 4, kArImageRgba32);
   if (fclose(file) != 0) ok = false;
-  if (!ok) fprintf(stderr, "[scene-assets] cannot write %s\n", path);
+  if (!ok) RuntimeLog_Printf("[scene-assets] cannot write %s\n", path);
   return ok;
 }
 
@@ -297,7 +298,7 @@ static bool WriteBinary(const char *directory, const char *name,
   FILE *file = sr_fopen(path, "wb");
   bool ok = file && fwrite(data, 1, size, file) == size;
   if (file && fclose(file) != 0) ok = false;
-  if (!ok) fprintf(stderr, "[scene-assets] cannot write %s\n", path);
+  if (!ok) RuntimeLog_Printf("[scene-assets] cannot write %s\n", path);
   return ok;
 }
 
@@ -311,7 +312,7 @@ static bool WriteOamBinary(const char *directory,
   bool ok = file && fwrite(source->oam.data, 1, oam_bytes, file) == oam_bytes &&
       fwrite(source->high_oam.data, 1, high_oam_bytes, file) == high_oam_bytes;
   if (file && fclose(file) != 0) ok = false;
-  if (!ok) fprintf(stderr, "[scene-assets] cannot write %s\n", path);
+  if (!ok) RuntimeLog_Printf("[scene-assets] cannot write %s\n", path);
   return ok;
 }
 
@@ -392,7 +393,7 @@ static bool WriteMetadata(const char *directory,
       "\"cgram\": \"cgram.bin\", \"oam\": \"oam.bin\", "
       "\"wram\": \"wram.bin\"}\n}\n");
   bool ok = fclose(file) == 0;
-  if (!ok) fprintf(stderr, "[scene-assets] cannot write %s\n", path);
+  if (!ok) RuntimeLog_Printf("[scene-assets] cannot write %s\n", path);
   return ok;
 }
 
@@ -466,7 +467,7 @@ bool SceneAssetDump_Write(const char *directory,
   ok &= WriteMetadata(directory, source, host_frame,
                       backgrounds, background_count);
   if (ok)
-    fprintf(stderr, "[scene-assets] complete resident asset dump -> %s/\n",
+    RuntimeLog_Printf("[scene-assets] complete resident asset dump -> %s/\n",
             directory);
   return ok;
 }

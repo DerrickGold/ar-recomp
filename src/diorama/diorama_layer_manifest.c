@@ -1,4 +1,5 @@
 #include "diorama_layer_manifest.h"
+#include "app/runtime_log.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -86,8 +87,7 @@ bool DioramaLayerManifest_Load(void) {
      * scene quietly losing every authored room, with nothing anywhere to
      * distinguish "nothing authored" from "the manifest is not where the game
      * is looking". The path is printed for exactly that reason. */
-    fprintf(stderr,
-            "[diorama-layers] %s not found (looked in the working directory) "
+    RuntimeLog_Printf("[diorama-layers] %s not found (looked in the working directory) "
             "-- no per-room layer overrides; the diorama renders stock "
             "geometry\n",
             path);
@@ -97,7 +97,7 @@ bool DioramaLayerManifest_Load(void) {
   DioramaLayerOrderTable *loaded = calloc(1, sizeof(*loaded));
   if (!loaded) {
     fclose(file);
-    fprintf(stderr, "[diorama-layers] out of memory loading %s\n", path);
+    RuntimeLog_Printf("[diorama-layers] out of memory loading %s\n", path);
     return false;
   }
   DioramaRoomOverride *room = NULL;
@@ -110,7 +110,7 @@ bool DioramaLayerManifest_Load(void) {
     if (strlen(line) == sizeof(line) - 1 && line[sizeof(line) - 2] != '\n') {
       int ch;
       while ((ch = fgetc(file)) != '\n' && ch != EOF) {}
-      fprintf(stderr, "[diorama-layers] %s:%d: line exceeds 2046 bytes -- line skipped\n",
+      RuntimeLog_Printf("[diorama-layers] %s:%d: line exceeds 2046 bytes -- line skipped\n",
               kLayerManifestLeaf, line_number);
       const char *start = line;
       while (*start == ' ' || *start == '\t') ++start;
@@ -148,8 +148,7 @@ bool DioramaLayerManifest_Load(void) {
        * `bad` and continued without touching `room`. */
       char *close = strchr(at, ']');
       if (!close) {
-        fprintf(stderr,
-                "[diorama-layers] %s:%d: section missing ']' -- ignored, and "
+        RuntimeLog_Printf("[diorama-layers] %s:%d: section missing ']' -- ignored, and "
                 "the plane lines under it are skipped\n",
                 kLayerManifestLeaf, line_number);
         room = NULL;
@@ -166,8 +165,7 @@ bool DioramaLayerManifest_Load(void) {
          * stray space lands here and would otherwise drop a whole authored room
          * with no output at all. Reported at a lower volume than an error. */
         if (!strncmp(at + 1, "layers", 6))
-          fprintf(stderr,
-                  "[diorama-layers] %s:%d: '[%s]' is not a valid room header "
+          RuntimeLog_Printf("[diorama-layers] %s:%d: '[%s]' is not a valid room header "
                   "(expected [layers:GG:MM[:token]] in hex) -- its plane lines are "
                   "skipped\n",
                   kLayerManifestLeaf, line_number, at + 1);
@@ -180,10 +178,10 @@ bool DioramaLayerManifest_Load(void) {
           DioramaLayerOrder_ClearTable(loaded);
           free(loaded);
           fclose(file);
-          fprintf(stderr, "[diorama-layers] out of memory loading %s -- previous overrides kept\n", path);
+          RuntimeLog_Printf("[diorama-layers] out of memory loading %s -- previous overrides kept\n", path);
           return false;
         }
-        fprintf(stderr, "[diorama-layers] %s:%d: table full, room dropped\n", kLayerManifestLeaf,
+        RuntimeLog_Printf("[diorama-layers] %s:%d: table full, room dropped\n", kLayerManifestLeaf,
                 line_number);
         bad++;
       } else {
@@ -197,7 +195,7 @@ bool DioramaLayerManifest_Load(void) {
       planes++;
     } else {
       bad++;
-      fprintf(stderr, "[diorama-layers] %s:%d: %s -- line skipped\n", kLayerManifestLeaf,
+      RuntimeLog_Printf("[diorama-layers] %s:%d: %s -- line skipped\n", kLayerManifestLeaf,
               line_number, error ? error : "bad line");
     }
   }
@@ -206,14 +204,14 @@ bool DioramaLayerManifest_Load(void) {
   if (!complete) {
     DioramaLayerOrder_ClearTable(loaded);
     free(loaded);
-    fprintf(stderr, "[diorama-layers] cannot read %s -- previous overrides kept\n", path);
+    RuntimeLog_Printf("[diorama-layers] cannot read %s -- previous overrides kept\n", path);
     return false;
   }
   DioramaLayerOrder_ClearTable(&s_layer_overrides);
   s_terrain_valid = false;
   s_layer_overrides = *loaded;
   free(loaded);
-  fprintf(stderr, "[diorama-layers] loaded %s: %d room(s), %d plane override(s)%s\n", path, rooms,
+  RuntimeLog_Printf("[diorama-layers] loaded %s: %d room(s), %d plane override(s)%s\n", path, rooms,
           planes, bad ? ", some lines skipped" : "");
   return true;
 }
@@ -306,7 +304,7 @@ bool DioramaLayerManifest_Save(void) {
 
   char *existing = NULL;
   if (!ReadExistingManifest(path, &existing)) {
-    fprintf(stderr, "[diorama-layers] cannot read all of %s -- original kept\n", path);
+    RuntimeLog_Printf("[diorama-layers] cannot read all of %s -- original kept\n", path);
     return false;
   }
 
@@ -318,7 +316,7 @@ bool DioramaLayerManifest_Save(void) {
   char *out = (char *)malloc(need + 1);
   if (!out) {
     free(existing);
-    fprintf(stderr, "[diorama-layers] out of memory writing %s\n", path);
+    RuntimeLog_Printf("[diorama-layers] out of memory writing %s\n", path);
     return false;
   }
   size_t wrote = DioramaLayerOrder_MergeManifest(&s_layer_overrides, existing,
@@ -326,7 +324,7 @@ bool DioramaLayerManifest_Save(void) {
   free(existing);
   if (wrote != need) {
     free(out);
-    fprintf(stderr, "[diorama-layers] could not merge %s -- original kept\n", path);
+    RuntimeLog_Printf("[diorama-layers] could not merge %s -- original kept\n", path);
     return false;
   }
 
@@ -339,7 +337,7 @@ bool DioramaLayerManifest_Save(void) {
   FILE *file = sr_fopen(tmp, "wb");
   if (!file) {
     free(out);
-    fprintf(stderr, "[diorama-layers] cannot write %s\n", tmp);
+    RuntimeLog_Printf("[diorama-layers] cannot write %s\n", tmp);
     return false;
   }
   size_t put = fwrite(out, 1, wrote, file);
@@ -348,7 +346,7 @@ bool DioramaLayerManifest_Save(void) {
   if (fclose(file) != 0) complete = false;
   if (!complete) {
     sr_remove(tmp);
-    fprintf(stderr, "[diorama-layers] incomplete write to %s -- original kept\n", tmp);
+    RuntimeLog_Printf("[diorama-layers] incomplete write to %s -- original kept\n", tmp);
     return false;
   }
   /* One atomic replace on both platforms. A bare rename() FAILS on Windows when
@@ -360,13 +358,13 @@ bool DioramaLayerManifest_Save(void) {
    * "original kept" below must be TRUE. */
   if (!AtomicReplaceFile(tmp, path)) {
     sr_remove(tmp);
-    fprintf(stderr, "[diorama-layers] could not replace %s -- original kept\n", path);
+    RuntimeLog_Printf("[diorama-layers] could not replace %s -- original kept\n", path);
     return false;
   }
 
   int active = 0;
   for (int i = 0; i < s_layer_overrides.count; i++)
     if (DioramaLayerOrder_RoomIsActive(s_layer_overrides.rooms[i])) active++;
-  fprintf(stderr, "[diorama-layers] wrote %s (%d room(s), comments preserved)\n", path, active);
+  RuntimeLog_Printf("[diorama-layers] wrote %s (%d room(s), comments preserved)\n", path, active);
   return true;
 }

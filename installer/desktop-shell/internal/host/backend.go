@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DerrickGold/ar-recomp/installer/internal/logretention"
 	"github.com/DerrickGold/ar-recomp/installer/internal/workshopui"
 )
 
@@ -63,12 +64,9 @@ func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outpu
 			b.Stop()
 		}
 	}()
-	if err = os.MkdirAll(filepath.Join(workspace, "logs"), 0700); err != nil {
-		return nil, err
-	}
-	b.log, err = os.CreateTemp(filepath.Join(workspace, "logs"), "builder-*.log")
+	b.log, err = logretention.Create(filepath.Join(workspace, "logs"), "builder-")
 	if err != nil {
-		return nil, err
+		fmt.Fprintf(os.Stderr, "Builder startup log unavailable: %v\n", err)
 	}
 	ready := filepath.Join(private, "ready.json")
 	// ctx cancels startup only. After readiness, Stop owns the backend lifetime.
@@ -107,8 +105,9 @@ func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outpu
 		b.command.Args = append(b.command.Args, "--jobs", strconv.Itoa(jobs))
 	}
 	b.command.Dir = workspace
-	b.command.Stdout = b.log
-	b.command.Stderr = b.log
+	if b.log != nil {
+		b.command.Stdout, b.command.Stderr = b.log, b.log
+	}
 	b.command.WaitDelay = 2 * time.Second
 	// GUI processes from an AppImage inherit webview library overrides. Do not
 	// leak those into the headless build driver or the generated game's loader.
@@ -137,9 +136,9 @@ func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outpu
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline.C:
-			return nil, fmt.Errorf("Builder startup timed out; see %s", b.log.Name())
+			return nil, b.startupError("Builder startup timed out")
 		case <-b.Done:
-			return nil, fmt.Errorf("Builder stopped during startup; see %s", b.log.Name())
+			return nil, b.startupError("Builder stopped during startup")
 		case <-ticker.C:
 			data, err := os.ReadFile(ready)
 			if os.IsNotExist(err) {
@@ -163,6 +162,13 @@ func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outpu
 			return b, nil
 		}
 	}
+}
+
+func (b *Backend) startupError(message string) error {
+	if b.log == nil {
+		return errors.New(message)
+	}
+	return fmt.Errorf("%s; see %s", message, b.log.Name())
 }
 
 func backendEnvironment(environment []string) []string {

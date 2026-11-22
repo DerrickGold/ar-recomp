@@ -1,4 +1,5 @@
 #include "action_effect_manifest.h"
+#include "app/runtime_log.h"
 #include "action_effect_recipes.h"
 #include "action_effect_capture.h"
 #include "app/settings.h"
@@ -62,7 +63,7 @@ bool ActionEffectManifest_Load(void) {
   FILE *f = sr_fopen(path,"rb");
   if (!f) {
     if (errno == ENOENT) { s_recipes = (ActionEffectRecipes){0}; return true; }
-    fprintf(stderr,"[action-effects] cannot read %s; retaining previous recipes\n",path);
+    RuntimeLog_Printf("[action-effects] cannot read %s; retaining previous recipes\n",path);
     return false;
   }
   char *text = malloc(kActionEffectRecipeMaxBytes + 1);
@@ -72,8 +73,8 @@ bool ActionEffectManifest_Load(void) {
   unsigned line = 0;
   ok = ok && ActionEffectRecipes_Parse(&s_recipes,text,size,&line);
   free(text);
-  if (!ok) fprintf(stderr,"[action-effects] rejected %s at line %u; retaining previous recipes\n",path,line);
-  else fprintf(stderr,"[action-effects] loaded %u source overrides from %s\n",s_recipes.count,path);
+  if (!ok) RuntimeLog_Printf("[action-effects] rejected %s at line %u; retaining previous recipes\n",path,line);
+  else RuntimeLog_Printf("[action-effects] loaded %u source overrides from %s\n",s_recipes.count,path);
   return ok;
 }
 void ActionEffectManifest_Apply(unsigned group, unsigned room, uint16_t clock,

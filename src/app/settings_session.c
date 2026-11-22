@@ -1,4 +1,5 @@
 #include "app/settings_session.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 
@@ -21,8 +22,7 @@ void SettingsSession_Start(void) {
     const SettingsSaveHost host = SettingsPersistence_Host(s_settings_writer);
     Settings_SetSaveHost(&host);
     if (!s_settings_writer)
-      fprintf(stderr,
-              "[settings] background writer unavailable; using durable synchronous saves\n");
+      RuntimeLog_Printf("[settings] background writer unavailable; using durable synchronous saves\n");
   }
 }
 
@@ -31,9 +31,7 @@ void SettingsSession_PollWrites(void) {
   PerformanceMetrics_RecordBatch(PerformanceMetrics_Epoch(), kPerformance_SettingsWrite,
       written.elapsed_ns, written.maximum_ns, written.writes);
   if (written.failed)
-    fprintf(
-        stderr,
-        "[settings] latest settings write failed; "
+    RuntimeLog_Printf("[settings] latest settings write failed; "
         "it will be retried by the next save or on exit\n");
 }
 
@@ -46,14 +44,13 @@ bool SettingsSession_Finish(bool fatal_session) {
   s_settings_writer = NULL;
   Settings_SetSaveHost(NULL);
   if (!settings_save_ok)
-    fprintf(stderr, "[settings] retrying failed settings save during shutdown\n");
+    RuntimeLog_Printf("[settings] retrying failed settings save during shutdown\n");
   if ((fatal_session || !settings_save_ok) && !InputReplay_ShouldProtectSaveData()) {
     char settings_path[kHostPathCapacity];
     UserDataFile(settings_path, sizeof(settings_path), "settings.ini");
     settings_flush_failed = !Settings_Save(settings_path);
     if (settings_flush_failed)
-      fprintf(stderr,
-              "[settings] shutdown write failed; recent preferences may not have been saved\n");
+      RuntimeLog_Printf("[settings] shutdown write failed; recent preferences may not have been saved\n");
   }
 
   return !settings_flush_failed;

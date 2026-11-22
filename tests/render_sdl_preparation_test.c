@@ -5,9 +5,25 @@
 #include "render/gpu_compile_log.h"
 #include "support/test_assert.h"
 
+static void CheckLateCompileAccounting(void) {
+  GpuCompileLog_BeginPreparation(NULL, NULL);
+  GpuCompileLog_Record("warm shader", "shader", 100000, true);
+  GpuCompileLog_EndPreparation();
+  assert(GpuCompileLog_LateBuildCount() == 0);
+  GpuCompileLog_Record("fast late shader", "shader", 100000, true);
+  GpuCompileLog_Record("failed late shader", "shader", 100000, false);
+  GpuCompileLog_BeginPreparation(NULL, NULL);
+  GpuCompileLog_Record("reset warm shader", "shader", 100000, true);
+  GpuCompileLog_EndPreparation();
+  assert(GpuCompileLog_LateBuildCount() == 2);
+  GpuCompileLog_ReportLate();
+  assert(GpuCompileLog_LateBuildCount() == 0);
+}
+
 /* Run on the actual backend: startup warming must finish without presenting
  * scratch pixels, changing the caller's target/clip, or modifying its art. */
 int main(void) {
+  CheckLateCompileAccounting();
   if (!SDL_Init(SDL_INIT_VIDEO)) return 77;
   SDL_Window *window = SDL_CreateWindow("pipeline preparation", 64, 64, SDL_WINDOW_HIDDEN);
   ArRenderDevice device = {0};

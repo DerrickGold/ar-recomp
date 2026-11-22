@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "app/runtime_diagnostics.h"
 
@@ -206,7 +207,7 @@ void DumpDiagState(const char *tag) {
    * bounded execution history off that coroutine stack. */
   static DiagnosticRunnerView view;
   if (!DiagnosticRunnerView_Borrow(&view)) {
-    fprintf(stderr, "[dump] runner ABI state is unavailable (%s)\n",
+    RuntimeLog_Printf("[dump] runner ABI state is unavailable (%s)\n",
             tag ? tag : "");
     return;
   }
@@ -305,12 +306,11 @@ void DumpDiagState(const char *tag) {
   Diagnostic_WriteDispatchLog(s_dispatch_path);
 
   const PresentCadenceMetrics cadence = PresentCadence_GetMetrics();
-  fprintf(stderr,
-          "[present-cadence] tick-presents=%lu re-presents=%lu "
+  RuntimeLog_Printf("[present-cadence] tick-presents=%lu re-presents=%lu "
           "max-represent-alpha=%.3f no-present-no-sleep=%lu\n",
           cadence.tick_present_count, cadence.represent_count,
           (double)cadence.maximum_represent_alpha,
           cadence.no_present_no_sleep_iteration_count);
-  fprintf(stderr, "[dump] wrote %s + wram/sram/dispatch_log (%s)\n",
+  RuntimeLog_Printf("[dump] wrote %s + wram/sram/dispatch_log (%s)\n",
           s_state_path, tag ? tag : "");
 }

@@ -1,5 +1,6 @@
 /* Desktop settings and input adapter for the portable Diorama compositor. */
 #include "diorama.h"
+#include "app/runtime_log.h"
 #include "diorama_layer_manifest.h"
 #include "diorama_rom_skybox_resource.h"
 #include "diorama_upload.h"
@@ -190,7 +191,7 @@ void Diorama_FlushSettingsIfDirty(void) {
       s_diorama_settings_dirty = false;
     else {
       s_diorama_settings_dirty_at = HostClock_Milliseconds();
-      fprintf(stderr, "[diorama] failed to persist camera settings\n");
+      RuntimeLog_Printf("[diorama] failed to persist camera settings\n");
     }
   }
 }

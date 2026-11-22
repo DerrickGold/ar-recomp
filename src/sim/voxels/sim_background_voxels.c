@@ -1,4 +1,5 @@
 #include "sim/voxels/sim_background_voxels.h"
+#include "app/runtime_log.h"
 
 #include "sim/mountains/sim_background_mountain_silhouette.h"
 #include "sim/voxels/sim_background_voxel_landmarks.h"
@@ -1524,7 +1525,7 @@ static void LogStructuresEnabled(uint8_t town, const uint8_t *wram,
   }
   if (!strcmp(line, previous)) return;
   memcpy(previous, line, at + 1);
-  fprintf(stderr, "[sim-structure] %s\n", line);
+  RuntimeLog_Printf("[sim-structure] %s\n", line);
 }
 
 /* AR_SIM_STRUCTURE_DEBUG=1: one transition-only line for every enhanced

@@ -1,4 +1,5 @@
 #include "sim/sim3d/sim3d.h"
+#include "app/runtime_log.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -313,7 +314,7 @@ void Sim3DCamera_FlushSettingsIfDirty(void) {
     s_settings_dirty = false;
   else {
     s_settings_dirty_at_ms = HostClock_Milliseconds();
-    fprintf(stderr, "[sim3d] failed to persist camera settings\n");
+    RuntimeLog_Printf("[sim3d] failed to persist camera settings\n");
   }
 }
 

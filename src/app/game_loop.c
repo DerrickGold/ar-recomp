@@ -7,12 +7,16 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <inttypes.h>
 #include <SDL3/SDL.h>
 
 #include "actraiser/actraiser_rtl.h"
 #include "actraiser/actraiser_angel.h"
 #include "actraiser_game.h"
 #include "action/present_action_effects.h"
+#include "app/diagnostic_options.h"
+#include "app/frame_trace.h"
+#include "app/runtime_log.h"
 #include "app/input_replay.h"
 #include "app/input_map.h"
 #include "app/performance_metrics.h"
@@ -29,6 +33,7 @@
 #include "dev/host_runtime_diagnostics.h"
 #include "dev/oracle_trace.h"
 #include "diorama/diorama.h"
+#include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_performance.h"
 #include "host/host_comparison_window.h"
 #include "host/host_display.h"
@@ -505,27 +510,6 @@ static void AppLoop_PumpEvents(const GameSessionConfig *config, bool *running) {
 
 /* The frame loop: pump events, then either service a host pause, step uncapped
  * (headless), or advance the M6 fixed-timestep accumulator. */
-/* Supplying a NULL buffer lets libc choose its own size. Deck's glibc uses
- * 4 KiB even when asked for 4 MiB, putting disk flushes back in the measured
- * loop. Own the diagnostic storage through fclose; ordinary playback allocates
- * nothing here. Longer traces still flush normally when their buffer fills. */
-static FILE *OpenBufferedDiagnosticTrace(const char *path, size_t size,
-                                        char **storage) {
-  *storage = NULL;
-  if (!path) return NULL;
-  FILE *file = fopen(path, "w");
-  if (!file) return NULL;
-  char *buffer = malloc(size);
-  if (!buffer || setvbuf(file, buffer, _IOFBF, size) != 0) {
-    fclose(file);
-    free(buffer);
-    fprintf(stderr, "[frame-trace] could not allocate buffering for %s\n", path);
-    return NULL;
-  }
-  *storage = buffer;
-  return file;
-}
-
 void GameLoop_Run(const GameSessionConfig *config) {
   /* SDL presentation/upload stay on main. The action producer publishes owned
    * packets on the source clock and lends no live state to presentation.
@@ -558,7 +542,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
   const bool stream_enabled = !config->headless &&
       (!stream_option || strcmp(stream_option, "0") != 0);
   if (stream_enabled)
-    fprintf(stderr, "[frame-producer] bounded frame pipeline %s\n",
+    RuntimeLog_Printf("[frame-producer] bounded frame pipeline %s\n",
         HostFrameProducer_Init(DestroyProducerCoroutine, NULL)
             ? "enabled" : "unavailable; synchronous fallback");
   const char *sim_stream_option = getenv("AR_SIM_FRAME_STREAM");
@@ -587,50 +571,32 @@ void GameLoop_Run(const GameSessionConfig *config) {
   uint64_t stream_owner_service_ns = 0;
   uint64_t stream_endpoint_ns = 0, stream_report_ns = 0;
   uint64_t stream_epoch = 0;
-  uint64_t stream_frames = 0, stream_last_source_ns = 0;
+  uint64_t stream_frames = 0;
   double stream_work_ms = 0, stream_copy_ms = 0, stream_bytes = 0, stream_age_ms = 0;
+  const bool stream_log = stream_enabled && DiagnosticOptionEnabled("AR_FRAME_STREAM_LOG");
   unsigned stream_event = 0;
   int stream_tick = 0, cadence_tick = 0;
   uint64_t cadence_epoch = 0;
-  const char *trace_path = getenv("AR_FRAME_STREAM_TRACE");
-  char *stream_trace_buffer = NULL;
-  FILE *stream_trace = OpenBufferedDiagnosticTrace(
-      stream_enabled ? trace_path : NULL, 1024 * 1024, &stream_trace_buffer);
-  if (stream_trace) {
-    fprintf(stream_trace,
-        "start_ns,complete_ns,endpoint_ns,alpha,target_ns,tick,interval_ns,interpolation,epoch\n");
-  }
-  const char *pacing_trace_path = getenv("AR_FRAME_PACING_TRACE");
-  char *pacing_trace_buffer = NULL;
-  FILE *pacing_trace = OpenBufferedDiagnosticTrace(
-      stream_enabled ? pacing_trace_path : NULL, 4 * 1024 * 1024,
-      &pacing_trace_buffer);
+  FrameTrace *stream_trace = FrameTrace_Open(
+      stream_enabled ? getenv("AR_FRAME_STREAM_TRACE") : NULL, kFrameTrace_Stream);
+  FrameTrace *pacing_trace = FrameTrace_Open(
+      stream_enabled ? getenv("AR_FRAME_PACING_TRACE") : NULL, kFrameTrace_Pacing);
+  FrameTrace *sync_trace = FrameTrace_Open(
+      config->headless ? NULL : getenv("AR_FRAME_SYNC_TRACE"), kFrameTrace_Synchronous);
+  FrameTrace *gpu_prepare_trace = FrameTrace_Open(
+      getenv("AR_GPU_PREPARE_TRACE"), kFrameTrace_GpuPrepare);
+  DioramaFrameGeneration_SetPrepareTrace(gpu_prepare_trace);
   stream.measure_cpu = pacing_trace != NULL;
   HostDisplay_EnablePresentTrace(pacing_trace != NULL);
-  if (pacing_trace) {
-    fprintf(pacing_trace,
-            "loop_ns,prepare_ns,ready_ns,draw_ns,complete_ns,deadline_ns,upload_ns,uploads,draw_"
-            "work_ns,swap_ns,vector_wait_ns,queue_before,queue_after,presented,tick,epoch,source_"
-            "ns,producer_start_ns,producer_complete_ns,input_ns,pump_ns,input_events_ns,owner_poll_"
-            "ns,submit_start_ns,backend_flush_ns,backend_acquire_ns,backend_submit_ns,producer_cpu_"
-            "ns,playout_target_ns,sample_ns,interval_ns,interpolation,pacing_source,draw_cpu_ns,"
-            "backend_command_ns,backend_swapchain_ns,backend_blit_ns,backend_queue_submit_ns\n");
-  }
   uint64_t trace_producer_start = 0, trace_producer_complete = 0, trace_input = 0;
   uint64_t trace_producer_cpu = 0;
-  const char *sync_trace_path = getenv("AR_FRAME_SYNC_TRACE");
-  char *sync_trace_buffer = NULL;
-  FILE *sync_trace = OpenBufferedDiagnosticTrace(
-      !config->headless ? sync_trace_path : NULL, 4 * 1024 * 1024, &sync_trace_buffer);
-  if (sync_trace) fprintf(sync_trace,
-      "sample_ns,complete_ns,interval_ns,remainder_ns,alpha,tick,produced,interpolation,source_ns,epoch,tick_delta,pacing_source,target_ns,map_group,map_number,presentation_sample_ns\n");
   if (stream_enabled && HostFrameProducer_Enabled()) {
     stream.queue = HostFrameQueue_Create();
     if (!stream.queue) {
       /* No game tick has run yet, so abandoning the owner here cannot migrate
        * a live coroutine. Allocation failure preserves the normal renderer. */
       HostFrameProducer_Shutdown();
-      fprintf(stderr, "[frame-producer] packet allocation failed; synchronous fallback\n");
+      RuntimeLog_Printf("[frame-producer] packet allocation failed; synchronous fallback\n");
     }
   }
   bool logged_input_ready = false;
@@ -729,10 +695,11 @@ void GameLoop_Run(const GameSessionConfig *config) {
          * their display time and made the next source tick start late. Poll's
          * acknowledgement makes runner reads safe; Resume preserves every
          * owned packet and the existing source/presentation clocks. */
-        const uint64_t service_start_ns = SDL_GetTicksNS();
+        const uint64_t service_start_ns = stream_log ? SDL_GetTicksNS() : 0;
         RunPersistenceHousekeeping();
         const uint64_t service_end_ns = SDL_GetTicksNS();
-        fprintf(stderr, "[stream-service] frames=%u full-waits=%u event=0 elapsed-ms=%.3f "
+        if (stream_log) RuntimeLog_Printf(
+            "[stream-service] frames=%u full-waits=%u event=0 elapsed-ms=%.3f "
             "retained=%u work-ms=%.3f resume-slack-ms=%.3f tick=%d\n",
             stream.frames, stream.full_waits,
             (double)(service_end_ns - stream_owner_service_ns) / 1e6,
@@ -793,22 +760,23 @@ void GameLoop_Run(const GameSessionConfig *config) {
           trace_input = packet->input_ns;
           trace_producer_cpu = packet->cpu_ns;
         }
-        const uint64_t now = SDL_GetTicksNS();
-        if (!stream_report_ns) stream_report_ns = now;
-        stream_frames++;
-        stream_last_source_ns = packet->source_ns;
-        stream_work_ms += (double)(packet->completed_ns - packet->started_ns) / 1e6;
-        stream_copy_ms += (double)packet->copy_ns / 1e6;
-        stream_bytes += (double)packet->copied_bytes / (1024 * 1024);
-        stream_age_ms += (double)(now - packet->source_ns) / 1e6;
+        const uint64_t now = stream_log ? SDL_GetTicksNS() : 0;
+        if (stream_log) {
+          if (!stream_report_ns) stream_report_ns = now;
+          stream_frames++;
+          stream_work_ms += (double)(packet->completed_ns - packet->started_ns) / 1e6;
+          stream_copy_ms += (double)packet->copy_ns / 1e6;
+          stream_bytes += (double)packet->copied_bytes / (1024 * 1024);
+          stream_age_ms += (double)(now - packet->source_ns) / 1e6;
+        }
         HostFrameQueue_Release(stream.queue);
-        if (now - stream_report_ns >= 1000000000) {
-          fprintf(stderr, "[frame-stream] captures-hz=%.3f work-ms=%.3f copy-ms=%.3f "
+        if (stream_log && now - stream_report_ns >= kNanosecondsPerSecond) {
+          RuntimeLog_Printf("[frame-stream] captures-hz=%.3f work-ms=%.3f copy-ms=%.3f "
               "copy-MiB=%.3f upload-age-ms=%.3f source-age-ms=%.3f\n",
               stream_frames * 1e9 / (double)(now - stream_report_ns),
               stream_work_ms / stream_frames, stream_copy_ms / stream_frames,
               stream_bytes / stream_frames, stream_age_ms / stream_frames,
-              (double)(now - stream_last_source_ns) / 1e6);
+              (double)(now - stream_endpoint_ns) / 1e6);
           stream_report_ns = now;
           stream_frames = 0;
           stream_work_ms = stream_copy_ms = stream_bytes = stream_age_ms = 0;
@@ -846,56 +814,36 @@ void GameLoop_Run(const GameSessionConfig *config) {
           cadence_epoch = stream_epoch;
           cadence_tick = stream_tick;
         }
-        /* Capture completion before either CSV write; a phase-trace flush
-         * used to inflate the next pacing row's apparent backend duration. */
         const uint64_t trace_complete_ns = (stream_trace || pacing_trace)
             ? SDL_GetTicksNS() : 0;
-        if (presented && stream_trace)
-          fprintf(stream_trace, "%llu,%llu,%llu,%.8f,%llu,%d,%llu,%d,%llu\n",
-              (unsigned long long)present_start_ns, (unsigned long long)trace_complete_ns,
-              (unsigned long long)stream_endpoint_ns, phase,
-              (unsigned long long)present_target_ns, stream_tick,
-              (unsigned long long)stream.interval_ns, stream.playout.interpolate,
-              (unsigned long long)stream_epoch);
-        /* Preserve slow idle iterations too, so a delayed event pump/owner
-         * acknowledgement is not mistaken for an unexplained sleep gap. */
-        if (pacing_trace && (presented || trace_uploads ||
-                            trace_ready_ns - trace_loop_ns > 1000000)) {
-          const HostDisplayPresentTrace trace = await_endpoint
-              ? (HostDisplayPresentTrace){0} : HostDisplay_LastPresentTrace();
-          fprintf(
-              pacing_trace,
-              "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%llu,%llu,%u,%u,%d,%d,%llu,%llu,%llu,%"
-              "llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d,%d,%llu,"
-              "%llu,%llu,%llu,%llu\n",
-              (unsigned long long)trace_loop_ns, (unsigned long long)present_start_ns,
-              (unsigned long long)trace_ready_ns, (unsigned long long)trace.draw_start_ns,
-              (unsigned long long)trace_complete_ns, (unsigned long long)trace.deadline_ns,
-              (unsigned long long)(trace_ready_ns - present_start_ns), trace_uploads,
-              (unsigned long long)trace.draw_ns, (unsigned long long)trace.swap_ns,
-              (unsigned long long)trace.vector_wait_ns, trace_queue_before,
-              HostFrameQueue_ReadyCount(stream.queue), presented, stream_tick,
-              (unsigned long long)stream_epoch, (unsigned long long)stream_endpoint_ns,
-              (unsigned long long)trace_producer_start, (unsigned long long)trace_producer_complete,
-              (unsigned long long)trace_input, (unsigned long long)(trace_pump_end - trace_loop_ns),
-              (unsigned long long)(trace_events_end - trace_pump_end),
-              (unsigned long long)(present_start_ns - trace_events_end),
-              (unsigned long long)trace.submit_start_ns, (unsigned long long)trace.backend_flush_ns,
-              (unsigned long long)trace.backend_acquire_ns,
-              (unsigned long long)trace.backend_submit_ns, (unsigned long long)trace_producer_cpu,
-              (unsigned long long)present_target_ns, (unsigned long long)sample_ns,
-              (unsigned long long)stream.interval_ns, stream.playout.interpolate,
-              HostDisplay_PacingSource(), (unsigned long long)trace.draw_cpu_ns,
-              (unsigned long long)trace.backend_command_ns,
-              (unsigned long long)trace.backend_swapchain_ns,
-              (unsigned long long)trace.backend_blit_ns,
-              (unsigned long long)trace.backend_queue_submit_ns);
+        if (presented && stream_trace) {
+          const FrameStreamTraceRow row = {
+            .start_ns = present_start_ns, .complete_ns = trace_complete_ns,
+            .endpoint_ns = stream_endpoint_ns, .alpha = phase, .target_ns = present_target_ns,
+            .tick = stream_tick, .interval_ns = stream.interval_ns,
+            .interpolation = stream.playout.interpolate, .epoch = stream_epoch,
+          };
+          FrameTrace_Record(stream_trace, &row, sizeof(row));
         }
-        if (trace_complete_ns) {
-          const uint64_t trace_write_ns = SDL_GetTicksNS() - trace_complete_ns;
-          if (trace_write_ns > 1000000)
-            fprintf(stderr, "[frame-trace-write] start-ns=%llu elapsed-ms=%.3f\n",
-                (unsigned long long)trace_complete_ns, (double)trace_write_ns / 1e6);
+        /* Keep slow idle iterations for event-pump and owner-ack attribution. */
+        if (pacing_trace && (presented || trace_uploads ||
+                            trace_ready_ns - trace_loop_ns > kNanosecondsPerMillisecond)) {
+          const FramePacingTraceRow row = {
+            .loop_ns = trace_loop_ns, .prepare_ns = present_start_ns,
+            .ready_ns = trace_ready_ns, .complete_ns = trace_complete_ns,
+            .uploads = trace_uploads, .queue_before = trace_queue_before,
+            .queue_after = HostFrameQueue_ReadyCount(stream.queue), .presented = presented,
+            .tick = stream_tick, .epoch = stream_epoch, .source_ns = stream_endpoint_ns,
+            .producer_start_ns = trace_producer_start, .producer_complete_ns = trace_producer_complete,
+            .input_ns = trace_input, .pump_ns = trace_pump_end - trace_loop_ns,
+            .input_events_ns = trace_events_end - trace_pump_end,
+            .owner_poll_ns = present_start_ns - trace_events_end,
+            .producer_cpu_ns = trace_producer_cpu, .playout_target_ns = present_target_ns,
+            .sample_ns = sample_ns, .interval_ns = stream.interval_ns,
+            .interpolation = stream.playout.interpolate, .pacing_source = HostDisplay_PacingSource(),
+            .render = await_endpoint ? (HostDisplayPresentTrace){0} : HostDisplay_LastPresentTrace(),
+          };
+          FrameTrace_Record(pacing_trace, &row, sizeof(row));
         }
         HostDisplay_YieldIfNoPresent(presented, false, false);
         continue;
@@ -903,12 +851,14 @@ void GameLoop_Run(const GameSessionConfig *config) {
       stream_pending = false;
       camera_reseed_handoff = !stream.sim_town && !stream.transition &&
           !stream.stopped && g_settings.diorama_mode == kAction3D_Voxel;
-      fprintf(stderr, "[stream-service] frames=%u full-waits=%u event=%u elapsed-ms=%.3f%s",
-          stream.frames, stream.full_waits, stream_event,
-          (double)(SDL_GetTicksNS() - stream_owner_service_ns) / 1e6,
-          stream.stall_ns ? "" : "\n");
-      if (stream.stall_ns)
-        fprintf(stderr, " stall-dropped-ms=%.3f\n", (double)stream.stall_ns / 1e6);
+      if (stream_log) {
+        char stall[64] = "";
+        if (stream.stall_ns)
+          snprintf(stall, sizeof(stall), " stall-dropped-ms=%.3f", (double)stream.stall_ns / 1e6);
+        RuntimeLog_Printf("[stream-service] frames=%u full-waits=%u event=%u elapsed-ms=%.3f%s\n",
+            stream.frames, stream.full_waits, stream_event,
+            (double)(SDL_GetTicksNS() - stream_owner_service_ns) / 1e6, stall);
+      }
       stream_event = 0;
       RunPostTickHousekeeping();
       HostInput_MarkFrameDrawn();
@@ -928,7 +878,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
     }
     const bool pipeline_log = HostRuntimeDiagnostics_PipelineLoggingEnabled();
     PerformanceMetrics_Configure(g_settings.performance_overlay != 0 || pipeline_log,
-        g_settings.performance_overlay != 0 || pipeline_log);
+        pipeline_log);
     const PerformanceScope events = PerformanceMetrics_Begin(kPerformance_Events);
     AppLoop_PumpEvents(config, &running);
     PerformanceMetrics_End(events);
@@ -1111,7 +1061,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
       const int reseed_tick_before = snes_frame_counter;
       const bool reseeded = DrawAndPresentFrame(kHostDisplayPresent_CameraReseed,
           kPresentationFrameGenerationPhaseNone);
-      fprintf(stderr, "[camera-reseed] tick-before=%d tick=%d capture-ticks=%d "
+      RuntimeLog_Printf("[camera-reseed] tick-before=%d tick=%d capture-ticks=%d "
           "source-ns=%llu next-source-ns=%llu "
           "start-ns=%llu complete-ns=%llu presented=%d\n",
           reseed_tick_before, snes_frame_counter, reseeded ? 0 : -1,
@@ -1264,16 +1214,16 @@ void GameLoop_Run(const GameSessionConfig *config) {
         sync_last_tick = snes_frame_counter;
       }
       if (presented && sync_trace) {
-        const uint64_t completed_ns = SDL_GetTicksNS();
-        fprintf(sync_trace, "%llu,%llu,%llu,%llu,%.8f,%d,%d,%d,%llu,%llu,%d,%d,%llu,%u,%u,%llu\n",
-            (unsigned long long)now_ns, (unsigned long long)completed_ns,
-            (unsigned long long)emulation_frame_interval_ns,
-            (unsigned long long)accumulator, alpha, snes_frame_counter,
-            produced_frame, !native_sync, (unsigned long long)sync_source_ns,
-            (unsigned long long)sync_epoch, snes_frame_counter - tick_before,
-            pacing_source, (unsigned long long)target_ns,
-            g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
-            (unsigned long long)sample_ns);
+        const FrameSyncTraceRow row = {
+          .sample_ns = now_ns, .complete_ns = SDL_GetTicksNS(),
+          .interval_ns = emulation_frame_interval_ns, .remainder_ns = accumulator,
+          .alpha = alpha, .tick = snes_frame_counter, .produced = produced_frame,
+          .interpolation = !native_sync, .source_ns = sync_source_ns, .epoch = sync_epoch,
+          .tick_delta = snes_frame_counter - tick_before, .pacing_source = pacing_source,
+          .target_ns = target_ns, .map_group = g_ram[kActRaiserWram_MapGroup],
+          .map_number = g_ram[kActRaiserWram_CurrentMap], .presentation_sample_ns = sample_ns,
+        };
+        FrameTrace_Record(sync_trace, &row, sizeof(row));
       }
       /* INVARIANT: every iteration either presents (normally blocking on vsync
        * or a guaranteed-nonzero throttle; explicit Unlimited presentation is
@@ -1291,13 +1241,13 @@ void GameLoop_Run(const GameSessionConfig *config) {
   HostFrameProducer_Shutdown();
   PresentActionEffects_StopSourceWorker();
   HostFrameQueue_Destroy(stream.queue);
-  if (stream_trace) fclose(stream_trace);
-  if (pacing_trace) fclose(pacing_trace);
-  free(stream_trace_buffer);
-  free(pacing_trace_buffer);
-  HostDisplay_EnablePresentTrace(false);
-  if (sync_trace) fclose(sync_trace);
-  free(sync_trace_buffer);
+  DioramaFrameGeneration_SetPrepareTrace(NULL);
+  FrameTrace *traces[] = {stream_trace, pacing_trace, sync_trace, gpu_prepare_trace};
+  FrameTrace_CloseAll(traces, sizeof(traces) / sizeof(traces[0]));
+  const HostDisplayYieldTrace yield_trace = HostDisplay_EndPresentTrace();
+  if (yield_trace.slow_yields)
+    RuntimeLog_Printf("[present-yield] slow-yields=%" PRIu64 " max-ms=%.3f\n",
+                      yield_trace.slow_yields, (double)yield_trace.maximum_ns / 1e6);
   HostDisplay_SetProducerPacing(false);
   HostDisplay_InvalidatePresentHistory();
   InputMap_SetAngelControlsActive(false);

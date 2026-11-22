@@ -1,4 +1,5 @@
 #include "audio/audio_session.h"
+#include "app/runtime_log.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -50,7 +51,7 @@ void AudioSession_AfterTicks(void) {
     int dropped = HostAudio_TakeRejectedChunkCount();
     if (dropped) {
       s_rejected_chunks += dropped;
-      fprintf(stderr, "[audio] %d chunk(s) rejected by SDL_PutAudioStreamData "
+      RuntimeLog_Printf("[audio] %d chunk(s) rejected by SDL_PutAudioStreamData "
                       "(%d total this session) — audio glitched\n",
               dropped, s_rejected_chunks);
     }

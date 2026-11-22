@@ -1,4 +1,5 @@
 #include "diorama_snapshot_capture.h"
+#include "app/runtime_log.h"
 #include "diorama/diorama_snapshot.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,7 +37,7 @@ void DioramaSnapshotCapture_Retain(const FrameSlot *slot,
   /* Capturing raw endpoints with generated view offsets would lie about the
    * displayed image. A later format can carry both endpoints/motion data. */
   if (slot->interp_setting_enabled) {
-    fprintf(stderr, "[diorama-snapshot] disable frame generation for capture\n");
+    RuntimeLog_Printf("[diorama-snapshot] disable frame generation for capture\n");
     return;
   }
   s_capture.owned = calloc(kDioramaSnapshotImageCount, 640u * 352u * 4u);
@@ -93,7 +94,7 @@ void DioramaSnapshotCapture_Write(const FrameSlot *slot,
       if (fclose(f)) ok = false;
     }
   }
-  fprintf(stderr, "[diorama-snapshot] %s %s (%zu bytes; base composition only)\n",
+  RuntimeLog_Printf("[diorama-snapshot] %s %s (%zu bytes; base composition only)\n",
       ok ? "wrote" : "could not capture", s_capture.path, size);
   free(packet);
   DioramaSnapshotCapture_Reset();

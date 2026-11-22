@@ -1,4 +1,5 @@
 #include "sim/voxels/sim_background_voxel_renderer.h"
+#include "app/runtime_log.h"
 #include "sim/sim3d/sim3d_performance.h"
 
 #include <float.h>
@@ -399,7 +400,7 @@ void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device) {
   }
   if (!ArRenderTexture_IsValid(g_renderer_state.ground)) {
     g_renderer_state.allocation_failed = true;
-    fprintf(stderr, "[sim-bg-voxels] texture allocation failed: %s\n",
+    RuntimeLog_Printf("[sim-bg-voxels] texture allocation failed: %s\n",
             ArRenderDevice_LastError(device));
     return;
   }
@@ -446,7 +447,7 @@ void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device) {
     }
     if (!upload_ok) {
       g_renderer_state.uploaded_ground_serial = 0;
-      fprintf(stderr, "[sim-bg-voxels] texture upload failed: %s\n",
+      RuntimeLog_Printf("[sim-bg-voxels] texture upload failed: %s\n",
               ArRenderDevice_LastError(device));
       return;
     }
@@ -494,7 +495,7 @@ void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device) {
             regions, region_count);
     PerformanceMetrics_End(atlas_performance);
     if (!atlas_uploaded) {
-      fprintf(stderr, "[sim-bg-voxels] GPU mountain atlas upload failed: %s\n",
+      RuntimeLog_Printf("[sim-bg-voxels] GPU mountain atlas upload failed: %s\n",
               Sim3DDepthPass_LastError());
       g_renderer_state.allocation_failed = true;
       return;

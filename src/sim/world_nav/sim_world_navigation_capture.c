@@ -1,4 +1,5 @@
 #include "sim/world_nav/sim_world_navigation_capture.h"
+#include "app/runtime_log.h"
 #include "actraiser_game.h"
 
 #include <stdio.h>
@@ -45,7 +46,7 @@ static bool PalaceCaptureResult(SimFrameData *frame, PalaceCaptureFailure reason
     "forced-blank", "foreground-ownership",
   };
   if (reason != s_palace_failure)
-    fprintf(stderr, "[sky-palace-capture] gf=%u fallback=%s\n",
+    RuntimeLog_Printf("[sky-palace-capture] gf=%u fallback=%s\n",
         (unsigned)frame->game_frame, names[reason]);
   s_palace_failure = reason;
   if (reason == kPalaceCapture_Ok) return true;
@@ -60,7 +61,7 @@ static bool NavigationCaptureFailed(SimFrameData *frame, NavigationCaptureFailur
     "oam-layout", "palace-raster", "plaque-raster", "label-raster",
   };
   if (reason != s_navigation_failure)
-    fprintf(stderr, "[world-navigation-capture] gf=%u fallback=%s\n",
+    RuntimeLog_Printf("[world-navigation-capture] gf=%u fallback=%s\n",
         (unsigned)frame->game_frame, names[reason]);
   s_navigation_failure = reason;
   frame->world_navigation_scene.composition = (SimWorldNavigationComposition){0};

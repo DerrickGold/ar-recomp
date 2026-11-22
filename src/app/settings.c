@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "app/settings.h"
 #include "localization/ui_catalog.h"
@@ -257,11 +258,11 @@ static bool ParsePins(const char *text, void *field) {
       pin->val = (uint8)code;
       (*count)++;
     } else {
-      fprintf(stderr, "AR_PIN: bad token '%s' "
+      RuntimeLog_Printf("AR_PIN: bad token '%s' "
               "(want 8-hex PAR 7Exxxxvv/7Fxxxxvv)\n", token);
     }
   }
-  if (*count) fprintf(stderr, "AR_PIN: %u pin(s) active\n", (unsigned)*count);
+  if (*count) RuntimeLog_Printf("AR_PIN: %u pin(s) active\n", (unsigned)*count);
   return true;
 }
 
@@ -1503,7 +1504,7 @@ const SettingDesc g_setting_descs[] = {
                kSettingCat_Display, 0, false, NULL, NULL),
   { "performance_overlay", "AR_PERFORMANCE_OVERLAY", "Performance overlay",
     "Show CPU timings, frame pacing, and worker activity. Detailed breaks down more steps. "
-    "The run log also records timings. GPU timings are unavailable.",
+    "GPU timings are unavailable.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Display,
     &g_settings.performance_overlay, 0, 0, 2, 1, false,
     kPerformanceOverlayLabels, 3,
@@ -3073,7 +3074,7 @@ void Settings_ApplyRenderCapabilities(uint32_t supported) {
     *setting->field = false;
     for (int row = 0; row < g_setting_desc_count; ++row)
       if (g_setting_descs[row].field == setting->field) {
-        fprintf(stderr, "[graphics-capabilities] %s blocked (required=$%x prepared=$%x)\n",
+        RuntimeLog_Printf("[graphics-capabilities] %s blocked (required=$%x prepared=$%x)\n",
             g_setting_descs[row].key, setting->required, s_hardware_supported);
         break;
       }
@@ -3611,7 +3612,7 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
   FILE *file = sr_fopen(path, "r");
   if (!file) {
     if (!missing_ok || errno != ENOENT)
-      fprintf(stderr, "[settings] cannot read %s: %s\n", path,
+      RuntimeLog_Printf("[settings] cannot read %s: %s\n", path,
               strerror(errno));
     return missing_ok && errno == ENOENT;
   }
@@ -3630,7 +3631,7 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
       continue;
     char *equals = strchr(key, '=');
     if (!equals) {
-      fprintf(stderr, "[settings] %s:%d: expected key = value\n",
+      RuntimeLog_Printf("[settings] %s:%d: expected key = value\n",
               path, line_number);
       success = false;
       continue;
@@ -3658,12 +3659,12 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
 
     const SettingDesc *desc = Settings_Find(key);
     if (!desc) {
-      fprintf(stderr, "[settings] %s:%d: unknown key '%s' ignored\n",
+      RuntimeLog_Printf("[settings] %s:%d: unknown key '%s' ignored\n",
               path, line_number, key);
       continue;
     }
     if (desc->type == kSettingType_Action) {
-      fprintf(stderr, "[settings] %s:%d: action key '%s' is not persistent\n",
+      RuntimeLog_Printf("[settings] %s:%d: action key '%s' is not persistent\n",
               path, line_number, key);
       success = false;
       continue;
@@ -3672,7 +3673,7 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
         ? ApplyBootLayerValue(desc, value, rank, false)
         : Settings_SetText(desc, value) != kSettingChange_Rejected;
     if (!applied) {
-      fprintf(stderr, "[settings] %s:%d: invalid value '%s' for %s\n",
+      RuntimeLog_Printf("[settings] %s:%d: invalid value '%s' for %s\n",
               path, line_number, value, key);
       success = false;
     }
@@ -3768,7 +3769,7 @@ void Settings_FinalizeDisplayMode(void) {
   }
 
   if (s_boot_display_from_environment) {
-    fprintf(stderr, "[display] AR_DISPLAY_MODE=%d -> %s%s\n",
+    RuntimeLog_Printf("[display] AR_DISPLAY_MODE=%d -> %s%s\n",
             s_boot_display_mode,
             Settings_DisplayModeName(g_settings.display_mode),
             g_settings.display_mode != s_boot_display_mode
@@ -3843,8 +3844,7 @@ static bool SaveSettings(const char *path, bool deferred) {
     static bool reported;
     if (!reported) {
       reported = true;
-      fprintf(stderr,
-              "[settings] persistence disabled — not writing %s "
+      RuntimeLog_Printf("[settings] persistence disabled — not writing %s "
               "(diagnostic run)\n",
               path);
     }
@@ -3906,7 +3906,7 @@ bool Settings_WriteSnapshot(const char *path, const char *text, size_t size) {
 
   FILE *file = sr_fopen(temporary, "w");
   if (!file) {
-    fprintf(stderr, "[settings] cannot write %s: %s\n", temporary,
+    RuntimeLog_Printf("[settings] cannot write %s: %s\n", temporary,
             strerror(errno));
     free(temporary);
     return false;
@@ -3918,7 +3918,7 @@ bool Settings_WriteSnapshot(const char *path, const char *text, size_t size) {
   if (fclose(file) != 0) success = false;
 
   if (success && !AtomicReplaceFile(temporary, path)) {
-    fprintf(stderr, "[settings] cannot replace %s: %s\n", path,
+    RuntimeLog_Printf("[settings] cannot replace %s: %s\n", path,
             strerror(errno));
     success = false;
   }

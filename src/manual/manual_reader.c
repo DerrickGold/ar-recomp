@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "manual_reader.h"
 
@@ -252,7 +253,7 @@ bool ManualReader_Open(void) {
   s_stick_x = s_stick_y = 0.0f;
   s_dragging = false;
   BumpHint();
-  fprintf(stderr, "[manual] opened (%s)\n", ManualReader_Status());
+  RuntimeLog_Printf("[manual] opened (%s)\n", ManualReader_Status());
   return true;
 }
 
@@ -260,7 +261,7 @@ void ManualReader_Close(void) {
   if (!s_reader.open) return;
   s_reader.open = false;
   s_dragging = false;
-  fprintf(stderr, "[manual] closed\n");
+  RuntimeLog_Printf("[manual] closed\n");
 }
 
 void ManualReader_DestroyTextures(void) {
@@ -532,7 +533,7 @@ static PageTexture *DecodePage(int page) {
                                           (int)entry->length, &w, &h,
                                           &channels, 4);
   if (!pixels) {
-    fprintf(stderr, "[manual] page %d: decode failed (%s)\n", page + 1,
+    RuntimeLog_Printf("[manual] page %d: decode failed (%s)\n", page + 1,
             stbi_failure_reason());
     if (s_reader.failed_count < kMaxFailures)
       s_reader.failed[s_reader.failed_count++] = page;
@@ -549,7 +550,7 @@ static PageTexture *DecodePage(int page) {
   };
   ArRenderTexture texture = ArRenderTexture_Invalid();
   if (!ArRenderDevice_CreateTexture(&g_render_device, &desc, &texture)) {
-    fprintf(stderr, "[manual] page %d: texture failed (%s)\n", page + 1,
+    RuntimeLog_Printf("[manual] page %d: texture failed (%s)\n", page + 1,
             ArRenderDevice_LastError(&g_render_device));
     if (s_reader.failed_count < kMaxFailures)
       s_reader.failed[s_reader.failed_count++] = page;
@@ -558,7 +559,7 @@ static PageTexture *DecodePage(int page) {
   }
   if (!ArRenderDevice_UpdateTexture(
           &g_render_device, texture, NULL, pixels, w * 4)) {
-    fprintf(stderr, "[manual] page %d: texture upload failed (%s)\n", page + 1,
+    RuntimeLog_Printf("[manual] page %d: texture upload failed (%s)\n", page + 1,
             ArRenderDevice_LastError(&g_render_device));
     if (s_reader.failed_count < kMaxFailures)
       s_reader.failed[s_reader.failed_count++] = page;

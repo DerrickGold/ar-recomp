@@ -15,6 +15,7 @@
  *   tile_sheet_<class>.ppm contact sheets, first-seen palette, 2x scale
  */
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -487,7 +488,7 @@ static void WriteContactSheet(CensusClass class_, const int *indices,
     }
   }
   fclose(f);
-  fprintf(stderr, "[tile-census] %s: %d tiles -> %s\n",
+  RuntimeLog_Printf("[tile-census] %s: %d tiles -> %s\n",
           kClassNames[class_], count, path);
 }
 
@@ -582,7 +583,7 @@ static void CensusDump(void) {
               s_skipped_mode_mask);
     fclose(summary);
   }
-  fprintf(stderr, "[tile-census] %u frames, %d unique tiles -> "
+  RuntimeLog_Printf("[tile-census] %u frames, %d unique tiles -> "
           "tile_census.{txt,jsonl}\n", s_frames_surveyed, s_record_count);
 }
 
@@ -633,7 +634,7 @@ static void HdMode7Dump_Frame(const HdTileCensusPpuView *view) {
     }
   }
   fclose(f);
-  fprintf(stderr, "[m7-dump] gf=%u canvas %016llx -> %s\n", gf,
+  RuntimeLog_Printf("[m7-dump] gf=%u canvas %016llx -> %s\n", gf,
           (unsigned long long)hash, path);
 }
 
@@ -659,7 +660,7 @@ void HdTileCensus_Frame(SrRunnerHandle *runner) {
     if (s_enabled) {
       memset(s_hash_slots, 0xff, sizeof(int32_t) << kCensusHashBits);
       atexit(CensusDump);
-      fprintf(stderr, "[tile-census] enabled\n");
+      RuntimeLog_Printf("[tile-census] enabled\n");
     }
   }
   if (!s_enabled && !s_mode7_dump_enabled) return;

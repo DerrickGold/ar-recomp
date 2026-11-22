@@ -1,4 +1,5 @@
 #include "action/action_voxel.h"
+#include "app/runtime_log.h"
 #include "actraiser/actraiser_room_profiles.h"
 
 #include "diorama.h"
@@ -362,8 +363,7 @@ static ArRenderTexture EnsureDioramaSkyboxPrefilterTexture(
   };
   if (!ArRenderDevice_CreateTexture(
           device, &desc, &s_diorama_skybox_prefilter_texture)) {
-    fprintf(stderr,
-            "[diorama] skybox prefilter target unavailable; using direct "
+    RuntimeLog_Printf("[diorama] skybox prefilter target unavailable; using direct "
             "full-resolution blur: %s\n", ArRenderDevice_LastError(device));
     DisableDioramaSkyboxPrefilter(device);
     return ArRenderTexture_Invalid();
@@ -394,8 +394,7 @@ static ArRenderTexture EnsureDioramaStackGroupTexture(
   };
   if (!ArRenderDevice_CreateTexture(
           device, &desc, &s_diorama_stack_group_texture)) {
-    fprintf(stderr,
-            "[diorama] stack-group target unavailable; using direct stack "
+    RuntimeLog_Printf("[diorama] stack-group target unavailable; using direct stack "
             "draws: %s\n", ArRenderDevice_LastError(device));
     DisableDioramaStackGroup(device);
     return ArRenderTexture_Invalid();
@@ -419,8 +418,7 @@ static ArRenderTexture EnsureDioramaSupersampleTexture(
   const ArRenderTexture texture = EnsureDioramaScratchTarget(
       device, &s_diorama_ss, w, h, kArRenderFilter_Linear);
   if (!ArRenderTexture_IsValid(texture)) {
-    fprintf(stderr,
-            "[diorama] supersample target unavailable; optional crisp AA "
+    RuntimeLog_Printf("[diorama] supersample target unavailable; optional crisp AA "
             "disabled for this renderer: %s\n", ArRenderDevice_LastError(device));
     DisableDioramaSupersample(device);
   }
@@ -435,8 +433,7 @@ static ArRenderTexture EnsureDioramaDofSourceTexture(
   const ArRenderTexture texture = EnsureDioramaScratchTarget(
       device, &s_diorama_dof_source, width, height, kArRenderFilter_Nearest);
   if (!ArRenderTexture_IsValid(texture)) {
-    fprintf(stderr,
-            "[diorama] compact DOF source unavailable; using crisp layer "
+    RuntimeLog_Printf("[diorama] compact DOF source unavailable; using crisp layer "
             "fallback: %s\n", ArRenderDevice_LastError(device));
     DisableDioramaDofSource(device);
   }
@@ -998,8 +995,7 @@ static void DioramaAitosWaterfallLog(bool log_on, uint8_t map_group, uint8_t map
   };
   if (!memcmp(key, last_key, sizeof key)) return;
   memcpy(last_key, key, sizeof key);
-  fprintf(stderr,
-          "[aitos-wf] draw map=$%02X/$%02X section=%d eligible=%d ext_nv=%d "
+  RuntimeLog_Printf("[aitos-wf] draw map=$%02X/$%02X section=%d eligible=%d ext_nv=%d "
           "top=%d cap_h=%d drawable_y1=%d fold_t=%.4f overlap_t=%.4f\n",
           map_group, map_number, layer_section, eligible ? 1 : 0, extension_nv,
           authentic_y0, capture_height, drawable_y1,

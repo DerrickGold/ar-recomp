@@ -1,4 +1,5 @@
 #include "diorama/diorama_effect_backend.h"
+#include "app/runtime_log.h"
 #include "diorama/diorama_scenery_uniforms.h"
 
 #include <SDL3/SDL.h>
@@ -114,8 +115,7 @@ static bool EnsureEffect(ArRenderDevice *device,
 
   SDL_GPUDevice *gpu = RendererGpuDevice(renderer);
   if (!gpu) {
-    fprintf(stderr,
-            "[gpu-fx] renderer has no GPU device - %s disabled "
+    RuntimeLog_Printf("[gpu-fx] renderer has no GPU device - %s disabled "
             "(enable \"GPU shader effects\" in Graphics settings?)\n",
             kEffectNames[effect]);
     return false;
@@ -142,7 +142,7 @@ static bool EnsureEffect(ArRenderDevice *device,
       effect == kDioramaEffect_NativeBloom ? 8 * sizeof(float) : 4 * sizeof(float);
   if (!state || !GpuRenderPreparation_Warm(device, state,
           effect == kDioramaEffect_NativeBloom ? bloom_uniforms : warm_uniforms, warm_bytes, false)) {
-    fprintf(stderr, "[gpu-fx] %s render state creation failed: %s\n",
+    RuntimeLog_Printf("[gpu-fx] %s render state creation failed: %s\n",
             kEffectNames[effect], SDL_GetError());
     SDL_DestroyGPURenderState(state);
     return false;
@@ -150,7 +150,7 @@ static bool EnsureEffect(ArRenderDevice *device,
 
   s_effects.states[effect] = state;
   s_effects.available[effect] = true;
-  fprintf(stderr, "[gpu-fx] %s shader ready\n", kEffectNames[effect]);
+  RuntimeLog_Printf("[gpu-fx] %s shader ready\n", kEffectNames[effect]);
   return true;
 }
 

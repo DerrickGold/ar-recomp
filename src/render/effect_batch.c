@@ -1,4 +1,5 @@
 #include "render/effect_batch.h"
+#include "app/runtime_log.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -18,8 +19,7 @@ void EffectRenderer_DisableBlend(ArRenderDevice *device, const char *operation) 
           &s_effect_blend_supported, &expected, 0,
           memory_order_acq_rel, memory_order_acquire))
     return;
-  fprintf(stderr,
-          "[host-effects] effect blend pass unavailable at %s (%s) — "
+  RuntimeLog_Printf("[host-effects] effect blend pass unavailable at %s (%s) — "
           "effect lighting and particles disabled\n",
           operation, ArRenderDevice_LastError(device));
 }
@@ -30,8 +30,7 @@ static void DisableEffectGeometry(ArRenderDevice *device, const char *operation)
           &s_effect_geometry_supported, &expected, 0,
           memory_order_acq_rel, memory_order_acquire))
     return;
-  fprintf(stderr,
-          "[host-effects] geometry pass unavailable at %s (%s) — "
+  RuntimeLog_Printf("[host-effects] geometry pass unavailable at %s (%s) — "
           "effect lighting and particles disabled\n",
           operation, ArRenderDevice_LastError(device));
 }
@@ -49,8 +48,7 @@ bool EffectRenderer_Submit(ArRenderDevice *device, const EffectBatch *batch,
     static bool logged;
     if (!logged) {
       logged = true;
-      fprintf(stderr,
-              "[host-effects] internal geometry batch capacity exceeded — "
+      RuntimeLog_Printf("[host-effects] internal geometry batch capacity exceeded — "
               "effect pass skipped\n");
     }
     return false;

@@ -1,6 +1,7 @@
 /* One semantic HUD owner for flat action, SIM, Palace, diorama and church.
  * Capture and scene exclusion share live scanout; publish only after completion. */
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
+#include "app/runtime_log.h"
 #include "diorama/diorama.h"
 
 static HudIconFrame s_pending_icon, s_completed_icon;
@@ -62,7 +63,7 @@ void ActRaiser_HudIconPrepare(void) {
     const int spell = g_ram[kActRaiserWram_SelectedMagic];
     const int slot = owned ? capture_first : -1;
     if (spell != last_spell || slot != last_slot || capture_count != last_count) {
-      fprintf(stderr, "[hud-icon] gf=%u sky-palace spell=%d -> slot=%d count=%u\n",
+      RuntimeLog_Printf("[hud-icon] gf=%u sky-palace spell=%d -> slot=%d count=%u\n",
           (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
           spell, slot, capture_count);
       last_spell = spell;

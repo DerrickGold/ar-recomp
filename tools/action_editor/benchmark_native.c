@@ -470,6 +470,7 @@ int main(int argc, char **argv) {
   fputc('\n',trace);
   const double scale = 1000.0 / SDL_GetPerformanceFrequency();
   double total = 0, prepare = 0, compose = 0, wait = 0;
+  unsigned late_builds_at_start = 0;
   for (int i = -warmup; i < frames; ++i) {
     if (probe_frame) {
       probe_frame(i);
@@ -478,6 +479,7 @@ int main(int argc, char **argv) {
     if (i == 0) {
       GpuCompileLog_EndPreparation();
       preparing = false;
+      late_builds_at_start = GpuCompileLog_LateBuildCount();
       fprintf(stderr, "[benchmark] %s\n", capture_only ? "capture-only" : "timed-begin");
       fflush(stderr);
     }
@@ -570,6 +572,8 @@ int main(int argc, char **argv) {
               s_profile_frame.primitive_bytes, (unsigned long long)(s_source.draws - draws),
               (unsigned long long)(s_source.submissions - submissions));
   }
+  fprintf(stderr, "[benchmark] late-builds=%u\n",
+          GpuCompileLog_LateBuildCount() - late_builds_at_start);
   /* The last frame has completed and its query results have been collected.
    * Capture readback and teardown can use other fence paths; neither belongs
    * to the frame trace. */

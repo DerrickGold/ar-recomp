@@ -1,4 +1,5 @@
 #include "host_audio.h"
+#include "app/runtime_log.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -124,8 +125,7 @@ static bool OpenAudioStream(void) {
                 ? device_native_frequency_hz
                 : kHostAudioMinimumOutputFrequencyHz;
   if (requested_spec.freq < kHostAudioMinimumOutputFrequencyHz) {
-    fprintf(stderr,
-            "[audio] requested %d Hz is below SDL's %d device minimum; "
+    RuntimeLog_Printf("[audio] requested %d Hz is below SDL's %d device minimum; "
             "using %d (the setting cannot lower it)\n",
             requested_spec.freq, kHostAudioMinimumOutputFrequencyHz,
             kHostAudioMinimumOutputFrequencyHz);
@@ -155,7 +155,7 @@ static bool OpenAudioStream(void) {
   s_audio_stream = SDL_OpenAudioDeviceStream(
       SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &requested_spec, AudioCallback, NULL);
   if (!s_audio_stream) {
-    fprintf(stderr, "SDL_OpenAudioDeviceStream failed: %s\n", SDL_GetError());
+    RuntimeLog_Printf("SDL_OpenAudioDeviceStream failed: %s\n", SDL_GetError());
     return false;
   }
 
@@ -168,13 +168,11 @@ static bool OpenAudioStream(void) {
   if (!SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(s_audio_stream),
                                 &device_spec,
                                 &actual_device_buffer_frames)) {
-    fprintf(stderr,
-            "[audio] SDL_GetAudioDeviceFormat failed: %s "
+    RuntimeLog_Printf("[audio] SDL_GetAudioDeviceFormat failed: %s "
             "(device rate/buffer diagnostic unavailable)\n",
             SDL_GetError());
   }
-  fprintf(stderr,
-          "[audio] stream input %d Hz, device %d Hz %d-frame buffer "
+  RuntimeLog_Printf("[audio] stream input %d Hz, device %d Hz %d-frame buffer "
           "(requested %d frames)\n",
           requested_spec.freq, device_spec.freq, actual_device_buffer_frames,
           s_requested_buffer_frames);
@@ -192,7 +190,7 @@ bool HostAudio_Init(int requested_frequency_hz, int requested_buffer_frames,
 
   s_audio_mutex = SDL_CreateMutex();
   if (!s_audio_mutex) {
-    fprintf(stderr, "[audio] SDL_CreateMutex failed: %s\n", SDL_GetError());
+    RuntimeLog_Printf("[audio] SDL_CreateMutex failed: %s\n", SDL_GetError());
     return false;
   }
   s_game_thread_id = SDL_GetCurrentThreadID();
@@ -204,12 +202,12 @@ static bool ApplyHostPauseState(void) {
   if (!s_host_paused) {
     if (!OpenAudioStream()) return false;
     if (!SDL_ResumeAudioStreamDevice(s_audio_stream)) {
-      fprintf(stderr, "[audio] resume failed: %s\n", SDL_GetError());
+      RuntimeLog_Printf("[audio] resume failed: %s\n", SDL_GetError());
       return false;
     }
   } else if (s_audio_open &&
              !SDL_PauseAudioStreamDevice(s_audio_stream)) {
-    fprintf(stderr, "[audio] pause failed: %s\n", SDL_GetError());
+    RuntimeLog_Printf("[audio] pause failed: %s\n", SDL_GetError());
     return false;
   }
   return true;

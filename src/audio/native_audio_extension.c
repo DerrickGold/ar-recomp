@@ -1,4 +1,5 @@
 #include "audio/native_audio_extension.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -691,8 +692,7 @@ static void StartNewInstance(RtlAudioExtensionContext *context, int slot,
         instance->lane_track == kEventTrack ? 0 : 1,
         instance->voice);
   if (s_log)
-    fprintf(stderr,
-            "[audio-ext] start serial=%llu id=%02x lane=%02x voice=%u%s\n",
+    RuntimeLog_Printf("[audio-ext] start serial=%llu id=%02x lane=%02x voice=%u%s\n",
             (unsigned long long)instance->serial, instance->id,
             instance->lane_track, instance->voice,
             paired ? " paired" : "");
@@ -881,8 +881,7 @@ static void FinishScheduledInstance(
   s_state.schedule_mask &= ~(1u << slot);
   if (ended) {
     if (s_log)
-      fprintf(stderr,
-              "[audio-ext] end serial=%llu id=%02x lane=%02x voice=%u\n",
+      RuntimeLog_Printf("[audio-ext] end serial=%llu id=%02x lane=%02x voice=%u\n",
               (unsigned long long)instance->serial, instance->id,
               instance->lane_track, instance->voice);
     if (g_native_audio_extension_trace_end_hook)
@@ -1024,8 +1023,7 @@ bool NativeAudioExtension_FilterDspWrite(
     SetVoiceBus(context, virtual_voice, RTL_AUDIO_VOICE_BUS_SFX);
     WriteVirtualVoiceRegister(context, virtual_voice, addr, *value);
     if (s_log) {
-      fprintf(stderr,
-              "[audio-ext] voice-write dsp=%02x x=%02x mask=%02x "
+      RuntimeLog_Printf("[audio-ext] voice-write dsp=%02x x=%02x mask=%02x "
               "owner=%02x physical=%d virtual=%d value=%02x\n",
               addr, routed_track, track_mask, ownership,
               hardware_voice, virtual_voice, *value);
@@ -1075,8 +1073,7 @@ bool NativeAudioExtension_FilterDspWrite(
           (!s_logged_routed_seen[addr] ||
            s_logged_routed_mask[addr] != route_mask ||
            s_logged_routed_value[addr] != routed_value)) {
-        fprintf(stderr,
-                "[audio-ext] mask-write dsp=%02x x=%02x mask=%02x "
+        RuntimeLog_Printf("[audio-ext] mask-write dsp=%02x x=%02x mask=%02x "
                 "owner=%02x routed=%02x value=%02x\n",
                 addr, logical_track, track_mask, ownership,
                 route_mask, *value);
@@ -1139,8 +1136,7 @@ void NativeAudioExtension_PatchSpcOpcode(
       s_state.song_kon_pending_mask |=
           ram[kCurrentTrackMaskAddress];
     if (s_log) {
-      fprintf(stderr,
-              "[audio-ext] preserved song update pc=%04x x=%02x "
+      RuntimeLog_Printf("[audio-ext] preserved song update pc=%04x x=%02x "
               "mask=%02x owner=%02x\n",
               pc, context->spc_x, ram[kCurrentTrackMaskAddress],
               ram[kEffectOwnershipMaskAddress]);
@@ -1293,8 +1289,7 @@ void NativeAudioExtension_OnSpcUpload(
   if (!s_enabled || !ExtensionContextValid(context)) return;
   CancelAllEffectsLocked(context);
   if (s_log)
-    fprintf(stderr,
-            "[audio-ext] canceled queued/active effects for SPC upload %06x\n",
+    RuntimeLog_Printf("[audio-ext] canceled queued/active effects for SPC upload %06x\n",
             source);
 }
 
@@ -1309,13 +1304,11 @@ void NativeAudioExtension_Install(void) {
   memset(s_logged_routed_seen, 0, sizeof(s_logged_routed_seen));
   RtlAudioExtensionConfigure(s_enabled);
   if (!s_enabled) {
-    fprintf(stderr,
-            "[audio-ext] extended sound channels disabled "
+    RuntimeLog_Printf("[audio-ext] extended sound channels disabled "
             "(authentic 8 voices)\n");
     return;
   }
-  fprintf(stderr,
-          "[audio-ext] extended sound channels enabled "
+  RuntimeLog_Printf("[audio-ext] extended sound channels enabled "
           "(%d voices, %d effect lanes)\n",
           RTL_AUDIO_ADAPTER_VOICE_MAX, kEffectBankCount * 2);
 }

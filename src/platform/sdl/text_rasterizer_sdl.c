@@ -1,4 +1,5 @@
 #include "platform/sdl/text_rasterizer_sdl.h"
+#include "app/runtime_log.h"
 #include "localization/text_boundaries.h"
 #include "localization/unicode_grapheme.h"
 
@@ -89,8 +90,7 @@ static void WarnMissingScalar(SdlTextRasterizerState *state, uint32_t scalar,
     if (state->warned_scalars[i] == scalar && state->warned_fonts[i] == font)
       return;
   if (state->warning_count == kMissingGlyphWarningCapacity) {
-    fprintf(stderr,
-            "[localized-text] further missing-character warnings for font "
+    RuntimeLog_Printf("[localized-text] further missing-character warnings for font "
             "stack '%s' are suppressed\n",
             state->font_stack_id);
     state->warnings_saturated = true;
@@ -98,8 +98,7 @@ static void WarnMissingScalar(SdlTextRasterizerState *state, uint32_t scalar,
   }
   state->warned_scalars[state->warning_count] = scalar;
   state->warned_fonts[state->warning_count++] = font;
-  fprintf(stderr,
-          "[localized-text] font stack '%s' %s U+%04X "
+  RuntimeLog_Printf("[localized-text] font stack '%s' %s U+%04X "
           "(font resource %llu); a replacement box may be shown. Add a font "
           "covering this character to the affected role's fallback list in "
           "pack.ini, then reimport and reinstall the pack. See the "

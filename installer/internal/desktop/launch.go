@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/appdata"
+	"github.com/DerrickGold/ar-recomp/installer/internal/logretention"
 )
 
 type LaunchOptions struct {
@@ -125,15 +125,6 @@ func Launch(options LaunchOptions) error {
 		return nil
 	}
 	logs := filepath.Join(root, "logs")
-	if err := os.MkdirAll(logs, 0755); err != nil {
-		return err
-	}
-	log, err := os.CreateTemp(logs, "launch-"+time.Now().Format("20060102-150405")+"-*.log")
-	if err != nil {
-		return err
-	}
-	defer log.Close()
-	fmt.Fprintf(log, "Application: %s\nData: %s\n", layout.Artifact, root)
 	command := exec.Command(layout.Binary, arguments...)
 	command.Dir = root
 	command.Env = append(os.Environ(), "AR_USER_DATA_DIR="+root)
@@ -146,9 +137,18 @@ func Launch(options LaunchOptions) error {
 		}
 		command.Env = append(command.Env, "LD_LIBRARY_PATH="+path)
 	}
-	command.Stdout, command.Stderr = log, log
+	log, logErr := logretention.CaptureGame(command, logs, "launch-")
+	if log != nil {
+		defer log.Close()
+		fmt.Fprintf(log, "Application: %s\nData: %s\n", layout.Artifact, root)
+	} else {
+		fmt.Fprintf(os.Stderr, "Game startup log unavailable: %v\n", logErr)
+	}
 	if err := command.Run(); err != nil {
-		return fmt.Errorf("the game could not run: %w\nDetails: %s", err, log.Name())
+		if log != nil {
+			return fmt.Errorf("the game could not run: %w\nDetails: %s", err, log.Name())
+		}
+		return fmt.Errorf("the game could not run: %w", err)
 	}
 	return nil
 }
@@ -163,13 +163,19 @@ func gameArguments(args []string, cwd, root, resources string) ([]string, error)
 		return filepath.Join(cwd, path)
 	}
 	for i := 0; i < len(result); i++ {
-		if result[i] == "--config" {
+		if result[i] == "--config" || result[i] == "--log-dir" {
+			option := result[i]
 			i++
 			if i == len(result) {
-				return nil, errors.New("--config requires a file")
+				if option == "--config" {
+					return nil, errors.New("--config requires a file")
+				}
+				return nil, errors.New("--log-dir requires a directory")
 			}
 			result[i] = absolute(result[i])
-			config = true
+			if option == "--config" {
+				config = true
+			}
 		} else if !strings.HasPrefix(result[i], "-") {
 			result[i] = absolute(result[i])
 			rom = true

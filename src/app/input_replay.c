@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "app/input_replay.h"
 
@@ -80,7 +81,7 @@ static void SetError(const char *message) {
   s_failed = true;
   snprintf(s_last_error, sizeof(s_last_error), "%s",
            message ? message : "input replay failed");
-  fprintf(stderr, "[input-replay] %s\n", s_last_error);
+  RuntimeLog_Printf("[input-replay] %s\n", s_last_error);
 }
 
 const char *InputReplay_LastError(void) {
@@ -182,8 +183,7 @@ static bool LoadCanonicalReplay(FILE *file, const char *path) {
     return false;
   }
   s_replay_source = kReplaySource_CanonicalHostTick;
-  fprintf(stderr,
-          "[input-replay] %zu canonical host-tick records, start=%llu from %s\n",
+  RuntimeLog_Printf("[input-replay] %zu canonical host-tick records, start=%llu from %s\n",
           s_canonical_frame_count,
           (unsigned long long)s_canonical_header.start_frame_ordinal, path);
   return true;
@@ -230,13 +230,11 @@ static bool LoadLegacyReplay(FILE *file, const char *path) {
     return false;
   }
   s_replay_source = kReplaySource_LegacyGameFrame;
-  fprintf(stderr,
-          "[input-replay] %zu legacy records, max gf=%u last gf=%u from %s\n",
+  RuntimeLog_Printf("[input-replay] %zu legacy records, max gf=%u last gf=%u from %s\n",
           record_count, s_maximum_legacy_game_frame,
           s_last_legacy_game_frame, path);
   if (invalid_frame_count) {
-    fprintf(stderr,
-            "[input-replay] ignored %zu record(s) outside 16-bit "
+    RuntimeLog_Printf("[input-replay] ignored %zu record(s) outside 16-bit "
             "game-frame range\n",
             invalid_frame_count);
   }
@@ -272,7 +270,7 @@ static void OpenRecordFile(const char *path) {
     s_writer_failed = true;
     return;
   }
-  fprintf(stderr, "[input-record] canonical host-tick stream -> %s\n", path);
+  RuntimeLog_Printf("[input-record] canonical host-tick stream -> %s\n", path);
 }
 
 static uint64_t ParseCheckpointInterval(void) {
@@ -281,8 +279,7 @@ static uint64_t ParseCheckpointInterval(void) {
   char *end = NULL;
   const unsigned long long value = strtoull(text, &end, 0);
   if (end == text || *end != '\0' || value == 0u) {
-    fprintf(stderr,
-            "[input-replay] ignored invalid "
+    RuntimeLog_Printf("[input-replay] ignored invalid "
             "AR_REPLAY_CHECKPOINT_INTERVAL='%s'\n", text);
     return 0u;
   }
@@ -305,8 +302,7 @@ void InputReplay_Init(void) {
   s_disable_auto_stop = getenv("AR_REPLAY_NOSTOP") != NULL;
   s_live_after_replay = getenv("AR_REPLAY_LIVE_AFTER_END") != NULL;
   if (s_live_after_replay && s_disable_auto_stop) {
-    fprintf(stderr,
-            "[input-replay] AR_REPLAY_LIVE_AFTER_END takes precedence over "
+    RuntimeLog_Printf("[input-replay] AR_REPLAY_LIVE_AFTER_END takes precedence over "
             "AR_REPLAY_NOSTOP\n");
   }
   s_game_frame_logging_enabled = getenv("AR_GFLOG") != NULL;
@@ -473,7 +469,7 @@ bool InputReplay_BeginSession(SrRunnerHandle *runner, const char *game_id) {
 static void LogGameFrame(unsigned game_frame) {
   if (s_game_frame_logging_enabled &&
       (snes_frame_counter % kGameFrameLogInterval) == 0) {
-    fprintf(stderr, "[gflog] host=%d gf=%u\n",
+    RuntimeLog_Printf("[gflog] host=%d gf=%u\n",
             snes_frame_counter, game_frame);
   }
 
@@ -482,8 +478,7 @@ static void LogGameFrame(unsigned game_frame) {
       game_mode >= kActRaiserActionMapGroup_First &&
       game_mode <= kActRaiserActionMapGroup_Last) {
     s_action_entry_reported = true;
-    fprintf(stderr,
-            "[act-enter] $18=%02X $19=%02X at game-frame %u\n",
+    RuntimeLog_Printf("[act-enter] $18=%02X $19=%02X at game-frame %u\n",
             game_mode, g_ram[kActRaiserWram_CurrentMap], game_frame);
   }
 }
@@ -509,8 +504,7 @@ static uint32_t ResolveCanonical(uint32_t live_inputs,
 
   if (s_live_after_replay) {
     if (!s_live_handoff_reported) {
-      fprintf(stderr,
-              "[input-replay] reached end of canonical recording at "
+      RuntimeLog_Printf("[input-replay] reached end of canonical recording at "
               "host tick %llu — handing control to live input\n",
               (unsigned long long)s_next_ordinal);
       s_live_handoff_reported = true;
@@ -541,15 +535,13 @@ static uint32_t ResolveLegacy(uint32_t live_inputs, unsigned game_frame,
 
   if (s_has_legacy_records && s_live_after_replay) {
     if (live_handoff && !s_live_handoff_reported) {
-      fprintf(stderr,
-              "[input-replay] reached end of legacy recording at gf=%u — "
+      RuntimeLog_Printf("[input-replay] reached end of legacy recording at gf=%u — "
               "handing control to live input\n", game_frame);
       s_live_handoff_reported = true;
     }
   } else if (s_has_legacy_records && !s_disable_auto_stop &&
              s_replay_started && game_frame >= s_last_legacy_game_frame) {
-    fprintf(stderr,
-            "[input-replay] reached end of legacy recording at gf=%u — "
+    RuntimeLog_Printf("[input-replay] reached end of legacy recording at gf=%u — "
             "stopping\n", game_frame);
     *stop_requested = true;
   }
@@ -709,7 +701,7 @@ void InputReplay_Shutdown(void) {
   if (s_writer_open && !s_writer_failed) {
     if (sr_input_replay_writer_finish(&s_writer) != SR_RESULT_OK ||
         fflush(s_record_file) != 0)
-      fprintf(stderr, "[input-record] could not finish canonical replay\n");
+      RuntimeLog_Printf("[input-record] could not finish canonical replay\n");
   }
   if (s_record_file) fclose(s_record_file);
   free(s_legacy_replay_inputs);

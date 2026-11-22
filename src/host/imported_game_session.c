@@ -1,4 +1,5 @@
 #include "host/imported_game_session.h"
+#include "app/runtime_log.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -65,7 +66,7 @@ static int Run(void *unused) {
       if (ready) break;
     }
     if (ready) {
-      fprintf(stderr, "[imported-world] prepared %u startup frames in %.1f ms\n",
+      RuntimeLog_Printf("[imported-world] prepared %u startup frames in %.1f ms\n",
           s_session.startup_ticks, (SDL_GetTicksNS() - begin) / 1e6);
       SDL_SetAtomicInt(&s_session.state, kImportedGame_Ready);
     } else if (!SDL_GetAtomicInt(&s_session.cancel) &&

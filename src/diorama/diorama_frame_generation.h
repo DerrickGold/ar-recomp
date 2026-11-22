@@ -14,6 +14,7 @@
 #include "render/render_device.h"
 
 typedef struct FrameSlot FrameSlot;
+typedef struct FrameTrace FrameTrace;
 enum { kDioramaFrameGenerationSkybox = kDioramaPlane_Count };
 
 /* Capture the native action planes for one completed emulation tick and build
@@ -122,5 +123,7 @@ void DioramaFrameGeneration_InvalidateHistory(void);
 bool DioramaFrameGeneration_PreparePipelines(ArRenderDevice *device, bool interpolation);
 void DioramaFrameGeneration_Reset(void);
 void DioramaFrameGeneration_Shutdown(void);
+/* The game loop owns the optional trace across renderer resets. */
+void DioramaFrameGeneration_SetPrepareTrace(FrameTrace *trace);
 
 #endif  /* AR_DIORAMA_FRAME_GENERATION_H */

@@ -1,4 +1,5 @@
 #include "action/action_effect_capture.h"
+#include "app/runtime_log.h"
 #include "action/action_voxel.h"
 #include "action/action_trunk.h"
 #include "diorama/diorama_trunk_guard.h"
@@ -140,7 +141,7 @@ void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
    * kActionApronMaxParts right?" without guessing, which is what the plan asks
    * for instead of assuming a capacity. */
   if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_ApronLog))
-    fprintf(stderr, "[apron] gf=%u parts=%d peak=%d overflow=%d\n",
+    RuntimeLog_Printf("[apron] gf=%u parts=%d peak=%d overflow=%d\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
             ActionApron_Count(), ActionApron_PeakCount(),
             ActionApron_Overflow());
@@ -535,7 +536,7 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
       static bool reported_independent;
       if(!reported_independent) {
         reported_independent=true;
-        fprintf(stderr,"[diorama-blend] gf=%u Voxel full-add independent TS sources=$%02x preserved before 3D separation\n",
+        RuntimeLog_Printf("[diorama-blend] gf=%u Voxel full-add independent TS sources=$%02x preserved before 3D separation\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame),independent_sub_sources);
       }
     }
@@ -577,8 +578,7 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
             verbose = getenv("AR_DIORAMA_BLEND_LOG") ? 1 : 0;
           if (!reported[src] || verbose) {
             reported[src] = true;
-            fprintf(stderr,
-                    "[diorama-blend] gf=%u BG%d half-added with subscreen "
+            RuntimeLog_Printf("[diorama-blend] gf=%u BG%d half-added with subscreen "
                     "(cgwsel=$%02x cgadsub=$%02x main=$%02x sub=$%02x) "
                     "-> captured at 50%% alpha\n",
                     ActRaiser_ReadWram16(kActRaiserWram_GameFrame), src + 1,
@@ -605,8 +605,7 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
             verbose_full_add = getenv("AR_DIORAMA_BLEND_LOG") ? 1 : 0;
           if (!reported_full_add || verbose_full_add) {
             reported_full_add = true;
-            fprintf(stderr,
-                    "[diorama-blend] gf=%u full subscreen add "
+            RuntimeLog_Printf("[diorama-blend] gf=%u full subscreen add "
                     "(cgwsel=$%02x cgadsub=$%02x main=$%02x sub=$%02x) "
                     "-> resolved TS sources=$%02x use additive planes\n",
                     ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
@@ -648,7 +647,7 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
     s_bg_apron_mask &= capture_screens;
     if (!ActRaiserActionBg_BindCaptureTiles(capture_screens & 3u, s_bg_apron_mask)) {
       static bool reported;
-      if (!reported) fprintf(stderr, "ERROR: native diorama tile capture unavailable\n");
+      if (!reported) RuntimeLog_Printf("ERROR: native diorama tile capture unavailable\n");
       reported = true;
     }
   }
@@ -738,7 +737,7 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
       if(!ActRaiser_ConfigurePpuObjCapture(&request)) {
         s_receiver_lighting=NULL;
         static bool reported;
-        if(!reported){fprintf(stderr,"[action-effects] runner rejected object receiver transforms\n");reported=true;}
+        if(!reported){RuntimeLog_Printf("[action-effects] runner rejected object receiver transforms\n");reported=true;}
       }
     }
   }

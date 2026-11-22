@@ -1,4 +1,5 @@
 #include "sim/sim3d/sim_shadow_effect_backend.h"
+#include "app/runtime_log.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -61,7 +62,7 @@ static bool EnsureBlur(ArRenderDevice *device) {
           warm_uniforms, sizeof(warm_uniforms), false)) {
     SDL_DestroyGPURenderState(s_blur.state);
     s_blur.state = NULL;
-    fprintf(stderr, "[sim3d-d4] shadow blur render state failed: %s\n",
+    RuntimeLog_Printf("[sim3d-d4] shadow blur render state failed: %s\n",
             SDL_GetError());
     s_blur.shader = NULL;
     return false;

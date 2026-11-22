@@ -1,4 +1,5 @@
 #include "sim/sim_world_map.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -120,8 +121,7 @@ bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
   memset(&g_world, 0, sizeof(g_world));
   size_t needed = kWorldPaletteRomOffset + kWorldPaletteEntries * 2;
   if (!rom_data || rom_size < needed) {
-    fprintf(stderr,
-            "[sim-worldmap] unavailable: ROM is %zu bytes, need %zu\n",
+    RuntimeLog_Printf("[sim-worldmap] unavailable: ROM is %zu bytes, need %zu\n",
             rom_size, needed);
     return false;
   }

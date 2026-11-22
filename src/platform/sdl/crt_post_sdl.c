@@ -1,4 +1,5 @@
 #include "render/crt_post.h"
+#include "app/runtime_log.h"
 #include "gpu_render_preparation.h"
 
 #include <SDL3/SDL.h>
@@ -66,7 +67,7 @@ static CrtMode Mode(const CrtPostConfig *config) {
     const char *value = getenv("AR_CRT_PASSTHROUGH");
     s_passthrough = value && value[0] && value[0] != '0';
     if (s_passthrough)
-      fprintf(stderr, "[crt] passthrough - render target engaged, shader "
+      RuntimeLog_Printf("[crt] passthrough - render target engaged, shader "
                       "bypassed (plumbing check)\n");
   }
   if (s_passthrough) return kCrtMode_Passthrough;
@@ -109,13 +110,13 @@ static bool EnsureScene(SDL_Renderer *renderer, int width, int height) {
   s_scene = SDL_CreateTexture(
       renderer, format, SDL_TEXTUREACCESS_TARGET, width, height);
   if (!s_scene) {
-    fprintf(stderr, "[crt] scene target %dx%d failed: %s\n",
+    RuntimeLog_Printf("[crt] scene target %dx%d failed: %s\n",
             width, height, SDL_GetError());
     return false;
   }
   if (!SDL_SetTextureScaleMode(s_scene, SDL_SCALEMODE_LINEAR) ||
       !SDL_SetTextureBlendMode(s_scene, SDL_BLENDMODE_NONE)) {
-    fprintf(stderr, "[crt] scene target setup failed: %s\n", SDL_GetError());
+    RuntimeLog_Printf("[crt] scene target setup failed: %s\n", SDL_GetError());
     ReleaseScene();
     return false;
   }
@@ -139,7 +140,7 @@ static bool EnsureShader(ArRenderDevice *device, SDL_Renderer *renderer) {
   s_gpu_device = (SDL_GPUDevice *)SDL_GetPointerProperty(
       properties, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL);
   if (!s_gpu_device) {
-    fprintf(stderr, "[crt] renderer has no GPU device - CRT disabled "
+    RuntimeLog_Printf("[crt] renderer has no GPU device - CRT disabled "
                     "(enable GPU shader effects in Graphics settings?)\n");
     return false;
   }
@@ -160,11 +161,11 @@ static bool EnsureShader(ArRenderDevice *device, SDL_Renderer *renderer) {
           &warm_uniforms, sizeof(warm_uniforms), false)) {
     SDL_DestroyGPURenderState(s_state);
     s_state = NULL;
-    fprintf(stderr, "[crt] render state creation failed: %s\n", SDL_GetError());
+    RuntimeLog_Printf("[crt] render state creation failed: %s\n", SDL_GetError());
     s_shader = NULL;
     return false;
   }
-  fprintf(stderr, "[crt] shader ready\n");
+  RuntimeLog_Printf("[crt] shader ready\n");
   return true;
 }
 

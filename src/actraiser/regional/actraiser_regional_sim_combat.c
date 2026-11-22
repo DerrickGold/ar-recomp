@@ -1,4 +1,5 @@
 #include "actraiser/regional/actraiser_regional_sim_combat.h"
+#include "app/runtime_log.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "actraiser/actraiser_hle_fatal.h"
 #include <stdio.h>
@@ -59,7 +60,7 @@ RecompReturn ActRaiser_RegionalSimThreshold(CpuState *cpu) {
   if (!Snapshot(cpu, &snapshot) || !ActRaiserSimCombat_Threshold(cpu, snapshot))
     ActRaiserHleFatal("Invalid SIM threshold owner");
   if (s_trace)
-    fprintf(stderr, "[regional] SIM arrow species=%u actor=%04x damage=%u threshold=%u rules=%u\n",
+    RuntimeLog_Printf("[regional] SIM arrow species=%u actor=%04x damage=%u threshold=%u rules=%u\n",
             cpu->X, cpu->Y, cpu_read8(cpu, 1, (uint16_t)(cpu->Y + 0x24)), (uint8_t)cpu->A,
             snapshot);
   return Tail(0x01b01c,0x01b018);
@@ -70,7 +71,7 @@ RecompReturn ActRaiser_RegionalSimContact(CpuState *cpu) {
   if (!Snapshot(cpu, &snapshot) || !ActRaiserSimCombat_Contact(cpu, snapshot))
     ActRaiserHleFatal("Invalid SIM contact owner");
   if (s_trace)
-    fprintf(stderr, "[regional] SIM contact species=%u actor=%04x hp=%u raw-result=%u rules=%u\n",
+    RuntimeLog_Printf("[regional] SIM contact species=%u actor=%04x hp=%u raw-result=%u rules=%u\n",
             cpu->X, cpu->Y, hp, (uint8_t)cpu->A, snapshot);
   return Tail(0x01b0d0,0x01b0cc);
 }

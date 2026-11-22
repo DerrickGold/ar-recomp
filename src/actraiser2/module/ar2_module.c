@@ -1,4 +1,5 @@
 #include "snesrecomp/game/bootstrap.h"
+#include "app/runtime_log.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/audio_timing.h"
@@ -131,7 +132,7 @@ static void interrupt(uint32_t vector) {
   cpu_push_interrupt_frame(&g_cpu);
   RecompReturn result = cpu_dispatch_pc(&g_cpu, vector, g_cpu.S);
   if (result != RECOMP_RETURN_NORMAL) {
-    fprintf(stderr, "interrupt result %d at %06x\n", result, block_pc);
+    RuntimeLog_Printf("interrupt result %d at %06x\n", result, block_pc);
     abort();
   }
   g_cpu = saved;
@@ -146,7 +147,7 @@ static void run_game(void) {
   while (result == RECOMP_RETURN_TAILCALL ||
          (result == RECOMP_RETURN_OWNED_UNWIND && cpu_finish_reset_tail(&scope, &g_cpu)))
     result = cpu_dispatch_pc_from(&g_cpu, g_tailcall_pc24, g_tailcall_miss_s, g_tailcall_src24);
-  fprintf(stderr, "reset returned %d at %06x\n", result, block_pc);
+  RuntimeLog_Printf("reset returned %d at %06x\n", result, block_pc);
   abort();
 }
 static void run_frame(void) {
@@ -177,7 +178,7 @@ static bool dispatch_miss(uint32_t source, uint32_t target) {
 RecompReturn Ar2_DispatchCopHandler(CpuState *cpu) {
   const uint16_t target = cpu_read16(cpu, 0x80, (uint16_t)(0x82db + cpu->X));
   if (cpu->X >= 0x1a2 || target < 0x847d || target == 0xffff) {
-    fprintf(stderr, "unsupported COP signature %02x\n", cpu->X / 2);
+    RuntimeLog_Printf("unsupported COP signature %02x\n", cpu->X / 2);
     abort();
   }
   return cpu_dispatch_pc_from(cpu, 0x800000 | target, cpu->S, 0x8082d8);
@@ -282,7 +283,7 @@ static void irq(void *unused, uint32_t line) {
 }
 static void require_ok(SrResult r) {
   if (r != SR_RESULT_OK) {
-    fprintf(stderr, "runner error %d\n", r);
+    RuntimeLog_Printf("runner error %d\n", r);
     abort();
   }
 }

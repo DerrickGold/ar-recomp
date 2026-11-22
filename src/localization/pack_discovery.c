@@ -1,4 +1,5 @@
 #include "localization/pack_discovery.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -162,7 +163,7 @@ bool ArLanguagePackCatalog_ReadArchiveIndex(ArLanguagePackCatalog *catalog,
     ArLanguagePackError detail = {{0}};
     if (replace) PreferId(candidate, id);
     if (!ArLanguagePackCatalog_Add(candidate, io, path, id, &detail))
-      fprintf(stderr, "[localization] skipping prepared %s: %s\n", id, detail.message);
+      RuntimeLog_Printf("[localization] skipping prepared %s: %s\n", id, detail.message);
   }
   *catalog = *candidate;
   free(candidate);

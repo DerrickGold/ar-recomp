@@ -156,7 +156,10 @@ def presentation_intervals(rows):
 def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_native=False):
     if refresh <= 0 or end < start or warmup_seconds < 0:
         raise ValueError('Invalid timing range or warmup')
-    with Path(path).open() as f:
+    path = Path(path)
+    if path.with_name(path.name + '.partial').exists():
+        raise ValueError('Frame trace is still recording or incomplete')
+    with path.open() as f:
         rows = [{k:(float(v) if k == 'alpha' else int(v)) for k,v in row.items()}
                 for row in csv.DictReader(f)]
     if rows and 'tick_delta' in rows[0]:

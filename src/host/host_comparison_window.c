@@ -1,4 +1,5 @@
 #include "host/host_comparison_window.h"
+#include "app/runtime_log.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -43,7 +44,7 @@ static void SavePreference(const char *key, bool value) {
   char path[kHostPathCapacity];
   UserDataFile(path, sizeof(path), "settings.ini");
   if (!Settings_SaveDeferred(path))
-    fprintf(stderr, "[picture-in-picture] could not save settings.ini\n");
+    RuntimeLog_Printf("[picture-in-picture] could not save settings.ini\n");
   HostInput_RequestPausedRedraw();
 }
 
@@ -61,7 +62,7 @@ void HostComparisonWindow_Destroy(void) {
 }
 
 static bool FallBackToInset(void) {
-  fprintf(stderr, "[picture-in-picture] separate window unavailable; using inset: %s\n",
+  RuntimeLog_Printf("[picture-in-picture] separate window unavailable; using inset: %s\n",
           SDL_GetError());
   HostComparisonWindow_Destroy();
   s_failed = true;

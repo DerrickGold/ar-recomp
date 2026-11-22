@@ -2,12 +2,13 @@
 
 #include <inttypes.h>
 #include <stdatomic.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "host/host_clock.h"
+#include "app/diagnostic_options.h"
 #include "app/performance_metrics.h"
+#include "app/performance_report.h"
+#include "app/runtime_log.h"
 
 _Static_assert((int)kPerformance_ActionCount == (int)kDioramaPerformanceStage_Count,
                "Action metric stage mapping");
@@ -70,11 +71,12 @@ _Static_assert(
         kDioramaPerformanceStage_Count,
     "every Diorama performance stage needs a report label");
 
-static bool LogEnabled(void) {
+bool DioramaPerformance_LoggingEnabled(void) {
   enum { kUnknown, kDisabled, kEnabled };
   int state = atomic_load_explicit(&s_enabled_state, memory_order_acquire);
   if (state != kUnknown) return state == kEnabled;
-  const int resolved = getenv("AR_PERF") || getenv("AR_ACTION_PERF")
+  const int resolved =
+      DiagnosticOptionEnabled("AR_PERF") || DiagnosticOptionEnabled("AR_ACTION_PERF")
       ? kEnabled : kDisabled;
   int expected = kUnknown;
   (void)atomic_compare_exchange_strong_explicit(
@@ -85,7 +87,7 @@ static bool LogEnabled(void) {
 }
 
 bool DioramaPerformance_Enabled(void) {
-  return LogEnabled() || PerformanceMetrics_Enabled();
+  return DioramaPerformance_LoggingEnabled() || PerformanceMetrics_Enabled();
 }
 
 static uint64_t DioramaPerformanceNow(void) {
@@ -111,7 +113,7 @@ void DioramaPerformance_End(DioramaPerformanceScope scope) {
       HostClock_Nanoseconds() - scope.started_ns;
   PerformanceMetrics_Record(PerformanceMetrics_Epoch(),
       (PerformanceStage)(kPerformance_ActionFirst + scope.stage), elapsed_ns);
-  if (!LogEnabled()) return;
+  if (!DioramaPerformance_LoggingEnabled()) return;
   LockPerformanceData();
   DioramaPerformanceCounter *counter = &s_data.counters[scope.stage];
   counter->elapsed_ns += elapsed_ns;
@@ -123,7 +125,7 @@ void DioramaPerformance_AddPlaneSync(bool succeeded, bool uploaded,
                                      uint64_t uploaded_bytes) {
   /* Global bytes/calls belong to the backend; skips belong to the mirror.
    * Keep only the plane-local totals for the focused diorama profiler. */
-  if (!LogEnabled()) return;
+  if (!DioramaPerformance_LoggingEnabled()) return;
   LockPerformanceData();
   s_data.plane_syncs++;
   if (!succeeded) {
@@ -136,7 +138,7 @@ void DioramaPerformance_AddPlaneSync(bool succeeded, bool uploaded,
 }
 
 void DioramaPerformance_SetRasterViewport(int width, int height) {
-  if (!LogEnabled()) return;
+  if (!DioramaPerformance_LoggingEnabled()) return;
   if (width < 0) width = 0;
   if (height < 0) height = 0;
   atomic_store_explicit(&s_viewport_width, width, memory_order_release);
@@ -144,7 +146,7 @@ void DioramaPerformance_SetRasterViewport(int width, int height) {
 }
 
 void DioramaPerformance_SetViewport(int width, int height) {
-  if (!LogEnabled()) return;
+  if (!DioramaPerformance_LoggingEnabled()) return;
   DioramaPerformance_SetRasterViewport(width, height);
   LockPerformanceData();
   if (width > 0 && height > 0)
@@ -153,7 +155,7 @@ void DioramaPerformance_SetViewport(int width, int height) {
 }
 
 void DioramaPerformance_SetPlane(int plane) {
-  if (!LogEnabled()) return;
+  if (!DioramaPerformance_LoggingEnabled()) return;
   atomic_store_explicit(&s_current_plane, plane, memory_order_release);
 }
 
@@ -258,7 +260,7 @@ void DioramaPerformance_AddDraw(
   }
   /* The interactive overlay must not run the expensive CPU triangle-coverage
    * estimator. Retain that opt-in analysis only for the legacy log profiler. */
-  if (!LogEnabled()) return;
+  if (!DioramaPerformance_LoggingEnabled()) return;
   const int width = atomic_load_explicit(
       &s_viewport_width, memory_order_acquire);
   const int height = atomic_load_explicit(
@@ -287,8 +289,16 @@ void DioramaPerformance_AddDraw(
   UnlockPerformanceData();
 }
 
-static void DioramaPerformanceReport(const DioramaPerformanceData *data,
-                                     uint64_t window_ns) {
+typedef struct DioramaReportSnapshot {
+  DioramaPerformanceData data;
+  uint64_t window_ns;
+} DioramaReportSnapshot;
+
+static void WriteDioramaReport(FILE *output, const void *record, size_t size) {
+  (void)size;
+  const DioramaReportSnapshot *snapshot = record;
+  const DioramaPerformanceData *data = &snapshot->data;
+  const uint64_t window_ns = snapshot->window_ns;
   const double presentations =
       data->presentations ? (double)data->presentations : 1.0;
   uint64_t child_ns = 0;
@@ -301,16 +311,17 @@ static void DioramaPerformanceReport(const DioramaPerformanceData *data,
       data->counters[kDioramaPerformance_Total].elapsed_ns;
   const uint64_t other_ns = total_ns > child_ns ? total_ns - child_ns : 0;
 
-  fprintf(stderr, "[diorama-perf] presents=%" PRIu64 " window=%.2fs",
-          data->presentations, (double)window_ns / 1000000000.0);
+  PerformanceReport report = {.output = output};
+  PerformanceReport_Append(&report, "[diorama-perf] presents=%" PRIu64 " window=%.2fs",
+                           data->presentations, (double)window_ns / 1000000000.0);
   for (int stage = 0; stage < kDioramaPerformanceStage_Count; stage++) {
     const DioramaPerformanceCounter *counter = &data->counters[stage];
     if (!counter->calls) continue;
-    fprintf(stderr, " %s=%.3fms", kDioramaStageNames[stage],
-            (double)counter->elapsed_ns / 1000000.0 / presentations);
+    PerformanceReport_Append(&report, " %s=%.3fms", kDioramaStageNames[stage],
+                             (double)counter->elapsed_ns / 1000000.0 / presentations);
   }
-  fprintf(stderr, " other=%.3fms\n",
-          (double)other_ns / 1000000.0 / presentations);
+  PerformanceReport_Append(&report, " other=%.3fms\n",
+                           (double)other_ns / 1000000.0 / presentations);
 
   const uint64_t alpha_fragments =
       data->fragment_pixels[kArRenderBlendMode_Alpha] +
@@ -319,7 +330,7 @@ static void DioramaPerformanceReport(const DioramaPerformanceData *data,
       data->fragment_pixels[kArRenderBlendMode_Add] +
       data->fragment_pixels[kArRenderBlendMode_AddPremultiplied] +
       data->fragment_pixels[kArRenderBlendMode_Light];
-  fprintf(stderr,
+  PerformanceReport_Append(&report,
           "[diorama-work] sync/present=%.1f uploads/present=%.1f "
           "upload-KiB/present=%.1f draws/present=%.1f "
           "vertices/present=%.1f indices/present=%.1f "
@@ -338,7 +349,7 @@ static void DioramaPerformanceReport(const DioramaPerformanceData *data,
   for (int blend = kArRenderBlendMode_Opaque;
        blend <= kArRenderBlendMode_Multiply; blend++)
     total_fragments += data->fragment_pixels[blend];
-  fprintf(stderr,
+  PerformanceReport_Append(&report,
           "[diorama-fill] screen-layers=%.2fx fragments/present=%.2fM "
           "opaque=%.2fM alpha=%.2fM add=%.2fM\n",
           (double)total_fragments / viewport_pixels,
@@ -349,7 +360,7 @@ static void DioramaPerformanceReport(const DioramaPerformanceData *data,
           (double)add_fragments / presentations / 1000000.0);
   for (int plane = 0; plane < 32; plane++) {
     if (!data->plane_draws[plane]) continue;
-    fprintf(stderr,
+    PerformanceReport_Append(&report,
             "  plane %2d: draws/present=%.1f screen-layers=%.2fx "
             "fragments/present=%.2fM\n",
             plane, (double)data->plane_draws[plane] / presentations,
@@ -357,12 +368,13 @@ static void DioramaPerformanceReport(const DioramaPerformanceData *data,
             (double)data->plane_fragment_pixels[plane] /
                 presentations / 1000000.0);
   }
+  PerformanceReport_Flush(&report);
 }
 
 void DioramaPerformance_PresentCompleted(void) {
-  if (!LogEnabled()) return;
+  if (!DioramaPerformance_LoggingEnabled()) return;
   const uint64_t now = DioramaPerformanceNow();
-  DioramaPerformanceData snapshot;
+  DioramaReportSnapshot snapshot;
   bool report = false;
 
   LockPerformanceData();
@@ -370,12 +382,13 @@ void DioramaPerformance_PresentCompleted(void) {
   s_data.presentations++;
   const uint64_t window_ns = now - s_data.window_started_ns;
   if (window_ns >= (uint64_t)kDioramaPerformanceWindowNs) {
-    snapshot = s_data;
+    snapshot.data = s_data;
+    snapshot.window_ns = window_ns;
     memset(&s_data, 0, sizeof(s_data));
     s_data.window_started_ns = now;
     report = true;
   }
   UnlockPerformanceData();
 
-  if (report && LogEnabled()) DioramaPerformanceReport(&snapshot, window_ns);
+  if (report) RuntimeLog_Record(WriteDioramaReport, &snapshot, sizeof(snapshot));
 }

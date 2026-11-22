@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_action_room_loader.h"
+#include "app/runtime_log.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -157,8 +158,7 @@ static void CopyMetatileSlice(CpuState *cpu, uint16_t destination,
 
 static void ReportDiagnostics(void) {
   if (!s_diagnostics.metatile_commands && !s_diagnostics.map_commands) return;
-  fprintf(stderr,
-          "[action-room-load-hle] summary command5=%u command4=%u bytes=%zu\n",
+  RuntimeLog_Printf("[action-room-load-hle] summary command5=%u command4=%u bytes=%zu\n",
           s_diagnostics.metatile_commands, s_diagnostics.map_commands,
           s_diagnostics.staged_bytes);
 }

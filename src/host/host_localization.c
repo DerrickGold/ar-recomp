@@ -1,4 +1,5 @@
 #include "host/host_localization.h"
+#include "app/runtime_log.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -33,17 +34,17 @@ void HostLocalization_LoadRegionalMedia(void) {
     if(!sr_path_exists(path))continue;
     if (!ArHostRegionalMediaFiles_Load(&s_regional_media, path, (ArRegionalMediaRelease)(i + 1),
                                        error, sizeof(error))) {
-      fprintf(stderr, "[regional-media] %s: %s; US graphics retained\n", path, error);
+      RuntimeLog_Printf("[regional-media] %s: %s; US graphics retained\n", path, error);
       continue;
     }
     const ArRegionalMediaView *view =
         ArHostRegionalMediaFiles_View(&s_regional_media, (ArRegionalMediaRelease)(i + 1));
     if(!ActRaiserRegionalMedia_AddDonor(view)) {
-      fprintf(stderr, "[regional-media] %s: donor does not match filename; US graphics retained\n",
+      RuntimeLog_Printf("[regional-media] %s: donor does not match filename; US graphics retained\n",
               path);
       continue;
     }
-    fprintf(stderr,"[regional-media] loaded %s (%zu reviewed resources)\n",donors[i],view->count);
+    RuntimeLog_Printf("[regional-media] loaded %s (%zu reviewed resources)\n",donors[i],view->count);
   }
 }
 
@@ -98,7 +99,7 @@ static void ExplainLegacyLanguagePack(void *context, const char *manifest,
           arguments, 3))
     snprintf(message, sizeof(message), "%s\n%s\n%s", metadata->display_name,
              instructions, manifest);
-  fprintf(stderr, "[localization] %s\n", message);
+  RuntimeLog_Printf("[localization] %s\n", message);
   if (s_headless)
     return;
   const SDL_MessageBoxButtonData buttons[] = {
@@ -115,7 +116,7 @@ static void ExplainLegacyLanguagePack(void *context, const char *manifest,
       .buttons = buttons};
   int answer = -1;
   if (!SDL_ShowMessageBox(&dialog, &answer))
-    fprintf(stderr, "[localization] cannot show upgrade window: %s\n",
+    RuntimeLog_Printf("[localization] cannot show upgrade window: %s\n",
             SDL_GetError());
   s_exit_requested = answer != 1;
 }
@@ -135,7 +136,7 @@ void HostLocalization_PublishInstalledPacks(void) {
       snprintf(choices[i].manifest, sizeof(choices[i].manifest), "%s", entry->manifest);
     }
     if (!Settings_SetLocalizationPacks(choices, catalog->count))
-      fprintf(stderr, "[localization] installed pack catalog has conflicting identities\n");
+      RuntimeLog_Printf("[localization] installed pack catalog has conflicting identities\n");
   }
   free(choices);
   free(catalog);
@@ -212,7 +213,7 @@ void HostLocalization_InstallInterfaceFonts(void) {
       (!ui_fonts_ready ||
        !SettingsOverlay_SetTextBackend(&s_text_backend, &ui_fonts,
                                         ui_font_error, sizeof(ui_font_error))))
-    fprintf(stderr, "[settings-menu] Unicode font unavailable; keeping native interface: %s\n",
+    RuntimeLog_Printf("[settings-menu] Unicode font unavailable; keeping native interface: %s\n",
             ui_font_error);
   ArHostFontResources_Retire(&s_font_resources, ui_primary);
   for (size_t i = 0; i < ui_fallback_count; ++i)
@@ -235,7 +236,7 @@ void HostLocalization_Shutdown(void) {
 void HostLocalization_ReleaseFonts(void) {
   ArLocalizedTextPresenter_SetFontResources(NULL);
   if (!ArHostFontResources_Destroy(&s_font_resources))
-    fprintf(stderr, "[localized-text] font resources still leased at shutdown\n");
+    RuntimeLog_Printf("[localized-text] font resources still leased at shutdown\n");
 }
 
 void HostLocalization_ApplySetting(const SettingDesc *desc) {

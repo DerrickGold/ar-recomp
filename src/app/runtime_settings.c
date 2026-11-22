@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "app/runtime_settings.h"
 #include "audio/audio_session.h"
@@ -34,8 +35,7 @@ static int RuntimeSettings_QuickStateSlot(void) {
   char *end = NULL;
   const long slot = strtol(text, &end, 0);
   if (!end || *end || slot < 0 || slot > 99) {
-    fprintf(stderr,
-            "[settings] invalid AR_QUICKSTATE_SLOT='%s' (want 0..99); "
+    RuntimeLog_Printf("[settings] invalid AR_QUICKSTATE_SLOT='%s' (want 0..99); "
             "using slot 0\n",
             text);
     return 0;
@@ -115,14 +115,14 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
     char settings_path[kHostPathCapacity];
     UserDataFile(settings_path, sizeof(settings_path), "settings.ini");
     if (!Settings_Save(settings_path)) {
-      fprintf(stderr, "[lifecycle] could not save settings.ini\n");
+      RuntimeLog_Printf("[lifecycle] could not save settings.ini\n");
       return false;
     }
     s_lifecycle_request = desc->action == kSettingAction_Restart
         ? kRuntimeLifecycle_Restart
         : kRuntimeLifecycle_Exit;
     SettingsOverlay_Close();
-    fprintf(stderr, "[lifecycle] %s requested\n",
+    RuntimeLog_Printf("[lifecycle] %s requested\n",
             s_lifecycle_request == kRuntimeLifecycle_Restart
                 ? "restart" : "exit");
     break;

@@ -77,6 +77,15 @@ class RoomBenchmarkTest(unittest.TestCase):
         self.assertFalse(benchmark.display_awake({}))
         self.assertFalse(benchmark.display_awake(dict(state, **{'/panel/bl_power': '4'})))
 
+    def test_late_build_count_detects_quiet_compiles(self):
+        output = Path('fixture')
+        benchmark.require_no_late_builds('[benchmark] late-builds=0\n', output)
+        with self.assertRaisesRegex(RuntimeError, '3 builds'):
+            benchmark.require_no_late_builds('[benchmark] late-builds=3\n', output)
+        for log in ('', '[benchmark] late-builds=0\n' * 2):
+            with self.assertRaisesRegex(RuntimeError, 'missing or ambiguous'):
+                benchmark.require_no_late_builds(log, output)
+
     def test_statistics_reject_incomplete_or_inconsistent_measurements(self):
         rows = [dict(frame=i, prepare_ms=1, compose_submit_ms=2, gpu_wait_ms=i+1,
                      complete_ms=i+4) for i in range(3)]

@@ -5,8 +5,9 @@ In **Settings → Video → General**, set **Performance overlay** to **Summary*
 It works in both authentic and enhanced modes.
 
 On Steam, you can also use the launch option
-`AR_PERFORMANCE_OVERLAY=Detailed %command%`. For logging without a visible panel,
-use `AR_PIPELINE_PERF=1`.
+`AR_PERFORMANCE_OVERLAY=Detailed %command%`. The overlay collects timings in
+memory. To include pipeline timings in the run log, use `AR_PIPELINE_PERF=1`
+with or without the overlay.
 
 ## Reading the panel
 
@@ -59,8 +60,8 @@ settings menu uses a compact panel to leave controls accessible.
    **Detailed** selected. Include the full panel, not just the FPS counter.
 2. Note your hardware, power limit, display refresh rate, frame limiter, output
    resolution, and graphics preset. On Steam Deck, include its power settings.
-3. Share that run's diagnostics ZIP. The console prints the `runs/...` directory
-   on exit; its logs provide more detail than a screenshot.
+3. For a run with additional timing logs, launch with `AR_PIPELINE_PERF=1`,
+   reproduce the slowdown, and share the run directory shown on exit.
 
 If a slowdown only happens while entering a scene, capture that separately from
 steady gameplay. When comparing settings, use the same location and camera.
@@ -97,12 +98,30 @@ cross-transition hitch trace, and a short-lived scene may end before a report.
 
 ### Source cadence traces
 
+`AR_FRAME_STREAM_LOG=1` enables frame-stream and producer-handoff messages.
+Routine game and SDL logs use a bounded background writer. Periodic pipeline,
+Action and SIM reports also format their snapshots on that writer. The
+shutdown log reports any dropped records or write errors.
+`AR_SYNC_RUNTIME_LOG=1` restores synchronous console output for comparison.
+
+`AR_ACTION_PERF=1` and `AR_SIM3D_PERF=1` enable the detailed Action and SIM
+profilers for targeted captures. `AR_PERF=1` also enables the legacy host
+reports. Use `AR_GPU_COMPILE_TRACE=1` to list every late GPU build. By default,
+slow or failed builds are reported as they occur and late-build totals are
+reported on exit.
+
 `AR_FRAME_PACING_TRACE=/path/to/pacing.csv` adds source tick/epoch, source
 interval, playout target/sample time, and producer thread CPU time to the
 existing stage trace. CPU sampling is off outside trace runs. CPU time and
 wall time refer to uploaded endpoints; skipped packets are not separate CSV
 rows. Unaccounted wall time includes blocking and descheduling, and cannot
 establish that a thread was runnable throughout a stall.
+
+Frame pacing, stream, synchronous, and GPU preparation traces format CSV records in
+the background. Each capture is written to a `.partial` sibling while active
+and published to the requested path after an orderly drain. If a queue
+overflows or a write fails, the partial capture is retained for inspection.
+The pacing analyzer rejects an incomplete capture.
 
 Analyze a settled native run with, for example:
 

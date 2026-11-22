@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <limits.h>
@@ -54,7 +55,7 @@ static bool EntryComplete(const HdReplacement *entry, const char *path,
     missing = "canvas_rect";
   else if (!entry->condition_count) missing = "when";
   if (missing)
-    fprintf(stderr, "[hd-manifest] %s:%d: [replace:%s] missing/invalid '%s'"
+    RuntimeLog_Printf("[hd-manifest] %s:%d: [replace:%s] missing/invalid '%s'"
             " — entry dropped\n", path, line, entry->name, missing);
   return !missing;
 }
@@ -97,7 +98,7 @@ static void ReadHdManifest(const char *path, int capacity) {
       } else if (!strncmp(s + 1, "music:", 6)) {
         /* Another module's sections in the shared manifest — not ours. */
       } else {
-        fprintf(stderr, "[hd-manifest] %s:%d: unknown section '%s]' ignored\n",
+        RuntimeLog_Printf("[hd-manifest] %s:%d: unknown section '%s]' ignored\n",
                 path, line_number, s);
       }
       continue;
@@ -135,11 +136,11 @@ static void ReadHdManifest(const char *path, int capacity) {
     } else if (!strcmp(key, "brightness")) {
       pending.brightness_mod = strtoul(value, NULL, 0) != 0;
     } else {
-      fprintf(stderr, "[hd-manifest] %s:%d: unknown key '%s' ignored\n",
+      RuntimeLog_Printf("[hd-manifest] %s:%d: unknown key '%s' ignored\n",
               path, line_number, key);
     }
     if (!ok) {
-      fprintf(stderr, "[hd-manifest] %s:%d: bad value for '%s' — "
+      RuntimeLog_Printf("[hd-manifest] %s:%d: bad value for '%s' — "
               "[replace:%s] dropped\n", path, line_number, key, pending.name);
       in_entry = false;
     }
@@ -176,7 +177,7 @@ int HdReplacements_LoadWithOverlay(const char *path, const char *overlay_path) {
   for (int i = 0; i < g_hd_replacement_count; i++) {
     HdReplacement *entry = &g_hd_replacements[i];
     if (entry->plane == kHdPlane_Tiles)
-      fprintf(stderr, "[hd-manifest] [replace:%s] plane 'tiles' is reserved "
+      RuntimeLog_Printf("[hd-manifest] [replace:%s] plane 'tiles' is reserved "
               "and not implemented yet; entry inert\n", entry->name);
   }
   return g_hd_replacement_count;
@@ -313,7 +314,7 @@ void HdReplacements_EvaluateFrame(void) {
       if (result == SR_RESULT_BUSY) {
         if (!(warned_mask & (1u << i))) {
           warned_mask |= 1u << i;
-          fprintf(stderr, "[hd-manifest] [replace:%s] Mode-7 override busy "
+          RuntimeLog_Printf("[hd-manifest] [replace:%s] Mode-7 override busy "
                   "(another entry owns it this frame); entry skipped\n",
                   entry->name);
         }
@@ -337,7 +338,7 @@ void HdReplacements_EvaluateFrame(void) {
     if (result == SR_RESULT_BUSY) {
       if (!(warned_mask & (1u << i))) {
         warned_mask |= 1u << i;
-        fprintf(stderr, "[hd-manifest] [replace:%s] source busy (another "
+        RuntimeLog_Printf("[hd-manifest] [replace:%s] source busy (another "
                 "capture owns it this frame); entry skipped\n", entry->name);
       }
       continue;

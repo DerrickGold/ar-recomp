@@ -1,0 +1,7 @@
+string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef fixture_id)
+set(fixture "${TEST_ROOT}-${fixture_id}")
+execute_process(COMMAND "${TEST_EXECUTABLE}" "${fixture}" RESULT_VARIABLE status)
+if(NOT status STREQUAL "0")
+    message(FATAL_ERROR "Native test fixture failed: ${status} (${fixture})")
+endif()
+file(REMOVE_RECURSE "${fixture}")

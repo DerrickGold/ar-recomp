@@ -14,6 +14,7 @@
  * CPU call or its fake $19/$AA preconditions. */
 
 #include "sim/sim_world_map_build.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,8 +78,7 @@ bool SimWorldMapBuild_Init(const uint8_t *rom_data, size_t rom_size) {
   s_have_cached_inputs = false;
   s_previous_consumer = kBuildConsumer_None;
   if (!s_rom_tables_available)
-    fprintf(stderr,
-            "[sim-worldmap] HLE unavailable: ROM is too short for build tables\n");
+    RuntimeLog_Printf("[sim-worldmap] HLE unavailable: ROM is too short for build tables\n");
   return s_rom_tables_available;
 }
 
@@ -185,11 +185,11 @@ static bool BuildTilemapHle(const uint8_t *wram, const uint8_t *baseline, uint8_
 
   if (!compare_oracle) return true;
   if (!BuildTilemapOracle(baseline, s_oracle_tilemap)) {
-    fprintf(stderr, "[sim-worldmap] HLE oracle call failed\n");
+    RuntimeLog_Printf("[sim-worldmap] HLE oracle call failed\n");
     return false;
   }
   if (memcmp(out, s_oracle_tilemap, kSimWorldMapBytes) == 0) {
-    fprintf(stderr, "[sim-worldmap] HLE/oracle parity: 16384/16384 bytes\n");
+    RuntimeLog_Printf("[sim-worldmap] HLE/oracle parity: 16384/16384 bytes\n");
     return true;
   }
 
@@ -200,8 +200,7 @@ static bool BuildTilemapHle(const uint8_t *wram, const uint8_t *baseline, uint8_
     if (!mismatches) first = i;
     mismatches++;
   }
-  fprintf(stderr,
-          "[sim-worldmap] HLE/oracle MISMATCH: %d bytes; first +$%04zX "
+  RuntimeLog_Printf("[sim-worldmap] HLE/oracle MISMATCH: %d bytes; first +$%04zX "
           "HLE=$%02X oracle=$%02X\n",
           mismatches, first, out[first], s_oracle_tilemap[first]);
   return false;
@@ -278,7 +277,7 @@ static void BuildFromWram(const uint8_t *wram, bool sky_palace_enabled,
   if (!baseline || !BuildTilemapHle(wram, baseline, s_built_tilemap, compare_oracle)) {
     /* Do not cache a failed attempt. The next supported frame retries. */
     s_previous_consumer = kBuildConsumer_None;
-    fprintf(stderr, "[sim-worldmap] HLE tilemap build failed; retrying\n");
+    RuntimeLog_Printf("[sim-worldmap] HLE tilemap build failed; retrying\n");
     return;
   }
 
@@ -292,8 +291,7 @@ static void BuildFromWram(const uint8_t *wram, bool sky_palace_enabled,
         : consumer == kBuildConsumer_SkyPalace ? "Sky Palace entry"
         : consumer == kBuildConsumer_DeathHeimCompletion ? "Death Heim completion entry"
                                                        : "town entry";
-  fprintf(stderr,
-          "[sim-worldmap] HLE built from sim state at gf=%u after %s "
+  RuntimeLog_Printf("[sim-worldmap] HLE built from sim state at gf=%u after %s "
           "(%d tile%s changed)\n",
           (uint16_t)(wram[kActRaiserWram_GameFrame] |
                    ((uint16_t)wram[kActRaiserWram_GameFrame + 1] << 8)),

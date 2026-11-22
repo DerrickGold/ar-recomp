@@ -4,6 +4,7 @@
  * Phase: present (FrameSlot only).
  * Tests: tests/present_world_nav_gpu_test.c */
 #include "sim/world_nav/present_world_nav_internal.h"
+#include "app/runtime_log.h"
 static struct {
   Sim3DMeshSet surface;
   Sim3DDepthSurfaceVertex *points;
@@ -191,7 +192,7 @@ static bool SimGlobeBuildSurfaceWork(const FrameSlot *slot,
   if (!ok) {
     free(points);
     s_sim_globe.ready = false;
-    fprintf(stderr,"[sim-globe-underlay] surface publication rejected quads=%zu\n",count);
+    RuntimeLog_Printf("[sim-globe-underlay] surface publication rejected quads=%zu\n",count);
     return false;
   }
   free(s_sim_globe.points);
@@ -205,8 +206,8 @@ static bool SimGlobeBuildSurfaceWork(const FrameSlot *slot,
   s_sim_globe.mountain_first = mountain_first;
   s_sim_globe.ready = true;
   s_sim_globe.detailed_town = detailed_town;
-  if (Sim3DPerformance_Enabled())
-    fprintf(stderr,"[sim-globe-town] source town=%u quads=%zu mountains=%zu\n",
+  if (Sim3DPerformance_LoggingEnabled())
+    RuntimeLog_Printf("[sim-globe-town] source town=%u quads=%zu mountains=%zu\n",
         slot->sim.town,count,count-mountain_first);
   return true;
 }
@@ -387,7 +388,7 @@ static bool AppendSimGlobeSurfaces(const FrameSlot *slot, ArRenderRectI source,
   ok = ok && WorldNavigationOceanTransform(&ocean, &batches[0].transform);
   batches[0].transform.focus = t.focus;
   ok = ok && Sim3DMeshSet_AppendSurface(&s_sim_globe.surface, batches, 3);
-  if (!ok) fprintf(stderr, "[sim-globe-underlay] surface batch rejected\n");
+  if (!ok) RuntimeLog_Printf("[sim-globe-underlay] surface batch rejected\n");
   if (ok && detailed_town) {
     /* Geographic focus marks the selected town; this separate ground cue
      * follows its smaller live sprite window. Both are draw-time materials,
@@ -407,7 +408,7 @@ static bool AppendSimGlobeSurfaces(const FrameSlot *slot, ArRenderRectI source,
       ok = PresentSimGlobeMountains_AppendEffects(
           projection->matrix, viewport, slot->sim.game_frame, slot->sim.background_voxel_detail,
           slot->sim.background_voxel_style, SimGlobeMountainGround);
-    if (!ok) fprintf(stderr, "[sim-globe-town] native surface/shadow append rejected\n");
+    if (!ok) RuntimeLog_Printf("[sim-globe-town] native surface/shadow append rejected\n");
   }
   return ok;
 }
@@ -552,7 +553,7 @@ static bool AppendSimGlobeModels(const FrameSlot *slot, ArRenderRectI source,
         sources ? sources + radial_count : NULL, count - radial_count, &style,
         slot->sim.background_voxel_shading, axes, view->matrix, (unsigned)t.radial.variant - 1);
   }
-  if (!ok) fprintf(stderr, "[sim-globe-underlay] models rejected count=%zu\n", count);
+  if (!ok) RuntimeLog_Printf("[sim-globe-underlay] models rejected count=%zu\n", count);
   return ok;
 }
 
@@ -581,19 +582,19 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
     SimBackgroundVoxelProject_Prepare(&params);
     if (!PresentSimGlobeMountains_Prepare(&params, &map, SimGlobeMountainGround,
                                           SimWorldMap_GeographySerial())) {
-      fprintf(stderr, "[sim-globe-town] native mountain preparation rejected\n");
+      RuntimeLog_Printf("[sim-globe-town] native mountain preparation rejected\n");
       goto failed;
     }
     if (trace) stamps[2] = HostClock_Nanoseconds();
     if (!PresentSimGlobeTerrain_Prepare(&map, SimWorldMap_TerrainSerial())) {
-      fprintf(stderr, "[sim-globe-town] native terrain preparation rejected\n");
+      RuntimeLog_Printf("[sim-globe-town] native terrain preparation rejected\n");
       goto failed;
     }
   }
   if (trace) stamps[3] = HostClock_Nanoseconds();
   PresentSimGlobeGroundShadow town_shadow = {0};
   if (content && content->prepare && !content->prepare(content->userdata, &view, &town_shadow)) {
-    fprintf(stderr, "[sim-globe-town] dynamic content preparation rejected\n");
+    RuntimeLog_Printf("[sim-globe-town] dynamic content preparation rejected\n");
     goto failed;
   }
   if (trace) stamps[4] = HostClock_Nanoseconds();
@@ -615,26 +616,27 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
     stamps[8] = HostClock_Nanoseconds();
     if (!detailed_town) stamps[2] = stamps[1];
     if (trace == 2 || stamps[8] - stamps[0] > 8000000) {
-      fprintf(stderr, "[sim-globe-trace] gf=%u total-ms=%.3f", slot->sim.game_frame,
-          (double)(stamps[8] - stamps[0]) / 1e6);
-      static const char *const names[] = {
-        "view", "mountains", "terrain", "shadows", "surface", "models", "actors", "submit"};
-      for (unsigned i = 0; i < 8; ++i)
-        fprintf(stderr, " %s-ms=%.3f", names[i], (double)(stamps[i+1] - stamps[i]) / 1e6);
       /* Native game-frame IDs can lag host ticks. Join with pacing rows by
        * their enclosing draw timestamps, including repeated source frames. */
-      fprintf(stderr, " start-ns=%llu end-ns=%llu\n",
+      RuntimeLog_Printf("[sim-globe-trace] gf=%u total-ms=%.3f"
+          " view-ms=%.3f mountains-ms=%.3f terrain-ms=%.3f shadows-ms=%.3f"
+          " surface-ms=%.3f models-ms=%.3f actors-ms=%.3f submit-ms=%.3f"
+          " start-ns=%llu end-ns=%llu\n", slot->sim.game_frame, (stamps[8] - stamps[0]) / 1e6,
+          (stamps[1] - stamps[0]) / 1e6, (stamps[2] - stamps[1]) / 1e6,
+          (stamps[3] - stamps[2]) / 1e6, (stamps[4] - stamps[3]) / 1e6,
+          (stamps[5] - stamps[4]) / 1e6, (stamps[6] - stamps[5]) / 1e6,
+          (stamps[7] - stamps[6]) / 1e6, (stamps[8] - stamps[7]) / 1e6,
           (unsigned long long)stamps[0], (unsigned long long)stamps[8]);
     }
   }
   if (!ArRenderTexture_IsValid(composite))
-    fprintf(stderr, "[sim-globe-underlay] composite rejected\n");
+    RuntimeLog_Printf("[sim-globe-underlay] composite rejected\n");
   if (!ok || !ArRenderTexture_IsValid(composite)) goto failed;
   return DrawSimGlobeImage(viewport, composite);
 failed:
   if (Sim3DDepthPass_IsCollecting())
     (void)Sim3DDepthPass_Submit(&g_render_device, ArRenderTexture_Invalid());
-  fprintf(stderr, "[sim-globe-underlay] selected connected world could not be rendered\n");
+  RuntimeLog_Printf("[sim-globe-underlay] selected connected world could not be rendered\n");
   return kPresentationOutcome_CoreFailure;
 }
 

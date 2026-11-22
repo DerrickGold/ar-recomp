@@ -4,6 +4,7 @@
  * Phase: present (FrameSlot only).
  * Tests: tests/present_world_nav_test.c */
 #include "sim/world_nav/present_world_nav_internal.h"
+#include "app/runtime_log.h"
 
 /* Private owners: artwork publication, registered surfaces, model bounds,
  * shell scratch, weather mapping, and native composition have separate reset
@@ -731,14 +732,14 @@ static bool DrawWorldNavigationGpuCloudBodies(const WorldNavigationProjection *p
 unavailable:
   g_world_nav_weather.body_unavailable = true;
   Sim3DPerformance_AddPath(kSim3DPath_Rejected);
-  fprintf(stderr,"[world-navigation] GPU cloud body unavailable; using compatible clouds\n");
+  RuntimeLog_Printf("[world-navigation] GPU cloud body unavailable; using compatible clouds\n");
   return false; /* The group queues nothing on rejection. */
 }
 
 static PresentationOutcome OmitWorldNavigationWeather(const char *reason) {
   if (!g_world_nav_weather.failure_reported) {
     g_world_nav_weather.failure_reported = true;
-    fprintf(stderr, "[world-navigation] optional weather omitted: %s\n",
+    RuntimeLog_Printf("[world-navigation] optional weather omitted: %s\n",
             reason && reason[0] ? reason : "renderer rejected the effect");
   }
   return kPresentationOutcome_OptionalOmitted;

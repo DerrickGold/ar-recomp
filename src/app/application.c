@@ -4,12 +4,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <signal.h>
+#endif
 #include <SDL3/SDL.h>
 
 #include "app/config.h"
 #include "app/ini_upgrade_apply.h"
 #include "app/portable_paths.h"
 #include "app/run_dir.h"
+#include "app/runtime_log.h"
 #include "app/scheduled_settings.h"
 #include "app/session_fatal.h"
 #include "app/session_recovery.h"
@@ -42,7 +46,7 @@ static ArUiLocale RecoveryLocale(void) {
 }
 
 void NORETURN Die(const char *error) {
-  fprintf(stderr, "Error: %s\n", error);
+  RuntimeLog_Printf("Error: %s\n", error);
   // Startup failures also happen in unattended replay/font qualification. A
   // modal dialog there prevents the process from exiting or reporting failure.
   const char *headless = getenv("AR_HEADLESS");
@@ -55,6 +59,8 @@ void NORETURN Die(const char *error) {
         SessionRecovery_Title(locale, kSessionFailure_Startup),
         formatted ? message : ArUiCatalog_Text(locale, "recovery.startup", error), NULL);
   }
+  RuntimeLog_Stop();
+  if (RuntimeLog_AbandonedIO()) _Exit(1);
   exit(1);
 }
 
@@ -75,13 +81,36 @@ static int Application_ParseArgs(Application *app, int argc, char **argv) {
   app->rom_path = NULL;
   app->config_path = NULL;
 
+  const char *log_destination = NULL;
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
       app->config_path = argv[++i];
+    } else if (!strcmp(argv[i], "--log-dir")) {
+      if (log_destination || i + 1 >= argc || !argv[i + 1][0] || argv[i + 1][0] == '-') {
+        fprintf(stderr, "--log-dir requires one directory path\n");
+        return 1;
+      }
+      log_destination = argv[++i];
     } else if (argv[i][0] != '-') {
       app->rom_path = argv[i];
     }
   }
+
+  char log_absolute[kHostPathCapacity];
+  if (log_destination && !snesrecomp_abspath(log_destination, log_absolute, sizeof(log_absolute))) {
+    fprintf(stderr, "[run-dir] could not resolve --log-dir %s\n", log_destination);
+    return 1;
+  }
+#ifdef _WIN32
+  /* Bundle paths are later joined with '/' like other game data paths. Let
+   * sr_win_path normalize those joins before adding the Win32 long-path prefix. */
+  if (log_destination && !strncmp(log_absolute, "\\\\?\\UNC\\", 8)) {
+    memmove(log_absolute + 2, log_absolute + 8, strlen(log_absolute + 8) + 1);
+    log_absolute[0] = log_absolute[1] = '\\';
+  } else if (log_destination && !strncmp(log_absolute, "\\\\?\\", 4)) {
+    memmove(log_absolute, log_absolute + 4, strlen(log_absolute + 4) + 1);
+  }
+#endif
 
 #ifdef __ANDROID__
   /* No launcher and no argv: the APK supplies the ROM and the data root. */
@@ -127,9 +156,8 @@ static int Application_ParseArgs(Application *app, int argc, char **argv) {
       app->rom_path = rom_abs;
   }
 
-  /* Per-run artifact ringfence (runs/<ts>/): must run before anything prints
-   * (console tee) or reads an AR_* output path. See run_dir.h. */
-  RunDirInit(argc, argv);
+  /* Reserve diagnostic paths before reading any AR_* output option. */
+  if (!RunDirInit(argc, argv, log_destination ? log_absolute : NULL)) return 1;
 
   HostRuntimeDiagnostics_InitTrace();
 
@@ -151,27 +179,29 @@ static int Application_ParseArgs(Application *app, int argc, char **argv) {
   /* Now that config-file AR_* values are env-bridged, point bare output
    * filenames into the per-run dir (see run_dir.h). */
   RunDirRebaseEnvOutputs();
+  RuntimeLog_Start();
+  RunDirReport();
 
   /* One authoritative line identifies both build capability and resolved
    * runtime mode. This prevents a trace-capable diagnostic build with tracing
    * off from being confused with a play/release build where the recorder was
    * compiled out entirely. Persist the same line beside replay artifacts. */
   const char *trace_status = sr_trace_status();
-  fprintf(stderr, "[runner-trace] %s\n", trace_status);
+  RuntimeLog_Printf("[runner-trace] %s\n", trace_status);
   RunDirRecordTraceStatus(trace_status);
 
   if (!app->rom_path) {
-    fprintf(stderr, "Usage: %s <rom.sfc> [--config config.ini]\n", argv[0]);
+    RuntimeLog_Printf("Usage: %s <rom.sfc> [--config config.ini] [--log-dir directory]\n", argv[0]);
     return 1;
   }
 
   app->rom_size = 0;
   app->rom_data = snesrecomp_read_whole_file(app->rom_path, &app->rom_size);
   if (!app->rom_data) {
-    fprintf(stderr, "Error: cannot open ROM file '%s'\n", app->rom_path);
+    RuntimeLog_Printf("Error: cannot open ROM file '%s'\n", app->rom_path);
     return 1;
   }
-  fprintf(stderr, "Loaded ROM: %s (%zu bytes)\n", app->rom_path, app->rom_size);
+  RuntimeLog_Printf("Loaded ROM: %s (%zu bytes)\n", app->rom_path, app->rom_size);
   /* Boot preparation shows the ROM's own HUD bar and angel while it compiles. */
   (void)PreparationIndicator_DecodeRom(app->rom_data, app->rom_size);
   return -1;
@@ -242,7 +272,7 @@ static int Application_CreateVideo(Application *app) {
   if (!app->headless) sdl_flags |= SDL_INIT_GAMEPAD;
   /* SDL3 returns true on success (the SDL2 0-on-success convention flipped). */
   if (!SDL_Init(sdl_flags)) {
-    fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+    RuntimeLog_Printf("SDL_Init failed: %s\n", SDL_GetError());
     return 1;
   }
 
@@ -266,32 +296,45 @@ static int Application_Shutdown(Application *app, GameSessionResult result) {
     const ArUiLocale locale = RecoveryLocale();
     const bool formatted = SessionRecovery_Format(message, sizeof(message), locale,
         SessionFatal_Kind(), SessionFatal_Message(), settings_flush_failed, save_flush_failed);
-    fprintf(stderr, "[fatal-session] shutdown complete%s%s\n",
+    RuntimeLog_Printf("[fatal-session] shutdown complete%s%s\n",
             settings_flush_failed ? "; settings write failed" : "",
             save_flush_failed ? "; battery save write failed" : "");
     if (!app->headless &&
         !SDL_ShowSimpleMessageBox(
             SDL_MESSAGEBOX_ERROR, SessionRecovery_Title(locale, SessionFatal_Kind()),
             formatted ? message : ArUiCatalog_Text(locale, "recovery.generic", NULL), NULL)) {
-      fprintf(stderr, "[fatal-session] could not show error dialog: %s\n",
+      RuntimeLog_Printf("[fatal-session] could not show error dialog: %s\n",
               SDL_GetError());
     }
   }
-  SDL_Quit();
+  RuntimeLog_Stop();
   free(app->rom_data);
+  /* CRT exit can lock every stdio stream, including an abandoned log sink. */
+  if (RuntimeLog_AbandonedIO()) _Exit(result.exit_code);
+  SDL_Quit();
   return result.exit_code;
 }
 
 int Application_Run(int argc, char **argv) {
+#ifndef _WIN32
+  /* Console readers can exit while the game or its libraries still log. */
+  signal(SIGPIPE, SIG_IGN);
+#endif
   Application app = {0};
   int rc = Application_ParseArgs(&app, argc, argv);
-  if (rc >= 0) return rc;
+  if (rc >= 0) {
+    RuntimeLog_Stop();
+    if (RuntimeLog_AbandonedIO()) _Exit(rc);
+    return rc;
+  }
 
   Application_ResolveDisplayAndSettings(&app);
   HostRuntimeDiagnostics_ConfigureChecks();
   rc = Application_CreateVideo(&app);
   if (rc >= 0) {
+    RuntimeLog_Stop();
     free(app.rom_data);
+    if (RuntimeLog_AbandonedIO()) _Exit(rc);
     return rc;
   }
   /* Process-scoped actions stay consumed across game resets. */

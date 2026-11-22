@@ -11,6 +11,14 @@ from analyze_frame_pacing import analyze, presentation_fps, source_cadence
 
 
 class PacingTraceTest(unittest.TestCase):
+    def test_active_or_incomplete_trace_shadows_previous_capture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'pacing.csv'
+            path.touch()
+            path.with_name('pacing.csv.partial').touch()
+            with self.assertRaisesRegex(ValueError, 'still recording or incomplete'):
+                analyze(path)
+
     def rows(self):
         rows = []
         for tick in range(1200, 1320):

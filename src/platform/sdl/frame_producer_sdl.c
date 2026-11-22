@@ -1,4 +1,5 @@
 #include "host/frame_producer.h"
+#include "app/runtime_log.h"
 
 #include <SDL3/SDL.h>
 #include <string.h>
@@ -48,7 +49,7 @@ static int Produce(void *unused) {
       option && !strcmp(option, "initiated") ? QOS_CLASS_USER_INITIATED :
       QOS_CLASS_USER_INTERACTIVE;
   const int qos_error = pthread_set_qos_class_self_np(qos, 0);
-  fprintf(stderr, "[frame-producer] Darwin QoS=%s result=%d\n",
+  RuntimeLog_Printf("[frame-producer] Darwin QoS=%s result=%d\n",
       qos == QOS_CLASS_DEFAULT ? "default" :
       qos == QOS_CLASS_USER_INITIATED ? "user-initiated" : "user-interactive", qos_error);
 #endif

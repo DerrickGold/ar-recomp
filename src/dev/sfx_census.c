@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -251,10 +252,10 @@ void SfxCensus_Init(void) {
           SR_RESULT_OK) {
     s_runner_api = NULL;
     s_runner = NULL;
-    fprintf(stderr, "[sfx-census] audio observer unavailable\n");
+    RuntimeLog_Printf("[sfx-census] audio observer unavailable\n");
     return;
   }
-  fprintf(stderr, "[sfx-census] enabled — correlating BRK sound requests with "
+  RuntimeLog_Printf("[sfx-census] enabled — correlating BRK sound requests with "
                   "shared-bank (srcn < %02x) key-ons\n",
                   kActRaiserSpcMusicSourceMinimum);
 }
@@ -347,7 +348,7 @@ void SfxCensus_Report(void) {
   for (int i = 0; i < kSfxIdCount && !any; i++)
     any = s_sfx[i].requests + s_sfx[i].correlated;
   if (!any) {
-    fprintf(stderr, "[sfx-census] nothing captured\n");
+    RuntimeLog_Printf("[sfx-census] nothing captured\n");
     return;
   }
 
@@ -357,7 +358,7 @@ void SfxCensus_Report(void) {
   if (f) {
     WriteReport(f);
     fclose(f);
-    fprintf(stderr, "[sfx-census] wrote %s\n", path);
+    RuntimeLog_Printf("[sfx-census] wrote %s\n", path);
   }
   WriteReport(stderr);
 }

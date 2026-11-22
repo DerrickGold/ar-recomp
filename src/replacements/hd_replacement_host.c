@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "action/action_obj_apron.h"
 #include "replacements/hd_replacement_host.h"
@@ -49,7 +50,7 @@ static bool LoadReplacementArt(HdReplacement *entry) {
       entry->image, &width, &height, &source_channel_count,
       kRgbaChannelCount);
   if (!rgba) {
-    fprintf(stderr, "[hd-manifest] [replace:%s] cannot decode %s (%s)\n",
+    RuntimeLog_Printf("[hd-manifest] [replace:%s] cannot decode %s (%s)\n",
             entry->name, entry->image, stbi_failure_reason());
     return false;
   }
@@ -57,7 +58,7 @@ static bool LoadReplacementArt(HdReplacement *entry) {
   uint8_t *padded_rgba = NULL;
   if (!HdReplacements_PrepareTitleCoverage(
           entry, rgba, width, height, &padded_rgba, &width)) {
-    fprintf(stderr, "[hd-manifest] [replace:%s] title coverage allocation failed\n",
+    RuntimeLog_Printf("[hd-manifest] [replace:%s] title coverage allocation failed\n",
             entry->name);
     stbi_image_free(rgba);
     return false;
@@ -81,7 +82,7 @@ static bool LoadReplacementArt(HdReplacement *entry) {
       entry->pixels = argb;
       entry->pixels_width = width;
       entry->pixels_height = height;
-      fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d, mode7)\n",
+      RuntimeLog_Printf("[hd-manifest] [replace:%s] %s (%dx%d, mode7)\n",
               entry->name, entry->image, width, height);
     }
     free(padded_rgba);
@@ -104,11 +105,11 @@ static bool LoadReplacementArt(HdReplacement *entry) {
           &g_render_device, texture, NULL, image,
           width * kArgbBytesPerPixel)) {
     entry->texture = texture;
-    fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d)\n",
+    RuntimeLog_Printf("[hd-manifest] [replace:%s] %s (%dx%d)\n",
             entry->name, entry->image, width, height);
   } else {
     ArRenderDevice_DestroyTexture(&g_render_device, texture);
-    fprintf(stderr, "[hd-manifest] [replace:%s] texture upload failed: %s\n",
+    RuntimeLog_Printf("[hd-manifest] [replace:%s] texture upload failed: %s\n",
             entry->name, ArRenderDevice_LastError(&g_render_device));
   }
   free(padded_rgba);
@@ -153,7 +154,7 @@ void HdReplacementHost_LoadTextures(void) {
     if (title_pack_loaded && HdReplacements_IsTitleHook(entry)) continue;
     if (LoadReplacementArt(entry)) loaded_art_count++;
   }
-  fprintf(stderr, "[hd-manifest] %d entries, %d with art\n", count, loaded_art_count);
+  RuntimeLog_Printf("[hd-manifest] %d entries, %d with art\n", count, loaded_art_count);
   Settings_SetHdReplacementsAvailable(loaded_art_count > 0);
 }
 
@@ -194,8 +195,7 @@ void HdReplacementHost_BindSurfaces(void) {
         s_m7_texture = ArRenderTexture_Invalid();
         free(s_m7_overlay_pixels);
         s_m7_overlay_pixels = NULL;
-        fprintf(stderr,
-                "[hd-manifest] mode7 host-surface allocation failed: %s\n",
+        RuntimeLog_Printf("[hd-manifest] mode7 host-surface allocation failed: %s\n",
                 ArRenderDevice_LastError(&g_render_device));
       }
       continue;

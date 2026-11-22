@@ -1,3 +1,5 @@
+#include "app/runtime_log.h"
+
 /* The live capture is world-space and independent of the SDL camera thread.
  * Retain a bounded neighborhood so orbit and ordinary scroll reuse the same
  * native lanes, even when the renderer re-presents a retained game frame. */
@@ -124,8 +126,8 @@ static DioramaTerrainSource *PrepareLiveTerrain(
       ppu->bg_mode != 1 || ppu->display_control != 15 ||
       ((ppu->mosaic_control & 1) && (ppu->mosaic_control >> 4))) {
     static bool reported;
-    if (!reported && ppu->brightness == 15 && DioramaPerformance_Enabled()) {
-      fprintf(stderr, "[voxel-live-terrain] unavailable world=%u geometry=%d capture=%d finite=%d vram=%llu base=%u palette=%llu mode=%u display=%u windows=%u/%u mosaic=%u\n",
+    if (!reported && ppu->brightness == 15 && DioramaPerformance_LoggingEnabled()) {
+      RuntimeLog_Printf("[voxel-live-terrain] unavailable world=%u geometry=%d capture=%d finite=%d vram=%llu base=%u palette=%llu mode=%u display=%u windows=%u/%u mosaic=%u\n",
           world_serial, geometry != NULL, capture != NULL, DioramaCameraPolicy_FiniteLayer(layer),
           (unsigned long long)context->vram.element_count, tile_base,
           (unsigned long long)context->cgram.element_count, ppu->bg_mode, ppu->display_control,
@@ -298,8 +300,8 @@ static void FinishLiveTerrain(const SrPpuFrameTransactionContext *context,
           sizeof(entry->characters)) ||
       memcmp(entry->palette, context->cgram.data, sizeof(entry->palette))) {
     static bool reported;
-    if (!reported && source->brightness == 15 && DioramaPerformance_Enabled()) {
-      fprintf(stderr, "[voxel-live-terrain] rejected scanout status=%u flags=%x scroll=%u,%u to %u,%u windows=%u/%u\n",
+    if (!reported && source->brightness == 15 && DioramaPerformance_LoggingEnabled()) {
+      RuntimeLog_Printf("[voxel-live-terrain] rejected scanout status=%u flags=%x scroll=%u,%u to %u,%u windows=%u/%u\n",
           status, result->flags, before->backgrounds[0].h_scroll, before->backgrounds[0].v_scroll,
           after->backgrounds[0].h_scroll, after->backgrounds[0].v_scroll,
           after->main_windowed, after->sub_windowed);
@@ -314,8 +316,8 @@ static void FinishLiveTerrain(const SrPpuFrameTransactionContext *context,
     const bool partial = s_terrain_strip.w > 0;
     if (partial)
       CopyTerrainRegion(pending, s_terrain_strip_pixels, s_terrain_strip, s_terrain_strip);
-    if (DioramaPerformance_Enabled())
-      fprintf(stderr, "[voxel-live-terrain] capture map=%02x/%02x source=%d,%d %dx%d bytes=%zu partial=%d\n",
+    if (DioramaPerformance_LoggingEnabled())
+      RuntimeLog_Printf("[voxel-live-terrain] capture map=%02x/%02x source=%d,%d %dx%d bytes=%zu partial=%d\n",
           g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
           source->bounds.x, source->bounds.y, source->bounds.w, source->bounds.h,
           3 * (partial ? (size_t)s_terrain_strip.w * s_terrain_strip.h :

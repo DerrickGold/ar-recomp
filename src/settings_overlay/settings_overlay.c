@@ -1,4 +1,5 @@
 #include "settings_overlay/settings_overlay.h"
+#include "app/runtime_log.h"
 
 #include "localization/interface_text.h"
 #include "settings_overlay/settings_overlay_internal.h"
@@ -723,7 +724,7 @@ static void PersistChange(SettingChangeResult result) {
                                  "settings.ini");
   if (!Settings_Save(settings_path)) {
     SetStatus(Ui("overlay.status.save_failed"));
-    fprintf(stderr, "[settings-menu] could not save %s\n", settings_path);
+    RuntimeLog_Printf("[settings-menu] could not save %s\n", settings_path);
     return;
   }
   if (result == kSettingChange_RestartPending)
@@ -774,7 +775,7 @@ static void ConfirmOrResetActiveSection(void) {
         Settings_ResetCategory((SettingCategory)category);
     if (result > aggregate) aggregate = result;
   }
-  fprintf(stderr, "[settings-menu] reset %s to built-in defaults\n",
+  RuntimeLog_Printf("[settings-menu] reset %s to built-in defaults\n",
           ArUiCatalog_Text(kArUiLocale_English, section->label, section->label));
   SaveAcceptedChange(aggregate);
 }
@@ -1269,7 +1270,7 @@ void SettingsOverlay_Open(void) {
   s_open = true;
   SettingsOverlay_Refresh();
   s_status[0] = 0;
-  fprintf(stderr, "[settings-menu] opened\n");
+  RuntimeLog_Printf("[settings-menu] opened\n");
 }
 
 void SettingsOverlay_Close(void) {
@@ -1291,7 +1292,7 @@ void SettingsOverlay_Close(void) {
   s_submenu_open = false;
   SettingsOverlayPalette_Close();
   s_open = false;
-  fprintf(stderr, "[settings-menu] closed\n");
+  RuntimeLog_Printf("[settings-menu] closed\n");
 }
 
 static bool BeginDecision(const char *title,const char *body,const char *accept,bool body_text) {

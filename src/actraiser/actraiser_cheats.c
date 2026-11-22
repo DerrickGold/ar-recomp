@@ -2,6 +2,7 @@
  * (ActRaiser_ApplyCheats), the magic cycle, and level warp.
  * Phase: game (main thread). */
 #include "actraiser/actraiser_rtl_internal.h"
+#include "app/runtime_log.h"
 #include "actraiser/actraiser_death_heim_runtime.h"
 
 /* Reload the selector-dependent part of the action OBJ atlas after a live
@@ -93,21 +94,21 @@ static void ActRaiser_ApplyMagicCycle(void) {
    * than at the call site so a press made in town is dropped outright instead
    * of firing the moment the next act loads. */
   if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
-    fprintf(stderr, "[magic-cycle] not in an action stage; ignored\n");
+    RuntimeLog_Printf("[magic-cycle] not in an action stage; ignored\n");
     return;
   }
 
   /* $00F8 is the act-mode cast state. Rewriting $02AC mid-cast would leave
    * the in-flight spell's actors running against the new spell's tiles. */
   if (g_ram[kActRaiserWram_MagicCastState] != 0) {
-    fprintf(stderr, "[magic-cycle] cast still active; selection unchanged\n");
+    RuntimeLog_Printf("[magic-cycle] cast still active; selection unchanged\n");
     return;
   }
 
   uint8 unlocked[4];
   unsigned count = ActRaiser_UnlockedMagic(unlocked);
   if (!count) {
-    fprintf(stderr, "[magic-cycle] no spells unlocked; selection unchanged "
+    RuntimeLog_Printf("[magic-cycle] no spells unlocked; selection unchanged "
             "(enable the All magic cheat to test every spell)\n");
     return;
   }
@@ -124,7 +125,7 @@ static void ActRaiser_ApplyMagicCycle(void) {
 
   g_ram[kActRaiserWram_SelectedMagic] = next;
   ActRaiser_ReloadSelectedMagicTiles(next);
-  fprintf(stderr, "[magic-cycle] selected %s (%u of %u unlocked, $02AC=$%02X, "
+  RuntimeLog_Printf("[magic-cycle] selected %s (%u of %u unlocked, $02AC=$%02X, "
           "VRAM $2D40 refreshed)\n", kActRaiserMagicNames[next],
           index + 1, count, next);
 }
@@ -415,11 +416,11 @@ void ActRaiser_Warp(unsigned region, unsigned map) {
   g_ram[kActRaiserWram_DestinationMapGroup] = (uint8)region;
   g_ram[kActRaiserWram_DestinationMap] = (uint8)map;
   g_ram[kActRaiserWram_TransitionRequest] |= kActRaiserTransitionRequestBit;
-  fprintf(stderr, "[warp] from $18=$%02X $19=$%02X staged region=$%02X "
+  RuntimeLog_Printf("[warp] from $18=$%02X $19=$%02X staged region=$%02X "
           "map=$%02X ($1B/$1A/$FB set); transition processor should pick it up.\n",
           source_map_group, source_map, region & 0xFF, map & 0xFF);
   if (ActRaiser_IsActionMapGroup(source_map_group)) {
-    fprintf(stderr, "[warp] WARNING: action->action is not a naturally observed "
+    RuntimeLog_Printf("[warp] WARNING: action->action is not a naturally observed "
             "transition; inherited timing/object state may affect fidelity.\n");
   }
 }

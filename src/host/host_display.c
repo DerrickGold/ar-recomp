@@ -10,6 +10,7 @@
  * continuity. A camera-reset replacement is allowed only after invalidation;
  * its zero-tick capture restores the image without seeding temporal history. */
 #include "host_display.h"
+#include "app/runtime_log.h"
 #include "action/action_voxel.h"
 #include "action/present_action_effects.h"
 #include "dev/dev_automation.h"
@@ -42,6 +43,7 @@
 #include "snesrecomp/runner.h"
 #include "snesrecomp/game/audio_timing.h"
 #include "app/settings.h"
+#include "app/diagnostic_options.h"
 #include "constants.h"
 #include "render/render_device.h"
 #include "app/performance_metrics.h"
@@ -94,6 +96,7 @@ static HostDisplayReseedState s_camera_reseed;
 static bool s_producer_pacing;
 static bool s_present_trace_enabled;
 static HostDisplayPresentTrace s_present_trace;
+static HostDisplayYieldTrace s_yield_trace;
 static HostFrameRefreshClock s_refresh_clock;
 static HostDisplayPacingOptions CurrentPacingOptions(void);
 
@@ -133,8 +136,15 @@ int HostDisplay_PacingSource(void) {
 void HostDisplay_EnablePresentTrace(bool enabled) {
   s_present_trace_enabled = enabled;
   s_present_trace = (HostDisplayPresentTrace){0};
+  s_yield_trace = (HostDisplayYieldTrace){0};
   DioramaFrameGeneration_EnableWaitTrace(enabled);
   ArSdlRenderBackend_EnablePresentTrace(&g_render_device, enabled);
+}
+
+HostDisplayYieldTrace HostDisplay_EndPresentTrace(void) {
+  const HostDisplayYieldTrace trace = s_yield_trace;
+  HostDisplay_EnablePresentTrace(false);
+  return trace;
 }
 
 HostDisplayPresentTrace HostDisplay_LastPresentTrace(void) {
@@ -233,8 +243,7 @@ static bool RunningUnderGamescope(void) {
     const char *display = getenv("GAMESCOPE_WAYLAND_DISPLAY");
     running_under_gamescope = display && display[0];
     if (running_under_gamescope) {
-      fprintf(stderr,
-              "[display] gamescope detected — deferring frame pacing "
+      RuntimeLog_Printf("[display] gamescope detected — deferring frame pacing "
               "to the compositor (its refresh report is advisory)\n");
     }
   }
@@ -337,7 +346,7 @@ static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
 static bool ReportPresentFailure(void) {
   PerformanceMetrics_Add(kPerformanceCount_FailedPresents, 1);
   if (!s_present_failure_reported) {
-    fprintf(stderr, "[display] frame present failed: %s\n",
+    RuntimeLog_Printf("[display] frame present failed: %s\n",
             ArRenderDevice_LastError(&g_render_device));
     s_present_failure_reported = true;
   }
@@ -373,19 +382,17 @@ bool HostDisplay_PresentCompositedFrame(HostDisplayPresentMode mode) {
               options.vsync_active,
           options.nominal_refresh_hz, completed_at_ns)) {
     if (options.nominal_refresh_hz > 0) {
-      fprintf(stderr,
-              "[display] renderer Vsync is not pacing completed presents; "
+      RuntimeLog_Printf("[display] renderer Vsync is not pacing completed presents; "
               "using a %d Hz software safety cadence\n",
               options.nominal_refresh_hz);
     } else {
-      fprintf(stderr,
-              "[display] renderer Vsync is not pacing completed presents; "
+      RuntimeLog_Printf("[display] renderer Vsync is not pacing completed presents; "
               "using the native-rate software safety cadence\n");
     }
   }
   if (was_fallback && !s_vsync_guard.software_fallback_active) {
     s_present_deadline_ns = 0;
-    fprintf(stderr, "[display] renderer Vsync pacing recovered after bounded probe\n");
+    RuntimeLog_Printf("[display] renderer Vsync pacing recovered after bounded probe\n");
   }
 
   if (!g_settings.show_fps) {
@@ -569,8 +576,7 @@ static void ResolveVideoGeometry(bool apply_runtime_changes,
     HostDisplay_InvalidatePresentHistory();
   }
 
-  fprintf(stderr,
-          "[video-geometry] %s %s -> %d extra columns/side "
+  RuntimeLog_Printf("[video-geometry] %s %s -> %d extra columns/side "
           "(render width %d, requested canvas %dx%d)\n",
           automatic ? "Auto" : s_active_aspect_x
               ? (s_active_aspect_y == 9 ? "16:9" : "16:10")
@@ -715,7 +721,7 @@ static void SetRenderVsync(int requested) {
   bool active = false;
   if (!ArSdlRenderBackend_SetVSync(
           &g_render_device, requested, &active)) {
-    fprintf(stderr, "[display] vsync request %d rejected: %s\n",
+    RuntimeLog_Printf("[display] vsync request %d rejected: %s\n",
             requested, SDL_GetError());
   }
   HostDisplayStatus_SetVsyncActive(active);
@@ -726,14 +732,13 @@ static void SetAllowedFramesInFlight(uint32_t requested) {
   bool changed = false;
   if (!ArSdlRenderBackend_SetAllowedFramesInFlight(
           &g_render_device, requested, &changed)) {
-    fprintf(stderr,
-            "[display] SDL_SetGPUAllowedFramesInFlight(%" PRIu32
+    RuntimeLog_Printf("[display] SDL_SetGPUAllowedFramesInFlight(%" PRIu32
             ") rejected: %s\n",
             requested, SDL_GetError());
     return;
   }
   if (!changed) return;
-  fprintf(stderr, "[display] GPU frames in flight: %" PRIu32 "\n",
+  RuntimeLog_Printf("[display] GPU frames in flight: %" PRIu32 "\n",
           requested);
 }
 
@@ -813,8 +818,7 @@ static void ReportPresentPerformance(uint64_t render_start_ms,
   if (!window_start_ms) window_start_ms = now_ms;
   if (now_ms - window_start_ms < kPerformanceReportIntervalMs) return;
 
-  fprintf(stderr,
-          "[present-perf] frames=%d present-ms avg=%.1f max=%" PRIu64 " "
+  RuntimeLog_Printf("[present-perf] frames=%d present-ms avg=%.1f max=%" PRIu64 " "
           "vsync-wait avg=%.1f max=%" PRIu64 " (no present thread)\n",
           window_frame_count,
           (double)render_sum_ms / window_frame_count,
@@ -831,7 +835,7 @@ static void ReportPresentPerformance(uint64_t render_start_ms,
 
 static bool PresentPerformanceEnabled(void) {
   static int enabled = -1;
-  if (enabled < 0) enabled = getenv("AR_PERF") ? 1 : 0;
+  if (enabled < 0) enabled = DiagnosticOptionEnabled("AR_PERF");
   return enabled != 0;
 }
 
@@ -914,7 +918,7 @@ static bool StagePreparedFrame(const FrameSlot *slot) {
   PerformanceContextForFrame(slot, kHostDisplayPresent_GameTick);
   const PerformanceScope upload = PerformanceMetrics_Begin(kPerformance_Upload);
   static int trace_staging = -1;
-  if (trace_staging < 0) trace_staging = getenv("AR_TRACE_FRAME_STAGING") != NULL;
+  if (trace_staging < 0) trace_staging = DiagnosticOptionEnabled("AR_TRACE_FRAME_STAGING");
   const uint64_t start = trace_staging ? SDL_GetTicksNS() : 0;
   PresentUpload(slot);
   const uint64_t uploaded = trace_staging ? SDL_GetTicksNS() : 0;
@@ -922,7 +926,7 @@ static bool StagePreparedFrame(const FrameSlot *slot) {
   const uint64_t retained = trace_staging ? SDL_GetTicksNS() : 0;
   PresentActionEffects_PrepareSourcePackets(&s_retained_frame.slot, slot);
   if (trace_staging && slot->diorama_voxel_mode && slot->diorama_active)
-    fprintf(stderr, "[frame-staging] start=%" PRIu64 " upload=%" PRIu64
+    RuntimeLog_Printf("[frame-staging] start=%" PRIu64 " upload=%" PRIu64
         " retain=%" PRIu64 " effects=%" PRIu64 "\n", start,
         uploaded - start, retained - uploaded, SDL_GetTicksNS() - retained);
   PerformanceMetrics_End(upload);
@@ -1066,10 +1070,10 @@ void HostDisplay_YieldIfNoPresent(bool presented,
   SDL_Delay(1);
   if (s_present_trace_enabled) {
     const uint64_t elapsed = SDL_GetTicksNS() - yield_start;
-    if (elapsed > requested_ns + 2000000)
-      fprintf(stderr, "[present-yield] start-ns=%llu requested-ms=%.3f elapsed-ms=%.3f\n",
-          (unsigned long long)yield_start, (double)requested_ns / 1e6,
-          (double)elapsed / 1e6);
+    if (elapsed > requested_ns + 2000000) {
+      ++s_yield_trace.slow_yields;
+      if (elapsed > s_yield_trace.maximum_ns) s_yield_trace.maximum_ns = elapsed;
+    }
   }
   PerformanceMetrics_End(pacing);
 }

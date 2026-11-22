@@ -1,4 +1,5 @@
 #include "diorama/diorama_camera.h"
+#include "app/runtime_log.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -161,8 +162,7 @@ DioramaCameraView DioramaCamera_Present(
     dyncam_log_on = (e && e[0] && e[0] != '0') ? 1 : 0;
   }
   if (dyncam_log_on && dynamic) {
-    fprintf(stderr,
-      "[dyncam] mode=%d gain=%.3f lean_yaw=%.3f lean_pitch=%.3f "
+    RuntimeLog_Printf("[dyncam] mode=%d gain=%.3f lean_yaw=%.3f lean_pitch=%.3f "
       "target(x=%.4f y=%.4f d=%.3f) render(x=%.4f y=%.4f d=%.3f) "
       "kick(pitch=%.4f zoom=%.4f) evt(hit=%d land=%d boost=%d) "
       "manual(yaw=%.4f pitch=%.4f zoom=%.4f framing=%.4f) "

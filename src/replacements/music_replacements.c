@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -166,7 +167,7 @@ static bool EntryComplete(const MusicReplacement *entry, const char *path,
   if (!entry->src) missing = "src";
   else if (!entry->file[0]) missing = "file";
   if (missing)
-    fprintf(stderr, "[music-manifest] %s:%d: [music:%s] missing/invalid '%s'"
+    RuntimeLog_Printf("[music-manifest] %s:%d: [music:%s] missing/invalid '%s'"
             " — entry dropped\n", path, line, entry->name, missing);
   return !missing;
 }
@@ -183,7 +184,7 @@ static void ProbeEntryFile(MusicReplacement *entry) {
   int error = 0;
   stb_vorbis *v = stb_vorbis_open_filename(entry->file, &error, NULL);
   if (!v) {
-    fprintf(stderr, "[music-manifest] [music:%s] cannot decode %s "
+    RuntimeLog_Printf("[music-manifest] [music:%s] cannot decode %s "
             "(stb_vorbis error %d)\n", entry->name, entry->file, error);
     return;
   }
@@ -210,7 +211,7 @@ static void ProbeEntryFile(MusicReplacement *entry) {
 
   if (entry->file_rate < 8000 || entry->file_rate > 192000 ||
       entry->file_frames == 0) {
-    fprintf(stderr, "[music-manifest] [music:%s] unusable file %s "
+    RuntimeLog_Printf("[music-manifest] [music:%s] unusable file %s "
             "(rate %d, %u frames)\n", entry->name, entry->file,
             entry->file_rate, entry->file_frames);
     return;
@@ -220,7 +221,7 @@ static void ProbeEntryFile(MusicReplacement *entry) {
       (entry->loop_end &&
        (entry->loop_end <= entry->loop_start ||
         entry->loop_end > entry->file_frames))) {
-    fprintf(stderr, "[music-manifest] [music:%s] bad loop points %u..%u "
+    RuntimeLog_Printf("[music-manifest] [music:%s] bad loop points %u..%u "
             "(file has %u frames) — looping whole file\n", entry->name,
             entry->loop_start, entry->loop_end, entry->file_frames);
     entry->loop_start = 0;
@@ -298,11 +299,11 @@ static void ReadMusicManifest(const char *manifest_path, int capacity) {
       ok = AssetConditions_ParseWhen(value, pending.conditions, kAssetMaxConditions,
                                 &pending.condition_count);
     } else {
-      fprintf(stderr, "[music-manifest] %s:%d: unknown key '%s' ignored\n",
+      RuntimeLog_Printf("[music-manifest] %s:%d: unknown key '%s' ignored\n",
               manifest_path, line_number, key);
     }
     if (!ok) {
-      fprintf(stderr, "[music-manifest] %s:%d: bad value for '%s' — "
+      RuntimeLog_Printf("[music-manifest] %s:%d: bad value for '%s' — "
               "[music:%s] dropped\n", manifest_path, line_number, key,
               pending.name);
       in_entry = false;
@@ -332,7 +333,7 @@ int MusicReplacements_LoadWithOverlay(const char *manifest_path,
     if (entry->has_audio) {
       CacheEncodedFile(i);
       with_audio++;
-      fprintf(stderr, "[music-manifest] [music:%s] %s (%d Hz, %u frames, "
+      RuntimeLog_Printf("[music-manifest] [music:%s] %s (%d Hz, %u frames, "
               "loop %u..%u)\n", entry->name, entry->file, entry->file_rate,
               entry->file_frames, entry->loop_start,
               entry->loop_end ? entry->loop_end : entry->file_frames);
@@ -340,9 +341,7 @@ int MusicReplacements_LoadWithOverlay(const char *manifest_path,
   }
   int cached = 0;
   for (int i = 0; i < g_music_replacement_count; ++i) cached += s_encoded[i].data != NULL;
-  fprintf(
-      stderr,
-      "[music-manifest] %d entries, %d with audio; %d memory-backed (%zu bytes), %d file-backed\n",
+  RuntimeLog_Printf("[music-manifest] %d entries, %d with audio; %d memory-backed (%zu bytes), %d file-backed\n",
       g_music_replacement_count, with_audio, cached, s_encoded_bytes, with_audio - cached);
   return g_music_replacement_count;
 }
@@ -430,7 +429,7 @@ static void EndSession(const char *why, bool awaiting_song) {
   RtlApuLock();
   s_halted_replacement = awaiting_song && (s.session || s_halted_replacement);
   if (s.session) {
-    fprintf(stderr, "[music] stop [music:%s] (%s)\n", s.session->name, why);
+    RuntimeLog_Printf("[music] stop [music:%s] (%s)\n", s.session->name, why);
     if (s.v) stb_vorbis_close(s.v);
     memset(&s, 0, sizeof(s));
   }
@@ -460,7 +459,7 @@ static void StartSession(const MusicReplacement *entry, int song) {
       : stb_vorbis_open_filename(entry->file, &error, NULL);
   if (!v) {
     /* Decoder allocation failed, or an uncached file changed since probing. */
-    fprintf(stderr, "[music] [music:%s] open failed at play time (%d) — "
+    RuntimeLog_Printf("[music] [music:%s] open failed at play time (%d) — "
             "authentic\n", entry->name, error);
     s_halted_replacement = false;
     memset(&s, 0, sizeof(s));
@@ -484,7 +483,7 @@ static void StartSession(const MusicReplacement *entry, int song) {
   s.hist[0] = 0;
   s.hist[1] = 0;
   ApplyVoiceMutePolicyLocked();
-  fprintf(stderr, "[music] src=%02X:%04X song=%02x -> [music:%s] %s\n",
+  RuntimeLog_Printf("[music] src=%02X:%04X song=%02x -> [music:%s] %s\n",
           (unsigned)(entry->src >> 16), (unsigned)(entry->src & 0xffff),
           (unsigned)song, entry->name, entry->file);
   RtlApuUnlock();
@@ -496,20 +495,20 @@ static void StartSession(const MusicReplacement *entry, int song) {
 void MusicReplacements_OnSpcUpload(uint32_t src) {
   s_loaded_src = src;
   if (s_musiclog)
-    fprintf(stderr, "[music] upload src=%02X:%04X\n",
+    RuntimeLog_Printf("[music] upload src=%02X:%04X\n",
             (unsigned)(src >> 16), (unsigned)(src & 0xffff));
 }
 
 void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t val) {
   if (port == SPC_PORT_SOUND_EFFECT) {
     if (val && s_musiclog)
-      fprintf(stderr, "[music] event id=%02x on port %d\n", val,
+      RuntimeLog_Printf("[music] event id=%02x on port %d\n", val,
               SPC_PORT_SOUND_EFFECT);
     return;
   }
   if (port != SPC_PORT_CONTROL) return;
   if (s_musiclog)
-    fprintf(stderr, "[music] port0=%02x (session=%s song=%02x)\n", val,
+    RuntimeLog_Printf("[music] port0=%02x (session=%s song=%02x)\n", val,
             s.session ? s.session->name : "-",
             s_current_song < 0 ? 0xff : (unsigned)s_current_song);
   if (val == SPC_CMD_HALT) {
@@ -526,7 +525,7 @@ void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t val) {
     bool was_paused = PlaybackPaused();
     s_driver_paused = true;
     if (!was_paused && s.session)
-      fprintf(stderr, "[music] pause [music:%s] (driver $F2)\n",
+      RuntimeLog_Printf("[music] pause [music:%s] (driver $F2)\n",
               s.session->name);
     return;
   }
@@ -561,12 +560,12 @@ void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t val) {
         inert = cand;
     }
     if (inert)
-      fprintf(stderr, "[music] src=%02X:%04X song=%02x authentic — drop %s "
+      RuntimeLog_Printf("[music] src=%02X:%04X song=%02x authentic — drop %s "
               "to replace ([music:%s])\n", (unsigned)(s_loaded_src >> 16),
               (unsigned)(s_loaded_src & 0xffff), (unsigned)val, inert->file,
               inert->name);
     else if (s_musiclog || s.session)
-      fprintf(stderr, "[music] src=%02X:%04X song=%02x authentic "
+      RuntimeLog_Printf("[music] src=%02X:%04X song=%02x authentic "
               "(no manifest entry)\n", (unsigned)(s_loaded_src >> 16),
               (unsigned)(s_loaded_src & 0xffff), (unsigned)val);
     EndSession("authentic song started", false);
@@ -574,16 +573,16 @@ void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t val) {
   }
   if (resume_same_session) {
     if (!PlaybackPaused())
-      fprintf(stderr, "[music] resume [music:%s] at frame %u\n",
+      RuntimeLog_Printf("[music] resume [music:%s] at frame %u\n",
               s.session->name, s.pos);
     else if (s_musiclog)
-      fprintf(stderr, "[music] driver resume [music:%s] deferred by host "
+      RuntimeLog_Printf("[music] driver resume [music:%s] deferred by host "
               "pause at frame %u\n", s.session->name, s.pos);
     return;
   }
   if (MusicPlay_IsRedundantRestart(s.session, entry, s.v != NULL)) {
     if (s_musiclog)
-      fprintf(stderr, "[music] play song=%02x already streaming [music:%s] at "
+      RuntimeLog_Printf("[music] play song=%02x already streaming [music:%s] at "
               "frame %u — no restart\n", (unsigned)val, s.session->name, s.pos);
     return;
   }
@@ -716,7 +715,7 @@ void MusicReplacements_MixOutput(int16_t *out, int out_frames) {
         int v = out[i] < 0 ? -out[i] : out[i];
         if (v > peak) peak = v;
       }
-      fprintf(stderr, "[music] mixing [music:%s] pos=%u/%u peak=%d\n",
+      RuntimeLog_Printf("[music] mixing [music:%s] pos=%u/%u peak=%d\n",
               entry->name, s.pos, s.total, peak);
     }
   }
@@ -759,7 +758,7 @@ void MusicReplacements_SetHostPaused(bool paused) {
   s_host_paused = paused;
   bool now_paused = PlaybackPaused();
   if (was_paused != now_paused && s.session) {
-    fprintf(stderr, "[music] host %s [music:%s] at frame %u\n",
+    RuntimeLog_Printf("[music] host %s [music:%s] at frame %u\n",
             now_paused ? "pause" : "resume", s.session->name, s.pos);
   }
   RtlApuUnlock();
@@ -770,7 +769,7 @@ void MusicReplacements_SetSessionBypassed(bool bypassed) {
   if (s_session_bypassed != bypassed) {
     s_session_bypassed = bypassed;
     ApplyVoiceMutePolicyLocked();
-    fprintf(stderr, "[music] session output -> %s\n",
+    RuntimeLog_Printf("[music] session output -> %s\n",
             bypassed ? "native SPC" : "enhanced replacement");
   }
   RtlApuUnlock();

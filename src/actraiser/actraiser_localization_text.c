@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_text.h"
+#include "app/runtime_log.h"
 #include "actraiser/actraiser_credits.h"
 #include "actraiser/actraiser_hud.h"
 
@@ -135,8 +136,7 @@ bool ActRaiser_LocalizationObserveTextEntry(CpuState *cpu) {
   s_pending_page_advance = false;
   s_pending_page_retains_rows = false;
   if (TraceEnabled()) {
-    fprintf(stderr,
-            "[localization-text] serial=%llu gf=%u map=%02X/%02X "
+    RuntimeLog_Printf("[localization-text] serial=%llu gf=%u map=%02X/%02X "
             "source=$%02X:%04X caller=$%02X:%04X context=$%02X:%04X "
             "x=$%04X dp=$%04X\n",
             (unsigned long long)s_text.serial, s_text.game_frame,
@@ -172,7 +172,7 @@ static void ObserveCode(CpuState *cpu, uint8_t code) {
     s_text.yielded_to_menu = true;
   }
   if (TraceEnabled() && (code == 0x02u || code == 0x00u || code == 0x01u))
-    fprintf(stderr, "[localization-page] gf=%u serial=%llu page=%u "
+    RuntimeLog_Printf("[localization-page] gf=%u serial=%llu page=%u "
                     "first=%u units=%u control=%02X retain=%u "
                     "completed=%u pending=%u clear=%u\n",
             s_text.game_frame, (unsigned long long)s_text.serial,
@@ -280,7 +280,7 @@ static bool ObserveSurfaceClear(CpuState *cpu, uint8_t first_column,
     s_pending_page_advance = false;
   }
   if (TraceEnabled())
-    fprintf(stderr, "[localization-clear] serial=%llu gf=%u "
+    RuntimeLog_Printf("[localization-clear] serial=%llu gf=%u "
             "columns=%u+%u rows=%u+%u dialogue=%u\n",
             (unsigned long long)s_compose_serial,
             s_compose[slot].game_frame, first_column, column_count,
@@ -390,8 +390,7 @@ bool ActRaiser_LocalizationObserveTextCompose(CpuState *cpu) {
   if (s_compose_count < kComposeObservationCapacity) ++s_compose_count;
   if (TraceEnabled()) {
     const ActRaiserLocalizationComposeObservation *event = &s_compose[slot];
-    fprintf(stderr,
-            "[localization-compose] serial=%llu gf=%u map=%02X/%02X "
+    RuntimeLog_Printf("[localization-compose] serial=%llu gf=%u map=%02X/%02X "
             "source=$%02X:%04X destination=%02X/%02X caller=$%02X:%04X "
             "table=$%02X:%04X selector=%u\n",
             (unsigned long long)event->serial, event->game_frame,

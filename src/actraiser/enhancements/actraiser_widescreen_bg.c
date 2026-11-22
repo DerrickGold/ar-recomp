@@ -6,6 +6,7 @@
  * restore the words that the game did not change during scanout. */
 
 #include "actraiser_game.h"
+#include "app/runtime_log.h"
 #include "actraiser/actraiser_rtl.h"
 #include "present/display_geometry.h"
 #include "action/action_bg_metatile.h"
@@ -183,8 +184,7 @@ void ActRaiser_WidescreenSkyPalaceRestore(SrRunnerHandle *runner) {
   }
   if (ws_bg_debug_enabled() &&
       (result != SR_RESULT_OK || changed_count != 0u)) {
-    fprintf(stderr,
-            "[ws-sky] restore result=%u restored=%u changed=%u\n",
+    RuntimeLog_Printf("[ws-sky] restore result=%u restored=%u changed=%u\n",
             (unsigned)result, (unsigned)restore_count,
             (unsigned)changed_count);
   }
@@ -247,8 +247,7 @@ void ActRaiser_WidescreenSkyPalacePrepare(SrRunnerHandle *runner) {
       source[0] != 0x43 || source[16] != 0x2A ||
       source[32] != 0x32 || source[48] != 0x00) {
     if (ws_bg_debug_enabled()) {
-      fprintf(stderr,
-              "[ws-sky] source reject BG2SC=$%02X base=$%04X meta=$%04X "
+      RuntimeLog_Printf("[ws-sky] source reject BG2SC=$%02X base=$%04X meta=$%04X "
               "header=%02X/%02X/%02X/%02X\n",
               ppu.background_tilemap_control[kActRaiserPpuLayer_Bg2],
               tilemap_base,
@@ -347,8 +346,7 @@ void ActRaiser_WidescreenSkyPalacePrepare(SrRunnerHandle *runner) {
         kActRaiserWram_GameFrame);
     if (game_frame != last_gf) {
       last_gf = game_frame;
-      fprintf(stderr,
-              "[ws-sky] gf=%u source=$07:D0A0 meta=$7E:%04X cols=%d "
+      RuntimeLog_Printf("[ws-sky] gf=%u source=$07:D0A0 meta=$7E:%04X cols=%d "
               "scroll=$%04X margins=%u/%u (render-only)\n",
               game_frame, metatile_definition_base, patched_columns, hscroll,
               (unsigned)ppu.margin_left, (unsigned)ppu.margin_right);

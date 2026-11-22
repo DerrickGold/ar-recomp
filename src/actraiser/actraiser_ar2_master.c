@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_ar2_master_internal.h"
+#include "app/runtime_log.h"
 
 #include "actraiser/actraiser_hle_fatal.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
@@ -86,11 +87,11 @@ void ActRaiserAr2Master_Load(const char *asset_path) {
       Ar2MasterPresentation_Init(&s_assets, error, sizeof(error))) {
     s_pack_image = image;
     s_available = true;
-    fprintf(stderr, "[ar2-master] Loaded %u character frames from %s\n",
+    RuntimeLog_Printf("[ar2-master] Loaded %u character frames from %s\n",
             (unsigned)s_assets.frame_count, asset_path);
     return;
   }
-  fprintf(stderr, "[ar2-master] %s ignored: %s\n", asset_path, error);
+  RuntimeLog_Printf("[ar2-master] %s ignored: %s\n", asset_path, error);
   memset(&s_assets, 0, sizeof(s_assets));
   free(image);
 }
@@ -1171,8 +1172,7 @@ RecompReturn ActRaiser_Ar2MasterControl(CpuState *cpu) {
   static int trace = -1;
   if (trace < 0) trace = getenv("AR_AR2_MASTER_TRACE") != NULL;
   if (trace)
-    fprintf(stderr,
-            "[ar2-master] gf=%u state=%u pc=%u anim=%02X step=%u frame=%d timer=%d "
+    RuntimeLog_Printf("[ar2-master] gf=%u state=%u pc=%u anim=%02X step=%u frame=%d timer=%d "
             "pos=%u,%u d=%d,%d ground=%d left=%d atk=%d held=%04X\n",
             game_frame, m->state, m->pc, m->anim, m->step, m->frame, m->timer,
             Field(cpu, player, kActRaiserActionObject_WorldX),
@@ -1402,8 +1402,7 @@ static void TraceContact(const CpuState *cpu, uint16_t object, bool shield, bool
   const uint16_t parent = Field(cpu, object, kActRaiserActionObject_SpawnerBacklink);
   const bool linked = parent >= kActRaiserWram_ActionObjectTable && parent < kObjectTableEnd;
   const uint16_t player = kActRaiserWram_PlayerObject;
-  fprintf(stderr,
-          "[ar2-shield] gf=%u obj=$%04X src=$%04X h=$%04X res=$%04X code=$%04X st=$%02X "
+  RuntimeLog_Printf("[ar2-shield] gf=%u obj=$%04X src=$%04X h=$%04X res=$%04X code=$%04X st=$%02X "
           "vis=$%02X anim=$%02X:%04X parent=$%04X psrc=$%04X pos=%d,%d vel=%d,%d "
           "ext=%d,%d,%d,%d atk=%u hp=%u flags=$%04X status=$%04X player=%d,%d "
           "shield=%d touch=%d shot=%s action=%s\n",

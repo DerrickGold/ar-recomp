@@ -1,4 +1,5 @@
 #include "actraiser/regional/actraiser_regional_runtime.h"
+#include "app/runtime_log.h"
 #include "actraiser/actraiser_rtl.h"
 #include "actraiser/actraiser_death_heim_runtime.h"
 #include "actraiser/regional/actraiser_regional_editor.h"
@@ -417,7 +418,7 @@ RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu) {
       SaveError error={{0}};char directory[512];
       if(PopulationRecoveryPath(directory,sizeof(directory))) {
         result=ActRaiserPopulation_Commit(cpu,&s_campaign,&preview,directory,&error);
-        fprintf(stderr,"[regional] population conversion result=%d recovery=%s%s%s\n",
+        RuntimeLog_Printf("[regional] population conversion result=%d recovery=%s%s%s\n",
             result,directory,error.message[0]?" error=":"",error.message);
       } else result=kActRaiserPopulation_RecoveryFailed;
       const ActRaiserRegionalPopulationNotice notice=result==kActRaiserPopulation_Committed?
@@ -426,7 +427,7 @@ RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu) {
                                 preview.town.removed);
     }
   } else if(result!=kActRaiserPopulation_Unchanged && s_population.prompt) {
-    fprintf(stderr, "[regional] population conversion not started: result=%d source=%d\n", result,
+    RuntimeLog_Printf("[regional] population conversion not started: result=%d source=%d\n", result,
             source);
     const uint16_t none[6]={0};
     (void)s_population.prompt(s_population.context, kActRaiserRegionalPopulation_Failed, source,
@@ -479,7 +480,7 @@ static bool PrepareDeathHeimSetting(void *unused, unsigned roster, bool shuffle,
   if (s_settings_writer) {
     SaveError error = {{0}};
     if (!s_settings_writer(s_settings_context, session, &candidate, &error)) {
-      fprintf(stderr, "[death-heim] settings not saved: %s\n", error.message);
+      RuntimeLog_Printf("[death-heim] settings not saved: %s\n", error.message);
       return false;
     }
   }
@@ -567,7 +568,7 @@ static ActRaiserRegionalEditResult FinishSettingsEdit(ActRaiserRegionalEditResul
   if (s_settings_writer && result==kActRaiserRegionalEdit_Applied) {
     SaveError error={{0}};
     if (!s_settings_writer(s_settings_context,edit->session,candidate,&error)) {
-      fprintf(stderr,"[regional] settings not saved: %s\n",error.message);
+      RuntimeLog_Printf("[regional] settings not saved: %s\n",error.message);
       return kActRaiserRegionalEdit_SaveFailed;
     }
   }
@@ -728,7 +729,7 @@ bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uin
    * clear sequence; an invalid request must not erase its one-shot marker. */
   s_completion_state = kScoreIdle;
   s_completion_scene = 0;
-  if (s_trace) fprintf(stderr, "[regional] room profile=%02x time=%04x->%04x\n",
+  if (s_trace) RuntimeLog_Printf("[regional] room profile=%02x time=%04x->%04x\n",
                        profile, native_bcd, *out_bcd);
   return true;
 }
@@ -748,12 +749,12 @@ RecompReturn ActRaiserRegional_RunMiracle(CpuState *cpu) {
   if (s_trace) {
     ArRegionalCostRule rule;
     ActRaiserMiracle_Rule(action,&rule);
-    fprintf(stderr,"[regional] miracle action=%u price=%u SP=%u begin\n",
+    RuntimeLog_Printf("[regional] miracle action=%u price=%u SP=%u begin\n",
             action,s_miracle_prices.price[rule],cpu_read16(cpu,0,0x0282));
   }
   const RecompReturn result = ActRaiserMiracle_Run(cpu, (uint8_t)cpu->A, &s_miracle_prices);
   s_miracle_active = false;
-  if (s_trace) fprintf(stderr,"[regional] miracle action=%u return=%u SP=%u\n",
+  if (s_trace) RuntimeLog_Printf("[regional] miracle action=%u return=%u SP=%u\n",
                        action,(unsigned)result,cpu_read16(cpu,0,0x0282));
   return result;
 }
@@ -846,11 +847,11 @@ RecompReturn ActRaiserRegional_RunReportCommand(CpuState *cpu) {
   const unsigned action = (uint8_t)cpu->A;
   s_report_command_active = true;
   if (s_trace)
-    fprintf(stderr, "[regional] report command=%u keep-open=%u begin\n", action, keep_open);
+    RuntimeLog_Printf("[regional] report command=%u keep-open=%u begin\n", action, keep_open);
   const RecompReturn result = ActRaiserReportCommand_Run(cpu, action, keep_open);
   s_report_command_active = false;
   if (s_trace)
-    fprintf(stderr, "[regional] report command=%u return=%u\n", action, (unsigned)result);
+    RuntimeLog_Printf("[regional] report command=%u return=%u\n", action, (unsigned)result);
   return result;
 }
 
@@ -890,7 +891,7 @@ static ArRegionalRecoverySnapshot CaptureRecovery(CpuState *cpu) {
     ActRaiserHleFatal("Cannot capture regional recovery policy");
   if (changed) ActRaiserRecovery_Reconcile(cpu, changed);
   if (s_trace && pending)
-    fprintf(stderr, "[regional] recovery cycle-sp=%u angel-calls=%u retired=%u\n",
+    RuntimeLog_Printf("[regional] recovery cycle-sp=%u angel-calls=%u retired=%u\n",
             snapshot.cycle_sp, snapshot.angel_calls, changed);
   return snapshot;
 }
@@ -945,7 +946,7 @@ RecompReturn ActRaiser_RegionalDevelopment(CpuState *cpu) {
        ArRegionalDevelopment_Resolve(&s_campaign.active.effective.development,&snapshot)))
     ActRaiserHleFatal("Cannot capture regional development cycle");
   if (s_trace && new_cycle && pending)
-    fprintf(stderr, "[regional] development divider=%u cycle=%u effects=%u\n",
+    RuntimeLog_Printf("[regional] development divider=%u cycle=%u effects=%u\n",
             snapshot.service_divider, snapshot.long_cycle, snapshot.effect_divider);
   return ActRaiserDevelopment_Master(cpu,&snapshot);
 }
@@ -970,7 +971,7 @@ RecompReturn ActRaiser_RegionalFishing(CpuState *cpu) {
   if (result != RECOMP_RETURN_NORMAL)
     return result >= RECOMP_RETURN_TAILCALL ? result : (RecompReturn)(result - 1);
   if (s_trace && (reconcile || continuation == 0xe895))
-    fprintf(stderr, "[regional] fishing progress=%u target=%u complete=%u\n",
+    RuntimeLog_Printf("[regional] fishing progress=%u target=%u complete=%u\n",
             cpu_read8(cpu,0x7f,0x916e), target, continuation == 0xe895);
   if (!cpu_hle_tailcall_request(0x030000u | continuation, 0x03e865))
     ActRaiserHleFatal("Regional fishing requires a generated wrapper");
@@ -984,7 +985,7 @@ RecompReturn ActRaiser_RegionalTownWait(CpuState *cpu) {
   if (cpu_read16(cpu, 0x7f, (uint16_t)(0x7ce1 + town)) == 1) {
     if (!ArRegionalSession_BeginTownWait(&s_campaign.active, &reload))
       ActRaiserHleFatal("Cannot capture regional town wait policy");
-    if (s_trace) fprintf(stderr, "[regional] town=%u next-wait=%u\n", town / 2, reload);
+    if (s_trace) RuntimeLog_Printf("[regional] town=%u next-wait=%u\n", town / 2, reload);
   }
   return ActRaiserTownWait_Step(cpu, reload);
 }
@@ -997,7 +998,7 @@ RecompReturn ActRaiser_RegionalRetry(CpuState *cpu) {
     ActRaiserHleFatal("Cannot capture regional checkpoint-retry policy");
   const uint16_t before = cpu_read16(cpu, 0, 0x001f);
   const uint16_t continuation = ActRaiserRetry_Prefix(cpu, clear_score);
-  if (s_trace && retry) fprintf(stderr, "[regional] checkpoint retry score=%04x->%04x\n",
+  if (s_trace && retry) RuntimeLog_Printf("[regional] checkpoint retry score=%04x->%04x\n",
                                 before, cpu_read16(cpu, 0, 0x001f));
   if (!cpu_hle_tailcall_request(continuation, 0x00981c))
     ActRaiserHleFatal("Regional checkpoint retry requires a generated wrapper");
@@ -1012,7 +1013,7 @@ RecompReturn ActRaiser_RegionalScrollCast(CpuState *cpu) {
     ActRaiserHleFatal("Cannot capture regional scroll transaction");
   const unsigned before = cpu_read8(cpu, 0, 0x21);
   const uint16_t continuation = ActRaiserScrollCast_Gate(cpu, &quote);
-  if (s_trace) fprintf(stderr,"[regional] scroll spell=%u stock=%u->%u target=%04x\n",
+  if (s_trace) RuntimeLog_Printf("[regional] scroll spell=%u stock=%u->%u target=%04x\n",
       cpu_read16(cpu,0,0x02ac),before,cpu_read8(cpu,0,0x21),continuation);
   /* The surrounding native actor dispatch has pushed data below its original
    * host frame. Preserve the wrapper's inherited context, NOT current S.
@@ -1035,14 +1036,14 @@ static RecompReturn QuakeEffect(CpuState *cpu, bool posted) {
     ActRaiserHleFatal("Cannot capture regional earthquake transaction");
   s_quake_active = s_quake_delegate = true;
   if (s_trace) memset(s_quake_selections, 0, sizeof(s_quake_selections));
-  if (s_trace) fprintf(stderr, "[regional] quake origin=%s selectors=%u%u%u%u%u begin\n",
+  if (s_trace) RuntimeLog_Printf("[regional] quake origin=%s selectors=%u%u%u%u%u begin\n",
       posted ? "posted" : "player", s_quake.random[0], s_quake.random[1], s_quake.random[2],
       s_quake.random[3], s_quake.random[4]);
   /* Delegate the complete native effect with its original return frame.
    * The one-shot recursion gate leaves descendant selector hooks active. */
   RecompReturn result = posted ? bank_01_9840_M0X0(cpu) : bank_01_97E5_M1X0(cpu);
   s_quake_active = s_quake_delegate = false;
-  if (s_trace) fprintf(stderr, "[regional] quake return=%u random-selectors=%u/%u/%u/%u/%u\n",
+  if (s_trace) RuntimeLog_Printf("[regional] quake return=%u random-selectors=%u/%u/%u/%u/%u\n",
       (unsigned)result, s_quake_selections[0], s_quake_selections[1], s_quake_selections[2],
       s_quake_selections[3], s_quake_selections[4]);
   return result;
@@ -1103,14 +1104,14 @@ void ActRaiserRegional_SimActorCache(bool load,unsigned town) {
   const bool ok=load?ArRegionalSimActors_LoadTown(&s_campaign.active.sim_actors,town):
       ArRegionalSimActors_SaveTown(&s_campaign.active.sim_actors,town);
   if (s_trace)
-    fprintf(stderr, "[regional] SIM cache %s town=%u captured=%u\n", load ? "load" : "save", town,
+    RuntimeLog_Printf("[regional] SIM cache %s town=%u captured=%u\n", load ? "load" : "save", town,
             ok);
 }
 void ActRaiserRegional_SimActorBirth(unsigned town,unsigned slot) {
   if (!s_campaign.active_valid) return;
   const bool ok=ArRegionalSession_BeginSimActor(&s_campaign.active,town,slot);
   if (s_trace)
-    fprintf(stderr, "[regional] SIM birth town=%u slot=%u captured=%u combat=%u ai=%u\n", town,
+    RuntimeLog_Printf("[regional] SIM birth town=%u slot=%u captured=%u combat=%u ai=%u\n", town,
             slot, ok, ok ? s_campaign.active.sim_actors.active[slot].combat : 0,
             ok ? s_campaign.active.sim_actors.active[slot].ai : 0);
 }
@@ -1165,7 +1166,7 @@ RecompReturn ActRaiser_RegionalStoryThreshold(CpuState *cpu) {
       !ActRaiserStory_LoadThreshold(cpu,snapshot.value[rule]) ||
       !cpu_hle_tailcall_request(0x03e142,0x03e13e))
     ActRaiserHleFatal("Cannot resume native story prerequisite comparison");
-  if (s_trace) fprintf(stderr,"[regional] story rule=%u threshold=%u population=%u gf=%u\n",
+  if (s_trace) RuntimeLog_Printf("[regional] story rule=%u threshold=%u population=%u gf=%u\n",
       (unsigned)rule,snapshot.value[rule],cpu_read16(cpu,0x7f,0x9202),cpu_read16(cpu,0,0x88));
   return RECOMP_RETURN_TAILCALL;
 }
@@ -1178,7 +1179,7 @@ RecompReturn ActRaiser_RegionalStoryCompass(CpuState *cpu) {
   if (!ActRaiser_RegionalStoryCompassEntry(cpu) ||
       !ArRegionalSession_BeginStory(&s_campaign.active,&snapshot))
     ActRaiserHleFatal("Cannot capture Bloodpool event prerequisite policy");
-  if (s_trace) fprintf(stderr,"[regional] failed Bloodpool Act2 clear-compass=%u\n",
+  if (s_trace) RuntimeLog_Printf("[regional] failed Bloodpool Act2 clear-compass=%u\n",
       snapshot.value[kArRegionalStory_ClearCompassPrerequisite]);
   if (snapshot.value[kArRegionalStory_ClearCompassPrerequisite]) {
     s_story_compass_delegate=true;
@@ -1204,10 +1205,10 @@ RecompReturn ActRaiser_RegionalSkullUse(CpuState *cpu) {
       !ArRegionalSession_BeginSkullWait(&s_campaign.active,&s_skull_frames))
     ActRaiserHleFatal("Cannot capture Magic Skull transaction");
   s_skull_active=s_skull_delegate=true;
-  if (s_trace) fprintf(stderr,"[regional] Magic Skull post-effect wait=%u begin\n",s_skull_frames);
+  if (s_trace) RuntimeLog_Printf("[regional] Magic Skull post-effect wait=%u begin\n",s_skull_frames);
   RecompReturn result=bank_01_9EE7_M1X0(cpu);
   s_skull_active=s_skull_delegate=false;
-  if (s_trace) fprintf(stderr,"[regional] Magic Skull return=%u\n",(unsigned)result);
+  if (s_trace) RuntimeLog_Printf("[regional] Magic Skull return=%u\n",(unsigned)result);
   return result;
 }
 bool ActRaiser_RegionalSkullSkipWaitEntry(CpuState *cpu) {
@@ -1232,7 +1233,7 @@ RecompReturn ActRaiser_RegionalSourceCollection(CpuState *cpu) {
       snapshot.automatic[item == 5 ? kArRegionalSourceItem_Life : kArRegionalSourceItem_Magic];
   const uint32_t target=ActRaiserSources_CollectionRoute(cpu,automatic);
   if (s_trace)
-    fprintf(stderr, "[regional] Source item=%u collection=%s\n", item,
+    RuntimeLog_Printf("[regional] Source item=%u collection=%s\n", item,
             automatic ? "automatic" : "held");
   if (!cpu_hle_tailcall_request(target,0x018916))
     ActRaiserHleFatal("Source collection has no native return owner");
@@ -1250,7 +1251,7 @@ static RecompReturn KeepSource(CpuState *cpu, uint8_t item) {
   /* The collected Source's native bonus and acknowledgement have completed.
    * Skip only removal of an older held Source. Sound, P restore, item pop and
    * native return-to-town continue normally. Explicit Use is never guarded. */
-  if (s_trace) fprintf(stderr,"[regional] Source item=%u kept older held item\n",item);
+  if (s_trace) RuntimeLog_Printf("[regional] Source item=%u kept older held item\n",item);
   if (!cpu_hle_tailcall_request(item==5?0x019cd1:0x019cf3,item==5?0x019cce:0x019cf0))
     ActRaiserHleFatal("Source preservation has no native return owner");
   return RECOMP_RETURN_TAILCALL;
@@ -1272,7 +1273,7 @@ RecompReturn ActRaiser_RegionalLivesDisplay(CpuState *cpu) {
   if (s_campaign.active.requested.lives_display != s_campaign.active.effective.lives_display) {
     if (!ArRegionalSession_BeginLivesDisplay(&s_campaign.active, &zero_based))
       ActRaiserHleFatal("Cannot activate regional lives HUD convention");
-    if (s_trace) fprintf(stderr, "[regional] lives HUD zero-based=%u\n", zero_based);
+    if (s_trace) RuntimeLog_Printf("[regional] lives HUD zero-based=%u\n", zero_based);
   }
   if (!zero_based) {
     s_lives_delegate = true;
@@ -1301,12 +1302,12 @@ RecompReturn ActRaiser_RegionalMasterReport(CpuState *cpu) {
   s_report_active = s_report_delegate = true;
   ActRaiserRegionalLevelGoals_RefreshReport(cpu);
   if (s_trace)
-    fprintf(stderr, "[regional] Master report score-page=%u begin\n", s_report_score_page);
+    RuntimeLog_Printf("[regional] Master report score-page=%u begin\n", s_report_score_page);
   /* The native body still composes the report and owns inventory objects,
    * button release/press waits and cleanup. Only its optional branch changes. */
   RecompReturn result = bank_01_899B_M1X0(cpu);
   s_report_active = s_report_delegate = false;
-  if (s_trace) fprintf(stderr, "[regional] Master report return=%u\n", (unsigned)result);
+  if (s_trace) RuntimeLog_Printf("[regional] Master report return=%u\n", (unsigned)result);
   return result;
 }
 bool ActRaiser_RegionalSkipScoreEntry(CpuState *cpu) {
@@ -1329,7 +1330,7 @@ void ActRaiserRegional_ObserveInputRelease(CpuState *cpu) {
   bool up_attack;
   if (!ArRegionalSession_BeginMagicGesture(&s_campaign.active, true, &up_attack))
     ActRaiserHleFatal("Cannot activate regional magic gesture");
-  if (s_trace) fprintf(stderr,"[regional] magic gesture=%s after release\n",
+  if (s_trace) RuntimeLog_Printf("[regional] magic gesture=%s after release\n",
       up_attack ? "up+attack" : "A/X");
 }
 
@@ -1362,11 +1363,11 @@ RecompReturn ActRaiser_RegionalSpeed(CpuState *cpu) {
     ActRaiserHleFatal("Cannot capture regional message-speed range");
   s_speed_active = s_speed_delegate = true;
   ActRaiserLocalizationRuntime_SetMessageSpeedMaximum(s_speed_maximum);
-  if (s_trace) fprintf(stderr, "[regional] speed range=0-%u stored=%u begin\n",
+  if (s_trace) RuntimeLog_Printf("[regional] speed range=0-%u stored=%u begin\n",
       s_speed_maximum, cpu_read8(cpu, 0, 0x0200));
   RecompReturn result = bank_01_8AF5_M1X0(cpu);
   s_speed_active = s_speed_delegate = s_speed_scale_delegate = false;
-  if (s_trace) fprintf(stderr, "[regional] speed return=%u stored=%u\n",
+  if (s_trace) RuntimeLog_Printf("[regional] speed return=%u stored=%u\n",
       (unsigned)result, cpu_read8(cpu, 0, 0x0200));
   return result;
 }
@@ -1404,16 +1405,13 @@ RecompReturn ActRaiser_RegionalSpeedScale(CpuState *cpu) {
 static void ReportLairDivergence(unsigned previous) {
   const unsigned changed=s_campaign.active.lairs.diverged_towns & ~previous;
   if (changed)
-    fprintf(
-        stderr,
-        "[regional] unaccounted lair stock write; retained histories quarantined for towns=%02x\n",
+    RuntimeLog_Printf("[regional] unaccounted lair stock write; retained histories quarantined for towns=%02x\n",
         changed);
 }
 static void ReportReloadDivergence(unsigned previous) {
   const unsigned changed=s_campaign.active.reloads.diverged_towns & ~previous;
   if (changed)
-    fprintf(stderr,
-            "[regional] unaccounted lair delay write; retained delays quarantined for towns=%02x\n",
+    RuntimeLog_Printf("[regional] unaccounted lair delay write; retained delays quarantined for towns=%02x\n",
             changed);
 }
 void ActRaiserRegional_CheckLairHistory(CpuState *cpu) {
@@ -1446,7 +1444,7 @@ static void ActivateLairReloads(CpuState *cpu) {
   }
   s_campaign.active=next;
   if (s_trace)
-    fprintf(stderr, "[regional] lair reload source=%u activated; running countdowns preserved\n",
+    RuntimeLog_Printf("[regional] lair reload source=%u activated; running countdowns preserved\n",
             (unsigned)next.effective.lair_reloads);
 }
 bool ActRaiser_RegionalLairReductionEntry(CpuState *cpu) {
@@ -1468,7 +1466,7 @@ RecompReturn ActRaiser_RegionalLairReduction(CpuState *cpu) {
     const bool matched = ActRaiserLairReloads_EndReduction(&s_campaign.active.reloads, cpu, source,
                                                            &candidate, town, result);
     if (s_trace)
-      fprintf(stderr, "[regional] native delay reduction town=%u matched=%u\n", town, matched);
+      RuntimeLog_Printf("[regional] native delay reduction town=%u matched=%u\n", town, matched);
   }
   ReportReloadDivergence(previous);
   return result;
@@ -1491,8 +1489,7 @@ static void ActivateLairAccounting(CpuState *cpu) {
   if (result == kArRegionalLairProjection_Ready) {
     s_campaign.active = next;
     if (s_trace)
-      fprintf(stderr,
-              "[regional] retained lair projection activated: seeds=%u house=%u score=%u/%u/%u\n",
+      RuntimeLog_Printf("[regional] retained lair projection activated: seeds=%u house=%u score=%u/%u/%u\n",
               (unsigned)target.seeds, (unsigned)target.house_credit,
               (unsigned)target.score_conversion, (unsigned)target.score_operation,
               (unsigned)target.score_route);
@@ -1520,7 +1517,7 @@ static void TryInitializeLairs(CpuState *cpu) {
       ActRaiserLairReloads_Initialize(&next.reloads, cpu)) {
     s_campaign.active=next;
     s_lair_seed_pending=false;
-    if (s_trace) fprintf(stderr,"[regional] exact lair histories initialized for new campaign\n");
+    if (s_trace) RuntimeLog_Printf("[regional] exact lair histories initialized for new campaign\n");
   }
 }
 RecompReturn ActRaiser_RegionalLairSeed(CpuState *cpu) {
@@ -1555,7 +1552,7 @@ static RecompReturn ObserveLairs(CpuState *cpu, ActRaiserLairEvent event,
   s_score=previous_score;
   if (observed) {
     const bool matched=ActRaiserLairHistory_End(&s_campaign.active.lairs,cpu,&capture,result);
-    if (s_trace) fprintf(stderr,"[regional] lair event=%u town=%u candidates=%x matched=%u\n",
+    if (s_trace) RuntimeLog_Printf("[regional] lair event=%u town=%u candidates=%x matched=%u\n",
         (unsigned)event,capture.town,capture.candidates,matched);
   }
   ReportLairDivergence(previous);
@@ -1636,7 +1633,7 @@ RecompReturn ActRaiser_RegionalScoreCard(CpuState *cpu) {
     s_completion_scene=scene;
     s_completion_state =
         policy.japanese[kArRegionalScore_Phase] ? kScoreSettledAtCard : kScoreAwaitDeparture;
-    if (s_trace) fprintf(stderr,"[regional] clear-card score phase=%s scene=%04x score=%04x\n",
+    if (s_trace) RuntimeLog_Printf("[regional] clear-card score phase=%s scene=%04x score=%04x\n",
         s_completion_state==kScoreSettledAtCard?"card":"departure",scene,cpu_read16(cpu,0,0x001f));
     if (s_completion_state==kScoreSettledAtCard) {
       /* Insert the JP settlement at the US equivalent of JP00:A713, after
@@ -1661,7 +1658,7 @@ RecompReturn ActRaiser_RegionalScoreDeparture(CpuState *cpu) {
     const RecompReturn result=ActRaiserNativeCall(cpu,bank_03_D095_M0X0,3,0xa310,true);
     if (result!=RECOMP_RETURN_NORMAL) return result;
   }
-  if (s_trace) fprintf(stderr,"[regional] departure score settlement=%s score=%04x\n",
+  if (s_trace) RuntimeLog_Printf("[regional] departure score settlement=%s score=%04x\n",
       settled?"already completed at card":"completed now",cpu_read16(cpu,0,0x001f));
   s_completion_state=kScoreIdle;
   s_completion_scene=0;
@@ -1691,7 +1688,7 @@ static bool PrepareContinue(void) {
     if (!SaveSystem_ValidateActive(&error) || !SaveSystem_CopyDurableImage(image) ||
         !ArRegionalCampaign_Continue(&s_campaign, SaveSystem_ActivePath(), image, &error)) {
       s_campaign.active_valid = false;
-      fprintf(stderr, "[regional] Continue preserved saves: %s\n", error.message);
+      RuntimeLog_Printf("[regional] Continue preserved saves: %s\n", error.message);
       if (!s_continue_prompt(s_continue_context, kActRaiserRegionalContinue_LoadFailed))
         return false;
       continue;
@@ -1722,7 +1719,7 @@ static bool PrepareContinue(void) {
         ArRegionalCampaign_AcknowledgeLairHistory(&s_campaign, format,
             SaveSystem_ActivePath(), image, stocks, &error)) continue;
     s_campaign.active_valid = false;
-    fprintf(stderr, "[regional] Continue history was not saved: %s\n", error.message);
+    RuntimeLog_Printf("[regional] Continue history was not saved: %s\n", error.message);
     if (!s_continue_prompt(s_continue_context, kActRaiserRegionalContinue_SaveFailed)) return false;
   }
 }
@@ -1732,14 +1729,14 @@ RecompReturn ActRaiser_RegionalContinue(CpuState *cpu) {
     BindDeathHeimConfig(&s_campaign.active.death_heim);
     if(!Randomizer_BindCampaign(&s_campaign.active.randomizer))
       ActRaiserHleFatal("Cannot restore this save's randomizer recipe; saves preserved");
-    if (s_trace) fprintf(stderr, "[regional] Continue history ready before native restoration\n");
+    if (s_trace) RuntimeLog_Printf("[regional] Continue history ready before native restoration\n");
     const RecompReturn result = ActRaiserNativeCall(cpu, bank_03_A83A_M1X0, 3, 0xa7a2, true);
     if (result != RECOMP_RETURN_NORMAL) return result;
     if (!cpu_hle_tailcall_request(0x02a7a3, 0x02a79f))
       ActRaiserHleFatal("Continue acceptance has no native title owner");
     return RECOMP_RETURN_TAILCALL;
   }
-  if (s_trace) fprintf(stderr, "[regional] Continue cancelled before native restoration\n");
+  if (s_trace) RuntimeLog_Printf("[regional] Continue cancelled before native restoration\n");
   /* The title frame remains live. Wait for the accepting button to be released
    * so a held B/Start cannot immediately reopen a cancelled prompt. */
   do {
@@ -1877,7 +1874,7 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
     /* A historical seed cannot be inferred from SRAM or current preferences.
      * Preserve the saved regional rules; never roll a developed campaign. */
     s_campaign.active.randomizer=RandomizerConfig_Default();
-    fprintf(stderr,"[randomizer] legacy save has no recorded seed; using unrandomized content\n");
+    RuntimeLog_Printf("[randomizer] legacy save has no recorded seed; using unrandomized content\n");
   }
   if(!Randomizer_BindCampaign(&s_campaign.active.randomizer))
     ActRaiserHleFatal("Cannot bind this campaign's randomizer recipe; saves preserved");
@@ -1893,7 +1890,7 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
   if (s_lair_seed_pending) TryInitializeLairs(cpu);
   else ActRaiserRegional_CheckLairHistory(cpu);
   s_prices_valid = false; /* a different campaign can have the same revision */
-  fprintf(stderr, "[regional] %s campaign rules session ready\n",
+  RuntimeLog_Printf("[regional] %s campaign rules session ready\n",
           selection == 1 ? "continued" : "new");
   ActRaiserWorldResume_Begin(g_ram, kSnesWramSize, selection == 1,
                              g_settings.remember_last_town,

@@ -1,4 +1,5 @@
 #include "actraiser/enhancements/actraiser_world_resume.h"
+#include "app/runtime_log.h"
 
 #include "actraiser_game.h"
 #include "actraiser_world_locations.h"
@@ -23,7 +24,7 @@ void ActRaiserWorldResume_Begin(uint8_t *wram, size_t size, bool continuing,
   ByteOrder_WriteLe16(wram + kActRaiserWram_Bg1CameraX, x - 128);
   ByteOrder_WriteLe16(wram + kActRaiserWram_Bg1CameraY, y - 112);
   wram[kActRaiserWram_WorldLocation] = town;
-  fprintf(stderr, "[world-resume] restored town=%u focus=%u,%u\n", town, x, y);
+  RuntimeLog_Printf("[world-resume] restored town=%u focus=%u,%u\n", town, x, y);
 }
 
 void ActRaiserWorldResume_Observe(const uint8_t *wram, size_t size, bool permitted) {

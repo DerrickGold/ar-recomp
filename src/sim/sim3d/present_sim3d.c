@@ -1,6 +1,7 @@
 /* Town scene composition from captured inputs. Stage helpers own their GPU
  * resources; this module selects their order and the active town view. */
 #include "sim/sim3d/present_sim3d_internal.h"
+#include "app/runtime_log.h"
 #include "render/present_hud.h"
 #include "sim/menu/present_sim_menu.h"
 #include "sim/world_nav/present_sim_globe.h"
@@ -776,8 +777,7 @@ static ArRenderTexture EnsureSimRimTexture(int w, int h) {
   s_sim_rim_h = h;
   if (!ArRenderTexture_IsValid(s_sim_rim_texture)) {
     s_sim_rim_unavailable = true;
-    fprintf(stderr,
-            "[sim3d-rim] rim target unavailable; optional rim light disabled "
+    RuntimeLog_Printf("[sim3d-rim] rim target unavailable; optional rim light disabled "
             "for this renderer: %s\n",
             ArRenderDevice_LastError(&g_render_device));
   }
@@ -907,8 +907,7 @@ static PresentationOutcome DrawSimRimLight(
     if (rim_valid && !masked && atomic_compare_exchange_strong_explicit(
             &s_sim_rim_mask_supported, &supported, 0,
             memory_order_relaxed, memory_order_relaxed)) {
-      fprintf(stderr,
-              "[sim3d-rim] backend rejected destination-alpha mask (%s) — "
+      RuntimeLog_Printf("[sim3d-rim] backend rejected destination-alpha mask (%s) — "
               "rim light disabled\n",
               ArRenderDevice_LastError(&g_render_device));
     }
@@ -2007,8 +2006,7 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
   if (!logged_ground_profile &&
       (slot->sim.effective_features & kSimFeature_GroundProjection)) {
     logged_ground_profile = true;
-    fprintf(stderr,
-            "[sim3d-d3] present features=$%04x camera=%d,%d,%u\n",
+    RuntimeLog_Printf("[sim3d-d3] present features=$%04x camera=%d,%d,%u\n",
             (unsigned)slot->sim.effective_features,
             (int)slot->sim.projection_pitch_mrad,
             (int)slot->sim.projection_yaw_mrad,

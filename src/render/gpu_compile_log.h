@@ -12,11 +12,9 @@
  * internal drawing/blit pipelines: their preparation is reported as a group;
  * native API tracing is needed to count those individual creations.
  *
- * During boot preparation only builds of kGpuCompileLogBootThresholdMs or
- * more are printed, followed by one summary line; drivers that cache (Metal)
- * then stay quiet. Any build after preparation is printed as "late": it ran
- * during play and is a candidate for moving into preparation. */
-enum { kGpuCompileLogBootThresholdMs = 5 };
+ * Slow builds and failures are printed immediately. Preparation and gameplay
+ * have separate summaries. AR_GPU_COMPILE_TRACE=1 also prints fast late builds. */
+enum { kGpuCompileLogThresholdMs = 5 };
 
 void GpuCompileLog_Record(const char *label, const char *stage, uint64_t elapsed_ns,
                           bool succeeded);
@@ -26,5 +24,9 @@ void GpuCompileLog_Record(const char *label, const char *stage, uint64_t elapsed
 typedef void (*GpuCompileLogObserver)(void *context);
 void GpuCompileLog_BeginPreparation(GpuCompileLogObserver observer, void *context);
 void GpuCompileLog_EndPreparation(void);
+/* Count all late builds, including successes too fast to log individually. */
+unsigned GpuCompileLog_LateBuildCount(void);
+/* Report and reset the late-build totals at session shutdown. */
+void GpuCompileLog_ReportLate(void);
 
 #endif /* AR_GPU_COMPILE_LOG_H */

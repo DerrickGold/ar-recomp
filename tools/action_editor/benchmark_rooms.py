@@ -25,6 +25,14 @@ def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def require_no_late_builds(log: str, output: Path) -> None:
+    counts = re.findall(r'^\[benchmark\] late-builds=(\d+)$', log, re.MULTILINE)
+    if len(counts) != 1:
+        raise RuntimeError(f'Late shader compilation count missing or ambiguous: {output}')
+    if int(counts[0]):
+        raise RuntimeError(f'Late shader compilation ({counts[0]} builds): {output}')
+
+
 def telemetry() -> dict[str, str]:
     values = {}
     for pattern in (
@@ -241,8 +249,7 @@ def main() -> None:
                         print(name, flush=True)
                         run_process(command, run_env, out, max(180, args.frames*.5))
                         log = (out/'run.log').read_text()
-                        if '[gpu-compile] late' in log.split('[benchmark] timed-begin')[-1]:
-                            raise RuntimeError(f'Late shader compilation: {out}')
+                        require_no_late_builds(log, out)
                         samples = json.loads((out/'telemetry.json').read_text())
                         if args.wake_deck and any(not display_awake(s['sensors']) for s in samples):
                             raise RuntimeError(f'Deck display slept during {name}; discard this run')

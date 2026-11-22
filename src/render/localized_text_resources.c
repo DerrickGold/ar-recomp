@@ -1,4 +1,5 @@
 #include "render/localized_text_resources_internal.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -229,8 +230,7 @@ void ArLocalizedTextResources_Reset(ArLocalizedTextResources *resources, ArRende
   if (resources->cache_initialized) {
     const ArTextSurfaceCacheStats *stats = ArTextSurfaceCache_GetStats(&resources->cache);
     if (stats && stats->lookups)
-      fprintf(stderr,
-              "[localized-text] cache lookups=%llu hits=%llu misses=%llu "
+      RuntimeLog_Printf("[localized-text] cache lookups=%llu hits=%llu misses=%llu "
               "rasters=%llu uploads=%llu failures=%llu\n",
               (unsigned long long)stats->lookups, (unsigned long long)stats->hits,
               (unsigned long long)stats->misses, (unsigned long long)stats->rasterize_calls,

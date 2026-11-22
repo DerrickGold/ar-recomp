@@ -8,6 +8,7 @@
  * paths and the choice between them. */
 
 #include <math.h>
+#include "app/runtime_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,7 +119,7 @@ static ArRenderTexture EnsureSimShadowTexture(int w, int h) {
     /* A large target rejection is stable for this renderer generation. Do not
      * turn an optional shadow into a per-frame allocation/stutter loop. */
     s_sim_shadow_unavailable = true;
-    fprintf(stderr, "[sim3d-d4] shadow mask target unavailable: %s\n",
+    RuntimeLog_Printf("[sim3d-d4] shadow mask target unavailable: %s\n",
             ArRenderDevice_LastError(&g_render_device));
   }
   return s_sim_shadow_texture;

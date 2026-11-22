@@ -1,4 +1,5 @@
 #include "render/localized_text_presenter.h"
+#include "app/runtime_log.h"
 
 #include "render/localized_text_artwork.h"
 #include "render/localized_text_resources_internal.h"
@@ -66,8 +67,7 @@ static void RecordLiveLineResult(ArLocalizedLiveLineResult result,
   ++stats->attempts;
   const bool first = stats->results[result]++ == 0;
   if (result != kArLiveLine_Prepared && first) {
-    fprintf(stderr,
-            "[localized-text] surface=%u live-line fallback: %s%s%s; "
+    RuntimeLog_Printf("[localized-text] surface=%u live-line fallback: %s%s%s; "
             "%s\n",
             surface_id, reasons[result], error && error[0] ? ": " : "",
             error ? error : "",
@@ -87,7 +87,7 @@ static void ReportOnce(const char *operation, const char *detail) {
     if (s_presenter.reported_errors[i] == key)
       return;
   s_presenter.reported_errors[s_presenter.next_reported_error++ % 32] = key;
-  fprintf(stderr, "[localized-text] %s%s%s; native text retained\n",
+  RuntimeLog_Printf("[localized-text] %s%s%s; native text retained\n",
           operation, detail && detail[0] ? ": " : "",
           detail && detail[0] ? detail : "");
 }

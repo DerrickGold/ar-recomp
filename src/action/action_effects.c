@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_room_profiles.h"
+#include "app/runtime_log.h"
 #include "action_effects.h"
 #include "action_map_effect_sources.h"
 #include "action/action_environment_capture_internal.h"
@@ -2109,8 +2110,7 @@ static void AitosWaterfallLog(const ActionSceneEffectFrame *dst,
   if (splash_count == last_splash && (int)published == last_published) return;
   last_splash = splash_count;
   last_published = (int)published;
-  fprintf(stderr,
-          "[aitos-wf] capture gf=%u cam=(%d,%d) scan=[%u,%u)x[%u,%u) "
+  RuntimeLog_Printf("[aitos-wf] capture gf=%u cam=(%d,%d) scan=[%u,%u)x[%u,%u) "
           "splash=%u veil=%s\n",
           (unsigned)dst->game_frame, camera_x, camera_y,
           trace->x0, trace->x1, trace->y0, trace->y1,

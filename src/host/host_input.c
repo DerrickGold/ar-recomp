@@ -1,4 +1,5 @@
 #include "host/host_ppu_output.h"
+#include "app/runtime_log.h"
 #include "host/host_input.h"
 #include "host/host_clock.h"
 
@@ -54,8 +55,7 @@ static const char *DeviceModeName(int mode) {
 void HostInput_LogStatus(const char *reason) {
   SDL_Window *keyboard = SDL_GetKeyboardFocus();
   SDL_Window *mouse = SDL_GetMouseFocus();
-  fprintf(stderr,
-          "[input] %s: ms=%llu window=%u keyboard-focus=%u mouse-focus=%u flags=$%llx "
+  RuntimeLog_Printf("[input] %s: ms=%llu window=%u keyboard-focus=%u mouse-focus=%u flags=$%llx "
           "mode=%s resolved-mode=%s gamepads=%d pad-active=%d key-suppressed=%d "
           "overlay=%d capture=%d paused=%d inspector=%d inspector-selection=%d "
           "inspector-owns-pause=%d key-seen=%d mouse-click-seen=%d\n",
@@ -123,15 +123,15 @@ bool HostInput_IsTurbo(void) {
 
 void HostInput_TogglePause(void) {
   s_paused = !s_paused;
-  fprintf(stderr, "[pause] %s\n", s_paused ? "on" : "off");
+  RuntimeLog_Printf("[pause] %s\n", s_paused ? "on" : "off");
 }
 
 void HostInput_ToggleTurbo(void) {
   s_turbo = !s_turbo;
   if (s_turbo)
-    fprintf(stderr, "[turbo] ON (%dx)\n", g_settings.turbo_multiplier);
+    RuntimeLog_Printf("[turbo] ON (%dx)\n", g_settings.turbo_multiplier);
   else
-    fprintf(stderr, "[turbo] off\n");
+    RuntimeLog_Printf("[turbo] off\n");
 }
 
 void HostInput_RequestPausedRedraw(void) {
@@ -371,7 +371,7 @@ static void OnGamepadHostAction(InputAction action) {
     case kInputAction_RenderCompare:
       if (!SettingsOverlay_IsOpen()) {
         RenderComparison_OnPress(SDL_GetTicks());
-        fprintf(stderr, "[compare] pressed; waiting for click or hold\n");
+        RuntimeLog_Printf("[compare] pressed; waiting for click or hold\n");
       }
       break;
     default:
@@ -476,8 +476,8 @@ static void HandleKeyDown(const SDL_Event *event, bool imported) {
       char settings_path[kHostPathCapacity];
       UserDataFile(settings_path, sizeof settings_path, "settings.ini");
       if (result > kSettingChange_Unchanged && !Settings_Save(settings_path))
-        fprintf(stderr, "[scene-inspector] could not save settings.ini\n");
-      fprintf(stderr, "[scene-inspector] %s (%s)\n",
+        RuntimeLog_Printf("[scene-inspector] could not save settings.ini\n");
+      RuntimeLog_Printf("[scene-inspector] %s (%s)\n",
               g_settings.scene_inspector ? "enabled — click the game to inspect"
                                          : "disabled",
               Settings_ChangeResultName(result));
@@ -498,11 +498,11 @@ static void HandleKeyDown(const SDL_Event *event, bool imported) {
     } else if (event->key.mod & SDL_KMOD_SHIFT) {
       DumpDiagState("hotkey");
     } else if (!g_ws_active) {
-      fprintf(stderr, "[display] F9 needs ExtendedAspectRatio "
+      RuntimeLog_Printf("[display] F9 needs ExtendedAspectRatio "
                       "(e.g. 16:9) in config.ini; staying 4:3\n");
     } else {
       int m = Settings_CycleDisplayMode();
-      fprintf(stderr, "[display] mode %d/%d -> %s\n", m + 1,
+      RuntimeLog_Printf("[display] mode %d/%d -> %s\n", m + 1,
               kDisplayMode_PresetCount, Settings_DisplayModeName(m));
     }
   } else if (event->key.key == SDLK_F6) {
@@ -512,23 +512,22 @@ static void HandleKeyDown(const SDL_Event *event, bool imported) {
   } else if (event->key.key == SDLK_D && !event->key.repeat) {
     if (event->key.mod & SDL_KMOD_SHIFT) {
       if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
-        fprintf(stderr,
-                "[diorama] layer dump requires an action stage "
+        RuntimeLog_Printf("[diorama] layer dump requires an action stage "
                 "($18=%02x)\n",
                 g_ram[kActRaiserWram_MapGroup]);
       } else {
         HostDevTools_ArmDioramaDump();
-        fprintf(stderr, "[diorama] layer capture armed for next frame\n");
+        RuntimeLog_Printf("[diorama] layer capture armed for next frame\n");
       }
     } else {
       const SettingDesc *mode = Settings_Find("diorama_mode");
       if (mode && !Settings_IsAvailable(mode)) {
-        fprintf(stderr, "[diorama] requires the new renderer\n");
+        RuntimeLog_Printf("[diorama] requires the new renderer\n");
       } else if (mode) {
         Settings_SetLong(mode, (g_settings.diorama_mode + 1) % kAction3D_Count);
         char value[32];
         Settings_FormatValue(mode, value, sizeof(value));
-        fprintf(stderr, "[action 3d] %s\n", value);
+        RuntimeLog_Printf("[action 3d] %s\n", value);
       }
     }
   } else {

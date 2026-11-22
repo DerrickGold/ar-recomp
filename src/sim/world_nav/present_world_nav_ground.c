@@ -5,6 +5,7 @@
  * Phase: present (FrameSlot only).
  * Tests: tests/present_world_nav_test.c */
 #include "sim/world_nav/present_world_nav_internal.h"
+#include "app/runtime_log.h"
 
 typedef struct WorldNavigationGroundWork {
   const WorldNavigationGroundSample *samples;
@@ -196,7 +197,7 @@ static bool DrawWorldNavigationGpuGrid(const FrameSlot *slot,
       if (!Sim3DMeshSet_Ready(&g_world_nav_gpu_grid.meshes)) goto unavailable;
       g_world_nav_gpu_grid.cull_unavailable = true;
       Sim3DPerformance_AddPath(kSim3DPath_Rejected);
-      fprintf(stderr,"[world-navigation] GPU grid selection unavailable; drawing full source\n");
+      RuntimeLog_Printf("[world-navigation] GPU grid selection unavailable; drawing full source\n");
     }
     g_world_nav_gpu_grid.selected_quads = g_world_nav_gpu_grid.source_quads;
     if (ok && culled) {
@@ -283,7 +284,7 @@ unavailable:
   g_world_nav_gpu_grid.unavailable = true;
   g_world_nav_gpu_grid.ready = false;
   Sim3DPerformance_AddPath(kSim3DPath_Rejected);
-  fprintf(stderr, "[world-navigation] GPU world source rejected; retaining CPU surfaces\n");
+  RuntimeLog_Printf("[world-navigation] GPU world source rejected; retaining CPU surfaces\n");
   return false;
 }
 

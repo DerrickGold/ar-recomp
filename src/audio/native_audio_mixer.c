@@ -1,4 +1,5 @@
 #include "audio/native_audio_mixer.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -104,8 +105,7 @@ void NativeAudioMixer_RouteDspWrite(
       (uint32_t)output_voice >= context->voice_bus_count)
     return;
   if (s_bus_log && context->voice_bus[output_voice] != bus) {
-    fprintf(stderr,
-            "[audio-bus] voice=%d -> %s x=%02x mask=%02x owner=%02x "
+    RuntimeLog_Printf("[audio-bus] voice=%d -> %s x=%02x mask=%02x owner=%02x "
             "dsp=%02x%s\n",
             output_voice,
             bus == RTL_AUDIO_VOICE_BUS_SFX ? "SFX" : "MUSIC",
@@ -203,8 +203,7 @@ void NativeAudioMixer_ApplySettings(void) {
   MusicReplacements_SetMusicVolumePercent(
       g_settings.audio_music_volume);
   if (s_bus_log)
-    fprintf(stderr,
-            "[audio-bus] gains music=%d%% sfx=%d%% replacement=%s\n",
+    RuntimeLog_Printf("[audio-bus] gains music=%d%% sfx=%d%% replacement=%s\n",
             g_settings.audio_music_volume, g_settings.audio_sfx_volume,
             s_music_replacement_active ? "active" : "inactive");
 }

@@ -1,6 +1,8 @@
 #include "actraiser2/ar2_content.h"
+#include "app/runtime_log.h"
 #include "actraiser/actraiser_ar2_master.h"
 #include "app/game_session.h"
+#include "render/gpu_compile_log.h"
 #include "action/action_effect_manifest.h"
 #include "app/game_loop.h"
 
@@ -87,15 +89,15 @@ static void PrepareSubsystems(const GameSessionConfig *config) {
   if (SimWorldMap_Init(config->rom_data, config->rom_size))
     SimWorldMapBuild_Init(config->rom_data, config->rom_size);
   if (!SimTownGroundArt_Init(config->rom_data, config->rom_size))
-    fprintf(stderr, "[world-navigation] native town ground unavailable\n");
+    RuntimeLog_Printf("[world-navigation] native town ground unavailable\n");
   if (!SimWorldNavigationTowns_Init(config->rom_data, config->rom_size))
-    fprintf(stderr, "[world-navigation] initial town terrain unavailable\n");
+    RuntimeLog_Printf("[world-navigation] initial town terrain unavailable\n");
   if (!Diorama_InitRomBackdrops(config->rom_data, config->rom_size))
-    fprintf(stderr, "[diorama] named ROM backdrops unavailable\n");
+    RuntimeLog_Printf("[diorama] named ROM backdrops unavailable\n");
   HostLocalization_LoadRegionalMedia();
   ActRaiserActorArt_Initialize(ActRaiserRegionalMedia_ActorArt());
   if (!ActRaiserActionBg_InitRoomScenes(config->rom_data, config->rom_size))
-    fprintf(stderr, "[action-room-scene] immutable loader unavailable\n");
+    RuntimeLog_Printf("[action-room-scene] immutable loader unavailable\n");
   /* Per-room diorama layer overrides. Absent file is the normal case and leaves
    * every room drawing as built. */
   DioramaLayerManifest_Load();
@@ -157,8 +159,7 @@ static void StartRunner(const GameSessionConfig *config) {
   const ActRaiserRomSetupResult rom_setup =
       ActRaiser_LastRomSetupResult();
   if (!rom_setup.visual_patches_applied)
-    fprintf(stderr,
-            "[sim-visuals] house-fire cadence patch skipped: "
+    RuntimeLog_Printf("[sim-visuals] house-fire cadence patch skipped: "
             "unexpected ROM signature\n");
 
   if (!rom_setup.randomizer_initialized && g_settings.rando_enable) {
@@ -191,8 +192,8 @@ static void StartRunner(const GameSessionConfig *config) {
     if (wp0 && wp0[0]) {
       FILE *f = sr_fopen(wp0, "rb");
       if (f) { size_t n = fread(g_ram, 1, kActRaiserWramSize, f); fclose(f);
-        fprintf(stderr, "[wram-init] seeded %zu bytes from %s\n", n, wp0); }
-      else fprintf(stderr, "AR_WRAM_INIT: cannot open %s\n", wp0);
+        RuntimeLog_Printf("[wram-init] seeded %zu bytes from %s\n", n, wp0); }
+      else RuntimeLog_Printf("AR_WRAM_INIT: cannot open %s\n", wp0);
     }
   }
 
@@ -283,6 +284,7 @@ static GameSessionResult StopSession(void) {
   SimWorldNavigationTowns_Shutdown();
   DioramaFrameGeneration_Shutdown();
   Diorama_Shutdown(&g_render_device);
+  GpuCompileLog_ReportLate();
   ManualReader_DestroyTextures();
   SettingsOverlay_Destroy();
   HostLocalization_ReleaseFonts();
@@ -338,7 +340,7 @@ static bool WakeVoxelRoomWorker(void *context) {
 GameSessionResult GameSession_Run(const GameSessionConfig *config) {
   PrepareSubsystems(config);
   StartRunner(config);
-  fprintf(stderr, "[lifecycle] game session ready; window %u; frame %d\n",
+  RuntimeLog_Printf("[lifecycle] game session ready; window %u; frame %d\n",
           g_window ? SDL_GetWindowID(g_window) : 0, snes_frame_counter);
   ActRaiserLocalizationRuntime_ApplySettings();
   VoxelRoomWorker room_worker = {0};
@@ -360,11 +362,10 @@ GameSessionResult GameSession_Run(const GameSessionConfig *config) {
   result.restart = reset && !fatal && !result.settings_failed && !result.save_failed;
   result.exit_code = fatal || (reset && !result.restart) ? 1 : 0;
   if (result.restart) {
-    fprintf(stderr, "[lifecycle] soft reset; keeping window %u\n",
+    RuntimeLog_Printf("[lifecycle] soft reset; keeping window %u\n",
             g_window ? SDL_GetWindowID(g_window) : 0);
   } else if (reset) {
-    fprintf(stderr,
-        "[lifecycle] reset stopped after a session or persistence failure; saves preserved\n");
+    RuntimeLog_Printf("[lifecycle] reset stopped after a session or persistence failure; saves preserved\n");
   }
   return result;
 }

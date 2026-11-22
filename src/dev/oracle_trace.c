@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "oracle_trace.h"
 
@@ -76,8 +77,7 @@ static void DumpActionFrame(uint32_t host_frame, const uint8_t *wram) {
   if (!s_first_action_frame_written) {
     s_first_action_frame_written = true;
     if (WriteWramSnapshot("recomp_act1_first.bin", wram)) {
-      fprintf(stderr,
-              "[dump-act] FIRST action frame %u -> recomp_act1_first.bin\n",
+      RuntimeLog_Printf("[dump-act] FIRST action frame %u -> recomp_act1_first.bin\n",
               host_frame);
     }
   }
@@ -94,7 +94,7 @@ static void DumpRequestedGameFrame(const uint8_t *wram) {
   const unsigned game_frame = ReadGameFrame(wram);
   if ((long)game_frame != s_dump_at_game_frame) return;
   if (WriteWramSnapshot("recomp_at.bin", wram))
-    fprintf(stderr, "[dump-at-gf] gf=%u -> recomp_at.bin\n", game_frame);
+    RuntimeLog_Printf("[dump-at-gf] gf=%u -> recomp_at.bin\n", game_frame);
 }
 
 static void DumpPpuRegisters(unsigned game_frame) {
@@ -105,8 +105,7 @@ static void DumpPpuRegisters(unsigned game_frame) {
       api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
       api->query_ppu_state(s_runner, &ppu) != SR_RESULT_OK)
     return;
-  fprintf(stderr,
-          "[ppureg] gf=%u bgmode=$%02x bgsc=[%02x %02x %02x %02x] "
+  RuntimeLog_Printf("[ppureg] gf=%u bgmode=$%02x bgsc=[%02x %02x %02x %02x] "
           "bgTileAdr=$%04x\n",
           game_frame, ppu.bg_mode_control,
           ppu.background_tilemap_control[0],
@@ -142,8 +141,7 @@ static void DumpRequestedVramFrames(const uint8_t *wram) {
                    "snapshots/vd_gf%u", game_frame);
         ActRaiser_FullSnapshot(snapshot_prefix);
         DumpPpuRegisters(game_frame);
-        fprintf(stderr,
-                "[vramdump] gf=%u -> "
+        RuntimeLog_Printf("[vramdump] gf=%u -> "
                 "%s.{wram,vram,cgram,oam}.bin + .ppu.json\n",
                 game_frame, snapshot_prefix);
       }
@@ -220,7 +218,7 @@ void OracleTrace_Init(SrRunnerHandle *runner) {
   if (s_trace_high_address > kWramLastAddress)
     s_trace_high_address = kWramLastAddress;
   if (s_trace_low_address > s_trace_high_address) {
-    fprintf(stderr,
+    RuntimeLog_Printf(
             "AR_WRAM_TRACE: invalid range [0x%05x,0x%05x]\n",
             s_trace_low_address, s_trace_high_address);
     return;
@@ -228,11 +226,11 @@ void OracleTrace_Init(SrRunnerHandle *runner) {
 
   s_wram_trace_file = sr_fopen(trace_path, "w");
   if (!s_wram_trace_file) {
-    fprintf(stderr, "AR_WRAM_TRACE: cannot open %s\n", trace_path);
+    RuntimeLog_Printf("AR_WRAM_TRACE: cannot open %s\n", trace_path);
     return;
   }
   s_enabled = true;
-  fprintf(stderr, "[wram-trace] -> %s  range=[0x%05x,0x%05x]\n",
+  RuntimeLog_Printf("[wram-trace] -> %s  range=[0x%05x,0x%05x]\n",
           trace_path, s_trace_low_address, s_trace_high_address);
 }
 

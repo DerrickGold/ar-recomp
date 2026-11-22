@@ -1,4 +1,5 @@
 #include "host/host_ppu_output.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,8 +95,7 @@ void HostPpuOutput_SetAuthenticEnabled(bool enabled) {
     (void)HostPpuOutputControl_Bind(
         &output, SR_PPU_OUTPUT_AUTHENTIC, 0u, 0u, 0u,
         NULL, 0u, 0u, 0u, 0u);
-    fprintf(stderr,
-            "[compare] authentic surface rejected for width %d\n",
+    RuntimeLog_Printf("[compare] authentic surface rejected for width %d\n",
             g_snes_width);
   } else {
     s_authentic_surface_bound = enabled;
@@ -191,8 +191,7 @@ void HostPpuOutput_Rebind(void) {
         kHostDisplayFramebufferHeight, 0u);
     if (result != SR_RESULT_OK) {
       s_authentic_capture_enabled = false;
-      fprintf(stderr,
-              "[compare] authentic surface rejected after rebind for width %d\n",
+      RuntimeLog_Printf("[compare] authentic surface rejected after rebind for width %d\n",
               g_snes_width);
     } else {
       s_authentic_surface_bound = true;

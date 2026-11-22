@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "dev_tools.h"
 
@@ -40,7 +41,7 @@ static void EnsureDirectoryExists(const char *path) {
   const int result = mkdir(path, 0755);
 #endif
   if (result != 0 && errno != EEXIST)
-    fprintf(stderr, "[dev-tools] could not create %s: %s\n",
+    RuntimeLog_Printf("[dev-tools] could not create %s: %s\n",
             path, strerror(errno));
 }
 
@@ -154,12 +155,11 @@ void DevTools_TakeFullSnapshot(const DevToolsContext *context) {
   if (screenshot) {
     DevToolsCaptureResult result = DevTools_WriteFramebufferPng(screenshot, context, false);
     if (fclose(screenshot) != 0) result.kind = kDevToolsCapture_Failed;
-    fprintf(stderr, "[snap] capture=%s\n", DevToolsCaptureKind_Name(result.kind));
+    RuntimeLog_Printf("[snap] capture=%s\n", DevToolsCaptureKind_Name(result.kind));
   } else {
-    fprintf(stderr, "[snap] capture=failed cannot open %s\n", screenshot_path);
+    RuntimeLog_Printf("[snap] capture=failed cannot open %s\n", screenshot_path);
   }
-  fprintf(stderr,
-          "[snap] -> %s.{wram,vram,cgram,oam,ppu.json,png} (gf=%u)\n",
+  RuntimeLog_Printf("[snap] -> %s.{wram,vram,cgram,oam,ppu.json,png} (gf=%u)\n",
           prefix, game_frame);
 }
 
@@ -237,8 +237,7 @@ void DevTools_DumpDioramaLayers(const DevToolsContext *context) {
                        context->snes_width, kActRaiserAuthenticHeight,
                        (size_t)context->framebuffer_pitch))
     dumped_count++;
-  fprintf(stderr,
-          "[diorama] dumped %d layer PNGs to %s/ (gf=%u, w=%d)\n",
+  RuntimeLog_Printf("[diorama] dumped %d layer PNGs to %s/ (gf=%u, w=%d)\n",
           dumped_count, directory, game_frame, context->snes_width);
 }
 
@@ -273,7 +272,7 @@ void DevTools_AdjustHudOutputScale(const DevToolsContext *context,
       Settings_SetLong(descriptor, next_percent);
   char formatted[32];
   Settings_FormatValue(descriptor, formatted, sizeof(formatted));
-  fprintf(stderr, "[hud-overlay] scale -> %s (%s; 1.00x = native output)\n",
+  RuntimeLog_Printf("[hud-overlay] scale -> %s (%s; 1.00x = native output)\n",
           formatted, Settings_ChangeResultName(result));
 }
 
@@ -395,8 +394,7 @@ bool DevTools_InspectWindowPoint(const DevToolsContext *context,
       chunk->inspector_kind, source_x, source_y,
       output_x, output_y, output_width, output_height,
     };
-    fprintf(stderr,
-            "[scene-inspector-hit] event=%d,%d output=%d,%d target=%s "
+    RuntimeLog_Printf("[scene-inspector-hit] event=%d,%d output=%d,%d target=%s "
             "source=%.3f,%.3f dst=%d,%d,%d,%d\n",
             window_x, window_y, output_x, output_y,
             chunk->inspector_kind == kInspectorPresentation_HudBg
@@ -432,8 +430,7 @@ bool DevTools_InspectWindowPoint(const DevToolsContext *context,
     kInspectorPresentation_Base, screen_position_x, screen_position_y,
     output_x, output_y, output_width, output_height,
   };
-  fprintf(stderr,
-          "[scene-inspector-hit] event=%d,%d output=%d,%d target=base "
+  RuntimeLog_Printf("[scene-inspector-hit] event=%d,%d output=%d,%d target=base "
           "screen=%.3f,%.3f viewport=%d,%d,%d,%d\n",
           window_x, window_y, output_x, output_y,
           screen_position_x, screen_position_y,

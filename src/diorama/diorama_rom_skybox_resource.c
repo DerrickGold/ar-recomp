@@ -1,4 +1,5 @@
 #include "diorama_rom_skybox_resource.h"
+#include "app/runtime_log.h"
 
 #include "diorama_layer_order.h"
 #include "diorama_rom_backdrop.h"
@@ -27,8 +28,7 @@ static DioramaRomSkyboxCache s_cache = {
 static void FailResource(ArRenderDevice *device, const char *operation) {
   if (s_cache.resource_failed) return;
   s_cache.resource_failed = true;
-  fprintf(stderr,
-          "[diorama] ROM skybox %s failed (%s); using captured fallback\n",
+  RuntimeLog_Printf("[diorama] ROM skybox %s failed (%s); using captured fallback\n",
           operation ? operation : "resource",
           ArRenderDevice_LastError(device));
 }
@@ -63,7 +63,7 @@ static bool DecodeSource(ArRenderDevice *device, int source) {
           &s_cache.default_fill_argb);
   s_cache.source = source;
   s_cache.resource_failed = false;
-  fprintf(stderr, "[diorama] ROM skybox source=%s decoded=%d\n",
+  RuntimeLog_Printf("[diorama] ROM skybox source=%s decoded=%d\n",
           DioramaLayerOrder_SourceToken(source),
           s_cache.available ? 1 : 0);
   return s_cache.available;

@@ -1,4 +1,5 @@
 #include "localization/pack_discovery.h"
+#include "app/runtime_log.h"
 
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_process.h>
@@ -58,7 +59,7 @@ static bool PrepareArchives(ArLanguagePackCatalog *catalog,
     helper[0] = 0;
   }
   if (!helper[0]) {
-    fprintf(stderr, "[localization] language archives need the installed ActRaiser "
+    RuntimeLog_Printf("[localization] language archives need the installed ActRaiser "
                     "Builder helper; restore utils/tools/actraiser-builder or "
                     "use unpacked packs\n");
     return false;
@@ -66,7 +67,7 @@ static bool PrepareArchives(ArLanguagePackCatalog *catalog,
   const char *args[] = {helper, "language", "prepare", "--packs-root", root, NULL};
   SDL_Process *process = SDL_CreateProcess(args, false);
   if (!process) {
-    fprintf(stderr, "[localization] could not start archive helper: %s\n", SDL_GetError());
+    RuntimeLog_Printf("[localization] could not start archive helper: %s\n", SDL_GetError());
     return false;
   }
   Uint64 start = SDL_GetTicks();
@@ -77,11 +78,11 @@ static bool PrepareArchives(ArLanguagePackCatalog *catalog,
     SDL_Delay(10);
   if (!finished) {
     if (SDL_KillProcess(process, true)) SDL_WaitProcess(process, true, &status);
-    fprintf(stderr, "[localization] archive preparation timed out\n");
+    RuntimeLog_Printf("[localization] archive preparation timed out\n");
   }
   SDL_DestroyProcess(process);
   if (!finished || status != 0) {
-    fprintf(stderr, "[localization] archive preparation failed; "
+    RuntimeLog_Printf("[localization] archive preparation failed; "
                     "no stale cached catalog will be used\n");
     return false;
   }
@@ -92,13 +93,13 @@ static bool PrepareArchives(ArLanguagePackCatalog *catalog,
   ArLanguagePackError error = {{0}};
   if (!io->read_file(io->context, path, 256 * 1024, &blob, error.message,
                      sizeof(error.message))) {
-    fprintf(stderr, "[localization] cannot read prepared archive catalog: %s\n", error.message);
+    RuntimeLog_Printf("[localization] cannot read prepared archive catalog: %s\n", error.message);
     return false;
   }
   bool ok = ArLanguagePackCatalog_ReadArchiveIndex(catalog, io, root,
       (const char *)blob.data, blob.size, &error);
   io->release_file(io->context, &blob);
-  if (!ok) fprintf(stderr, "[localization] %s\n", error.message);
+  if (!ok) RuntimeLog_Printf("[localization] %s\n", error.message);
   return ok;
 }
 
@@ -119,7 +120,7 @@ static SDL_EnumerationResult SDLCALL VisitPack(void *user, const char *directory
   if (!SDL_GetPathInfo(path, &info)) return SDL_ENUM_CONTINUE; /* Disabled/uninstalled. */
   ArLanguagePackError error = {{0}};
   if (!ArLanguagePackCatalog_Add(scan->catalog, &scan->io, path, name, &error))
-    fprintf(stderr, "[localization] skipping %s: %s\n", path, error.message);
+    RuntimeLog_Printf("[localization] skipping %s: %s\n", path, error.message);
   return SDL_ENUM_CONTINUE;
 }
 
@@ -146,13 +147,11 @@ bool ArLanguagePackCatalog_ScanDesktop(ArLanguagePackCatalog *catalog,
     (void)PrepareArchives(catalog, &scan.io, root);
   /* Say so rather than quietly presenting a subset as the whole library. */
   if (catalog->dropped)
-    fprintf(stderr,
-            "[localization] %zu installed package(s) beyond the supported %d "
+    RuntimeLog_Printf("[localization] %zu installed package(s) beyond the supported %d "
             "are not selectable; disable some to choose them\n",
             catalog->dropped, kArLanguagePackCatalogMaximum);
   if (catalog->visit_limit_reached)
-    fprintf(stderr,
-            "[localization] stopped after %d entries in %s; some installed "
+    RuntimeLog_Printf("[localization] stopped after %d entries in %s; some installed "
             "packages were not examined\n",
             kArLanguagePackCatalogVisitLimit, root);
   return true;

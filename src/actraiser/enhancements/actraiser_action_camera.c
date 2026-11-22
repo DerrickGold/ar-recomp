@@ -16,6 +16,7 @@
  * motion that actually fit. */
 
 #include "action/action_camera_bounds.h"
+#include "app/runtime_log.h"
 #include "action/action_voxel.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser/enhancements/actraiser_camera_internal.h"
@@ -330,8 +331,7 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
     if (camera_x != last_x || camera_y != last_y ||
         g_ram[kActRaiserWram_MapGroup] != last_group ||
         g_ram[kActRaiserWram_CurrentMap] != last_map) {
-      fprintf(stderr,
-              "[ws-action-camera] room=%02x/%02x camera=%u,%u "
+      RuntimeLog_Printf("[ws-action-camera] room=%02x/%02x camera=%u,%u "
               "bounds=%u..%u,%u..%u margins=%d/%d,%d/%d fit=%d,%d "
               "delta=%d->%d,%d->%d\n",
               g_ram[kActRaiserWram_MapGroup],

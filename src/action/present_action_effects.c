@@ -1,4 +1,5 @@
 #include "action/action_decoration_pass.h"
+#include "app/runtime_log.h"
 #include "action/action_environment_exposure.h"
 /* Action-stage enhancement passes. Geometry recipes live in
  * action_effect_render*.c; this owner uploads masks, submits flat/Diorama
@@ -227,8 +228,7 @@ uint64_t PresentActionEffects_UploadMask(
 static void DisableActionPlaneEffect(ArRenderDevice *device, const char *operation) {
   if (!s_action_plane_blend_supported) return;
   s_action_plane_blend_supported = false;
-  fprintf(stderr,
-          "[action-fx] flat BG-local effect unavailable at %s (%s); "
+  RuntimeLog_Printf("[action-fx] flat BG-local effect unavailable at %s (%s); "
           "disabled\n",
           operation ? operation : "unknown operation",
           ArRenderDevice_LastError(device));
@@ -249,8 +249,7 @@ static void FailActionPlaneTargetState(ArRenderDevice *device,
 static void DisableActionHeat(ArRenderDevice *device, const char *operation) {
   if (!s_action_heat_supported) return;
   s_action_heat_supported = false;
-  fprintf(stderr,
-          "[action-fx] lava heat refraction unavailable at %s (%s); "
+  RuntimeLog_Printf("[action-fx] lava heat refraction unavailable at %s (%s); "
           "disabled\n",
           operation ? operation : "unknown operation",
           ArRenderDevice_LastError(device));
@@ -487,7 +486,7 @@ static void SubmitSurfaceLight(ArRenderDevice *device, const EffectBatch *batch)
           batch->vertices, batch->vertex_count, batch->indices, batch->index_count, &state))
     return;
   s_action_surface_light_supported = false;
-  fprintf(stderr, "[action-fx] surface lighting unavailable (%s); disabled\n",
+  RuntimeLog_Printf("[action-fx] surface lighting unavailable (%s); disabled\n",
           ArRenderDevice_LastError(device));
 }
 
@@ -858,7 +857,7 @@ void PresentActionEffects_DrawWithSource(
   static bool announced;
   if (!announced && geometry->index_count && spell_submitted) {
     announced = true;
-    fprintf(stderr, "[action-fx] first spell geometry submitted: %u effect(s), "
+    RuntimeLog_Printf("[action-fx] first spell geometry submitted: %u effect(s), "
             "%d vertices / %d indices (lighting=%d particles=%d)\n",
             slot->action_effects.visible_count, geometry->vertex_count,
             geometry->index_count, slot->action_effect_lighting,
@@ -867,8 +866,7 @@ void PresentActionEffects_DrawWithSource(
   static bool announced_scene;
   if (!announced_scene && actor_index_count && scene_submitted) {
     announced_scene = true;
-    fprintf(stderr,
-            "[action-fx] first scene accent geometry submitted: %u effect(s), "
+    RuntimeLog_Printf("[action-fx] first scene accent geometry submitted: %u effect(s), "
             "%d vertices / %d indices (lighting=%d particles=%d)\n",
             slot->action_scene_effects.visible_count,
             actor_vertex_count, actor_index_count,
@@ -877,8 +875,7 @@ void PresentActionEffects_DrawWithSource(
   static bool announced_decorations;
   if (!announced_decorations && decoration_submitted) {
     announced_decorations = true;
-    fprintf(stderr,
-            "[action-fx] first map decoration geometry submitted\n");
+    RuntimeLog_Printf("[action-fx] first map decoration geometry submitted\n");
   }
 }
 
@@ -1015,7 +1012,7 @@ void PresentActionEffects_StopSourceWorker(void) {
   SDL_UnlockMutex(worker->lock);
   SDL_SignalSemaphore(worker->work);
   SDL_WaitThread(worker->thread, NULL);
-  fprintf(stderr, "[effect-worker] queued=%u built=%u accepted=%u work-ms=%.3f\n",
+  RuntimeLog_Printf("[effect-worker] queued=%u built=%u accepted=%u work-ms=%.3f\n",
       worker->queued, worker->built, worker->accepted, worker->work_ns / 1e6);
   for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) {
     free(worker->packets[i].primitives);
@@ -1270,7 +1267,7 @@ void PresentActionEffects_DrawDioramaPlane(
     if (EffectRenderer_Submit(context->device, &batch, pass->blend) &&
         !announced[pass->layer]) {
       announced[pass->layer] = true;
-      fprintf(stderr, "[action-fx] first %s geometry submitted (Diorama)\n", pass->label);
+      RuntimeLog_Printf("[action-fx] first %s geometry submitted (Diorama)\n", pass->label);
     }
   }
 }
@@ -1432,8 +1429,7 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
   if (render_layer < kActionEffectRenderLayer_Count &&
       !announced[render_layer] && composited) {
     announced[render_layer] = true;
-    fprintf(stderr,
-            "[action-fx] first %s geometry submitted "
+    RuntimeLog_Printf("[action-fx] first %s geometry submitted "
             "(flat, winner-masked)\n",
             pass->label);
   }

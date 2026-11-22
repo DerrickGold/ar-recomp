@@ -1,4 +1,5 @@
 #include "sim/sim3d/present_sim3d_underlay.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -37,7 +38,7 @@ SimUnderlayTextures PresentSim3DUnderlay_Prepare(
   if (!ArRenderTexture_IsValid(s_underlay.sharp) &&
       !CreateTexture(device, false, &s_underlay.sharp)) {
     s_underlay.sharp_unavailable = true;
-    fprintf(stderr, "[sim3d-underlay] world map texture unavailable: %s\n",
+    RuntimeLog_Printf("[sim3d-underlay] world map texture unavailable: %s\n",
             ArRenderDevice_LastError(device));
     return result;
   }

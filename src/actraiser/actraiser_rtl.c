@@ -7,6 +7,7 @@
 #define _DARWIN_C_SOURCE 1
 #endif
 #include "actraiser/actraiser_rtl_internal.h"
+#include "app/runtime_log.h"
 #include "dev/snes_snapshot.h"
 #include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/enhancements/actraiser_world_resume.h"
@@ -59,7 +60,7 @@ bool ActRaiserSimMenu_ArtworkAvailable(void) {
   static bool failure_reported;
   const bool available = SimMenuArt_Capture(&preflight, s_runner_api, s_runner);
   if (!available && !failure_reported)
-    fprintf(stderr, "[sim-menu] modern artwork preflight failed; retaining native menu control\n");
+    RuntimeLog_Printf("[sim-menu] modern artwork preflight failed; retaining native menu control\n");
   failure_reported = !available;
   return available;
 }
@@ -274,7 +275,7 @@ bool ActRaiser_PpuShapeTraceActive(unsigned gf) {
     if (path && path[0]) {
       trace->file = sr_fopen(path, "wb");
       if (!trace->file) {
-        fprintf(stderr, "[ppu-shape] unable to open %s: %s\n", path,
+        RuntimeLog_Printf("[ppu-shape] unable to open %s: %s\n", path,
                 strerror(errno));
       } else {
         fprintf(trace->file,
@@ -295,7 +296,7 @@ bool ActRaiser_PpuShapeTraceActive(unsigned gf) {
                 "post_fixed,post_cgwsel,post_cgadsub,hdma_rep0,hdma_rep1,"
                 "hdma_rep2,hdma_rep3,hdma_rep4,hdma_rep5,hdma_rep6,"
                 "hdma_rep7,hdma_live\n");
-        fprintf(stderr,
+        RuntimeLog_Printf(
                 "[ppu-shape] tracing gf=%u..%u, maximum %u records -> %s\n",
                 trace->gf_lo, trace->gf_hi, trace->maximum_records, path);
       }
@@ -311,7 +312,7 @@ bool ActRaiser_PpuShapeTraceActive(unsigned gf) {
   if (!trace->limit_reported) {
     trace->limit_reported = true;
     fflush(trace->file);
-    fprintf(stderr, "[ppu-shape] stopped at the %u-record safety limit\n",
+    RuntimeLog_Printf("[ppu-shape] stopped at the %u-record safety limit\n",
             trace->maximum_records);
   }
   return false;
@@ -535,7 +536,7 @@ static void SuspendGameCoroutine(void *unused) {
    * unchecked failure would silently return and keep running on a stack the
    * host believes it owns; there is no recovery, so abort loudly instead. */
   if (swapcontext(&s_game_ctx, &s_host_ctx) != 0) {
-    fprintf(stderr, "FATAL: swapcontext (game -> host) failed\n");
+    fputs("FATAL: swapcontext (game -> host) failed\n", stderr);
     abort();
   }
 #endif
@@ -572,8 +573,7 @@ static void ActRaiser_HleFatalEscapeToHost(const char *message) {
     /* This escape is valid only while RunOneFrameOfGame is blocked in the
      * matching SwitchToFiber/swapcontext. Calling it from host-side NMI/IRQ or
      * a standalone helper would overwrite/switch to the wrong context. */
-    fprintf(stderr,
-            "FATAL: HLE invariant failed outside the game coroutine\n");
+    fputs("FATAL: HLE invariant failed outside the game coroutine\n", stderr);
     abort();
   }
   ActRaiser_YieldToHost();
@@ -623,7 +623,7 @@ void ActRaiser_OnInidispWrite(uint8_t value) {
     RtlSetApuCatchupSuppressed(false);
     if (ActRaiser_DeveloperFlagEnabled(
             kActRaiserDeveloperFlag_LoadPacingLog)) {
-      fprintf(stderr,
+      RuntimeLog_Printf(
               "[load-pace] f=%d block=$%06X dest-group=$%02X: HD "
               "one-shot already complete; skipped %u-frame hold\n",
               snes_frame_counter, block,
@@ -635,7 +635,7 @@ void ActRaiser_OnInidispWrite(uint8_t value) {
   s_action_load_hold_frames = frames - 1;
   if (ActRaiser_DeveloperFlagEnabled(
           kActRaiserDeveloperFlag_LoadPacingLog)) {
-    fprintf(stderr,
+    RuntimeLog_Printf(
             "[load-pace] f=%d block=$%06X dest-group=$%02X: holding "
             "forced blank for %u frames; suppressing collapsed APU catch-up\n",
             snes_frame_counter, block,
@@ -665,7 +665,7 @@ void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
   if (decision == kActionLoadPacingTrigger_Discard) {
     if (ActRaiser_DeveloperFlagEnabled(
             kActRaiserDeveloperFlag_LoadPacingLog)) {
-      fprintf(stderr,
+      RuntimeLog_Printf(
               "[load-pace] f=%d mode=$%02X/$%02X inidisp=$%02X: "
               "discarded stale arm before APU halt $F0\n",
               snes_frame_counter, g_ram[kActRaiserWram_MapGroup],
@@ -684,7 +684,7 @@ void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
   s_action_load_one_shot_token = 0;
   if (ActRaiser_DeveloperFlagEnabled(
           kActRaiserDeveloperFlag_LoadPacingLog)) {
-    fprintf(stderr,
+    RuntimeLog_Printf(
             "[load-pace] f=%d action mode=$%02X/$%02X: completed %u-frame "
             "forced-blank hold; releasing APU halt $F0\n",
             snes_frame_counter, g_ram[kActRaiserWram_MapGroup],
@@ -724,7 +724,7 @@ int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
         (g_sr_block_index - 1) & kRuntimeBlockTraceRingMask];
     if (block == wedge_blk && (idx == wedge_idx || idx == wedge_idx + 1)) {
       if (++wedge_n == kRdnmiRepeatedReadWarningThreshold) {
-        fprintf(stderr,
+        RuntimeLog_Printf(
                 "[4210-wedge] blk=$%06X f=%d x%u consecutive reads; "
                 "forceNmi=%d yielding=%d inNmi=%d nmiAvail=%d\n",
                 block, snes_frame_counter,
@@ -732,7 +732,6 @@ int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
                 force_nmi ? 1 : 0,
                 s_rdnmi_yielding ? 1 : 0, in_nmi ? 1 : 0,
                 nmi_available ? 1 : 0);
-        fflush(stderr);
       }
     } else {
       wedge_blk = block;
@@ -757,7 +756,7 @@ int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
         static int warned;
         if (!warned) {
           warned = 1;
-          fprintf(stderr,
+          RuntimeLog_Printf(
                   "[4210] non-yieldable-context spin at $%06X f=%d "
                   "-> fast-exit (bit7=1, unpaced)\n",
                   block, snes_frame_counter);
@@ -798,7 +797,7 @@ int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
           const uint32_t ppu_display = RtlGamePpuDisplayState();
           const uint8_t display_control =
               RTL_GAME_PPU_DISPLAY_CONTROL(ppu_display);
-          fprintf(stderr,
+          RuntimeLog_Printf(
                   "[vbl] f=%d bright=%d fblank=%d bgmode=%02x main=%02x "
                   "$18=%02x $19=%02x time$E6=%02x%02x HP=%02x PB=%02x "
                   "S=%04x blk=%06X\n",
@@ -921,7 +920,7 @@ static void ActRaiser_BrkHook(CpuState *cpu) {
    * still alive and posting routine SFX while a specific event id never posts. */
   if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_CopLog)) {
     unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-    fprintf(stderr, "[brk] gf=%u fn=%s id=%02x $18=%02x $19=%02x\n",
+    RuntimeLog_Printf("[brk] gf=%u fn=%s id=%02x $18=%02x $19=%02x\n",
             game_frame, g_last_recomp_func ? g_last_recomp_func : "?",
             id, g_ram[kActRaiserWram_MapGroup],
             g_ram[kActRaiserWram_CurrentMap]);
@@ -980,7 +979,7 @@ static void PostCopRequest(CpuState *cpu, uint8 id, uint32 site,
    * previously suspected still-unreached for a different event id). */
   if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_CopLog)) {
     unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-    fprintf(stderr, "[cop] gf=%u fn=%s site=%06x id=%02x%s $18=%02x $19=%02x\n",
+    RuntimeLog_Printf("[cop] gf=%u fn=%s site=%06x id=%02x%s $18=%02x $19=%02x\n",
             game_frame, source ? source : "?",
             site, id, suppress_dialog_blip ? " suppressed-dialog-blip" : "",
             g_ram[kActRaiserWram_MapGroup],
@@ -1046,7 +1045,7 @@ bool ActRaiser_QueryInputState(SrInputStateSnapshot *state) {
  * Writes <prefix>.{wram,vram,cgram,oam}.bin plus PPU register metadata. */
 void ActRaiser_FullSnapshot(const char *prefix) {
   if (!SnesSnapshot_Write(prefix, s_runner, s_runner_api))
-    fprintf(stderr, "[snap] could not write complete snapshot: %s\n", prefix);
+    RuntimeLog_Printf("[snap] could not write complete snapshot: %s\n", prefix);
 }
 
 static void game_coroutine(void) {
@@ -1105,15 +1104,21 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * vblank yield to see what the main thread is doing frame to frame. Read the
    * return frame from the PRE-pop S (sp-2, since we already added 2 above). */
   if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_YieldLog)) {
-    int top = g_recomp_stack_top;
-    fprintf(stderr, "[yield] f=%d S=%04x A=%04x P=%02x depth=%d:",
-            snes_frame_counter, cpu->S, cpu->A, cpu->P, top);
-    for (int i = top - 1; i >= 0 && i >= top - 6; i--)
-      fprintf(stderr, " %s", g_recomp_stack[i] ? g_recomp_stack[i] : "?");
-    uint16 sp = no_pop ? cpu->S : (uint16)(cpu->S - 2);
-    uint16 rlo = g_ram[(uint16)(sp + 1)];
-    uint16 rhi = g_ram[(uint16)(sp + 2)];
-    fprintf(stderr, " ret~%02x:%04x\n", cpu->PB, (uint16)(((rhi << 8) | rlo) + 1));
+    const int top = g_recomp_stack_top;
+    char stack[256] = {0};
+    size_t used = 0;
+    for (int i = top - 1; i >= 0 && i >= top - 6; --i) {
+      const int length = snprintf(stack + used, sizeof(stack) - used, " %s",
+                                  g_recomp_stack[i] ? g_recomp_stack[i] : "?");
+      if (length < 0 || (size_t)length >= sizeof(stack) - used) break;
+      used += (size_t)length;
+    }
+    const uint16 sp = no_pop ? cpu->S : (uint16)(cpu->S - 2);
+    const uint16 rlo = g_ram[(uint16)(sp + 1)];
+    const uint16 rhi = g_ram[(uint16)(sp + 2)];
+    RuntimeLog_Printf("[yield] f=%d S=%04x A=%04x P=%02x depth=%d:%s ret~%02x:%04x\n",
+                      snes_frame_counter, cpu->S, cpu->A, cpu->P, top, stack, cpu->PB,
+                      (uint16)(((rhi << 8) | rlo) + 1));
   }
 
   /* AR_FORCE18=<hex>: experimentally pin $7E0018 (game-mode byte) before the
@@ -1216,7 +1221,7 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
           kActRaiserWram_ActionObjectTable);
       unsigned first_handler = ActRaiser_ReadWram16((uint16)(
           kActRaiserWram_ActionObjectTable + kActionObjectHandlerOffset));
-      fprintf(stderr, "[obj] gf=%u timer=%02x%02x HP=%02x active=%d obj0.sw=%04x obj0.h=%04x\n",
+      RuntimeLog_Printf("[obj] gf=%u timer=%02x%02x HP=%02x active=%d obj0.sw=%04x obj0.h=%04x\n",
               game_frame, g_ram[kActRaiserWram_ActionTimerHigh],
               g_ram[kActRaiserWram_ActionTimerLow],
               g_ram[kActRaiserWram_PlayerHp], active_objects,
@@ -1377,7 +1382,7 @@ static bool CreateGameCoroutine(void) {
   if (!s_host_fiber) {
     s_host_fiber = ConvertThreadToFiberEx(NULL, FIBER_FLAG_FLOAT_SWITCH);
     if (!s_host_fiber) {
-      fprintf(stderr, "Failed to convert driver thread to fiber\n");
+      RuntimeLog_Printf("Failed to convert driver thread to fiber\n");
       return false;
     }
   }
@@ -1390,7 +1395,7 @@ static bool CreateGameCoroutine(void) {
                                FIBER_FLAG_FLOAT_SWITCH,
                                game_coroutine_fiber, NULL);
   if (!s_game_fiber) {
-    fprintf(stderr, "Failed to create game coroutine fiber\n");
+    RuntimeLog_Printf("Failed to create game coroutine fiber\n");
     return false;
   }
 #else
@@ -1405,7 +1410,7 @@ static bool CreateGameCoroutine(void) {
      * that caused it. */
     long page = sysconf(_SC_PAGESIZE);
     if (page <= 0) {
-      fprintf(stderr, "Failed to query the host page size\n");
+      RuntimeLog_Printf("Failed to query the host page size\n");
       return false;
     }
     size_t guard = (size_t)page;
@@ -1413,12 +1418,12 @@ static bool CreateGameCoroutine(void) {
     void *map = mmap(NULL, total, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (map == MAP_FAILED) {
-      fprintf(stderr, "Failed to allocate game coroutine stack\n");
+      RuntimeLog_Printf("Failed to allocate game coroutine stack\n");
       return false;
     }
     /* Stacks grow DOWN, so the guard belongs at the lowest address. */
     if (mprotect(map, guard, PROT_NONE) != 0) {
-      fprintf(stderr, "Failed to protect the game coroutine guard page: %s\n",
+      RuntimeLog_Printf("Failed to protect the game coroutine guard page: %s\n",
               strerror(errno));
       munmap(map, total);
       return false;
@@ -1436,7 +1441,7 @@ static bool CreateGameCoroutine(void) {
                                     game_coroutine);
 #else
   if (getcontext(&s_game_ctx) != 0) {
-    fprintf(stderr, "Failed to capture game coroutine context\n");
+    RuntimeLog_Printf("Failed to capture game coroutine context\n");
     return false;
   }
   s_game_ctx.uc_stack.ss_sp = s_game_stack;
@@ -1545,7 +1550,7 @@ void RunOneFrameOfGame(void) {
             one_shot_token, one_shot_completed)) {
       if (ActRaiser_DeveloperFlagEnabled(
               kActRaiserDeveloperFlag_LoadPacingLog)) {
-        fprintf(stderr,
+        RuntimeLog_Printf(
                 "[load-pace] f=%d HD one-shot complete; released forced "
                 "blank %u frame(s) early\n",
                 snes_frame_counter, s_action_load_hold_frames);

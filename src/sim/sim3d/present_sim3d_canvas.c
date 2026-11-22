@@ -1,4 +1,5 @@
 #include "sim/sim3d/present_sim3d_canvas.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include "render/upload_rect_run.h"
@@ -53,7 +54,7 @@ void PresentSim3DCanvas_Upload(ArRenderDevice *device, bool needed) {
     };
     if (!ArRenderDevice_CreateTexture(device, &desc, &s_canvas.texture)) {
       s_canvas.state = kSimCanvas_Unavailable;
-      fprintf(stderr, "[sim3d-canvas] texture allocation failed: %s\n",
+      RuntimeLog_Printf("[sim3d-canvas] texture allocation failed: %s\n",
           ArRenderDevice_LastError(device));
       return;
     }
@@ -87,7 +88,7 @@ void PresentSim3DCanvas_Upload(ArRenderDevice *device, bool needed) {
       ArRenderDevice_DestroyTexture(device, s_canvas.texture);
       s_canvas.texture = ArRenderTexture_Invalid();
       s_canvas.state = kSimCanvas_Unavailable;
-      fprintf(stderr, "[sim3d-canvas] full retry failed; disabling town canvas: %s\n",
+      RuntimeLog_Printf("[sim3d-canvas] full retry failed; disabling town canvas: %s\n",
           ArRenderDevice_LastError(device));
     } else {
       s_canvas.state = kSimCanvas_RetryFull;

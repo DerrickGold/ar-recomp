@@ -200,12 +200,12 @@ func TestPublishFailureAndReplacementRetainPreviousApplication(t *testing.T) {
 }
 
 func TestLaunchArgumentsRetainCallerRelativePaths(t *testing.T) {
-	options, err := ParseLaunchOptions([]string{"--data-dir=profile", "--config", "custom.ini", "rom.sfc"})
+	options, err := ParseLaunchOptions([]string{"--data-dir=profile", "--config", "custom.ini", "--log-dir", "capture logs", "rom.sfc"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	args, err := gameArguments(options.GameArgs, "/caller", "/profile", "/app/Resources")
-	if err != nil || strings.Join(args, "|") != "--config|/caller/custom.ini|/caller/rom.sfc" {
+	if err != nil || strings.Join(args, "|") != "--config|/caller/custom.ini|--log-dir|/caller/capture logs|/caller/rom.sfc" {
 		t.Fatalf("args %q %v", args, err)
 	}
 	args, err = gameArguments(nil, "/caller", "/profile", "/app/Resources")

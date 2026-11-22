@@ -1,4 +1,5 @@
 #include "action/action_effect_capture.h"
+#include "app/runtime_log.h"
 #include "action/action_effect_manifest.h"
 #include "action/action_trunk_life.h"
 #include "action/action_woodland.h"
@@ -74,7 +75,7 @@ static void ReportCapturedActionEffects(const FrameSlot *dst) {
     static bool announced;
     if (!announced) {
       announced = true;
-      fprintf(stderr, "[action-fx] first spell captured: kind=%u part(s)=%u "
+      RuntimeLog_Printf("[action-fx] first spell captured: kind=%u part(s)=%u "
               "visible=%u (lighting=%d particles=%d)\n",
               dst->action_effects.controller_kind,
               dst->action_effects.effect_count,
@@ -88,8 +89,7 @@ static void ReportCapturedActionEffects(const FrameSlot *dst) {
     static bool announced_scene;
     if (!announced_scene) {
       announced_scene = true;
-      fprintf(stderr,
-              "[action-fx] first scene accents captured: actors=%u/%u "
+      RuntimeLog_Printf("[action-fx] first scene accents captured: actors=%u/%u "
               "decorations=%u/%u (lighting=%d particles=%d)\n",
               dst->action_scene_effects.effect_count,
               dst->action_scene_effects.visible_count,
@@ -131,8 +131,7 @@ static void ReportCapturedActionEffects(const FrameSlot *dst) {
         moment = "LAUNCH";
       if (!moment) continue;
       spawn_reports++;
-      fprintf(stderr,
-              "[action-fx spawn] %s slot=$%04X world=(%d,%d) cam=(%d,%d) "
+      RuntimeLog_Printf("[action-fx spawn] %s slot=$%04X world=(%d,%d) cam=(%d,%d) "
               "screen=(%d,%d) vel=(%d,%d) age=%u "
               "[viewport top screen_y=0, ground screen_y~%d]\n",
               moment, e->record_address, e->world_x, e->world_y,
@@ -152,8 +151,7 @@ static void ReportCapturedActionEffects(const FrameSlot *dst) {
       reported_kinds |= bit;
       for (uint8_t i = 0; i < dst->action_effects.unmatched_count; i++) {
         const ActionEffectUnmatched *u = &dst->action_effects.unmatched[i];
-        fprintf(stderr,
-                "[action-fx census] spell=%u slot=$%04X unmatched: "
+        RuntimeLog_Printf("[action-fx census] spell=%u slot=$%04X unmatched: "
                 "anim=$%02X:%04X state=%u visual=%u comp=$%04X "
                 "flip=$%04X status=$%04X\n",
                 dst->action_effects.controller_kind, u->record_address,

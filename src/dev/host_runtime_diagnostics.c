@@ -1,8 +1,10 @@
 #include "dev/host_runtime_diagnostics.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "app/diagnostic_options.h"
 #include "actraiser_game.h"
 #include "constants.h"
 #include "host/host_clock.h"
@@ -31,7 +33,7 @@ void HostRuntimeDiagnostics_InitTrace(void) {
     const char *v = getenv("AR_DRIFT_FRAME");
     if (v && v[0]) {
       cpu_trace_arm_stack_drift_tripwire((int32_t)strtol(v, NULL, 0));
-      fprintf(stderr, "[AR_DRIFT_FRAME] stack-drift tripwire armed at frame %s\n", v);
+      RuntimeLog_Printf("[AR_DRIFT_FRAME] stack-drift tripwire armed at frame %s\n", v);
     }
   }
 #endif
@@ -87,7 +89,7 @@ void HostRuntimeDiagnostics_ConfigureChecks(void) {
 
 HostRuntimeTickProfile HostRuntimeDiagnostics_BeginTick(void) {
   HostRuntimeTickProfile scope = {0};
-  if (s_tick_perf < 0) s_tick_perf = getenv("AR_PERF") ? 1 : 0;
+  if (s_tick_perf < 0) s_tick_perf = DiagnosticOptionEnabled("AR_PERF");
   scope.perf_start_ms = s_tick_perf ? HostClock_Milliseconds() : 0;
   /* SNESRECOMP_APU_PROFILE=<ms>: per-frame APU-stall attribution. Any game frame whose
    * wall time reaches the threshold (default 8 ms; the flag value overrides
@@ -120,8 +122,7 @@ void HostRuntimeDiagnostics_EndTick(HostRuntimeTickProfile scope) {
     if (dt_ns >= (uint64_t)s_apuprof_ms * kNanosecondsPerMillisecond) {
       const unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       double audiowait_ms = RtlApuProfileTakeAudioWaitMax() / (double)kNanosecondsPerMillisecond;
-      fprintf(stderr,
-              "[apuprof] gf=%u dt=%.1fms lockwait=%.2fms "
+      RuntimeLog_Printf("[apuprof] gf=%u dt=%.1fms lockwait=%.2fms "
               "portsync=%.2fms/%llucyc/%uc apu=%llu "
               "audio=%llu uploadctl=%llu timeline=%llu other=%llu "
               "reads=%u writes=%u "
@@ -158,8 +159,7 @@ void HostRuntimeDiagnostics_EndTick(HostRuntimeTickProfile scope) {
       uint64_t cc, cy;
       RtlApuProfileReadCatchupStats(&cc, &cy);
       const unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      fprintf(stderr,
-              "[perf] fps=%d run-ms avg=%.1f max=%llu gf+=%u "
+      RuntimeLog_Printf("[perf] fps=%d run-ms avg=%.1f max=%llu gf+=%u "
               "apu-catchup calls=%llu cyc=%llu $18=%02x\n",
               win_frames, (double)run_ms_sum / win_frames, (unsigned long long)run_ms_max,
               (unsigned)(uint16)(gf - last_gf), (unsigned long long)(cc - last_cu_calls),
@@ -176,7 +176,7 @@ void HostRuntimeDiagnostics_EndTick(HostRuntimeTickProfile scope) {
 }
 
 uint64_t HostRuntimeDiagnostics_BeginDraw(void) {
-  if (s_draw_perf < 0) s_draw_perf = getenv("AR_PERF") ? 1 : 0;
+  if (s_draw_perf < 0) s_draw_perf = DiagnosticOptionEnabled("AR_PERF");
 
   return s_draw_perf ? HostClock_Milliseconds() : 0;
 }
@@ -192,8 +192,7 @@ void HostRuntimeDiagnostics_EndDraw(uint64_t started_ms) {
     draw_win_frames++;
     if (!draw_win_start) draw_win_start = now;
     if (now - draw_win_start >= kPerformanceReportIntervalMs) {
-      fprintf(stderr,
-              "[draw-perf] frames=%d draw-ms avg=%.1f max=%llu "
+      RuntimeLog_Printf("[draw-perf] frames=%d draw-ms avg=%.1f max=%llu "
               "$18=%02x $19=%02x authentic-capture=%s\n",
               draw_win_frames, (double)draw_ms_sum / draw_win_frames,
               (unsigned long long)draw_ms_max, g_ram[kActRaiserWram_MapGroup],
@@ -208,9 +207,6 @@ void HostRuntimeDiagnostics_EndDraw(uint64_t started_ms) {
 
 bool HostRuntimeDiagnostics_PipelineLoggingEnabled(void) {
   static int enabled = -1;
-  if (enabled < 0) {
-    const char *value = getenv("AR_PIPELINE_PERF");
-    enabled = value && value[0] && value[0] != '0';
-  }
+  if (enabled < 0) enabled = DiagnosticOptionEnabled("AR_PIPELINE_PERF");
   return enabled != 0;
 }

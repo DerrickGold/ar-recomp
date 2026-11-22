@@ -1,4 +1,5 @@
 #include "host/imported_world_travel.h"
+#include "app/runtime_log.h"
 #include "host/imported_game_session.h"
 #include "dev/host_dev_tools.h"
 #include "app/run_dir.h"
@@ -131,7 +132,7 @@ bool ImportedWorldTravel_Pending(void) {
 }
 
 static void ShowError(const char *message) {
-  fprintf(stderr, "[imported-world] %s\n", message);
+  RuntimeLog_Printf("[imported-world] %s\n", message);
   if (!getenv("AR_HEADLESS_VIDEO"))
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ActRaiser 2", message, g_window);
 }
@@ -205,7 +206,7 @@ static void TakeSnapshot(void) {
   char directory[4096], prefix[4096], path[4096];
   RunDirFile(directory, sizeof(directory), "snapshots");
   if (!SDL_CreateDirectory(directory)) {
-    fprintf(stderr, "[snap] cannot create %s: %s\n", directory, SDL_GetError());
+    RuntimeLog_Printf("[snap] cannot create %s: %s\n", directory, SDL_GetError());
     return;
   }
   RunDirFile(prefix, sizeof(prefix), "snapshots/ar2_%02u_f%u", number++, s_visit.frame.frame);
@@ -224,7 +225,7 @@ static void TakeSnapshot(void) {
     } else ok = false;
     capture.release(capture.owner);
   } else ok = false;
-  fprintf(stderr, "[snap] AR2 %s -> %s.{wram,vram,cgram,oam,highoam}.bin, "
+  RuntimeLog_Printf("[snap] AR2 %s -> %s.{wram,vram,cgram,oam,highoam}.bin, "
       ".ppu.json, .cpu.json, .ppm\n",
       ok ? "complete" : "incomplete", prefix);
 }
@@ -250,7 +251,7 @@ static void FinishVisit(void) {
       !memcmp(&s_visit.cpu_before, &g_cpu, sizeof(g_cpu));
   const bool restored = ActRaiserWorldTravel_Complete();
   ActRaiserWorldTravel_Return();
-  fprintf(stderr, "[imported-world] AR1 checkpoint %s from frame %d after %u visit frames\n",
+  RuntimeLog_Printf("[imported-world] AR1 checkpoint %s from frame %d after %u visit frames\n",
           restored ? (intact ? "restored" : "CHANGED") : "returning",
           s_visit.frame_before, s_visit.visit_frame);
   InputMap_SetActionHandler(s_visit.action_handler);
@@ -326,7 +327,7 @@ void ImportedWorldTravel_Begin(void) {
     return;
   }
   if (!OpenLevel()) { FinishVisit(); return; }
-  fprintf(stderr, "[imported-world] descending to %s in window %u\n",
+  RuntimeLog_Printf("[imported-world] descending to %s in window %u\n",
           atlas->destinations[destination].label, SDL_GetWindowID(g_window));
 }
 
@@ -463,7 +464,7 @@ bool ImportedWorldTravel_Update(bool hidden) {
     s_visit.deadline = now + RTL_NTSC_FRAME_INTERVAL_NS;
     HostInput_ClearHeld();
     AudioSession_SetPaused(true);
-    fprintf(stderr, "[imported-world] level ready; hid %u startup frames; descent %.1f ms, "
+    RuntimeLog_Printf("[imported-world] level ready; hid %u startup frames; descent %.1f ms, "
         "%u updates, largest gap %.1f ms%s\n", s_visit.startup_ticks,
         (SDL_GetTicksNS() - s_visit.descent_begin_ns) / 1e6, s_visit.descent_updates,
         s_visit.descent_max_gap_ms, headless ? " (headless ticks)" : "");

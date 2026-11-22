@@ -1,4 +1,5 @@
 #include "action_bg_tuner.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -911,13 +912,12 @@ ActionBgTunerResult ActionBgTuner_Change(const ActionBgTunerRow *row,
 static void PrintDraft(void) {
   ActionBgPlan plan;
   if (!BuildEffectivePlan(&plan, true)) return;
-  fprintf(stderr, "[action-bg-tuner] room=%02X/%02X apply=%d guides=%d\n",
+  RuntimeLog_Printf("[action-bg-tuner] room=%02X/%02X apply=%d guides=%d\n",
           s_tuner.map_group, s_tuner.map_number,
           s_tuner.draft_enabled, s_tuner.guides_enabled);
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
     const ActionBgLayerPlan *p = &plan.layer[layer];
-    fprintf(stderr,
-            "[action-bg-tuner] BG%u role=%s source=%s edge=%s "
+    RuntimeLog_Printf("[action-bg-tuner] BG%u role=%s source=%s edge=%s "
             "motion=%s horizontal=%s:%u,%u vertical=%s:%u,%u\n",
             layer + 1, ActionBgLayerRole_Name(p->role),
             ActionBgSourceKind_Name(p->source),
@@ -929,8 +929,7 @@ static void PrintDraft(void) {
             p->vertical_extent.top, p->vertical_extent.bottom);
     for (unsigned band = 0; band < p->band_count; band++) {
       const ActionBgBand *b = &p->bands[band];
-      fprintf(stderr,
-              "[action-bg-tuner] BG%u band=%s:%u..%u edge=%s motion=%s "
+      RuntimeLog_Printf("[action-bg-tuner] BG%u band=%s:%u..%u edge=%s motion=%s "
               "horizontal=%s:%u,%u\n",
               layer + 1, ActionBgBandAnchor_Name(b->anchor), b->y0, b->y1,
               ActionBgEdgeMode_Name(b->edge),

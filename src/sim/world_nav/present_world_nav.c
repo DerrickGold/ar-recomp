@@ -1,4 +1,5 @@
 #include "sim/world_nav/present_world_nav_imports.h"
+#include "app/runtime_log.h"
 #include "actraiser2/ar2_content.h"
 #include "sim/world_nav/present_world_nav.h"
 /* Standalone world-navigation composition over the shared authored town
@@ -365,7 +366,7 @@ static void CaptureWorldNavigationArtVersion(const FrameSlot *slot, uint8_t phas
   Sim3DDepthPass_DestroyAtlasCache(g_world_nav_art.atlas_cache);
   g_world_nav_art.atlas_cache = NULL;
   g_world_nav_art.atlas_cache_unavailable = true;
-  fprintf(stderr, "[world-navigation] GPU ground snapshots unavailable; using mutable atlas\n");
+  RuntimeLog_Printf("[world-navigation] GPU ground snapshots unavailable; using mutable atlas\n");
 }
 
 static bool WorldNavigationArtPatchesEnabled(void) {
@@ -382,12 +383,13 @@ static void TraceWorldNavigationArt(const FrameSlot *slot, uint8_t phase,
     const uint64_t stamps[7]) {
   unsigned cells = 0;
   for (size_t i = 0; i < sizeof(changes->cells); ++i) cells += changes->cells[i] != 0;
-  fprintf(stderr, "[sim-ground] gf=%u phase=%u changed=%d patch=%d cells=%u",
-      slot->sim.game_frame, phase, changed, patch, cells);
-  const char *names[] = {"inputs", "pixels", "cleanup", "transition", "upload", "capture"};
-  for (unsigned i = 0; i < 6; ++i)
-    fprintf(stderr, " %s-ms=%.3f", names[i], (double)(stamps[i+1] - stamps[i]) / 1e6);
-  fprintf(stderr, " start-ns=%llu end-ns=%llu\n",
+  RuntimeLog_Printf("[sim-ground] gf=%u phase=%u changed=%d patch=%d cells=%u"
+      " inputs-ms=%.3f pixels-ms=%.3f cleanup-ms=%.3f transition-ms=%.3f"
+      " upload-ms=%.3f capture-ms=%.3f start-ns=%llu end-ns=%llu\n",
+      slot->sim.game_frame, phase, changed, patch, cells,
+      (stamps[1] - stamps[0]) / 1e6, (stamps[2] - stamps[1]) / 1e6,
+      (stamps[3] - stamps[2]) / 1e6, (stamps[4] - stamps[3]) / 1e6,
+      (stamps[5] - stamps[4]) / 1e6, (stamps[6] - stamps[5]) / 1e6,
       (unsigned long long)stamps[0], (unsigned long long)stamps[6]);
 }
 
@@ -582,7 +584,7 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
         return false;
     } else {
       g_world_nav_art.unavailable = true;
-      fprintf(stderr, "[world-navigation] using native-resolution world art\n");
+      RuntimeLog_Printf("[world-navigation] using native-resolution world art\n");
       /* Old ground must keep its inferred slopes if native cleanup failed. */
       EnsureWorldNavigationMountains(slot,radius_tiles);
     }
@@ -989,7 +991,7 @@ bool EnsureWorldNavigationResourcesAtRadius(const FrameSlot *slot, float radius_
   const bool art_ready = EnsureWorldNavigationArt(slot,radius_tiles);
   const uint64_t art_done = setup_timing ? HostClock_Nanoseconds() : 0;
   if (setup_timing && art_done - setup_started > 5000000)
-    fprintf(stderr, "[world-navigation-setup] mountains=%.3fms cliffs=%.3fms art=%.3fms\n",
+    RuntimeLog_Printf("[world-navigation-setup] mountains=%.3fms cliffs=%.3fms art=%.3fms\n",
         (double)(mountains_done - setup_started) / 1000000.0,
         (double)(cliffs_done - mountains_done) / 1000000.0,
         (double)(art_done - cliffs_done) / 1000000.0);

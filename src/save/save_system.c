@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "save/save_system.h"
 #include "save/save_paths.h"
@@ -660,7 +661,7 @@ void SaveSystem_RecordTownVisit(uint8_t town) {
       town == s_runtime.last_town) return;
   s_runtime.last_town = town;
   s_runtime.town_visit_dirty = true;
-  fprintf(stderr, "[world-resume] visited town=%u%s\n", town,
+  RuntimeLog_Printf("[world-resume] visited town=%u%s\n", town,
           s_runtime.town_visit_awaiting_story ? " (awaiting first story save)" : "");
 }
 
@@ -677,7 +678,7 @@ bool SaveSystem_FlushTownVisit(SaveError *error) {
   WriteHash(bytes + kTownVisitPayloadBytes, bytes, kTownVisitPayloadBytes);
   if (!Save_WriteCompanionFile(path, bytes, sizeof(bytes), error)) return false;
   s_runtime.town_visit_dirty = false;
-  fprintf(stderr, "[world-resume] saved town=%u to %s\n", s_runtime.last_town, path);
+  RuntimeLog_Printf("[world-resume] saved town=%u to %s\n", s_runtime.last_town, path);
   return true;
 }
 
@@ -839,7 +840,7 @@ bool SaveSystem_MigrateLegacyNative(const char *legacy_path,
                                      ValidatePayload, &s_runtime.commit_host, error);
   free(legacy);
   if (!migrated) return false;
-  fprintf(stderr, "[saves] migrated legacy %s -> %s (%s backend)\n",
+  RuntimeLog_Printf("[saves] migrated legacy %s -> %s (%s backend)\n",
           legacy_path, active_path,
           s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm");
   return true;
@@ -972,7 +973,7 @@ bool SaveSystem_LoadActive(SaveError *error) {
       s_runtime.localized_name_valid = false;
       s_runtime.localized_name_dirty = false;
       SaveSystem_ResyncShadow();
-      fprintf(stderr, "[saves] %s backend: no existing %s; using fresh SRAM\n",
+      RuntimeLog_Printf("[saves] %s backend: no existing %s; using fresh SRAM\n",
               s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm",
               path);
       return true;
@@ -995,7 +996,7 @@ bool SaveSystem_LoadActive(SaveError *error) {
   s_runtime.native_write_aborted = false;
   NotifyReload();
   SaveSystem_ResyncShadow();
-  fprintf(stderr, "[saves] loaded %s backend from %s\n",
+  RuntimeLog_Printf("[saves] loaded %s backend from %s\n",
           s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm", path);
   return true;
 }
@@ -1058,7 +1059,7 @@ bool SaveSystem_AutoPersistIfChanged(SaveError *error) {
     return CommitImage(&request, error);
   }
   if (!SaveSystem_WriteActive(error)) return false;
-  fprintf(stderr, "[saves] battery SRAM changed -> wrote %s\n", ActivePath());
+  RuntimeLog_Printf("[saves] battery SRAM changed -> wrote %s\n", ActivePath());
   return true;
 }
 
@@ -1092,7 +1093,7 @@ bool SaveSystem_EndNativeWrite(bool completed, SaveError *error) {
   snprintf(s_runtime.story_name, sizeof(s_runtime.story_name), "%s",
            s_runtime.story_name_valid ? s_runtime.localized_name : "");
   s_runtime.story_pending = true;
-  fprintf(stderr, "[saves] native story transaction completed\n");
+  RuntimeLog_Printf("[saves] native story transaction completed\n");
   return true;
 }
 
@@ -1119,7 +1120,7 @@ bool SaveSystem_ExportToLibrary(SaveFileFormat format,bool campaign,SaveError *e
   if(!SavePaths_Export(&s_runtime.paths,extension,path,sizeof(path),error))return false;
   bool ok=campaign?SaveSystem_ExportCampaign(path,error):SaveSystem_Export(format,path,error);
   SavePaths_Release(path);
-  if(ok)fprintf(stderr,"[saves] export -> %s\n",path);
+  if(ok)RuntimeLog_Printf("[saves] export -> %s\n",path);
   return ok;
 }
 
@@ -1143,7 +1144,7 @@ static bool BackupActiveOnce(bool enabled, SaveError *error) {
     SavePaths_Release(backup);
     if(!ok)return false;
     s_runtime.backup_taken = true;
-    fprintf(stderr, "[saves] backup -> %s\n", backup);
+    RuntimeLog_Printf("[saves] backup -> %s\n", backup);
     return true;
   }
   time_t now = time(NULL);
@@ -1164,7 +1165,7 @@ static bool BackupActiveOnce(bool enabled, SaveError *error) {
   } while(ArchivePathExists(backup));
   if (!SaveSystem_ExportCampaign(backup, error)) return false;
   s_runtime.backup_taken = true;
-  fprintf(stderr, "[saves] backup -> %s\n", backup);
+  RuntimeLog_Printf("[saves] backup -> %s\n", backup);
   return true;
 }
 

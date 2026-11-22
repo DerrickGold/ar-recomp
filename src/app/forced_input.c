@@ -1,4 +1,5 @@
 #include "app/forced_input.h"
+#include "app/runtime_log.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -59,8 +60,7 @@ static void ParsePulseFrames(const char *list) {
     const long parsed = strtol(cursor, &end, 10);
     if (errno == ERANGE || end == cursor ||
         parsed < INT_MIN || parsed > INT_MAX) {
-      fprintf(stderr,
-              "[forced-input] invalid AR_FORCE_PULSES='%s' "
+      RuntimeLog_Printf("[forced-input] invalid AR_FORCE_PULSES='%s' "
               "(want comma-separated host frames)\n",
               list);
       s_pulse_count = 0;
@@ -72,8 +72,7 @@ static void ParsePulseFrames(const char *list) {
     while (isspace((unsigned char)*cursor)) cursor++;
     if (!*cursor) return;
     if (*cursor != ',') {
-      fprintf(stderr,
-              "[forced-input] invalid AR_FORCE_PULSES='%s' "
+      RuntimeLog_Printf("[forced-input] invalid AR_FORCE_PULSES='%s' "
               "(want comma-separated host frames)\n",
               list);
       s_pulse_count = 0;
@@ -84,8 +83,7 @@ static void ParsePulseFrames(const char *list) {
 
   while (isspace((unsigned char)*cursor)) cursor++;
   if (*cursor) {
-    fprintf(stderr,
-            "[forced-input] AR_FORCE_PULSES has more than %u entries; "
+    RuntimeLog_Printf("[forced-input] AR_FORCE_PULSES has more than %u entries; "
             "extra entries ignored\n",
             (unsigned)kMaximumPulseCount);
   }
@@ -102,8 +100,7 @@ void ForcedInput_Init(void) {
     if (!force_after[0]) {
       s_force_after_host_frame = 0;
     } else if (!ParseInt(force_after, 10, &s_force_after_host_frame)) {
-      fprintf(stderr,
-              "[forced-input] invalid AR_FORCE_INPUT_AFTER='%s' "
+      RuntimeLog_Printf("[forced-input] invalid AR_FORCE_INPUT_AFTER='%s' "
               "(want a host-frame number)\n",
               force_after);
       s_force_after_host_frame = -1;
@@ -116,8 +113,7 @@ void ForcedInput_Init(void) {
     if (!input_mask[0]) {
       s_forced_input_mask = 0;
     } else if (!ParseInputMask(input_mask, &s_forced_input_mask)) {
-      fprintf(stderr,
-              "[forced-input] invalid AR_FORCE_INPUT_MASK='%s' "
+      RuntimeLog_Printf("[forced-input] invalid AR_FORCE_INPUT_MASK='%s' "
               "(want a 32-bit integer)\n",
               input_mask);
       s_forced_input_mask = 1u << kInputAction_B;

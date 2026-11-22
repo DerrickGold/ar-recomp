@@ -1,4 +1,5 @@
 #include "dev/debug_state.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 
@@ -6,7 +7,7 @@
 
 bool DebugState_Apply(int command, int slot) {
   if (slot < 0 || slot > 99) {
-    fprintf(stderr, "[debug-state] rejected invalid slot %d (want 0..99)\n",
+    RuntimeLog_Printf("[debug-state] rejected invalid slot %d (want 0..99)\n",
             slot);
     return false;
   }
@@ -15,8 +16,7 @@ bool DebugState_Apply(int command, int slot) {
      * that continuation serializable. Native font mode is not a workaround.
      * Do not load first and then invalidate caches: that is already too late
      * to prevent RAM/stack disagreement, including pending native controls. */
-    fprintf(stderr,
-            "[debug-state] restore of slot %d rejected: snapshots do not "
+    RuntimeLog_Printf("[debug-state] restore of slot %d rejected: snapshots do not "
             "restore recompiled game execution. No state was changed. "
             "Use a battery save and input recording instead.\n",
             slot);
@@ -25,8 +25,7 @@ bool DebugState_Apply(int command, int slot) {
   if (command != kSaveLoad_Save)
     return false;
   RtlSaveLoad(kSaveLoad_Save, slot);
-  fprintf(stderr,
-          "[debug-state] snapshot capture requested for slot %d "
+  RuntimeLog_Printf("[debug-state] snapshot capture requested for slot %d "
           "(inspection only; not a resumable save state)\n",
           slot);
   return true;

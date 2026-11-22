@@ -1,4 +1,5 @@
 #include "app/scheduled_settings.h"
+#include "app/runtime_log.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -38,8 +39,7 @@ static bool ParseTargetGameFrame(const char *text, uint16_t *target) {
   const unsigned long parsed = strtoul(text, &end, 0);
   if (errno == ERANGE || end == text || *end != '\0' ||
       parsed > UINT16_MAX) {
-    fprintf(stderr,
-            "[settings] invalid AR_SETTING_AT_GF='%s' "
+    RuntimeLog_Printf("[settings] invalid AR_SETTING_AT_GF='%s' "
             "(want a 16-bit game frame)\n",
             text);
     return false;
@@ -59,8 +59,7 @@ static bool ParseSettingChange(ScheduledSetting *change,
   if (!equals || key_length == 0 ||
       key_length >= sizeof(change->key) ||
       value_length >= sizeof(change->value)) {
-    fprintf(stderr,
-            "[settings] invalid AR_SETTING_SET='%s' "
+    RuntimeLog_Printf("[settings] invalid AR_SETTING_SET='%s' "
             "(want key=value within %u/%u characters)\n",
             specification,
             (unsigned)(sizeof(change->key) - 1),
@@ -119,7 +118,7 @@ void ScheduledSettings_ApplyIfDue(void) {
     if (descriptor && descriptor->type == kSettingType_Action) {
       const bool invoked = !strcmp(change->value, "run") &&
           Settings_InvokeAction(descriptor);
-      fprintf(stderr, "[settings] gf=%u %s=%s -> %s action\n",
+      RuntimeLog_Printf("[settings] gf=%u %s=%s -> %s action\n",
               (unsigned)game_frame, change->key, change->value,
               invoked ? "applied" : "rejected");
       continue;
@@ -128,7 +127,7 @@ void ScheduledSettings_ApplyIfDue(void) {
         descriptor
             ? Settings_SetText(descriptor, change->value)
             : kSettingChange_Rejected;
-    fprintf(stderr, "[settings] gf=%u %s=%s -> %s%s\n",
+    RuntimeLog_Printf("[settings] gf=%u %s=%s -> %s%s\n",
             (unsigned)game_frame, change->key, change->value,
             Settings_ChangeResultName(result),
             descriptor ? "" : " (unknown key)");

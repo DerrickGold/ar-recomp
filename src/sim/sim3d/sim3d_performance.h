@@ -38,6 +38,7 @@ typedef struct Sim3DPerformanceScope {
 } Sim3DPerformanceScope;
 
 bool Sim3DPerformance_Enabled(void);
+bool Sim3DPerformance_LoggingEnabled(void);
 Sim3DPerformanceScope Sim3DPerformance_Begin(Sim3DPerformanceStage stage);
 void Sim3DPerformance_End(Sim3DPerformanceScope scope);
 

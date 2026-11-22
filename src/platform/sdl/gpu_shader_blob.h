@@ -14,6 +14,7 @@
 #define AR_GPU_SHADER_BLOB_H
 
 #include <SDL3/SDL.h>
+#include "app/runtime_log.h"
 #include <stdio.h>
 
 #include "render/gpu_compile_log.h"
@@ -72,7 +73,7 @@ static inline SDL_GPUShader *GpuShaderBlob_CreateWithStorage(
     info.format = SDL_GPU_SHADERFORMAT_MSL;
     info.entrypoint = "main0";
   } else {
-    fprintf(stderr, "[gpu-fx] no shader format in common with this backend "
+    RuntimeLog_Printf("[gpu-fx] no shader format in common with this backend "
                     "(it offers 0x%x, we ship SPIR-V + DXIL + MSL) — %s disabled\n",
             (unsigned)formats, label);
     return NULL;
@@ -86,7 +87,7 @@ static inline SDL_GPUShader *GpuShaderBlob_CreateWithStorage(
   SDL_GPUShader *shader = SDL_CreateGPUShader(device, &info);
   GpuCompileLog_Record(label, "shader", SDL_GetTicksNS() - started, shader != NULL);
   if (!shader)
-    fprintf(stderr, "[gpu-fx] %s shader compile failed (%s): %s\n", label,
+    RuntimeLog_Printf("[gpu-fx] %s shader compile failed (%s): %s\n", label,
             GpuShaderBlob_FormatName(info.format), SDL_GetError());
   return shader;
 }

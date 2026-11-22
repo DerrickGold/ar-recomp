@@ -1,4 +1,5 @@
 #include "host/xbox_usb_gamepad.h"
+#include "app/runtime_log.h"
 
 #if defined(AR_XBOX_USB_BRIDGE)
 #include "xbox_sdl.h"
@@ -16,8 +17,8 @@ void HostXboxUsbGamepad_Start(void) {
   if (enabled && !strcmp(enabled, "0")) return;
   char error[256];
   s_bridge = xbox_sdl_start(error, sizeof error);
-  if (!s_bridge) fprintf(stderr, "[input] Xbox USB bridge unavailable: %s\n", error);
-  else fprintf(stderr, "[input] Xbox USB bridge enabled for 045e:02d1\n");
+  if (!s_bridge) RuntimeLog_Printf("[input] Xbox USB bridge unavailable: %s\n", error);
+  else RuntimeLog_Printf("[input] Xbox USB bridge enabled for 045e:02d1\n");
 }
 
 void HostXboxUsbGamepad_Update(void) {
@@ -25,7 +26,7 @@ void HostXboxUsbGamepad_Update(void) {
   char error[256];
   if (xbox_sdl_update(s_bridge, error, sizeof error) < 0) {
     if (strcmp(s_last_error, error)) {
-      fprintf(stderr, "[input] Xbox USB bridge: %s\n", error);
+      RuntimeLog_Printf("[input] Xbox USB bridge: %s\n", error);
       snprintf(s_last_error, sizeof s_last_error, "%s", error);
     }
   } else s_last_error[0] = 0;

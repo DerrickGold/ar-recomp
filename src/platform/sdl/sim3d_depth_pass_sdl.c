@@ -5,6 +5,7 @@
  * Phase: present (render owner thread).
  * Tests: tests/sim3d_depth_pass_gpu_test.c */
 #include "platform/sdl/sim3d_depth_pass_sdl_internal.h"
+#include "app/runtime_log.h"
 bool IsModelMesh(Sim3DMeshKind kind) {
 #if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
   return kind == kMeshModel || kind == kMeshModelClipped;
@@ -216,7 +217,7 @@ static bool UploadAtlasRegions(
   uint8_t *mapped = SDL_MapGPUTransferBuffer(
       g_depth_pass.device, atlas->transfer, true);
   if (!mapped) {
-    fprintf(stderr, "[sim3d-depth] material atlas upload allocation failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] material atlas upload allocation failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -280,7 +281,7 @@ static bool UploadAtlasRegions(
   }
   SDL_EndGPUCopyPass(copy);
   if (!SDL_SubmitGPUCommandBuffer(commands)) {
-    fprintf(stderr, "[sim3d-depth] material atlas upload submission failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] material atlas upload submission failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -432,7 +433,7 @@ static bool EnsureGpuBuffers(Uint32 vertex_count) {
   const Uint32 maximum_vertices =
       UINT32_MAX / (Uint32)sizeof(Sim3DGpuVertex);
   if (vertex_count > maximum_vertices) {
-    fprintf(stderr, "[sim3d-depth] geometry buffer exceeds GPU size limit\n");
+    RuntimeLog_Printf("[sim3d-depth] geometry buffer exceeds GPU size limit\n");
     return false;
   }
   Uint32 capacity = g_depth_pass.gpu_vertex_capacity
@@ -474,7 +475,7 @@ static bool EnsureGpuBuffers(Uint32 vertex_count) {
           g_depth_pass.device, &index_transfer_info);
   if (!vertex_buffer || !transfer_buffer || !index_buffer ||
       !index_transfer_buffer) {
-    fprintf(stderr, "[sim3d-depth] geometry buffer creation failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] geometry buffer creation failed: %s\n",
             SDL_GetError());
     if (vertex_buffer)
       SDL_ReleaseGPUBuffer(g_depth_pass.device, vertex_buffer);
@@ -490,7 +491,7 @@ static bool EnsureGpuBuffers(Uint32 vertex_count) {
   Uint32 *indices = SDL_MapGPUTransferBuffer(
       g_depth_pass.device, index_transfer_buffer, false);
   if (!indices) {
-    fprintf(stderr, "[sim3d-depth] index staging map failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] index staging map failed: %s\n",
             SDL_GetError());
     SDL_ReleaseGPUBuffer(g_depth_pass.device, vertex_buffer);
     SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer_buffer);
@@ -709,13 +710,13 @@ ArRenderTexture Sim3DDepthPass_Submit(
     return ArRenderTexture_Invalid();
   g_depth_pass.collecting = false;
   if (g_depth_pass.geometry_failed) {
-    fprintf(stderr, "[sim3d-depth] geometry collection failed or a queued mesh was invalidated\n");
+    RuntimeLog_Printf("[sim3d-depth] geometry collection failed or a queued mesh was invalidated\n");
     return ArRenderTexture_Invalid();
   }
   Uint32 total = 0;
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (g_depth_pass.lists[i].count > UINT32_MAX - total) {
-      fprintf(stderr, "[sim3d-depth] geometry vertex count overflow\n");
+      RuntimeLog_Printf("[sim3d-depth] geometry vertex count overflow\n");
       return ArRenderTexture_Invalid();
     }
     total += g_depth_pass.lists[i].count;
@@ -733,7 +734,7 @@ ArRenderTexture Sim3DDepthPass_Submit(
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (!g_depth_pass.lists[i].count) continue;
     if (!TextureForLayer((Sim3DDepthPassLayer)i, native_shadow)) {
-      fprintf(stderr, "[sim3d-depth] material layer %d has no GPU texture\n",
+      RuntimeLog_Printf("[sim3d-depth] material layer %d has no GPU texture\n",
               i);
       return ArRenderTexture_Invalid();
     }
@@ -742,7 +743,7 @@ ArRenderTexture Sim3DDepthPass_Submit(
   Sim3DGpuVertex *mapped = total ? SDL_MapGPUTransferBuffer(
       g_depth_pass.device, g_depth_pass.transfer_buffer, true) : NULL;
   if (total && !mapped) {
-    fprintf(stderr, "[sim3d-depth] geometry upload map failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] geometry upload map failed: %s\n",
             SDL_GetError());
     return ArRenderTexture_Invalid();
   }
@@ -1102,7 +1103,7 @@ ArRenderTexture Sim3DDepthPass_Submit(
   }
   SDL_EndGPURenderPass(pass);
   if (!SDL_SubmitGPUCommandBuffer(commands)) {
-    fprintf(stderr, "[sim3d-depth] command submission failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] command submission failed: %s\n",
             SDL_GetError());
     return ArRenderTexture_Invalid();
   }

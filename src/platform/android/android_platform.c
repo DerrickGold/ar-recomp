@@ -4,7 +4,9 @@
 
 #include <android/log.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,13 +66,14 @@ static char *ReadSmallFile(const char *path) {
   return text;
 }
 
+static void StartConsoleLogcat(void);
+
 bool AndroidPlatform_PrepareStorage(char *rom_path, size_t rom_path_size) {
   /* Touches drive the on-screen controls; do not also synthesize mouse
    * clicks, which the desktop path uses for camera drags. */
   SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
   SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
-  /* Until RunDirInit picks a log file, stdout/stderr would go nowhere. */
-  AndroidPlatform_TeeConsole(NULL);
+  StartConsoleLogcat();
 
   const char *base = SDL_GetAndroidExternalStoragePath();
   if (!base || !*base) base = SDL_GetAndroidInternalStoragePath();
@@ -153,19 +156,14 @@ int AndroidPlatform_RunWithDesktopStack(int (*entry)(int, char **), int argc,
   return call.result;
 }
 
-typedef struct ConsoleTee {
-  int read_fd;
-  FILE *log;
-} ConsoleTee;
-
-static void *ConsoleTeeThread(void *argument) {
-  ConsoleTee *tee = argument;
+static void *ConsoleLogcatThread(void *argument) {
+  const int fd = (int)(intptr_t)argument;
   char buffer[2048];
   size_t used = 0;
   for (;;) {
-    ssize_t n = read(tee->read_fd, buffer + used, sizeof buffer - 1 - used);
+    const ssize_t n = read(fd, buffer + used, sizeof(buffer) - 1 - used);
+    if (n < 0 && errno == EINTR) continue;
     if (n <= 0) break;
-    if (tee->log) { fwrite(buffer + used, 1, (size_t)n, tee->log); fflush(tee->log); }
     used += (size_t)n;
     buffer[used] = 0;
     char *start = buffer;
@@ -176,30 +174,35 @@ static void *ConsoleTeeThread(void *argument) {
       start = newline + 1;
     }
     used = strlen(start);
-    if (used == sizeof buffer - 1) {   /* overlong line: flush as-is */
+    if (used == sizeof(buffer) - 1) {
       __android_log_write(ANDROID_LOG_INFO, kLogTag, start);
       used = 0;
     } else {
-      memmove(buffer, start, used);
+      memmove(buffer, start, used + 1);
     }
   }
+  if (used) __android_log_write(ANDROID_LOG_INFO, kLogTag, buffer);
+  close(fd);
   return NULL;
 }
 
-void AndroidPlatform_TeeConsole(const char *log_path) {
-  static ConsoleTee tee;
+static void StartConsoleLogcat(void) {
+  static bool started;
+  if (started) return;
   int fds[2];
   if (pipe(fds) != 0) return;
-  tee.read_fd = fds[0];
-  tee.log = log_path ? fopen(log_path, "w") : NULL;
-  fflush(stdout);
-  fflush(stderr);
+  pthread_t thread;
+  if (fcntl(fds[1], F_SETFL, O_NONBLOCK) < 0 ||
+      pthread_create(&thread, NULL, ConsoleLogcatThread, (void *)(intptr_t)fds[0]) != 0) {
+    close(fds[0]);
+    close(fds[1]);
+    return;
+  }
+  pthread_detach(thread);
+  started = true;
   dup2(fds[1], STDOUT_FILENO);
   dup2(fds[1], STDERR_FILENO);
   close(fds[1]);
-  pthread_t thread;
-  if (pthread_create(&thread, NULL, ConsoleTeeThread, &tee) == 0)
-    pthread_detach(thread);
 }
 
 #endif /* __ANDROID__ */

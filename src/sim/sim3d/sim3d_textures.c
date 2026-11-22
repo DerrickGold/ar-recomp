@@ -1,4 +1,5 @@
 #include "sim/sim3d/sim3d_textures.h"
+#include "app/runtime_log.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -59,8 +60,7 @@ void Sim3DTextures_Create(ArRenderDevice *device) {
         device, s_atlas, NULL,
         g_sim_obj_atlas_pixels, kSimObjAtlasPitch);
   } else {
-    fprintf(stderr,
-            "[sim3d-d1] semantic atlas texture unavailable: %s\n",
+    RuntimeLog_Printf("[sim3d-d1] semantic atlas texture unavailable: %s\n",
             ArRenderDevice_LastError(device));
   }
 
@@ -94,8 +94,7 @@ void Sim3DTextures_Create(ArRenderDevice *device) {
           device, &sim_flat_texture, &s_flat))
     s_ready = false;
   if (!s_ready) {
-    fprintf(stderr,
-            "[sim3d-d2] capture textures unavailable: %s\n",
+    RuntimeLog_Printf("[sim3d-d2] capture textures unavailable: %s\n",
             ArRenderDevice_LastError(device));
     for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
       ArRenderDevice_DestroyTexture(

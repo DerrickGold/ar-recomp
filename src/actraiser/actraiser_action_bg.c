@@ -1,4 +1,5 @@
 #include "diorama/diorama_camera_policy.h"
+#include "app/runtime_log.h"
 #include "actraiser_action_bg.h"
 #include "diorama/diorama_scene_extent.h"
 
@@ -605,8 +606,7 @@ static bool CompareEnabled(void) {
     const char *value = getenv("AR_ACTION_BG_HLE_COMPARE");
     s_observer.enabled = value && value[0] && value[0] != '0';
     if (s_observer.enabled)
-      fprintf(stderr,
-              "[action-bg-hle] differential observer enabled\n");
+      RuntimeLog_Printf("[action-bg-hle] differential observer enabled\n");
   }
   return s_observer.enabled != 0;
 }
@@ -620,11 +620,9 @@ bool ActRaiserActionBg_HleEnabled(void) {
      * explicit-on spelling for older harnesses. */
     s_observer.hle_enabled = !value || !value[0] || value[0] != '0';
     if (s_observer.hle_enabled)
-      fprintf(stderr,
-              "[action-bg-hle] full world-layer provider enabled\n");
+      RuntimeLog_Printf("[action-bg-hle] full world-layer provider enabled\n");
     else
-      fprintf(stderr,
-              "[action-bg-hle] provider disabled by AR_ACTION_BG_HLE=0\n");
+      RuntimeLog_Printf("[action-bg-hle] provider disabled by AR_ACTION_BG_HLE=0\n");
   }
   return s_observer.hle_enabled != 0;
 }
@@ -635,8 +633,7 @@ static bool RoomSceneCompareEnabled(void) {
     s_observer.room_scene_compare_enabled =
         value && value[0] && value[0] != '0';
     if (s_observer.room_scene_compare_enabled)
-      fprintf(stderr,
-              "[action-room-scene] immutable/live comparison enabled\n");
+      RuntimeLog_Printf("[action-room-scene] immutable/live comparison enabled\n");
   }
   return s_observer.room_scene_compare_enabled != 0;
 }
@@ -647,8 +644,7 @@ static bool RoomSceneStageCompareEnabled(void) {
     s_observer.room_scene_stage_compare_enabled =
         value && value[0] && value[0] != '0';
     if (s_observer.room_scene_stage_compare_enabled)
-      fprintf(stderr,
-              "[action-room-stage] native WRAM comparison enabled\n");
+      RuntimeLog_Printf("[action-room-stage] native WRAM comparison enabled\n");
   }
   return s_observer.room_scene_stage_compare_enabled != 0;
 }
@@ -659,11 +655,9 @@ static bool RoomSceneHleEnabled(void) {
     s_observer.room_scene_hle_enabled =
         !value || !value[0] || value[0] != '0';
     if (s_observer.room_scene_hle_enabled)
-      fprintf(stderr,
-              "[action-room-scene] ROM-derived world source enabled\n");
+      RuntimeLog_Printf("[action-room-scene] ROM-derived world source enabled\n");
     else
-      fprintf(stderr,
-              "[action-room-scene] ROM-derived world source disabled by "
+      RuntimeLog_Printf("[action-room-scene] ROM-derived world source disabled by "
               "AR_ACTION_ROOM_SCENE_HLE=0\n");
   }
   return s_observer.room_scene_hle_enabled != 0;
@@ -780,7 +774,7 @@ static void CollectVoxelPrebuild(void) {
   const bool already_compiled_live = VoxelRoomVariantMatches(resident,
       entry->group, entry->room, entry->profile, entry->mosaic) && resident->from_live;
   if (entry->geometry && !already_compiled_live) {
-    fprintf(stderr, "[voxel-room-prebuild] ready map=%02x/%02x\n", entry->group, entry->room);
+    RuntimeLog_Printf("[voxel-room-prebuild] ready map=%02x/%02x\n", entry->group, entry->room);
     PublishVoxelRoomBuild(entry);
   } else {
     DestroyVoxelRoomBuild(entry);
@@ -818,7 +812,7 @@ void ActRaiserActionBg_RequestVoxelPrebuild(uint8_t group, uint8_t room,
   s_voxel_prebuild.rom = s_observer.rom;
   s_voxel_prebuild.rom_size = s_observer.rom_size;
   s_voxel_prebuild.job = entry;
-  fprintf(stderr, "[voxel-room-prebuild] queued map=%02x/%02x terrain=%u mosaic=%u\n",
+  RuntimeLog_Printf("[voxel-room-prebuild] queued map=%02x/%02x terrain=%u mosaic=%u\n",
       group, room, profile, mosaic);
   atomic_store_explicit(&s_voxel_prebuild.state, kVoxelPrebuildPending, memory_order_release);
   if (!s_voxel_prebuild.wake(s_voxel_prebuild.wake_context)) {
@@ -966,17 +960,17 @@ static void RecordFallback(ActRaiserActionBgFallbackReason reason,
   s_observer.diagnostics.fallbacks[reason]++;
   if (s_observer.reported_fallback[reason]) return;
   s_observer.reported_fallback[reason] = true;
-  fprintf(stderr,
-          "[action-bg-hle] fallback=%s map=%02X/%02X BG%u",
-          FallbackName(reason), map_group, map_number, layer + 1);
-  if (snapshot) {
-    fprintf(stderr,
-            " size=%ux%u map=$%04X table=$%04X tilemap=$%04X bgsc=$%02X",
+  if (snapshot)
+    RuntimeLog_Printf(
+            "[action-bg-hle] fallback=%s map=%02X/%02X BG%u "
+            "size=%ux%u map=$%04X table=$%04X tilemap=$%04X bgsc=$%02X\n",
+            FallbackName(reason), map_group, map_number, layer + 1,
             snapshot->decode.world_width, snapshot->decode.world_height,
             snapshot->decode.map_page, snapshot->decode.metatile_table,
             snapshot->tilemap_base, snapshot->bgsc);
-  }
-  fputc('\n', stderr);
+  else
+    RuntimeLog_Printf("[action-bg-hle] fallback=%s map=%02X/%02X BG%u\n",
+                     FallbackName(reason), map_group, map_number, layer + 1);
 }
 
 /* The optional comparator observes the same preconditions later in the frame.
@@ -1019,8 +1013,7 @@ static bool EnsureRoomScene(uint8_t map_group, uint8_t map_number) {
       (s_observer.mosaic_pattern &&
        !ActionRoomMosaic_Project(s_observer.room_scene,s_observer.mosaic_pattern))) {
     s_observer.diagnostics.room_scene_load_failures++;
-    fprintf(stderr,
-            "[action-room-scene] load failed map=%02X/%02X\n",
+    RuntimeLog_Printf("[action-room-scene] load failed map=%02X/%02X\n",
             map_group, map_number);
     return false;
   }
@@ -1218,20 +1211,17 @@ static void CompareRoomSceneStageOnce(
       const char *field = stage.first_field <
               kActRaiserActionRoomStageField_Count
           ? kStageFields[stage.first_field] : "unknown";
-      fprintf(stderr,
-              "[action-room-stage] MISMATCH map=%02X/%02X BG%u "
+      RuntimeLog_Printf("[action-room-stage] MISMATCH map=%02X/%02X BG%u "
               "count=%zu/%zu first=%s+$%zX immutable=$%02X live=$%02X\n",
               map_group, map_number, bg_layer, stage.mismatches,
               stage.compared, field, stage.first_offset,
               stage.first_immutable, stage.first_live);
     } else {
-      fprintf(stderr,
-              "[action-room-stage] match map=%02X/%02X BG%u bytes=%zu\n",
+      RuntimeLog_Printf("[action-room-stage] match map=%02X/%02X BG%u bytes=%zu\n",
               map_group, map_number, bg_layer, stage.compared);
     }
   } else {
-    fprintf(stderr,
-            "[action-room-stage] comparison failed map=%02X/%02X BG%u\n",
+    RuntimeLog_Printf("[action-room-stage] comparison failed map=%02X/%02X BG%u\n",
             map_group, map_number, bg_layer);
   }
 }
@@ -1252,8 +1242,7 @@ static void CompareRoomSceneWorld(unsigned layer, uint8_t map_group,
   ActRaiserActionRoomSceneCompareResult comparison;
   if (!ActRaiserActionBg_CompareRoomSceneLayer(
           s_observer.room_scene, bg_layer, world, &comparison)) {
-    fprintf(stderr,
-            "[action-room-scene] shape mismatch map=%02X/%02X BG%u "
+    RuntimeLog_Printf("[action-room-scene] shape mismatch map=%02X/%02X BG%u "
             "profile=%d immutable=%ux%u live=%ux%u\n",
             map_group, map_number, bg_layer,
             s_observer.room_scene->have_video_profile
@@ -1267,8 +1256,7 @@ static void CompareRoomSceneWorld(unsigned layer, uint8_t map_group,
   s_observer.diagnostics.room_scene_tiles_compared += comparison.compared;
   s_observer.diagnostics.room_scene_mismatches += comparison.mismatches;
   if (comparison.mismatches) {
-    fprintf(stderr,
-            "[action-room-scene] MISMATCH map=%02X/%02X BG%u "
+    RuntimeLog_Printf("[action-room-scene] MISMATCH map=%02X/%02X BG%u "
             "serial=%u count=%zu/%zu first=(%d,%d) immutable=$%04X "
             "live=$%04X\n",
             map_group, map_number, bg_layer, serial,
@@ -1276,8 +1264,7 @@ static void CompareRoomSceneWorld(unsigned layer, uint8_t map_group,
             comparison.first_tile_x, comparison.first_tile_y,
             comparison.first_immutable, comparison.first_live);
   } else {
-    fprintf(stderr,
-            "[action-room-scene] match map=%02X/%02X BG%u "
+    RuntimeLog_Printf("[action-room-scene] match map=%02X/%02X BG%u "
             "profile=$%02X serial=%u tiles=%zu\n",
             map_group, map_number, bg_layer,
             s_observer.room_scene->video_profile_index, serial,
@@ -1468,12 +1455,12 @@ static const ActionVoxelGeometry *FindVoxelRoomBuild(const ActionRoomScene *scen
   const bool same_tiles = same_edits &&
       !memcmp(entry->tiles, tiles, tile_count * sizeof(*tiles));
   if (!same_tiles || (ActionVoxel_HasCutouts(entry->geometry) && !CaptureMasksSupported())) {
-    fprintf(stderr, "[voxel-room-prebuild] fallback map=%02x/%02x scene=%d edits=%d tiles=%d\n",
+    RuntimeLog_Printf("[voxel-room-prebuild] fallback map=%02x/%02x scene=%d edits=%d tiles=%d\n",
         group, room, same_scene, same_edits, same_tiles);
     return NULL;
   }
   entry->last_used = ++s_voxel_room_use;
-  fprintf(stderr, "[voxel-room-prebuild] match map=%02x/%02x source=%s\n",
+  RuntimeLog_Printf("[voxel-room-prebuild] match map=%02x/%02x source=%s\n",
       group, room, entry->from_live ? "live" : "rom");
   return ActionVoxel_Retain(entry->geometry);
 }
@@ -1952,8 +1939,7 @@ void ActRaiserActionBg_ObserveRoomSceneFrameLine(
       s_observer.room_frame_uses_previous = true;
       s_observer.diagnostics.room_scene_raster_hold_frames++;
       if (RoomSceneCompareVerbose()) {
-        fprintf(stderr,
-                "[action-room-scene] raster-hold map=%02X/%02X frame=%u "
+        RuntimeLog_Printf("[action-room-scene] raster-hold map=%02X/%02X frame=%u "
                 "row=%u previous-frame=%u "
                 "camera={current:$%04X,raster:$%04X,prior:$%04X}\n",
                 s_observer.map_group, s_observer.map_number,
@@ -2007,8 +1993,7 @@ void ActRaiserActionBg_ObserveRoomSceneFrameLine(
   const char *field = comparison.first_field <
       kActRaiserActionRoomSceneFrameField_Count
       ? names[comparison.first_field] : "unknown";
-  fprintf(stderr,
-          "[action-room-scene] FRAME-MISMATCH map=%02X/%02X frame=%u "
+  RuntimeLog_Printf("[action-room-scene] FRAME-MISMATCH map=%02X/%02X frame=%u "
           "row=%u field=%s immutable=$%04X live=$%04X "
           "camera={current:$%04X,raster:$%04X,prior:$%04X}\n",
           s_observer.map_group, s_observer.map_number,
@@ -2618,8 +2603,7 @@ static void ReportComparison(
   if (comparison->outside_world &&
       reported_outside_serial[layer] != serial) {
     reported_outside_serial[layer] = serial;
-    fprintf(stderr,
-            "[action-bg-hle] finite-edge gf=%u map=%02X/%02X BG%u "
+    RuntimeLog_Printf("[action-bg-hle] finite-edge gf=%u map=%02X/%02X BG%u "
             "serial=%u count=%zu first=(%d,%d) camera=(%u,%u) "
             "world=%ux%u\n",
             ReadWram16(wram, kActRaiserWram_GameFrame),
@@ -2633,8 +2617,7 @@ static void ReportComparison(
   if (comparison->mismatches &&
       reported_mismatch_serial[layer] != serial) {
     reported_mismatch_serial[layer] = serial;
-    fprintf(stderr,
-            "[action-bg-hle] MISMATCH gf=%u map=%02X/%02X BG%u "
+    RuntimeLog_Printf("[action-bg-hle] MISMATCH gf=%u map=%02X/%02X BG%u "
             "serial=%u count=%zu/%zu first=(%d,%d) "
             "hle=$%04X native=$%04X\n",
             ReadWram16(wram, kActRaiserWram_GameFrame),
@@ -2826,8 +2809,7 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
       s_observer.diagnostics.room_scene_hle_fallbacks++;
       if (!s_observer.reported_room_scene_hle_fallback[layer]) {
         s_observer.reported_room_scene_hle_fallback[layer] = true;
-        fprintf(stderr,
-                "[action-room-scene] provider fallback map=%02X/%02X "
+        RuntimeLog_Printf("[action-room-scene] provider fallback map=%02X/%02X "
                 "BG%u; retaining live WRAM source\n",
                 map_group, map_number, layer + 1u);
       }
@@ -2889,8 +2871,7 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
         virtual_layer_classified && CompileTileBandCache(&s_provider[layer]);
     if (virtual_layer_classified && !tile_band_cache_ready &&
         !s_provider[layer].reported_tile_band_cache_failure) {
-      fprintf(stderr,
-              "[action-bg-hle] map=%02X/%02X BG%u virtual-layer band "
+      RuntimeLog_Printf("[action-bg-hle] map=%02X/%02X BG%u virtual-layer band "
               "cache unavailable; using authentic priority bands\n",
               map_group, map_number, layer + 1u);
       s_provider[layer].reported_tile_band_cache_failure = true;
@@ -3062,8 +3043,7 @@ const ActRaiserActionBgDiagnostics *ActRaiserActionBg_GetDiagnostics(void) {
 
 void ActRaiserActionBg_Shutdown(void) {
   if (s_observer.enabled > 0 && s_observer.diagnostics.frames_observed) {
-    fprintf(stderr,
-            "[action-bg-hle] summary frames=%" PRIu64
+    RuntimeLog_Printf("[action-bg-hle] summary frames=%" PRIu64
             " activations=%" PRIu64 " layers=%" PRIu64
             " tiles=%" PRIu64 " mismatches=%" PRIu64
             " outside=%" PRIu64
@@ -3099,8 +3079,7 @@ void ActRaiserActionBg_Shutdown(void) {
   }
   if (s_observer.hle_enabled > 0 &&
       s_observer.diagnostics.provider_frames) {
-    fprintf(stderr,
-            "[action-bg-hle] provider-summary frames=%" PRIu64
+    RuntimeLog_Printf("[action-bg-hle] provider-summary frames=%" PRIu64
             " preflight={layers:%" PRIu64 ",tiles:%" PRIu64
             ",mismatches:%" PRIu64 ",outside:%" PRIu64 "}"
             " eligible=%" PRIu64 " layers=%" PRIu64
@@ -3122,8 +3101,7 @@ void ActRaiserActionBg_Shutdown(void) {
             s_observer.diagnostics.provider_tile_band_cache_hits);
   }
   if (s_observer.room_scene_compare_enabled > 0) {
-    fprintf(stderr,
-            "[action-room-scene] summary loads=%" PRIu64
+    RuntimeLog_Printf("[action-room-scene] summary loads=%" PRIu64
             " load-failures=%" PRIu64 " layers=%" PRIu64
             " tiles=%" PRIu64 " mismatches=%" PRIu64
             " frames=%" PRIu64 " raster-holds=%" PRIu64
@@ -3139,8 +3117,7 @@ void ActRaiserActionBg_Shutdown(void) {
             s_observer.diagnostics.room_scene_scanlines_compared,
             s_observer.diagnostics.room_scene_registers_compared,
             s_observer.diagnostics.room_scene_register_mismatches);
-    fprintf(stderr,
-            "[action-room-scene] mismatch-fields="
+    RuntimeLog_Printf("[action-room-scene] mismatch-fields="
             "{BG1HOFS:%" PRIu64 ",BG1VOFS:%" PRIu64
             ",BG2HOFS:%" PRIu64 ",BG2VOFS:%" PRIu64
             ",MOSAIC:%" PRIu64 ",TM:%" PRIu64 ",TS:%" PRIu64
@@ -3178,16 +3155,14 @@ void ActRaiserActionBg_Shutdown(void) {
                 kActRaiserActionRoomSceneFrameField_Bg2Sc]);
   }
   if (s_observer.room_scene_stage_compare_enabled > 0) {
-    fprintf(stderr,
-            "[action-room-stage] summary layers=%" PRIu64
+    RuntimeLog_Printf("[action-room-stage] summary layers=%" PRIu64
             " bytes=%" PRIu64 " mismatches=%" PRIu64 "\n",
             s_observer.diagnostics.room_scene_stage_layers_compared,
             s_observer.diagnostics.room_scene_stage_bytes_compared,
             s_observer.diagnostics.room_scene_stage_mismatches);
   }
   if (s_observer.room_scene_hle_enabled > 0) {
-    fprintf(stderr,
-            "[action-room-scene] provider-summary layers=%" PRIu64
+    RuntimeLog_Printf("[action-room-scene] provider-summary layers=%" PRIu64
             " live-fallbacks=%" PRIu64 "\n",
             s_observer.diagnostics.room_scene_hle_layers,
             s_observer.diagnostics.room_scene_hle_fallbacks);

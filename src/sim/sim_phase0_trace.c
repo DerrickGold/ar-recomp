@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "sim/sim_phase0_trace.h"
 
@@ -53,10 +54,10 @@ bool SimPhase0Trace_Open(const char *path) {
   if (!path || !path[0]) return false;
   s_sim_phase0_trace = sr_fopen(path, "w");
   if (!s_sim_phase0_trace) {
-    fprintf(stderr, "[sim3d-phase0] cannot open %s\n", path);
+    RuntimeLog_Printf("[sim3d-phase0] cannot open %s\n", path);
     return false;
   }
-  fprintf(stderr, "[sim3d-phase0] state trace -> %s\n", path);
+  RuntimeLog_Printf("[sim3d-phase0] state trace -> %s\n", path);
   return true;
 }
 
@@ -67,10 +68,10 @@ void SimPhase0Trace_InitFromEnvironment(void) {
   if (!path || !path[0]) return;
   s_sim_phase0_trace = sr_fopen(path, "w");
   if (!s_sim_phase0_trace) {
-    fprintf(stderr, "[sim3d-phase0] cannot open %s\n", path);
+    RuntimeLog_Printf("[sim3d-phase0] cannot open %s\n", path);
     return;
   }
-  fprintf(stderr, "[sim3d-phase0] state trace -> %s\n", path);
+  RuntimeLog_Printf("[sim3d-phase0] state trace -> %s\n", path);
 }
 
 static void WriteCaptureArray(FILE *out, const SrPpuFrameSnapshot *frame) {

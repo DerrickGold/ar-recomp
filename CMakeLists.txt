@@ -494,6 +494,7 @@ else()
 endif()
 
 target_compile_definitions(ActRaiserRecomp PRIVATE
+    AR_ASYNC_RUNTIME_LOG=1
     SYSTEM_VOLUME_MIXER_AVAILABLE=0
     SNESRECOMP_TRACE=${_SNESRECOMP_TRACE}
     SNESRECOMP_TRACE_RECORDER=${_SNESRECOMP_TRACE_RECORDER}
@@ -1736,6 +1737,28 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_render_upload_metrics_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_render_upload_metrics_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_render_upload_metrics COMMAND actraiser_render_upload_metrics_test)
+
+    add_executable(actraiser_diagnostic_writer_test
+        tests/diagnostic_writer_test.c src/platform/sdl/diagnostic_writer_sdl.c
+        src/app/frame_trace.c)
+    target_include_directories(actraiser_diagnostic_writer_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diagnostic_writer_test PRIVATE SDL3::SDL3)
+    add_test(NAME actraiser_diagnostic_writer COMMAND ${CMAKE_COMMAND}
+        -DTEST_EXECUTABLE=$<TARGET_FILE:actraiser_diagnostic_writer_test>
+        -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/diagnostic-writer-fixture
+        -P ${CMAKE_SOURCE_DIR}/tests/native_temp_fixture.cmake)
+    set_tests_properties(actraiser_diagnostic_writer PROPERTIES TIMEOUT 10)
+
+    add_executable(actraiser_run_retention_test
+        tests/run_retention_test.c src/app/run_retention.c)
+    target_include_directories(actraiser_run_retention_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_run_retention_test PRIVATE SDL3::SDL3)
+    add_test(NAME actraiser_run_retention COMMAND ${CMAKE_COMMAND}
+        -DTEST_EXECUTABLE=$<TARGET_FILE:actraiser_run_retention_test>
+        -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/retention-fixture
+        -P ${CMAKE_SOURCE_DIR}/tests/native_temp_fixture.cmake)
 
     add_executable(actraiser_gpu_texture_upload_layout_test tests/gpu_texture_upload_layout_test.c)
     target_include_directories(actraiser_gpu_texture_upload_layout_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -4439,6 +4462,7 @@ if(BUILD_TESTING)
         src/platform/sdl/action_scene_pass_sdl.c
         src/render/gpu_compile_log.c
         src/platform/sdl/diorama_frame_generation_sdl.c
+        src/app/frame_trace.c src/platform/sdl/diagnostic_writer_sdl.c
         src/platform/sdl/action_effect_source_sdl.c
         src/platform/sdl/gpu_block_motion_sdl.c
         src/platform/sdl/gpu_global_motion_sdl.c

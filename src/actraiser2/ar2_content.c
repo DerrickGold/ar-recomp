@@ -1,4 +1,5 @@
 #include "actraiser2/ar2_content.h"
+#include "app/runtime_log.h"
 #include "actraiser2/ar2_scenes.h"
 #include "actraiser/actraiser_ar2_master_assets.h"
 #include "snesrecomp/support/utf8_fs.h"
@@ -42,10 +43,10 @@ void Ar2Content_Load(void) {
     valid = s_atlas && Ar2WorldAtlas_Decode(s_atlas, rom, size);
   }
   if (!valid) {
-    fprintf(stderr, "[ar2-world] ignored: %s\n", error);
+    RuntimeLog_Printf("[ar2-world] ignored: %s\n", error);
     Ar2Content_Close();
   } else {
-    fprintf(stderr, "[ar2-world] continent loaded; action entrances available\n");
+    RuntimeLog_Printf("[ar2-world] continent loaded; action entrances available\n");
   }
 }
 

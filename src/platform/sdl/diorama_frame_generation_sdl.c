@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "app/frame_trace.h"
 #include "present/present.h"
 #include "platform/sdl/presentation_geometry_sdl.h"
 #include "platform/sdl/render_sdl_internal.h"
@@ -167,10 +168,10 @@ typedef struct NativeCaptureJob {
 
 static struct {
   NativeCaptureJob job;
-  bool attempted, pending;
-  FILE *trace;
-  unsigned jobs;
+  bool pending;
 } s_capture;
+static FrameTrace *s_prepare_trace;
+static unsigned s_prepare_trace_jobs;
 
 static void RunNativeCapture(NativeCaptureJob *job) {
   job->started_ns = SDL_GetTicksNS();
@@ -215,8 +216,8 @@ finished:
 
 void DioramaFrameGeneration_FinishCapture(void) {
   if (!s_capture.pending) return;
-  const uint64_t start = SDL_GetTicksNS();
-  const uint64_t complete = SDL_GetTicksNS();
+  const uint64_t start = s_prepare_trace ? SDL_GetTicksNS() : 0;
+  const uint64_t complete = s_prepare_trace ? SDL_GetTicksNS() : 0;
   const NativeCaptureJob *job = &s_capture.job;
   s_gpu.endpoint = job->ok;
   s_gpu.mask = job->ok ? job->mask : 0;
@@ -227,32 +228,26 @@ void DioramaFrameGeneration_FinishCapture(void) {
     SDL_Log("[gpu-frame-generation] native capture failed; retaining reference until renderer reset");
   }
   s_gpu.projection_fence = job->fence;
-  if (s_capture.trace) fprintf(s_capture.trace, "%u,%llu,%llu,%llu,%llu,%llu,%u,%d\n",
-      ++s_capture.jobs,
-      (unsigned long long)job->queued_ns, (unsigned long long)job->started_ns,
-      (unsigned long long)job->submitted_ns, (unsigned long long)start,
-      (unsigned long long)complete, job->mask, job->ok);
+  if (s_prepare_trace) {
+    const FrameGpuPrepareTraceRow row = {
+      .job = ++s_prepare_trace_jobs, .queued_ns = job->queued_ns, .started_ns = job->started_ns,
+      .submitted_ns = job->submitted_ns, .join_ns = start, .joined_ns = complete,
+      .mask = job->mask, .ok = job->ok,
+    };
+    FrameTrace_Record(s_prepare_trace, &row, sizeof(row));
+  }
   s_capture.pending = false;
 }
 
 static void StopNativeCapture(void) {
   DioramaFrameGeneration_FinishCapture();
-  if (s_capture.trace) fclose(s_capture.trace);
   memset(&s_capture, 0, sizeof(s_capture));
 }
 
-static void StartNativeCapture(void) {
-  if (s_capture.attempted) return;
-  s_capture.attempted = true;
-  const char *path = getenv("AR_GPU_PREPARE_TRACE");
-  if (path && *path) {
-    s_capture.trace = fopen(path, "a");
-    if (s_capture.trace) {
-      setvbuf(s_capture.trace, NULL, _IOFBF, 65536);
-      if (ftell(s_capture.trace) == 0)
-        fprintf(s_capture.trace, "job,queued_ns,started_ns,submitted_ns,join_ns,joined_ns,mask,ok\n");
-    }
-  }
+void DioramaFrameGeneration_SetPrepareTrace(FrameTrace *trace) {
+  DioramaFrameGeneration_FinishCapture();
+  s_prepare_trace = trace;
+  s_prepare_trace_jobs = 0;
 }
 
 static void DestroyAtlasWrappers(void) {
@@ -567,7 +562,6 @@ static void CaptureOwnedNative(ArRenderDevice *device, bool had_previous, int he
   }
   s_gpu.pending_analysis_mask = analyzed_mask;
   s_pair_mask |= job.mask;
-  StartNativeCapture();
   job.queued_ns = SDL_GetTicksNS();
   s_capture.job = job;
   s_capture.pending = true;

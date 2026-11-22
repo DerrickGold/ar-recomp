@@ -48,9 +48,22 @@ the run's `run_info.txt`, so replay and benchmark artifacts identify their
 diagnostic overhead without relying on a build-directory name.
 
 Development and trace builds also create a timestamped `runs/` diagnostic
-bundle by default. Play and packaged builds do not create one, tee the console,
-or write `run_info.txt`. Set `AR_ENABLE_RUN_DIR=1` for a release diagnostic
-launch; `AR_NO_RUN_DIR=1` disables bundling in any build.
+bundle by default. The game applies retention when it starts an automatic
+bundle. It keeps up to eight
+temporary bundles for seven days, with a combined 512 MiB budget for completed
+bundles. Automatic runtime text logs stop at approximately 16 MiB per file.
+Opt-in traces, screenshots, and dumps count toward retention once the run ends.
+Set `AR_ENABLE_RUN_DIR=1` to enable temporary bundles in a packaged build, or
+`AR_NO_RUN_DIR=1` to disable automatic bundling.
+
+Use `--log-dir /path/to/new-capture` to preserve a one-off run. The destination
+must be new or empty. It receives game and SDL diagnostics in `console.log`,
+run metadata, dumps, and enabled diagnostics with bare output filenames.
+Third-party stdout and stderr remain on their original streams. Explicit
+output paths still go to the locations you specify. Preserved captures are
+exempt from automatic retention and the text-log size limit. If a trace cannot
+finish cleanly, its `.partial` file stays available for inspection. Use a
+different filename to start another trace and keep that partial capture.
 
 `--config <file>` **replaces** the default `config.ini` load entirely (the file
 you pass carries its own `[Graphics]`/`[Sound]` sections too), so
@@ -229,7 +242,9 @@ layout change moves with the keys rather than the letters. The defaults are:
 If the picture still animates but even Esc/F1 does nothing, keep the log from
 that launch. Builder launches write `logs/game-*.log` in the build's working
 directory; native app launches write `logs/launch-*.log` in the game data
-directory. Development runs use `runs/<timestamp>/console.log`.
+directory. Development runs use `runs/<timestamp>/console.log`. Builder and
+launcher logs rotate on launch, retaining up to eight recent logs per source,
+with a seven-day age limit and a 128 MiB budget for closed logs.
 
 The `[window] startup focus` and `[input]` lines separate window activation
 from input routing. `event-loop-ready` records focus after the first event

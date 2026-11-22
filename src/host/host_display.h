@@ -116,7 +116,11 @@ typedef struct HostDisplayPresentTrace {
   uint64_t backend_flush_ns, backend_acquire_ns, backend_submit_ns;
   uint64_t backend_command_ns, backend_swapchain_ns, backend_blit_ns, backend_queue_submit_ns;
 } HostDisplayPresentTrace;
+typedef struct HostDisplayYieldTrace {
+  uint64_t slow_yields, maximum_ns;
+} HostDisplayYieldTrace;
 void HostDisplay_EnablePresentTrace(bool enabled);
+HostDisplayYieldTrace HostDisplay_EndPresentTrace(void);
 HostDisplayPresentTrace HostDisplay_LastPresentTrace(void);
 /* Absolute next presentation deadline for the independent producer.
  * Zero means that clock is not active. */

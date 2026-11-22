@@ -1,4 +1,5 @@
 #include "settings_overlay/settings_overlay_artwork.h"
+#include "app/runtime_log.h"
 #include "settings_overlay/settings_overlay_internal.h"
 
 #include <stdio.h>
@@ -177,8 +178,7 @@ static bool DecodeFontAsset(const uint8_t *rom_data, size_t rom_size) {
           s_font_tiles, output_size, &state))
     return false;
 
-  fprintf(stderr,
-          "[settings-menu] decoded ActRaiser font: $%04X bytes from ROM "
+  RuntimeLog_Printf("[settings-menu] decoded ActRaiser font: $%04X bytes from ROM "
           "offset $%06X (%zu compressed bytes consumed)\n",
           kFontTileBytes, kFontAssetOffset,
           (state.bits_consumed + 7) / 8);
@@ -670,7 +670,7 @@ static void BuildFallbackFont(void) {
     s_artwork.glyph_defined[ch] = true;
   }
   s_artwork.glyph_defined[' '] = true;
-  fprintf(stderr, "[settings-menu] ROM font unavailable; using host fallback font\n");
+  RuntimeLog_Printf("[settings-menu] ROM font unavailable; using host fallback font\n");
 }
 
 static void PrepareRomFont(void) {
@@ -806,8 +806,7 @@ static ArRenderTexture CreateDialogFrameTexture(const uint8_t *rom_data, size_t 
   size_t character_end = (size_t)kDialogCharAssetOffset + (size_t)(0xff + 1) * 32;
   size_t palette_end = (size_t)kDialogPaletteAssetOffset + 32;
   if (!rom_data || rom_size < character_end || rom_size < palette_end) {
-    fprintf(stderr,
-            "[settings-menu] native dialog frame unavailable; "
+    RuntimeLog_Printf("[settings-menu] native dialog frame unavailable; "
             "using host frame fallback\n");
     return ArRenderTexture_Invalid();
   }
@@ -829,8 +828,7 @@ static ArRenderTexture CreateDialogFrameTexture(const uint8_t *rom_data, size_t 
   const ArRenderTexture texture =
       SettingsOverlayArtwork_CreateAtlas(s_device, kDialogAtlasWidth, kDialogAtlasHeight, pixels);
   if (ArRenderTexture_IsValid(texture)) {
-    fprintf(stderr,
-            "[settings-menu] decoded native dialog frame: "
+    RuntimeLog_Printf("[settings-menu] decoded native dialog frame: "
             "chars ROM $%06X, palette ROM $%06X\n",
             kDialogCharAssetOffset, kDialogPaletteAssetOffset);
   }

@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_action_video_config.h"
+#include "app/runtime_log.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -111,8 +112,7 @@ RecompReturn ActRaiser_RunActionVideoConfig(CpuState *cpu) {
 
 static void ReportDiagnostics(void) {
   if (!s_diagnostics.commands) return;
-  fprintf(stderr,
-          "[action-room-video-hle] summary command3=%u bytes=%zu\n",
+  RuntimeLog_Printf("[action-room-video-hle] summary command3=%u bytes=%zu\n",
           s_diagnostics.commands, s_diagnostics.applied_bytes);
 }
 

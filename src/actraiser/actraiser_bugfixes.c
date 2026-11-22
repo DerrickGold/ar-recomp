@@ -5,6 +5,7 @@
  * live in docs/actraiser-1/ram-map.md and docs/actraiser-1/save-format.md. */
 
 #include "actraiser_cell_map.h"
+#include "app/runtime_log.h"
 #include "actraiser_bridge_extension.h"
 #include "actraiser_town_metatile.h"
 #include "actraiser_town_structure_steps.h"
@@ -271,8 +272,7 @@ static int ext_migrate_bridges(CpuState *cpu, uint8 db, unsigned town,
     }
     if (!keep) {
       if (bridgefix_debug_level() >= 1)
-        fprintf(stderr,
-                "[bridgefix] town %u: reclaimed invalid/duplicate "
+        RuntimeLog_Printf("[bridgefix] town %u: reclaimed invalid/duplicate "
                 "extension slot %d (cell %u,%u, flags $%02X)\n",
                 town, i, (unsigned)rec[0], (unsigned)rec[1],
                 (unsigned)rec[2]);
@@ -321,8 +321,7 @@ static int ext_migrate_bridges(CpuState *cpu, uint8 db, unsigned town,
     for (int b = 0; b < 4; b++)
       cpu_write8(cpu, db, (uint16)(rec + b), 0);
     if (bridgefix_debug_level() >= 1) {
-      fprintf(stderr,
-              "[bridgefix] town %u: %s bridge slot %d (cell %u,%u, "
+      RuntimeLog_Printf("[bridgefix] town %u: %s bridge slot %d (cell %u,%u, "
               "flags $%02X) in extension slot %d — record slot freed\n",
               town, matching_slot >= 0 ? "deduplicated" : "migrated", i,
               (unsigned)cpu_read8(cpu, kSramBank, ext),
@@ -430,8 +429,7 @@ RecompReturn ActRaiser_AllocStructureRecord(CpuState *cpu) {
   if (slot >= 0) {
     const uint16 rec = (uint16)(base + slot * kStructRecordSize);
     if (debug >= 2 || (debug >= 1 && new_is_bridge)) {
-      fprintf(stderr,
-              "[bridgefix] town %u: alloc slot %3d = %s $%02X at cell "
+      RuntimeLog_Printf("[bridgefix] town %u: alloc slot %3d = %s $%02X at cell "
               "%u,%u (%d slots left)\n",
               (unsigned)(town_index >> 1), slot,
               struct_class_name(new_type), (unsigned)new_type,
@@ -453,8 +451,7 @@ RecompReturn ActRaiser_AllocStructureRecord(CpuState *cpu) {
     bugfix_exit_flags(cpu, 0);
   } else {
     if (debug >= 1) {
-      fprintf(stderr,
-              "[bridgefix] town %u: TABLE FULL — %s $%02X at cell %u,%u "
+      RuntimeLog_Printf("[bridgefix] town %u: TABLE FULL — %s $%02X at cell %u,%u "
               "NOT built (authentic 128-structure cap)\n",
               (unsigned)(town_index >> 1),
               struct_class_name(new_type), (unsigned)new_type,
@@ -565,8 +562,7 @@ RecompReturn ActRaiser_SceneMarkStructures(CpuState *cpu) {
     }
   }
   if (ext_marked && bridgefix_debug_level() >= 1)
-    fprintf(stderr,
-            "[bridgefix] town %u: construction redraw restamped %d "
+    RuntimeLog_Printf("[bridgefix] town %u: construction redraw restamped %d "
             "extension bridge(s)\n", town, ext_marked);
 
   /* Exit state of the original loop. Extension marking above deliberately
@@ -607,8 +603,7 @@ RecompReturn ActRaiser_FinishSceneBridgeRendering(CpuState *cpu) {
     }
   }
   if (rendered && bridgefix_debug_level() >= 1)
-    fprintf(stderr,
-            "[bridgefix] town %u: reconstruction rendered %d extension "
+    RuntimeLog_Printf("[bridgefix] town %u: reconstruction rendered %d extension "
             "bridge(s)\n", town, rendered);
 
   cpu_write16(cpu, db, 0x7C97, 0xFFFF);  /* native STA $7C97 */

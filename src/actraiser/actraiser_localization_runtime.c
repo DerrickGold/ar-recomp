@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_runtime.h"
+#include "app/runtime_log.h"
 #include "actraiser/actraiser_localization_hud.h"
 #include "actraiser/actraiser_localization_credits.h"
 #include "actraiser/actraiser_localization_art.h"
@@ -282,8 +283,7 @@ static bool LegacySelection(int content, int presentation) {
         metadata.format_version != 1)
       continue;
     s_runtime.legacy_blocked = true;
-    fprintf(stderr,
-            "[localization] v1 pack '%s' requires a Builder upgrade; "
+    RuntimeLog_Printf("[localization] v1 pack '%s' requires a Builder upgrade; "
             "using native ROM text for this session selection: %s\n",
             metadata.package_id, paths[i]);
     if (s_pack_host.legacy_pack)
@@ -344,7 +344,7 @@ static bool EnsureConfigured(void) {
     s_runtime.native_attempted = true;
     if (!LoadRuntimePack(&s_runtime.native_pack,
                          s_runtime.native_manifest_path, true, &error))
-      fprintf(stderr, "[localization] enhanced USA fallback unavailable: %s\n",
+      RuntimeLog_Printf("[localization] enhanced USA fallback unavailable: %s\n",
               error.message);
   }
   if (presentation && content && content != s_runtime.selected_content) {
@@ -469,7 +469,7 @@ static bool EnsureConfigured(void) {
       &s_runtime.world_navigation);
   s_runtime.name_entry_applied_native_revision = 0;
   s_runtime.name_key_map.valid = false;
-  fprintf(stderr, "[localization] %s: %s\n",
+  RuntimeLog_Printf("[localization] %s: %s\n",
           presentation ? "enhanced" : "native",
           presentation ? metadata->display_name : "untouched USA text/font");
   return s_runtime.enabled;
@@ -485,8 +485,7 @@ reject:
     ScheduleFailed(error.message);
     return false;
   }
-  fprintf(stderr,
-          "[localization] selection rejected (%s); prior selection retained\n",
+  RuntimeLog_Printf("[localization] selection rejected (%s); prior selection retained\n",
           error.message);
   g_settings.localization_content =
       s_runtime.content < 0 ? 0 : s_runtime.content;
@@ -809,7 +808,7 @@ static void RefreshNameEntry(void) {
           &s_runtime.compose, kActRaiserLocalizationNameEntrySurface,
           ResolveComposeText, NULL,
           error, sizeof(error))) {
-    fprintf(stderr, "[localization] name entry refresh unavailable (%s); "
+    RuntimeLog_Printf("[localization] name entry refresh unavailable (%s); "
                     "native text retained\n",
             error[0] ? error : "refresh failed");
   }
@@ -879,7 +878,7 @@ static void RefreshReports(void) {
     if (!ActRaiserLocalizationComposeState_Refresh(
             &s_runtime.compose, surface, revision,
             ResolveComposeText, NULL, error, sizeof(error))) {
-      fprintf(stderr, "[localization] %s refresh unavailable (%s); "
+      RuntimeLog_Printf("[localization] %s refresh unavailable (%s); "
                       "native text retained\n",
               semantic_id,
               error[0] ? error : "refresh failed");
@@ -1030,7 +1029,7 @@ bool ActRaiserLocalizationRuntime_BeginDialogue(
   if (!ArDialogueSession_BeginBounded(&s_runtime.session, &selection,
                                       route->semantic_id, &resolver,
                                       kArLocalizationFrameTextCapacity, &error)) {
-    fprintf(stderr, "[localization] %s unavailable (%s); native text retained\n",
+    RuntimeLog_Printf("[localization] %s unavailable (%s); native text retained\n",
             route->semantic_id, error.message);
     s_runtime.failed_observation_serial = observation->serial;
     return false;
@@ -1044,7 +1043,7 @@ bool ActRaiserLocalizationRuntime_BeginDialogue(
 }
 
 static void ScheduleFailed(const char *reason) {
-  fprintf(stderr, "[localization] %s scheduling unavailable (%s); "
+  RuntimeLog_Printf("[localization] %s scheduling unavailable (%s); "
                   "native text retained\n",
           s_runtime.route ? s_runtime.route->semantic_id : "dialogue", reason);
   s_runtime.scheduled_dialogue = false;
@@ -1340,7 +1339,7 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
           &s_runtime.compose, &compose_observations[index],
           ResolveComposeText, NULL, error, sizeof(error));
       if (s_runtime.presentation && !composed && error[0])
-        fprintf(stderr, "[localization] fixed text unavailable (%s); native text retained\n",
+        RuntimeLog_Printf("[localization] fixed text unavailable (%s); native text retained\n",
                 error);
       s_runtime.compose_observation_serial =
           compose_observations[index].serial;
@@ -1497,9 +1496,7 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
   ArLanguagePackError error = {{0}};
   if (!ActRaiserLocalizationRuntime_DialogueScheduled() &&
       !SynchronizeObservedDialogue(s_runtime.pack, &error)) {
-    fprintf(
-        stderr,
-        "[localization] %s progress unavailable (%s); native text retained\n",
+    RuntimeLog_Printf("[localization] %s progress unavailable (%s); native text retained\n",
         route->semantic_id, error.message);
     s_runtime.route = NULL; /* One diagnostic/fallback per invocation. */
     return;
@@ -1544,8 +1541,7 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
                        trace_bytes != reveal_bytes)) {
     const unsigned game_frame = g_ram[kActRaiserWram_GameFrame] |
         ((unsigned)g_ram[kActRaiserWram_GameFrame + 1u] << 8);
-    fprintf(stderr,
-            "[localization-reveal] gf=%u serial=%llu page=%u bytes=%zu total=%zu\n",
+    RuntimeLog_Printf("[localization-reveal] gf=%u serial=%llu page=%u bytes=%zu total=%zu\n",
             game_frame, (unsigned long long)observation.serial,
             page.page_index, reveal_bytes, window->bytes);
     trace_ticket = s_runtime.pager.ticket;
@@ -1604,8 +1600,7 @@ void ActRaiserLocalizationRuntime_AppendWorldNavigationLabel(
           native_label_visible, cgram_words, cgram_word_count,
           ResolveComposeText, ResolveWorldLabel, NULL, error, sizeof(error)) &&
       error[0])
-    fprintf(stderr,
-            "[localization] world-navigation label unavailable (%s); "
+    RuntimeLog_Printf("[localization] world-navigation label unavailable (%s); "
             "native text retained\n",
             error);
 }

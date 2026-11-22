@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_sim_menu.h"
+#include "app/runtime_log.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -103,7 +104,7 @@ static uint8_t Call(CpuState *c, Routine routine, uint16_t a, uint16_t x,
   c->host_return_valid=1;
   const RecompReturn result=routine(c);
   if (result != RECOMP_RETURN_NORMAL || c->S != os) {
-    fprintf(stderr,"[sim-menu] invalid native leaf return %d, stack %04x/%04x\n",
+    RuntimeLog_Printf("[sim-menu] invalid native leaf return %d, stack %04x/%04x\n",
             result,c->S,os);
     abort();
   }
@@ -425,7 +426,7 @@ RecompReturn ActRaiser_SimMenuBrowse(CpuState *c) {
     s_scene=cpu_read16(c,0,0x18);
     SimMenuModel_Open(&s_menu,++s_generation,c->X);
     if (getenv("AR_SIM_MENU_TRACE"))
-      fprintf(stderr,"[sim-menu] open generation=%llu node=%04x DB=%02x S=%04x\n",
+      RuntimeLog_Printf("[sim-menu] open generation=%llu node=%04x DB=%02x S=%04x\n",
               (unsigned long long)s_generation,c->X,c->DB,c->S);
   }
   if (s_menu.phase != kSimMenu_Browse)
@@ -446,7 +447,7 @@ RecompReturn ActRaiser_SimMenuBrowse(CpuState *c) {
       MenuSound(c,event == kSimMenuEvent_Changed ? 0x018b82 :
                   event == kSimMenuEvent_Close ? 0x018c15 : 0x018c1c);
     if (event != kSimMenuEvent_None && getenv("AR_SIM_MENU_TRACE"))
-      fprintf(stderr,"[sim-menu] event=%d node=%04x action=%u phase=%d\n",
+      RuntimeLog_Printf("[sim-menu] event=%d node=%04x action=%u phase=%d\n",
               event,SimMenuModel_Selection(&s_menu),SimMenuModel_Action(&s_menu),s_menu.phase);
     if (event == kSimMenuEvent_Describe) { Describe(c); Redraw(c); }
     else if (event == kSimMenuEvent_Changed) Redraw(c);
@@ -550,7 +551,7 @@ bool ActRaiser_SimMenuConfirmInputEntry(CpuState *c) {
     SimMenuModel_Open(&s_menu,++s_generation,0xf32e);
     s_menu.phase=kSimMenu_Opening;
     if (getenv("AR_SIM_MENU_TRACE"))
-      fprintf(stderr,"[sim-menu] opening generation=%llu before native release wait\n",
+      RuntimeLog_Printf("[sim-menu] opening generation=%llu before native release wait\n",
               (unsigned long long)s_generation);
   }
   if (c && s_owner && s_action == 15 && c->DB == 1 && c->D == 0 &&

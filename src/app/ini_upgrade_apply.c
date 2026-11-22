@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "app/ini_upgrade_apply.h"
 
@@ -163,7 +164,7 @@ static bool BackupReleaseContent(const char *path, const char *live) {
     if (matches) return true;
     if (!absent) continue;
     if (!WriteWholeFile(backup, live, strlen(live))) return false;
-    fprintf(stderr, "[upgrade] backed up %s to %s\n", path, backup);
+    RuntimeLog_Printf("[upgrade] backed up %s to %s\n", path, backup);
     return true;
   }
   return false;
@@ -175,7 +176,7 @@ static void ApplyReleaseContent(const char *path, const char *live, const char *
   bool baseline_absent = false;
   char *baseline = ReadWholeFile(baseline_path, &baseline_absent);
   if (!baseline && !baseline_absent) {
-    fprintf(stderr, "[upgrade] cannot read %s -- content update skipped\n", baseline_path);
+    RuntimeLog_Printf("[upgrade] cannot read %s -- content update skipped\n", baseline_path);
     return;
   }
   const bool same_release = baseline && !strcmp(baseline, shipped);
@@ -185,18 +186,18 @@ static void ApplyReleaseContent(const char *path, const char *live, const char *
   if (live && same_release) return;
   if (!live || strcmp(live, shipped)) {
     if (live && !BackupReleaseContent(path, live)) {
-      fprintf(stderr, "[upgrade] cannot back up %s -- original kept\n", path);
+      RuntimeLog_Printf("[upgrade] cannot back up %s -- original kept\n", path);
       return;
     }
     if (!WriteWholeFile(path, shipped, strlen(shipped))) {
-      fprintf(stderr, "[upgrade] cannot replace %s -- original kept\n", path);
+      RuntimeLog_Printf("[upgrade] cannot replace %s -- original kept\n", path);
       return;
     }
-    fprintf(stderr, "[upgrade] installed release content: %s\n", path);
+    RuntimeLog_Printf("[upgrade] installed release content: %s\n", path);
   }
   /* Publish only after the live file succeeds, so failures remain retryable. */
   if (!same_release && !WriteWholeFile(baseline_path, shipped, strlen(shipped)))
-    fprintf(stderr, "[upgrade] cannot record %s -- will retry next launch\n", baseline_path);
+    RuntimeLog_Printf("[upgrade] cannot record %s -- will retry next launch\n", baseline_path);
 }
 
 void IniUpgrade_ApplyShippedDefaults(void) {
@@ -222,8 +223,7 @@ void IniUpgrade_ApplyShippedDefaults(void) {
        * we never saw, which is precisely the data loss this whole module exists
        * to prevent. Skip the leaf and say so: a missing new setting is a far
        * better outcome than a replaced config. */
-      fprintf(stderr,
-              "[upgrade] %s exists but could not be read -- skipped, and your "
+      RuntimeLog_Printf("[upgrade] %s exists but could not be read -- skipped, and your "
               "file is left exactly as it is\n",
               leaf);
       free(shipped);
@@ -257,16 +257,15 @@ void IniUpgrade_ApplyShippedDefaults(void) {
 
     if (WriteWholeFile(live_path, merged, wrote)) {
       if (live == NULL || !*live) {
-        fprintf(stderr, "[upgrade] created %s from the shipped default\n", leaf);
+        RuntimeLog_Printf("[upgrade] created %s from the shipped default\n", leaf);
       } else {
-        fprintf(stderr,
-                "[upgrade] %s: %d new setting%s added, your values kept\n",
+        RuntimeLog_Printf("[upgrade] %s: %d new setting%s added, your values kept\n",
                 leaf, added, added == 1 ? "" : "s");
       }
     } else {
       /* Reported rather than silent, but not fatal: the user still has their
        * original file, which is the outcome that matters. */
-      fprintf(stderr, "[upgrade] could not update %s -- your file is unchanged\n",
+      RuntimeLog_Printf("[upgrade] could not update %s -- your file is unchanged\n",
               leaf);
     }
     free(merged);

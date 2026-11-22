@@ -4,6 +4,7 @@
  * Phase: present (render owner thread).
  * Tests: tests/sim3d_depth_pass_gpu_test.c */
 #include "platform/sdl/sim3d_depth_pass_sdl_internal.h"
+#include "app/runtime_log.h"
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/sim3d_depth_vert.h"
 #include "shaders/sim3d_billboard_rim_frag.h"
@@ -390,7 +391,7 @@ bool CreateTargets(SDL_Renderer *renderer, int width, int height,
       g_depth_pass.device, &depth_info);
   if (depth_props) SDL_DestroyProperties(depth_props);
   if (!g_depth_pass.color_target || !g_depth_pass.depth_target) {
-    fprintf(stderr, "[sim3d-depth] render target creation failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] render target creation failed: %s\n",
             SDL_GetError());
     ReleaseTargets();
     return false;
@@ -414,7 +415,7 @@ bool CreateTargets(SDL_Renderer *renderer, int width, int height,
       !SDL_SetTextureBlendMode(g_depth_pass.output_texture,
                                SDL_BLENDMODE_BLEND) ||
       !SDL_SetTextureScaleMode(g_depth_pass.output_texture, scale_mode)) {
-    fprintf(stderr, "[sim3d-depth] SDL target wrapper failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] SDL target wrapper failed: %s\n",
             SDL_GetError());
     ReleaseTargets();
     return false;
@@ -486,7 +487,7 @@ static bool CreatePipeline(void) {
   g_depth_pass.pipeline = GpuShaderBlob_CreateGraphicsPipeline(
       g_depth_pass.device, &info, "town depth");
   if (!g_depth_pass.pipeline) {
-    fprintf(stderr, "[sim3d-depth] pipeline creation failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] pipeline creation failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -498,7 +499,7 @@ static bool CreatePipeline(void) {
   g_depth_pass.depth_occluder_pipeline = GpuShaderBlob_CreateGraphicsPipeline(
       g_depth_pass.device, &info, "town depth occluder");
   if (!g_depth_pass.depth_occluder_pipeline) {
-    fprintf(stderr, "[sim3d-depth] depth-only pipeline creation failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] depth-only pipeline creation failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -507,7 +508,7 @@ static bool CreatePipeline(void) {
   g_depth_pass.effect_pipeline = GpuShaderBlob_CreateGraphicsPipeline(
       g_depth_pass.device, &info, "town effect");
   if (!g_depth_pass.effect_pipeline) {
-    fprintf(stderr, "[sim3d-depth] effect pipeline creation failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] effect pipeline creation failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -522,7 +523,7 @@ static bool CreatePipeline(void) {
   g_depth_pass.billboard_rim_pipeline = GpuShaderBlob_CreateGraphicsPipeline(
       g_depth_pass.device, &info, "town billboard rim");
   if (!g_depth_pass.billboard_rim_pipeline) {
-    fprintf(stderr, "[sim3d-depth] billboard rim pipeline creation failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] billboard rim pipeline creation failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -580,7 +581,7 @@ static bool CreatePipeline(void) {
   g_depth_pass.nearest_sampler = SDL_CreateGPUSampler(
       g_depth_pass.device, &sampler);
   if (!g_depth_pass.nearest_sampler) {
-    fprintf(stderr, "[sim3d-depth] nearest sampler creation failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] nearest sampler creation failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -589,7 +590,7 @@ static bool CreatePipeline(void) {
   g_depth_pass.linear_sampler = SDL_CreateGPUSampler(
       g_depth_pass.device, &sampler);
   if (!g_depth_pass.linear_sampler) {
-    fprintf(stderr, "[sim3d-depth] linear sampler creation failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] linear sampler creation failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -682,7 +683,7 @@ bool EnsureInitialized(SDL_Renderer *renderer) {
   g_depth_pass.device = props ? SDL_GetPointerProperty(
       props, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL) : NULL;
   if (!g_depth_pass.device) {
-    fprintf(stderr, "[sim3d-depth] renderer has no SDL_GPU device\n");
+    RuntimeLog_Printf("[sim3d-depth] renderer has no SDL_GPU device\n");
     g_depth_pass.failed = true;
     return false;
   }
@@ -690,7 +691,7 @@ bool EnsureInitialized(SDL_Renderer *renderer) {
           g_depth_pass.device, SDL_GPU_TEXTUREFORMAT_D32_FLOAT,
           SDL_GPU_TEXTURETYPE_2D,
           SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
-    fprintf(stderr, "[sim3d-depth] D32 depth targets are unsupported\n");
+    RuntimeLog_Printf("[sim3d-depth] D32 depth targets are unsupported\n");
     g_depth_pass.failed = true;
     return false;
   }
@@ -699,14 +700,14 @@ bool EnsureInitialized(SDL_Renderer *renderer) {
           SDL_GPU_TEXTURETYPE_2D,
           SDL_GPU_TEXTUREUSAGE_COLOR_TARGET |
               SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
-    fprintf(stderr, "[sim3d-depth] RGBA8 sampled color targets are "
+    RuntimeLog_Printf("[sim3d-depth] RGBA8 sampled color targets are "
                     "unsupported\n");
     g_depth_pass.failed = true;
     return false;
   }
   g_depth_pass.renderer = renderer;
   if (!CreatePipeline() || !CreateWhiteTexture(renderer)) {
-    fprintf(stderr, "[sim3d-depth] required GPU resources failed: %s\n",
+    RuntimeLog_Printf("[sim3d-depth] required GPU resources failed: %s\n",
             SDL_GetError());
     g_depth_pass.failed = true;
     return false;

@@ -1,12 +1,13 @@
 #include "sim/sim3d/sim3d_performance.h"
 
 #include <inttypes.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "host/host_clock.h"
+#include "app/diagnostic_options.h"
 #include "app/performance_metrics.h"
+#include "app/performance_report.h"
+#include "app/runtime_log.h"
 
 _Static_assert((int)kPerformance_SimCount == (int)kSim3DPerformanceStage_Count,
                "SIM metric stage mapping");
@@ -53,15 +54,15 @@ _Static_assert(
         kSim3DPerformanceStage_Count,
     "every SIM 3D performance stage needs a report label");
 
-static bool LogEnabled(void) {
+bool Sim3DPerformance_LoggingEnabled(void) {
   static int enabled = -1;
   if (enabled < 0)
-    enabled = (getenv("AR_PERF") || getenv("AR_SIM3D_PERF")) ? 1 : 0;
+    enabled = DiagnosticOptionEnabled("AR_PERF") || DiagnosticOptionEnabled("AR_SIM3D_PERF");
   return enabled != 0;
 }
 
 bool Sim3DPerformance_Enabled(void) {
-  return LogEnabled() || PerformanceMetrics_Enabled();
+  return Sim3DPerformance_LoggingEnabled() || PerformanceMetrics_Enabled();
 }
 
 Sim3DPerformanceScope Sim3DPerformance_Begin(
@@ -118,62 +119,68 @@ void Sim3DPerformance_AddUpload(uint64_t bytes) {
   counter->upload_bytes += bytes;
 }
 
-static void ReportPerformance(uint64_t window_ns) {
-  const double divisor = s_presentations ? (double)s_presentations : 1.0;
-  fprintf(stderr,
+typedef struct Sim3DReportSnapshot {
+  Sim3DPerformanceCounters counters[kSim3DPerformanceStage_Count];
+  uint64_t presentations, window_ns, geometry_upload_bytes;
+} Sim3DReportSnapshot;
+
+static void AppendPerformanceReport(PerformanceReport *report, const Sim3DReportSnapshot *snapshot) {
+  const double divisor = snapshot->presentations ? (double)snapshot->presentations : 1.0;
+  PerformanceReport_Append(report,
           "[sim3d-perf] presents=%" PRIu64 " window=%.2fs",
-          s_presentations, (double)window_ns / 1000000000.0);
+          snapshot->presentations, (double)snapshot->window_ns / 1000000000.0);
   for (int stage = 0; stage < kSim3DPerformanceStage_Count; stage++) {
-    const Sim3DPerformanceCounters *counter = &s_counters[stage];
+    const Sim3DPerformanceCounters *counter = &snapshot->counters[stage];
     if (!counter->calls && !counter->draws && !counter->uploads) continue;
-    fprintf(stderr, " %s=%.3fms", kStageNames[stage],
+    PerformanceReport_Append(report, " %s=%.3fms", kStageNames[stage],
             (double)counter->elapsed_ns / 1000000.0 / divisor);
   }
-  fputc('\n', stderr);
+  PerformanceReport_Append(report, "\n");
 
   /* A one-off asset build can disappear in the per-presentation mean. Keep
    * maxima separate from the existing mean/work report for cold-entry audits. */
-  fprintf(stderr, "[sim3d-perf-max]");
+  PerformanceReport_Append(report, "[sim3d-perf-max]");
   for (int stage = 0; stage < kSim3DPerformanceStage_Count; stage++) {
-    const Sim3DPerformanceCounters *counter = &s_counters[stage];
+    const Sim3DPerformanceCounters *counter = &snapshot->counters[stage];
     if (!counter->calls) continue;
-    fprintf(stderr, " %s=%.3fms", kStageNames[stage],
+    PerformanceReport_Append(report, " %s=%.3fms", kStageNames[stage],
             (double)counter->maximum_ns / 1000000.0);
   }
-  fputc('\n', stderr);
+  PerformanceReport_Append(report, "\n");
 
   uint64_t draws = 0;
   uint64_t vertices = 0;
   uint64_t indices = 0;
   const Sim3DPerformanceCounters *upload =
-      &s_counters[kSim3DPerformance_Upload];
+      &snapshot->counters[kSim3DPerformance_Upload];
   for (int stage = 0; stage < kSim3DPerformanceStage_Count; stage++) {
-    draws += s_counters[stage].draws;
-    vertices += s_counters[stage].vertices;
-    indices += s_counters[stage].indices;
+    draws += snapshot->counters[stage].draws;
+    vertices += snapshot->counters[stage].vertices;
+    indices += snapshot->counters[stage].indices;
   }
-  fprintf(stderr,
+  PerformanceReport_Append(report,
           "[sim3d-work] draws/present=%.1f vertices/present=%.1f "
           "indices/present=%.1f uploads=%" PRIu64 " upload-MiB=%.2f",
           (double)draws / divisor, (double)vertices / divisor,
           (double)indices / divisor, upload->uploads,
           (double)upload->upload_bytes / (1024.0 * 1024.0));
-  fprintf(stderr, " vertex-upload-MiB/present=%.3f",
-      (double)s_geometry_upload_bytes / divisor / (1024.0 * 1024.0));
+  PerformanceReport_Append(report, " vertex-upload-MiB/present=%.3f",
+      (double)snapshot->geometry_upload_bytes / divisor / (1024.0 * 1024.0));
   for (int stage = 0; stage < kSim3DPerformanceStage_Count; stage++) {
-    const Sim3DPerformanceCounters *counter = &s_counters[stage];
+    const Sim3DPerformanceCounters *counter = &snapshot->counters[stage];
     if (!counter->draws) continue;
-    fprintf(stderr, " %s=%.1fd/%.1fv", kStageNames[stage],
+    PerformanceReport_Append(report, " %s=%.1fd/%.1fv", kStageNames[stage],
             (double)counter->draws / divisor,
             (double)counter->vertices / divisor);
   }
-  fputc('\n', stderr);
+  PerformanceReport_Append(report, "\n");
 }
 
 void Sim3DPerformance_AddPath(Sim3DPerformancePath path) {
   if (path < 0 || path >= kSim3DPath_Count) return;
   PerformanceMetrics_Add((PerformanceCount)(kPerformanceCount_CpuProject + path), 1);
-  if (LogEnabled() && s_current_stage >= 0 && s_current_stage < kSim3DPerformanceStage_Count)
+  if (Sim3DPerformance_LoggingEnabled() &&
+      s_current_stage >= 0 && s_current_stage < kSim3DPerformanceStage_Count)
     ++s_counters[s_current_stage].paths[path];
 }
 
@@ -198,6 +205,25 @@ void Sim3DPerformance_AddAtlasReuse(void) {
   PerformanceMetrics_Add(kPerformanceCount_AtlasReuse, 1);
 }
 
+static void WriteSim3DReport(FILE *output, const void *record, size_t size) {
+  (void)size;
+  const Sim3DReportSnapshot *snapshot = record;
+  PerformanceReport report = {.output = output};
+  AppendPerformanceReport(&report, snapshot);
+  for (int stage = 0; stage < kSim3DPerformanceStage_Count; ++stage) {
+    bool any = false;
+    for (int path = 0; path < kSim3DPath_Count; ++path)
+      any |= snapshot->counters[stage].paths[path] != 0;
+    if (!any) continue;
+    PerformanceReport_Append(&report, "[sim3d-path] stage=%s", kStageNames[stage]);
+    for (int path = 0; path < kSim3DPath_Count; ++path)
+      PerformanceReport_Append(&report, " %s=%.2f", kPathNames[path],
+          (double)snapshot->counters[stage].paths[path] / (double)snapshot->presentations);
+    PerformanceReport_Append(&report, " (events/present)\n");
+  }
+  PerformanceReport_Flush(&report);
+}
+
 void Sim3DPerformance_EndPresentation(void) {
   if (!Sim3DPerformance_Enabled()) return;
   uint64_t now_ns = HostClock_Nanoseconds();
@@ -205,19 +231,11 @@ void Sim3DPerformance_EndPresentation(void) {
   s_presentations++;
   uint64_t window_ns = now_ns - s_window_started_ns;
   if (window_ns < (uint64_t)kPerformanceWindowNs) return;
-  if (LogEnabled()) {
-    ReportPerformance(window_ns);
-    for (int stage = 0; stage < kSim3DPerformanceStage_Count; ++stage) {
-      bool any = false;
-      for (int path = 0; path < kSim3DPath_Count; ++path)
-        any |= s_counters[stage].paths[path] != 0;
-      if (!any) continue;
-      fprintf(stderr, "[sim3d-path] stage=%s", kStageNames[stage]);
-      for (int path = 0; path < kSim3DPath_Count; ++path)
-        fprintf(stderr, " %s=%.2f", kPathNames[path],
-            (double)s_counters[stage].paths[path] / (double)s_presentations);
-      fprintf(stderr, " (events/present)\n");
-    }
+  if (Sim3DPerformance_LoggingEnabled()) {
+    Sim3DReportSnapshot snapshot = {.presentations = s_presentations,
+        .window_ns = window_ns, .geometry_upload_bytes = s_geometry_upload_bytes};
+    memcpy(snapshot.counters, s_counters, sizeof(s_counters));
+    RuntimeLog_Record(WriteSim3DReport, &snapshot, sizeof(snapshot));
   }
   memset(s_counters, 0, sizeof(s_counters));
   s_geometry_upload_bytes = 0;

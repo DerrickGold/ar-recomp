@@ -1,4 +1,5 @@
 #include "present/render_preparation.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include "render/crt_post.h"
@@ -165,8 +166,7 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
    * those too and wait for submitted warmup draws before ending preparation. */
   if (ok) ok = ArRenderDevice_FinishPreparation(device);
   const ArRenderCapabilities *caps = ArRenderDevice_Capabilities(device);
-  fprintf(stderr,
-          "[graphics-prepare] features=$%x texture-limit=%dx%d "
+  RuntimeLog_Printf("[graphics-prepare] features=$%x texture-limit=%dx%d "
           "depth=%d linear-models=%d radial=%d surface=%d body=%d cloud-shader=%d shadow-shader=%d "
           "completion-shader=%d completion-clouds=%d\n",
           *supported, caps->maximum_texture_width, caps->maximum_texture_height, depth.depth,

@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "native_audio_trace.h"
 
@@ -57,8 +58,7 @@ static void OnRunnerEvent(void *user_data, SrRunnerHandle *runner,
       event->audio_sample_rate == 0u) {
     if (!s_pcm_format_warning_reported) {
       s_pcm_format_warning_reported = true;
-      fprintf(stderr,
-              "[native-audio-trace] PCM capture requires S16 stereo; "
+      RuntimeLog_Printf("[native-audio-trace] PCM capture requires S16 stereo; "
               "unsupported runner audio event ignored\n");
     }
     return;
@@ -193,8 +193,7 @@ bool NativeAudioTrace_Init(SrRunnerHandle *runner) {
     g_native_audio_extension_trace_start_hook = OnExtendedStart;
     g_native_audio_extension_trace_end_hook = OnExtendedEnd;
     g_native_audio_extension_trace_cancel_hook = OnExtendedCancel;
-    fprintf(stderr,
-            "[native-audio-trace] enabled — serial request/lane provenance "
+    RuntimeLog_Printf("[native-audio-trace] enabled — serial request/lane provenance "
             "will be written at shutdown\n");
   }
   if (pcm_enabled) {
@@ -215,8 +214,7 @@ bool NativeAudioTrace_Init(SrRunnerHandle *runner) {
       NativeAudioTrace_Shutdown();
       return false;
     }
-    fprintf(stderr,
-            "[native-audio-trace] PCM capture uses runner final-mix events\n");
+    RuntimeLog_Printf("[native-audio-trace] PCM capture uses runner final-mix events\n");
   }
   return true;
 }
@@ -310,7 +308,7 @@ static void WriteRequests(const NativeAudioRequestRecord *records,
             r->music_suppressed_voice_mask, r->native_lane_retriggers);
   }
   fclose(f);
-  fprintf(stderr, "[native-audio-trace] wrote %s\n", path);
+  RuntimeLog_Printf("[native-audio-trace] wrote %s\n", path);
 }
 
 static void WritePcmIfRequested(void) {
@@ -320,12 +318,11 @@ static void WritePcmIfRequested(void) {
   char path[kRuntimePathCapacity];
   RunDirFile(path, sizeof(path), "native_audio_pcm.wav");
   if (NativeAudioPcmCapture_WriteWav(&s_pcm, path)) {
-    fprintf(stderr,
-            "[native-audio-trace] wrote %s (frames %llu..%llu)\n",
+    RuntimeLog_Printf("[native-audio-trace] wrote %s (frames %llu..%llu)\n",
             path, (unsigned long long)s_pcm.first_frame,
             (unsigned long long)s_pcm.end_frame);
   } else {
-    fprintf(stderr, "[native-audio-trace] could not write %s\n", path);
+    RuntimeLog_Printf("[native-audio-trace] could not write %s\n", path);
   }
 }
 
@@ -344,7 +341,7 @@ static void WriteSongEvents(const NativeAudioSongEvent *events, size_t count) {
             e->value, e->image_src, e->caller ? e->caller : "?");
   }
   fclose(f);
-  fprintf(stderr, "[native-audio-trace] wrote %s\n", path);
+  RuntimeLog_Printf("[native-audio-trace] wrote %s\n", path);
 }
 
 static void WriteProvenance(const NativeAudioDspProvenance *entries,
@@ -365,7 +362,7 @@ static void WriteProvenance(const NativeAudioDspProvenance *entries,
             (unsigned long long)p->last_cycle, p->last_value);
   }
   fclose(f);
-  fprintf(stderr, "[native-audio-trace] wrote %s\n", path);
+  RuntimeLog_Printf("[native-audio-trace] wrote %s\n", path);
 }
 
 static void WriteMusicSuppressions(
@@ -388,7 +385,7 @@ static void WriteMusicSuppressions(
             (unsigned long long)entry->last_cycle);
   }
   fclose(f);
-  fprintf(stderr, "[native-audio-trace] wrote %s\n", path);
+  RuntimeLog_Printf("[native-audio-trace] wrote %s\n", path);
 }
 
 void NativeAudioTrace_Report(void) {
@@ -404,7 +401,7 @@ void NativeAudioTrace_Report(void) {
   NativeAudioMusicSuppression *suppressions =
       malloc(kRuntimeSuppressionCapacity * sizeof(*suppressions));
   if (!requests || !songs || !provenance || !suppressions) {
-    fprintf(stderr, "[native-audio-trace] report allocation failed\n");
+    RuntimeLog_Printf("[native-audio-trace] report allocation failed\n");
     free(requests);
     free(songs);
     free(provenance);
@@ -429,8 +426,7 @@ void NativeAudioTrace_Report(void) {
   WriteSongEvents(songs, song_count);
   WriteProvenance(provenance, provenance_count);
   WriteMusicSuppressions(suppressions, suppression_count);
-  fprintf(stderr,
-          "[native-audio-trace] requests=%llu retained=%llu "
+  RuntimeLog_Printf("[native-audio-trace] requests=%llu retained=%llu "
           "completed=%llu mailbox-coalesced=%llu mailbox-drop=%llu "
           "port-coalesced=%llu port-drop=%llu busy-drop=%llu "
           "lane-retriggered=%llu lane-replaced=%llu "
@@ -475,8 +471,7 @@ void NativeAudioTrace_Report(void) {
   if (stats.request_records_evicted || stats.scheduled_port_overflow ||
       stats.song_event_overflow || stats.provenance_overflow ||
       stats.suppression_provenance_overflow) {
-    fprintf(stderr,
-            "[native-audio-trace] WARNING incomplete retention: "
+    RuntimeLog_Printf("[native-audio-trace] WARNING incomplete retention: "
             "requests-evicted=%llu scheduled-overflow=%llu "
             "song-overflow=%llu dsp-provenance-overflow=%llu "
             "suppression-provenance-overflow=%llu\n",

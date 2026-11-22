@@ -19,6 +19,7 @@
  * sprite/projectile predicates authentic. */
 
 #include "snesrecomp/game/cpu.h"
+#include "app/runtime_log.h"
 #include "action/action_effect_clock.h"
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
@@ -396,8 +397,7 @@ void ActRaiser_WidescreenSpriteActivationProbe(void) {
                     previous->definition_address != definition_address ||
                     previous->object_type != object_type;
       if (changed) {
-        fprintf(stderr,
-                "[ws-activate] gf=%u slot=%d obj=$%04X event=%s side=%c "
+        RuntimeLog_Printf("[ws-activate] gf=%u slot=%d obj=$%04X event=%s side=%c "
                 "span=[%d,%d] margins=%d/%d status=$%04X flags30=$%04X "
                 "handler=$%04X type=$%04X def=$%02X:%04X\n",
                 game_frame, slot, object_address,
@@ -415,8 +415,7 @@ void ActRaiser_WidescreenSpriteActivationProbe(void) {
       previous->definition_address = definition_address;
       previous->object_type = object_type;
     } else if (previous->present) {
-      fprintf(stderr,
-              "[ws-activate] gf=%u slot=%d obj=$%04X event=exit reason=%s "
+      RuntimeLog_Printf("[ws-activate] gf=%u slot=%d obj=$%04X event=exit reason=%s "
               "span=[%d,%d] status=$%04X flags30=$%04X\n",
               game_frame, slot, object_address,
               authentic ? "authentic" : "outside",
@@ -812,8 +811,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
         uint16 definition_address = cpu_read16(
             cpu, cpu->DB,
             (uint16)(object_address + kActRaiserActionObject_Composition));
-        fprintf(stderr,
-                "[ws-activation-state] gf=%u slot=%u obj=$%04X "
+        RuntimeLog_Printf("[ws-activation-state] gf=%u slot=%u obj=$%04X "
                 "$0400=%u->%u mode=%s authentic=%d draw=%d active=%d "
                 "span=[%d,%d] margins=%d/%d handler=$%04X type=$%04X "
                 "def=$%02X:%04X\n",
@@ -997,8 +995,7 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
      * coordinate every frame. For the first, screen = world - cam and a wider
      * viewport legitimately reveals it earlier; for the second, world - cam is
      * pinned and there is nothing further out to reveal. */
-    fprintf(stderr,
-            "[objslot] gf=%u obj=$%04X slot=%u screen=(%d,%d) world=(%d,%d) "
+    RuntimeLog_Printf("[objslot] gf=%u obj=$%04X slot=%u screen=(%d,%d) world=(%d,%d) "
             "cam=(%d,%d) anim=$%02X:%04X comps=%u\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame), object_address,
             (unsigned)(oam_offset >> 2), (int)(int16)screen_origin_x,
@@ -1175,8 +1172,7 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
               signed_screen_x >= kActRaiserAuthenticWidth) {
             unsigned game_frame =
                 ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-            fprintf(stderr,
-                    "[ws-sprite] gf=%u obj=$%04X def=$%02X:%04X x=%d y=%u tile=$%02X\n",
+            RuntimeLog_Printf("[ws-sprite] gf=%u obj=$%04X def=$%02X:%04X x=%d y=%u tile=$%02X\n",
                     game_frame, object_address, definition_bank,
                     (unsigned)(uint16)(definition_address - 1),
                     signed_screen_x,
@@ -1440,8 +1436,7 @@ static void ws_sim_catalog_record(CpuState *cpu, uint16 record,
         cpu, cpu->DB, (uint16)(record + kSimRecord_State));
     uint16 status = cpu_read16(
         cpu, cpu->DB, (uint16)(record + kSimRecord_Status));
-    fprintf(stderr,
-            "[simcat] gf=%u town=%u tier=W idx=%u rec=%04X type=%02X "
+    RuntimeLog_Printf("[simcat] gf=%u town=%u tier=W idx=%u rec=%04X type=%02X "
             "state=%04X behavior=%04X script=%04X timer=%04X frame=%04X "
             "x=%04X y=%04X status=%04X flags=%04X "
             "f14=%04X f16=%04X f18=%04X vx=%04X vy=%04X "
@@ -1478,8 +1473,7 @@ static void ws_sim_catalog_record(CpuState *cpu, uint16 record,
   } else {
     uint16 status = cpu_read16(
         cpu, cpu->DB, (uint16)(record + kSimRecord_Status));
-    fprintf(stderr,
-            "[simcat] gf=%u town=%u tier=F idx=%u rec=%04X list=%04X "
+    RuntimeLog_Printf("[simcat] gf=%u town=%u tier=F idx=%u rec=%04X list=%04X "
             "timer=%04X script=%04X loop=%04X base=%04X frame=%04X "
             "x=%04X y=%04X status=%04X oam=%03X "
             "obsel=%02X obj1=%04X obj2=%04X\n",
@@ -1577,8 +1571,7 @@ RecompReturn ActRaiser_UpdateSimCamera(CpuState *cpu) {
     if (camera_x != last_camera ||
         g_ram[kActRaiserWram_CurrentMap] != last_town ||
         clamped != last_clamped) {
-      fprintf(stderr,
-              "[ws-sim-camera] gf=%u town=%u target=%u native=%u wide=%u "
+      RuntimeLog_Printf("[ws-sim-camera] gf=%u town=%u target=%u native=%u wide=%u "
               "bounds=%u-%u shake=%d/%d\n",
               (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
               (unsigned)g_ram[kActRaiserWram_CurrentMap],
@@ -1727,8 +1720,7 @@ RecompReturn ActRaiser_SimProjectileVisible(CpuState *cpu) {
                    (uint16)(record + kSimRecord_WorldX)) +
         kSimProjectileAnchorX);
     if (x4 < camera_x || x4 >= authentic_right) {
-      fprintf(stderr,
-              "[ws-sim-projectile] gf=%u record=$%04X world=%u,%u "
+      RuntimeLog_Printf("[ws-sim-projectile] gf=%u record=$%04X world=%u,%u "
               "camera=%u,%u margins=%d/%d\n",
               (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
               record,
@@ -1925,8 +1917,7 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
           int sx = screen_x & 0x01FF;
           if (sx >= kActRaiserAuthenticWidth + margin_right)
             sx -= kActRaiserTownWorldWidth;
-          fprintf(stderr,
-                  "[ws-sim-sprite] gf=%u emitter=%s record=$%04X "
+          RuntimeLog_Printf("[ws-sim-sprite] gf=%u emitter=%s record=$%04X "
                   "part=%u oam=$%03X x=%d y=%u margins=%d/%d "
                   "tile=$%03X attr=$%04X\n",
                   (unsigned)ActRaiser_ReadWram16(

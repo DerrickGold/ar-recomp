@@ -1,4 +1,5 @@
 #include "sim/sim_render_metadata.h"
+#include "app/runtime_log.h"
 
 #include <math.h>
 #include <stdatomic.h>
@@ -1158,7 +1159,7 @@ static int16_t UpdateProjectileArc(const SimSourceRecord *source,
     { static int dbg = -1;
       if (dbg < 0) dbg = getenv("AR_ERUPTDBG") ? 1 : 0;
       if (dbg)
-        fprintf(stderr, "[erupt] throw rec=$%04X (%d,%d)+%d -> (%d,%d) "
+        RuntimeLog_Printf("[erupt] throw rec=$%04X (%d,%d)+%d -> (%d,%d) "
                 "frames=%d apex=%d\n", source->record_address,
                 from_x, from_y, (int)from_height,
                 arc->to_x, arc->to_y, (int)arc->total_frames,
@@ -1995,7 +1996,7 @@ static void EruptionCensus(const SimFrameData *dst) {
   int state = air * 16 + fire;
   if ((air || fire) && state != last) {
     last = state;
-    fprintf(stderr, "[erupt] census air=%d fire=%d\n", air, fire);
+    RuntimeLog_Printf("[erupt] census air=%d fire=%d\n", air, fire);
   }
 }
 
@@ -2014,8 +2015,7 @@ static void ApplyProjectileArc(SimFrameData *dst) {
       int state = SimFrameIsProjected(dst) ? 1 : 0;
       if (state != last) {
         last = state;
-        fprintf(stderr,
-                "[erupt] arc pass %s (master_enabled=%d view=%d objects=%u)\n",
+        RuntimeLog_Printf("[erupt] arc pass %s (master_enabled=%d view=%d objects=%u)\n",
                 state ? "ACTIVE" : "INACTIVE -- fireballs stay on the ROM path",
                 (int)dst->master_enabled, (int)dst->view,
                 (unsigned)dst->object_count);

@@ -1,4 +1,5 @@
 #include "app/input_map.h"
+#include "app/runtime_log.h"
 #include "actraiser/actraiser_angel_input.h"
 #include "host/gamepad_poll.h"
 
@@ -92,7 +93,7 @@ InputDeviceMode InputMap_DeviceMode(void) {
 static void MarkSteamDeckDetected(void) {
   if (s_steam_deck_detected) return;
   s_steam_deck_detected = true;
-  fprintf(stderr, "[input] Steam Deck detected; Auto uses gamepad input\n");
+  RuntimeLog_Printf("[input] Steam Deck detected; Auto uses gamepad input\n");
 }
 
 static bool IsSteamDeckHardware(void) {
@@ -154,7 +155,7 @@ static void AddGamepad(SDL_JoystickID id) {
   if (s_pad_count >= kMaxGamepads) return;
   SDL_Gamepad *pad = SDL_OpenGamepad(id);
   if (!pad) {
-    fprintf(stderr, "[input] could not open gamepad %u: %s\n", (unsigned)id, SDL_GetError());
+    RuntimeLog_Printf("[input] could not open gamepad %u: %s\n", (unsigned)id, SDL_GetError());
     return;
   }
   GamepadSlot *slot = &s_pads[s_pad_count++];
@@ -168,13 +169,13 @@ static void AddGamepad(SDL_JoystickID id) {
     MarkSteamDeckDetected();
   const char *name = SDL_GetGamepadName(pad);
   snprintf(slot->name, sizeof(slot->name), "%s", name ? name : "Gamepad");
-  fprintf(stderr, "[input] gamepad %d connected: %s\n", s_pad_count, slot->name);
+  RuntimeLog_Printf("[input] gamepad %d connected: %s\n", s_pad_count, slot->name);
 }
 
 static void RemoveGamepad(SDL_JoystickID id) {
   int slot = SlotForJoystick(id);
   if (slot < 0) return;
-  fprintf(stderr, "[input] gamepad %d disconnected: %s\n",
+  RuntimeLog_Printf("[input] gamepad %d disconnected: %s\n",
           slot + 1, s_pads[slot].name);
   SDL_CloseGamepad(s_pads[slot].pad);
   for (int i = slot; i + 1 < s_pad_count; i++) s_pads[i] = s_pads[i + 1];
@@ -215,7 +216,7 @@ void InputMap_Init(void) {
        i++) {
     int added = SDL_AddGamepadMappingsFromFile(kMappingFiles[i]);
     if (added > 0) {
-      fprintf(stderr, "[input] %d gamepad mappings from %s\n",
+      RuntimeLog_Printf("[input] %d gamepad mappings from %s\n",
               added, kMappingFiles[i]);
       break;
     }
@@ -229,7 +230,7 @@ void InputMap_Init(void) {
     SDL_free(ids);
   }
   if (!s_pad_count)
-    fprintf(stderr, "[input] no gamepad connected; keyboard bindings active\n");
+    RuntimeLog_Printf("[input] no gamepad connected; keyboard bindings active\n");
   const char *poll_option = getenv("AR_GAMEPAD_POLL_THREAD");
   /* Linux HID feature reports can stall SDL's main-thread event pump. Keep
    * other platforms on their established device path until physical-device
@@ -240,7 +241,7 @@ void InputMap_Init(void) {
 #endif
   if (poll_option) use_poll_thread = strcmp(poll_option, "0") != 0;
   if (use_poll_thread) {
-    fprintf(stderr, "[input] gamepad polling worker %s\n",
+    RuntimeLog_Printf("[input] gamepad polling worker %s\n",
             HostGamepadPoll_Init() ? "enabled" : "unavailable; using event pump");
   }
 }

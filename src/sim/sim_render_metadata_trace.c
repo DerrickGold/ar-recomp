@@ -1,4 +1,5 @@
 #include "snesrecomp/support/utf8_fs.h"
+#include "app/runtime_log.h"
 
 #include "sim/sim_render_metadata.h"
 
@@ -28,10 +29,10 @@ static void TraceInitFromEnvironment(void) {
   if (!path || !path[0]) return;
   s_sim_d1_trace = sr_fopen(path, "w");
   if (!s_sim_d1_trace) {
-    fprintf(stderr, "[sim3d-d1] cannot open %s\n", path);
+    RuntimeLog_Printf("[sim3d-d1] cannot open %s\n", path);
     return;
   }
-  fprintf(stderr, "[sim3d-d1] metadata trace -> %s\n", path);
+  RuntimeLog_Printf("[sim3d-d1] metadata trace -> %s\n", path);
 }
 
 /* Whether anything will read this frame's trace fields. Sim3D_FinishCapture

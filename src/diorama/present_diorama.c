@@ -1,4 +1,5 @@
 #include "diorama/diorama_trunk_gpu.h"
+#include "app/runtime_log.h"
 #include "diorama/diorama_terrain_transfer.h"
 #include "diorama/diorama_trunk_guard_upload.h"
 #include "diorama/diorama_voxel_guard_upload.h"
@@ -394,7 +395,7 @@ static void UploadVoxelGuard(ArRenderDevice *device, const FrameSlot *slot,
   const uint64_t previous = s_voxel_guard.view.capture_generation;
   if (DioramaVoxelGuardUpload_Update(&s_voxel_guard, device, slot->diorama_voxel,
       source, &frame, &prefix) && !previous) {
-    fprintf(stderr, "[voxel-guard] ready map=%02x/%02x source=%d,%d size=%dx%d finite=%d,%d,%d,%d generation=%llu\n",
+    RuntimeLog_Printf("[voxel-guard] ready map=%02x/%02x source=%d,%d size=%dx%d finite=%d,%d,%d,%d generation=%llu\n",
         slot->diorama_map_group, slot->diorama_map_number,
         source->layout.lower.world_x, source->layout.lower.world_y,
         source->layout.lower.width, kDioramaVoxelGuardRows,
@@ -512,11 +513,11 @@ static void PlaneStatCensus(
         : (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) / area;
   }
   if (frames % 300u != 0u) return;
-  fprintf(stderr, "[planestat] after %lu frames (%dx%d)\n",
+  RuntimeLog_Printf("[planestat] after %lu frames (%dx%d)\n",
           frames, width, height);
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     if (!present_count[plane]) continue;
-    fprintf(stderr,
+    RuntimeLog_Printf(
             "  plane %2d: present %5.1f%% covered %5.1f%% bbox %5.1f%%\n",
             plane, 100.0 * (double)present_count[plane] / (double)frames,
             100.0 * covered_sum[plane] / (double)present_count[plane],
@@ -722,7 +723,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   if (trace_voxel_source < 0)
     trace_voxel_source = getenv("AR_VOXEL_SOURCE_CACHE_TRACE") != NULL;
   if (trace_voxel_source && cache_voxel_source)
-    fprintf(stderr, "[voxel-source-cache] source-ns=%llu reuse=%u revision=%llu world=%d,%d size=%d,%d changed-rows=%u row-reuse=%u\n",
+    RuntimeLog_Printf("[voxel-source-cache] source-ns=%llu reuse=%u revision=%llu world=%d,%d size=%d,%d changed-rows=%u row-reuse=%u\n",
         (unsigned long long)slot->timestamp_ns, reuse_voxel_source,
         (unsigned long long)revision, voxel_source_key.world_x, voxel_source_key.world_y,
         voxel_source_key.width, voxel_source_key.height,

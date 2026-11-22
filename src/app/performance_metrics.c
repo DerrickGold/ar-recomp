@@ -1,4 +1,6 @@
 #include "app/performance_metrics.h"
+#include "app/performance_report.h"
+#include "app/runtime_log.h"
 
 #include <stdatomic.h>
 #include <stdarg.h>
@@ -125,21 +127,12 @@ static int CompareIntervals(const void *a, const void *b) {
   const uint64_t aa = *(const uint64_t *)a, bb = *(const uint64_t *)b;
   return (aa > bb) - (aa < bb);
 }
-/* stderr is unbuffered on Windows. Emitting every stage with fprintf made
- * the once-per-second report stall the presentation owner for 8–12 ms.
- * Batch the complete report without changing buffering for other diagnostics.
- * Oversized future fields still flush safely instead of truncating a report. */
-typedef struct PerformanceReportBuffer {
-  char text[16384];
-  size_t used;
-} PerformanceReportBuffer;
-
-static void FlushReport(PerformanceReportBuffer *report) {
-  if (report->used) fwrite(report->text, 1, report->used, stderr);
+void PerformanceReport_Flush(PerformanceReport *report) {
+  if (report->used) fwrite(report->text, 1, report->used, report->output);
   report->used = 0;
 }
 
-static void AppendReport(PerformanceReportBuffer *report, const char *format, ...) {
+void PerformanceReport_Append(PerformanceReport *report, const char *format, ...) {
   va_list args, retry;
   va_start(args, format);
   va_copy(retry, args);
@@ -147,9 +140,10 @@ static void AppendReport(PerformanceReportBuffer *report, const char *format, ..
       sizeof(report->text) - report->used, format, args);
   va_end(args);
   if (length >= 0 && (size_t)length >= sizeof(report->text) - report->used) {
-    FlushReport(report);
+    /* Preserve an oversized field without truncating or reordering it. */
+    PerformanceReport_Flush(report);
     if ((size_t)length >= sizeof(report->text)) {
-      vfprintf(stderr, format, retry);
+      vfprintf(report->output, format, retry);
       length = 0;
     } else {
       length = vsnprintf(report->text, sizeof(report->text), format, retry);
@@ -157,6 +151,64 @@ static void AppendReport(PerformanceReportBuffer *report, const char *format, ..
   }
   va_end(retry);
   if (length > 0) report->used += (size_t)length;
+}
+
+static void WritePipelineReport(FILE *output, const void *record, size_t size) {
+  (void)size;
+  const PerformanceSnapshot *out = record;
+  PerformanceReport report = {.output = output};
+  if (out->counts[kPerformanceCount_NativePresents] > 0)
+    PerformanceReport_Append(&report, "[pipeline-cadence] native=%.3f holds=%.3f skipped-ticks=%.3f (per-present; holds depend on refresh)\n",
+        out->counts[kPerformanceCount_NativePresents],
+        out->counts[kPerformanceCount_SourceHolds],
+        out->counts[kPerformanceCount_SourceSkips]);
+  PerformanceReport_Append(
+      &report,
+      "[pipeline-perf] scene=%s host=%d map=%02x/%02x output=%dx%d frames=%" PRIu64
+      " fps=%.1f cadence-ms=%.3f p95=%.3f max=%.3f refresh=%d vsync=%d cap=%d pacing-source=%d gpu-ms=unavailable\n",
+      PerformanceMetrics_SceneName(out->context.scene), out->context.host_mode,
+      out->context.map_group, out->context.map_number, out->context.width, out->context.height,
+      out->presents, out->fps, out->frame_mean_ms, out->frame_p95_ms, out->frame_max_ms,
+      out->context.refresh_mode, (int)out->context.vsync, out->context.limit_fps,
+      out->context.pacing_source);
+  for (int i = 0; i < kPerformanceStage_Count; i++) if (out->stages[i].calls)
+    PerformanceReport_Append(&report, "[pipeline-stage] %s mean-ms=%.4f peak-call-ms=%.4f calls=%" PRIu64 "\n",
+        kNames[i], out->stages[i].mean_ms, out->stages[i].maximum_ms, out->stages[i].calls);
+  PerformanceReport_Append(
+      &report,
+      "[pipeline-work] ticks=%.2f repre=%.2f draws=%.1f vertices=%.0f upload-MiB=%.3f depth-MiB=%.3f depth-copy-MiB=%.3f depth-copy-calls=%.2f jobs=%.2f helpers=%.2f fallback=%.2f failed=%.2f (per-present)\n",
+      out->counts[kPerformanceCount_Ticks], out->counts[kPerformanceCount_Represents],
+      out->counts[kPerformanceCount_Draws], out->counts[kPerformanceCount_Vertices],
+      out->counts[kPerformanceCount_UploadBytes] / 1048576,
+      out->counts[kPerformanceCount_DepthUploadBytes] / 1048576,
+      out->counts[kPerformanceCount_DepthCopyBytes] / 1048576,
+      out->counts[kPerformanceCount_DepthCopyCalls], out->counts[kPerformanceCount_WorkJobs],
+      out->counts[kPerformanceCount_HelperJobs], out->counts[kPerformanceCount_Fallbacks],
+      out->counts[kPerformanceCount_FailedPresents]);
+  PerformanceReport_Append(
+      &report,
+      "[pipeline-traffic] upload-calls=%.2f skipped=%.2f scan-MiB=%.3f upload-MiB=%.3f mirror-realloc=%.2f (per-present)\n",
+      out->counts[kPerformanceCount_UploadCalls], out->counts[kPerformanceCount_UploadSkipped],
+      out->counts[kPerformanceCount_ScanBytes] / 1048576,
+      out->counts[kPerformanceCount_UploadBytes] / 1048576,
+      out->counts[kPerformanceCount_MirrorReallocs]);
+  PerformanceReport_Append(
+      &report,
+      "[pipeline-atlas] reuse=%.2f copy-MiB=%.3f copy-calls=%.2f (per-present; copies are GPU-only)\n",
+      out->counts[kPerformanceCount_AtlasReuse],
+      out->counts[kPerformanceCount_AtlasCopyBytes] / 1048576,
+      out->counts[kPerformanceCount_AtlasCopyCalls]);
+  PerformanceReport_Append(
+      &report,
+      "[pipeline-path] cpu-project=%.2f cpu-stage=%.2f gpu-reuse=%.2f publish=%.2f opt-out=%.2f limit=%.2f rejected=%.2f (events/present, not view fallbacks)\n",
+      out->counts[kPerformanceCount_CpuProject], out->counts[kPerformanceCount_CpuStage],
+      out->counts[kPerformanceCount_GpuReuse], out->counts[kPerformanceCount_GeometryPublish],
+      out->counts[kPerformanceCount_GeometryOptOut], out->counts[kPerformanceCount_GeometryLimit],
+      out->counts[kPerformanceCount_GeometryRejected]);
+  PerformanceReport_Append(&report, "[effect-projection] fallback-events=%.3f fallback-frames=%.3f (per-present; exceptional failures only)\n",
+      out->counts[kPerformanceCount_EffectProjectionFallbacks],
+      out->counts[kPerformanceCount_EffectProjectionFallbackFrames]);
+  PerformanceReport_Flush(&report);
 }
 
 static void Publish(uint64_t now) {
@@ -180,62 +232,7 @@ static void Publish(uint64_t now) {
   }
   for (int i = 0; i < kPerformanceCount_Count; i++)
     out->counts[i] = (double)s_window.counts[i] / s_window.frames;
-  if (s_log) {
-    PerformanceReportBuffer report;
-    report.used = 0;
-    if (out->counts[kPerformanceCount_NativePresents] > 0)
-      AppendReport(&report, "[pipeline-cadence] native=%.3f holds=%.3f skipped-ticks=%.3f (per-present; holds depend on refresh)\n",
-          out->counts[kPerformanceCount_NativePresents],
-          out->counts[kPerformanceCount_SourceHolds],
-          out->counts[kPerformanceCount_SourceSkips]);
-    AppendReport(
-        &report,
-        "[pipeline-perf] scene=%s host=%d map=%02x/%02x output=%dx%d frames=%" PRIu64
-        " fps=%.1f cadence-ms=%.3f p95=%.3f max=%.3f refresh=%d vsync=%d cap=%d pacing-source=%d gpu-ms=unavailable\n",
-        PerformanceMetrics_SceneName(out->context.scene), out->context.host_mode,
-        out->context.map_group, out->context.map_number, out->context.width, out->context.height,
-        out->presents, out->fps, out->frame_mean_ms, out->frame_p95_ms, out->frame_max_ms,
-        out->context.refresh_mode, (int)out->context.vsync, out->context.limit_fps,
-        out->context.pacing_source);
-    for (int i = 0; i < kPerformanceStage_Count; i++) if (out->stages[i].calls)
-      AppendReport(&report, "[pipeline-stage] %s mean-ms=%.4f peak-call-ms=%.4f calls=%" PRIu64 "\n",
-          kNames[i], out->stages[i].mean_ms, out->stages[i].maximum_ms, out->stages[i].calls);
-    AppendReport(
-        &report,
-        "[pipeline-work] ticks=%.2f repre=%.2f draws=%.1f vertices=%.0f upload-MiB=%.3f depth-MiB=%.3f depth-copy-MiB=%.3f depth-copy-calls=%.2f jobs=%.2f helpers=%.2f fallback=%.2f failed=%.2f (per-present)\n",
-        out->counts[kPerformanceCount_Ticks], out->counts[kPerformanceCount_Represents],
-        out->counts[kPerformanceCount_Draws], out->counts[kPerformanceCount_Vertices],
-        out->counts[kPerformanceCount_UploadBytes] / 1048576,
-        out->counts[kPerformanceCount_DepthUploadBytes] / 1048576,
-        out->counts[kPerformanceCount_DepthCopyBytes] / 1048576,
-        out->counts[kPerformanceCount_DepthCopyCalls], out->counts[kPerformanceCount_WorkJobs],
-        out->counts[kPerformanceCount_HelperJobs], out->counts[kPerformanceCount_Fallbacks],
-        out->counts[kPerformanceCount_FailedPresents]);
-    AppendReport(
-        &report,
-        "[pipeline-traffic] upload-calls=%.2f skipped=%.2f scan-MiB=%.3f upload-MiB=%.3f mirror-realloc=%.2f (per-present)\n",
-        out->counts[kPerformanceCount_UploadCalls], out->counts[kPerformanceCount_UploadSkipped],
-        out->counts[kPerformanceCount_ScanBytes] / 1048576,
-        out->counts[kPerformanceCount_UploadBytes] / 1048576,
-        out->counts[kPerformanceCount_MirrorReallocs]);
-    AppendReport(
-        &report,
-        "[pipeline-atlas] reuse=%.2f copy-MiB=%.3f copy-calls=%.2f (per-present; copies are GPU-only)\n",
-        out->counts[kPerformanceCount_AtlasReuse],
-        out->counts[kPerformanceCount_AtlasCopyBytes] / 1048576,
-        out->counts[kPerformanceCount_AtlasCopyCalls]);
-    AppendReport(
-        &report,
-        "[pipeline-path] cpu-project=%.2f cpu-stage=%.2f gpu-reuse=%.2f publish=%.2f opt-out=%.2f limit=%.2f rejected=%.2f (events/present, not view fallbacks)\n",
-        out->counts[kPerformanceCount_CpuProject], out->counts[kPerformanceCount_CpuStage],
-        out->counts[kPerformanceCount_GpuReuse], out->counts[kPerformanceCount_GeometryPublish],
-        out->counts[kPerformanceCount_GeometryOptOut], out->counts[kPerformanceCount_GeometryLimit],
-        out->counts[kPerformanceCount_GeometryRejected]);
-    AppendReport(&report, "[effect-projection] fallback-events=%.3f fallback-frames=%.3f (per-present; exceptional failures only)\n",
-        out->counts[kPerformanceCount_EffectProjectionFallbacks],
-        out->counts[kPerformanceCount_EffectProjectionFallbackFrames]);
-    FlushReport(&report);
-  }
+  if (s_log) RuntimeLog_Record(WritePipelineReport, out, sizeof(*out));
   memset(s_window.elapsed, 0, sizeof(s_window.elapsed));
   memset(s_window.maximum, 0, sizeof(s_window.maximum));
   memset(s_window.calls, 0, sizeof(s_window.calls));

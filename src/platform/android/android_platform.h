@@ -21,8 +21,4 @@ bool AndroidPlatform_PrepareStorage(char *rom_path, size_t rom_path_size);
 int AndroidPlatform_RunWithDesktopStack(int (*entry)(int, char **), int argc,
                                         char **argv);
 
-/* Mirrors stdout/stderr into logcat (tag "ActRaiser") and `log_path`. Replaces
- * the desktop `tee` child process, which an app cannot spawn. */
-void AndroidPlatform_TeeConsole(const char *log_path);
-
 #endif /* AR_ANDROID_PLATFORM_H */

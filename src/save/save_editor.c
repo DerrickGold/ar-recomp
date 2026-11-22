@@ -1,4 +1,5 @@
 #include "save/save_editor.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -157,7 +158,7 @@ static SaveEditorActionResult ApplyEdits(SettingAction action, const Settings *s
   const bool persist = action != kSettingAction_SaveApplySession;
   if (!SaveSystem_ApplyEdits(&edits, armed, persist, settings->save_autobackup, error))
     return kSaveEditorAction_Failed;
-  fprintf(stderr, "[save-editor] staged save edits applied%s\n",
+  RuntimeLog_Printf("[save-editor] staged save edits applied%s\n",
           persist ? " and saved" : " for this session");
   return action == kSettingAction_SaveApplyRestart ? kSaveEditorAction_RestartRequired
                                                    : kSaveEditorAction_Completed;
@@ -179,7 +180,7 @@ SaveEditorActionResult SaveEditor_HandleAction(SettingAction action,
     SaveError error = {{0}};
     SaveEditorActionResult result = ApplyEdits(action, settings, settings->save_edit_armed, &error);
     if (result == kSaveEditorAction_Failed)
-      fprintf(stderr, "[save-editor] %s failed: %s\n",
+      RuntimeLog_Printf("[save-editor] %s failed: %s\n",
               action == kSettingAction_SaveApplySession ? "session apply" : "apply and save",
               error.message);
     return result;
@@ -190,24 +191,24 @@ SaveEditorActionResult SaveEditor_HandleAction(SettingAction action,
     SaveError error = { { 0 } };
     if (!path || !*path) {
       if (!SaveSystem_DefaultImportPath(selected, sizeof(selected), &error)) {
-        fprintf(stderr, "[saves] import failed: %s\n", error.message);
+        RuntimeLog_Printf("[saves] import failed: %s\n", error.message);
         return kSaveEditorAction_Failed;
       }
       path = selected;
     }
     if (!SaveSystem_Import(path, settings->save_autobackup, &error)) {
-      fprintf(stderr, "[save-editor] import %s failed: %s\n", path,
+      RuntimeLog_Printf("[save-editor] import %s failed: %s\n", path,
               error.message);
       return kSaveEditorAction_Failed;
     }
-    fprintf(stderr, "[save-editor] imported %s -> %s\n", path,
+    RuntimeLog_Printf("[save-editor] imported %s -> %s\n", path,
             SaveSystem_ActivePath());
     return kSaveEditorAction_RestartRequired;
   }
   case kSettingAction_SaveExportCampaign: {
     SaveError error = {{0}};
     if (!SaveSystem_ExportToLibrary(kSaveFileFormat_NativeSrm, true, &error)) {
-      fprintf(stderr, "[saves] campaign export failed: %s\n", error.message);
+      RuntimeLog_Printf("[saves] campaign export failed: %s\n", error.message);
       return kSaveEditorAction_Failed;
     }
     return kSaveEditorAction_Completed;
@@ -219,7 +220,7 @@ SaveEditorActionResult SaveEditor_HandleAction(SettingAction action,
     const SaveFileFormat format =
         ini ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
     if (!SaveSystem_ExportToLibrary(format, false, &error)) {
-      fprintf(stderr, "[saves] raw export failed: %s\n", error.message);
+      RuntimeLog_Printf("[saves] raw export failed: %s\n", error.message);
       return kSaveEditorAction_Failed;
     }
     return kSaveEditorAction_Completed;

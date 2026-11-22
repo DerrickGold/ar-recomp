@@ -1,4 +1,5 @@
 #include "diorama/diorama_camera_policy.h"
+#include "app/runtime_log.h"
 #include "diorama/diorama_layer_manifest.h"
 /* ActRaiser frame plan: the per-frame presentation decisions for widescreen
  * and diorama (action-BG plans, canvas and vertical margins), the widescreen
@@ -72,7 +73,7 @@ static void ActRaiser_ProjectBgPresentationPolicy(
   ActionBgPlan_InitNative(plan);
   if (!reported_invalid_policy) {
     reported_invalid_policy = true;
-    fprintf(stderr,
+    RuntimeLog_Printf(
             "ERROR: invalid background presentation policy; using native plan\n");
   }
 }
@@ -165,8 +166,7 @@ static bool ActRaiser_ResolveActionBgPlan(
   if (apply_tuner_draft && !trunk && !castle && !ActionBgTuner_ApplyDraft(plan) &&
       !reported_rejected_draft) {
     reported_rejected_draft = true;
-    fprintf(stderr,
-            "[action-bg-tuner] rejected stale/invalid draft; using canonical "
+    RuntimeLog_Printf("[action-bg-tuner] rejected stale/invalid draft; using canonical "
             "room policy\n");
   }
   return ActionBgPlan_CompilePresentation(plan, presentation);
@@ -213,19 +213,19 @@ static void ActRaiser_LogWidescreenLayers(void) {
   last_frame = (int)game_frame;
   SrPpuStateSnapshot ppu;
   if (!ActRaiser_QueryPpuState(&ppu)) return;
-  fprintf(stderr,
+  char layers[4][48];
+  for (int layer = 0; layer < 4; layer++)
+    snprintf(layers[layer], sizeof(layers[layer]), " BG%d[w%d h%02x hs=%d]", layer + 1,
+             ppu.background_tilemap_control[layer] & 1,
+             ppu.background_tilemap_control[layer] & 0xfc,
+             ppu.backgrounds[layer].h_scroll);
+  RuntimeLog_Printf(
           "[ws-layers] gf=%u mode=%d main=%02x sub=%02x "
-          "wsel=%06x cgwsel=%02x cgadsub=%02x",
+          "wsel=%06x cgwsel=%02x cgadsub=%02x%s%s%s%s win1=[%d,%d] win2=[%d,%d]\n",
           game_frame, ppu.bg_mode,
           ppu.main_screen, ppu.sub_screen,
           ppu.window_select, ppu.color_math_control,
-          ppu.color_math_designation);
-  for (int layer = 0; layer < 4; layer++)
-    fprintf(stderr, " BG%d[w%d h%02x hs=%d]", layer + 1,
-            ppu.background_tilemap_control[layer] & 1,
-            ppu.background_tilemap_control[layer] & 0xfc,
-            ppu.backgrounds[layer].h_scroll);
-  fprintf(stderr, " win1=[%d,%d] win2=[%d,%d]\n",
+          ppu.color_math_designation, layers[0], layers[1], layers[2], layers[3],
           ppu.window1_left, ppu.window1_right,
           ppu.window2_left, ppu.window2_right);
 }
@@ -407,7 +407,7 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
                     ids[0], ids[1], ids[2], ids[3]);
       if (n >= (int)sizeof(buf) - 32) break;
     }
-    fprintf(stderr, "[vext-tiles] gf=%u camY=%4d phase=%3d band: %s\n",
+    RuntimeLog_Printf("[vext-tiles] gf=%u camY=%4d phase=%3d band: %s\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame), cam_y,
             cam_y & 0xFF, buf);
   }
@@ -421,8 +421,7 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
       SrPpuStateSnapshot ppu;
       if (!ActRaiser_QueryPpuState(&ppu)) return;
       last = gf;
-      fprintf(stderr,
-              "[vext] gf=%u top=%d layer=%d camY=%d worldH=%d "
+      RuntimeLog_Printf("[vext] gf=%u top=%d layer=%d camY=%d worldH=%d "
               "vscroll=%d/%d screenEn=$%02x tilemap=$%04x\n",
               gf, g_ws_extra_top, primary_layer + 1,
               ActRaiser_ReadWram16(
@@ -930,7 +929,7 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
     last_bg_plan_source_bg1 = bg_plan_source_bg1;
     last_bg_plan_source_bg2 = bg_plan_source_bg2;
     last_bg_hle_bindings = bg_hle_bindings;
-    fprintf(stderr, "[widescreen] gf=%u $18=%02x $19=%02x -> %s "
+    RuntimeLog_Printf("[widescreen] gf=%u $18=%02x $19=%02x -> %s "
             "clamp=%02x mirror=%02x repeat=%02x bands=%u/%08x normal=%02x "
             "hud=%u/%u/%u left-only-y=%u bg-plan=%d source=%s/%s "
             "hle=%02x\n",

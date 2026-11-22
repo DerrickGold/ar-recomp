@@ -1,4 +1,5 @@
 #include "host/host_video.h"
+#include "app/runtime_log.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -64,10 +65,15 @@ void HostVideo_Create(const char *title, bool hidden_capture) {
    * working one. Listing the compiled-in drivers also tells you instantly
    * whether a hand-supplied libSDL3 was built without a real backend. */
   const char *driver = SDL_GetCurrentVideoDriver();
-  fprintf(stderr, "[video] driver: %s (available:", driver ? driver : "(none)");
-  for (int i = 0, n = SDL_GetNumVideoDrivers(); i < n; i++)
-    fprintf(stderr, " %s", SDL_GetVideoDriver(i));
-  fprintf(stderr, ")\n");
+  char available[256] = {0};
+  size_t used = 0;
+  for (int i = 0; i < SDL_GetNumVideoDrivers(); ++i) {
+    const int length = snprintf(available + used, sizeof(available) - used, " %s",
+                                SDL_GetVideoDriver(i));
+    if (length < 0 || (size_t)length >= sizeof(available) - used) break;
+    used += (size_t)length;
+  }
+  RuntimeLog_Printf("[video] driver: %s (available:%s)\n", driver ? driver : "(none)", available);
   if (driver && (SDL_strcmp(driver, "dummy") == 0 ||
                  SDL_strcmp(driver, "offscreen") == 0))
     Die("SIM3D requires a real GPU video driver; dummy/offscreen is unsupported");
@@ -183,7 +189,7 @@ void HostVideo_Create(const char *title, bool hidden_capture) {
     Die("Graphics startup preparation failed; unable to safely prepare the renderer");
   Settings_ApplyRenderCapabilities(prepared_features);
   const uint64_t preparation_finished = SDL_GetTicksNS();
-  fprintf(stderr, "[graphics-prepare] completed in %llu ms; cpu-cores=%d system-ram=%d MB "
+  RuntimeLog_Printf("[graphics-prepare] completed in %llu ms; cpu-cores=%d system-ram=%d MB "
       "start-ns=%llu end-ns=%llu\n",
       (unsigned long long)((preparation_finished - preparation_started) / 1000000),
       SDL_GetNumLogicalCPUCores(), SDL_GetSystemRAM(),
@@ -224,17 +230,17 @@ void HostVideo_TakeFocus(void) {
    * SDL bounds this wait; a timeout is diagnostic, not a startup failure. */
   if (g_settings.window_mode != kWindowMode_Windowed &&
       !SDL_SyncWindow(g_window))
-    fprintf(stderr, "[window] startup fullscreen did not settle: %s\n",
+    RuntimeLog_Printf("[window] startup fullscreen did not settle: %s\n",
             SDL_GetError());
 #endif
   /* Direct launches from the builder or terminal may need to activate the
    * application. Request this once at startup. A successful request does not
    * prove focus was granted; the event loop logs subsequent focus changes. */
   if (!SDL_RaiseWindow(g_window))
-    fprintf(stderr, "[window] could not raise to foreground: %s\n",
+    RuntimeLog_Printf("[window] could not raise to foreground: %s\n",
             SDL_GetError());
   SDL_Window *keyboard = SDL_GetKeyboardFocus();
-  fprintf(stderr,
+  RuntimeLog_Printf(
       "[window] startup focus: SDL=%d window=%u keyboard-focus=%u "
       "flags=$%llx key-events=%d/%d\n",
       SDL_GetVersion(), (unsigned)SDL_GetWindowID(g_window),

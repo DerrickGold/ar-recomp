@@ -1,4 +1,5 @@
 #include "sim/church/present_church.h"
+#include "app/runtime_log.h"
 #include "sim/church/church_scene.h"
 #include "sim/church/church_art.h"
 #include "actraiser_game.h"
@@ -189,7 +190,7 @@ PresentationOutcome PresentChurch_Draw(ArRenderDevice *device, const FrameSlot *
    * is a core renderer error, never a recoverable missing enhancement. */
   if (!ArRenderDevice_EndTarget(device, &saved)) return kPresentationOutcome_CoreFailure;
   if (drawn) return kPresentationOutcome_Complete;
-  fprintf(stderr, "[church] scene unavailable; using native church for this visit (%s)\n",
+  RuntimeLog_Printf("[church] scene unavailable; using native church for this visit (%s)\n",
           ArRenderDevice_LastError(device));
   PresentChurch_ResetResources(device);
   s_failed = true;

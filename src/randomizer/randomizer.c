@@ -1,4 +1,5 @@
 #include "randomizer/randomizer.h"
+#include "app/runtime_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -738,13 +739,13 @@ bool Randomizer_Init(uint8 *rom, uint32 size) {
   memset(&s_summary, 0, sizeof s_summary);
   ResetStatScale();
   if (!rom || size != ROM_SIZE_EXPECTED) {
-    fprintf(stderr, "[randomizer] disabled: unexpected ROM image (%u bytes)\n",
+    RuntimeLog_Printf("[randomizer] disabled: unexpected ROM image (%u bytes)\n",
             (unsigned)size);
     return false;
   }
   s_rom_pristine = (uint8 *)malloc(size);
   if (!s_rom_pristine) {
-    fprintf(stderr, "[randomizer] disabled: snapshot allocation failed\n");
+    RuntimeLog_Printf("[randomizer] disabled: snapshot allocation failed\n");
     return false;
   }
   memcpy(s_rom_pristine, rom, size);
@@ -795,8 +796,7 @@ void Randomizer_Apply(void) {
 
   PassLairs((RandomizerMode)config.lair_spots, (RandomizerMode)config.lair_types, seed);
 
-  fprintf(stderr,
-          "[randomizer] seed %u applied: %d stat records, %d drops, %d statue "
+  RuntimeLog_Printf("[randomizer] seed %u applied: %d stat records, %d drops, %d statue "
           "moves, %d enemy types, %d lair moves, %d lair types\n",
           (unsigned)seed, s_summary.enemy_records, s_summary.statue_drops,
           s_summary.statue_moves, s_summary.enemy_type_moves,

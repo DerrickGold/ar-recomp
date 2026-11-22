@@ -3,6 +3,7 @@
  * captures, and the order the enhancement passes run in.
  * Phase: game (frame transaction). */
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
+#include "app/runtime_log.h"
 #include "host/host_ppu_output.h"
 #include "host/host_frame_surfaces.h"
 #include "diorama/diorama_gpu_policy.h"
@@ -78,7 +79,7 @@ static void FinishBackgroundPacket(void) {
   static bool reported;
   if (!reported) {
     reported = true;
-    fprintf(stderr, "[gpu-bg-capture] first packet=%ux%u mask=%u\n", p->words[0], p->words[1], p->words[2]);
+    RuntimeLog_Printf("[gpu-bg-capture] first packet=%ux%u mask=%u\n", p->words[0], p->words[1], p->words[2]);
   }
   if (!p->words[2]) return;
   const DioramaGpuCaptureMode mode = BackgroundPacketMode();
@@ -99,8 +100,7 @@ static void FinishBackgroundPacket(void) {
         const uint32_t got = SrPpuBgPacket_Color(p, bg, band, x, y);
         const uint32_t expected = pixels ? pixels[y * p->words[0] + x] : 0;
         if (got != expected) {
-          if (mismatches++ == 0) fprintf(stderr,
-              "[gpu-bg-capture] mismatch bg=%u band=%u x=%u y=%u got=%08x expected=%08x\n",
+          if (mismatches++ == 0) RuntimeLog_Printf("[gpu-bg-capture] mismatch bg=%u band=%u x=%u y=%u got=%08x expected=%08x\n",
               bg, band, x, y, got, expected);
           ready = false;
         }
@@ -133,7 +133,7 @@ static void FinishBackgroundPacket(void) {
       for (unsigned x = 0; x < p->words[4]; ++x) {
         const uint32_t got = SrPpuBgPacket_Color(p, 2, 0, x, y);
         if (got != expected[x] && mismatches++ == 0)
-          fprintf(stderr, "[gpu-bg-capture] skybox mismatch x=%u y=%u got=%08x expected=%08x\n",
+          RuntimeLog_Printf("[gpu-bg-capture] skybox mismatch x=%u y=%u got=%08x expected=%08x\n",
               x, y, got, expected[x]);
       }
     }
@@ -144,8 +144,7 @@ static void FinishBackgroundPacket(void) {
     unsigned full_add_rows = 0;
     if (p->words[7]) for (unsigned y = 0; y < p->words[1]; ++y)
       full_add_rows += p->words[p->words[7] + y] != 0;
-    fprintf(stderr,
-        "[gpu-bg-capture] frames=%u rejected-sources=%u mismatch-frames=%u mask=%u owned=%u full-add-rows=%u\n",
+    RuntimeLog_Printf("[gpu-bg-capture] frames=%u rejected-sources=%u mismatch-frames=%u mask=%u owned=%u full-add-rows=%u\n",
         frames, rejected, mismatch_frames, p->words[2], p->owned_sources, full_add_rows);
   }
   if (p->words[2]) s_live_background_packet = p;
@@ -302,8 +301,7 @@ static void ActRaiser_ReportVerticalCaptureRows(void) {
       }
     int margin_top, margin_bottom;
     ActRaiser_LiveVerticalMargins(&margin_top, &margin_bottom);
-    fprintf(stderr,
-            "[vext-rows] gf=%u top=%d bottom=%d hudbg=[%d..%d] "
+    RuntimeLog_Printf("[vext-rows] gf=%u top=%d bottom=%d hudbg=[%d..%d] "
             "bg2plane=[%d..%d] "
             "objs_unlocked=%u\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame), margin_top,
@@ -330,8 +328,7 @@ static void ActRaiser_ReportTitleScanout(const SnesRunnerApi *scanout_api,
           scanout_api->query_ppu_state(scanout_runner, &scanout_initial) ==
               SR_RESULT_OK) {
         last_gf = gf;
-        fprintf(stderr,
-                "[titlelog] gf=%d $18=%02x $19=%02x bgmode=%02x "
+        RuntimeLog_Printf("[titlelog] gf=%d $18=%02x $19=%02x bgmode=%02x "
                 "hdmaen=%02x m7=[%04x %04x %04x %04x] inidisp=%02x\n",
                 gf, g_ram[kActRaiserWram_MapGroup],
                 g_ram[kActRaiserWram_CurrentMap],
@@ -374,8 +371,7 @@ static void ActRaiser_PublishScanout(SrResult scanout_status,
     };
   }
   if (scanout_status != SR_RESULT_OK) {
-    fprintf(stderr,
-        "[ppu-scanout] status=%d gf=%u map=%02x/%02x "
+    RuntimeLog_Printf("[ppu-scanout] status=%d gf=%u map=%02x/%02x "
         "skybox=%ux%u world=%ux%u origin=%d,%d flags=%u\n",
         (int)scanout_status,
         ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
@@ -407,8 +403,7 @@ static void ActRaiser_PublishScanout(SrResult scanout_status,
         ? api->query_dma_state(ActRaiser_Runner(), &dma)
         : SR_RESULT_UNAVAILABLE;
     const SrDmaChannelState *channel = &dma.channels[2];
-    fprintf(stderr,
-        "[authentic-invalid] gf=%u scene=%02x/%02x scanout=%d flags=%08x "
+    RuntimeLog_Printf("[authentic-invalid] gf=%u scene=%02x/%02x scanout=%d flags=%08x "
         "inidisp=%02x mode=%u serial=%llu->%llu dma=%d "
         "ch2={flags:%x mode:%u target:%02x source:%02x:%04x} "
         "hdma-shadow=%02x camera=%u,%u margins=%u,%u,%u,%u\n",
@@ -446,7 +441,7 @@ static void ActRaiser_FinishSceneCapture(void) {
   if (apron_geom.apron > 0 && ActRaiser_DioramaBgApronMask() &&
       !ActRaiser_ResolvePpuCaptureAprons(BackgroundPacketEnabled() ? s_background_packet : NULL)) {
     static bool reported;
-    if (!reported) fprintf(stderr, "[ppu-capture] could not resolve additive capture aprons\n");
+    if (!reported) RuntimeLog_Printf("[ppu-capture] could not resolve additive capture aprons\n");
     reported = true;
   }
   FinishBackgroundPacket();
