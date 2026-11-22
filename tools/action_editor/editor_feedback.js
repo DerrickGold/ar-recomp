@@ -156,7 +156,9 @@ function refreshEditorFeedback() {
   $('#selectionPixels').disabled=!selected||mode!=='2d';
   $('#selectionPreview').disabled=!selected;
   $('#selectionVoxel').disabled=!selected||bgIndex!==0;
-  $('#selectionPaste').disabled=!selected||mode!=='2d'||tileClipboard?.key!==keyOf(room,bgIndex);
+  const pasteProblem=tilePasteProblem();
+  $('#selectionPaste').disabled=!selected||mode!=='2d'||!!pasteProblem;
+  $('#selectionPaste').title=pasteProblem||'Paste at the selection';
   $('#selectionTools').hidden=mode!=='2d';
   $('#pixelSelectionBlackQuick').disabled=!selected||mode!=='2d';
   $('#copyTilesQuick').disabled=!selected||mode!=='2d';

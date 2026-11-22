@@ -37,7 +37,7 @@ function openTileMenu(cx,cy,clientX,clientY) {
     displayedCell(room,bgIndex,L,x,y)?.bands||[]);
   const hasSelection=positions.length>0,anyHigh=bands.some(b=>b===2);
   const allHigh=bands.length>0&&bands.every(b=>b===2);
-  const sameClipboard=tileClipboard?.key===keyOf(room,bgIndex);
+  const pasteProblem=tilePasteProblem();
   tileMenuTarget={cx,cy,key:keyOf(room,bgIndex),priority:allHigh?1:2,effect:effect?.id,x:point.x,y:point.y};
   $('#tileActionAddEffect').disabled=false;
   $('#tileActionLightBox').disabled=bgIndex!==0||!hasSelection;
@@ -69,11 +69,10 @@ function openTileMenu(cx,cy,clientX,clientY) {
   $('#tileActionPixels').disabled=!tile;
   $('#tileActionSample').disabled=!tile;
   $('#tileActionRemove').disabled=$('#removeStamps').disabled;
-  $('#tileActionStamp').disabled=!sameClipboard;
-  $('#tileActionPaste').disabled=!sameClipboard||cx < -512||cy < -512||
+  $('#tileActionStamp').disabled=!!pasteProblem;
+  $('#tileActionPaste').disabled=!!pasteProblem||cx < -512||cy < -512||
     cx+tileClipboard.w>512||cy+tileClipboard.h>512;
-  $('#tileActionPaste').title=sameClipboard?`Paste ${tileClipboard.w}×${tileClipboard.h} tiles at ${cx}, ${cy}`
-    :'Copy tiles from this room, background and terrain first.';
+  $('#tileActionPaste').title=pasteProblem||`Paste ${tileClipboard.w}×${tileClipboard.h} tiles at ${cx}, ${cy}`;
   tileMenu.hidden=false;
   const rect=tileMenu.getBoundingClientRect();
   tileMenu.style.left=`${Math.max(8,Math.min(clientX,window.innerWidth-rect.width-8))}px`;

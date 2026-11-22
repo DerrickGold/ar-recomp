@@ -2358,7 +2358,8 @@ independently of language, artwork, difficulty, or pending settings changes.
 The saved limits (256 pixel records and 512 classification spans per BG)
 count distinct records across all terrain families, with shared records counted
 once. Pasted tile storage grows as needed, without a fixed count budget.
-Copy/stamp stays within the same room, background and terrain family.
+Within a room, the clipboard is shared by matching terrain variants on the
+same BG. Cross-room pastes use the destination BG's active terrain family.
 
 ## Authoring model
 
@@ -2480,9 +2481,10 @@ metatile rule. Mutating actions use the ordinary Undo/Redo history.
 
 **Paste over here** places the copied rectangle with its top-left corner at the
 clicked cell. Empty edge space is a valid destination, and pasting expands the
-map bounds as needed. Copies stay within the same room, BG and terrain family.
-The menu disables Paste when that clipboard is unavailable. Feedback appears
-at the top of the map, including any capacity error.
+map bounds as needed. To paste into another room, switch rooms and select the
+same BG. The rooms must share character graphics, palette and tile animation.
+The menu disables Paste when the clipboard is unavailable for the current BG.
+Feedback appears at the top of the map, including any capacity error.
 
 Click outside, scroll the map, or press Esc to dismiss the menu while keeping the
 selection. With the map focused, **Shift-F10** or the keyboard menu key opens
@@ -2549,26 +2551,27 @@ the editor checks that limit before exporting. Existing whole-plane
 
 ## Copy, paste, and extend scenery
 
-1. In **Map editor**, choose the room and BG, then **Select rectangle** and drag
+1. In **Map**, choose the source room and BG, then choose **Rectangle** and drag
    across the tiles to copy, or click the start tile and Shift-click the opposite
    corner. **Copy selected tiles** (Ctrl/Cmd-C) captures the
-   complete rectangle, including its art, four depth bands, and pixel edits.
-2. Use **Add edge space** to expose empty cells at the left, right, top, or
+   complete rectangle, including flip flags, depth bands and pixel edits.
+2. For a cross-room paste, use **Room** to switch to the destination and select
+   the same BG. The rooms must use the same character graphics, palette and
+   tile animation. Their tile layouts and metatile definitions can differ.
+3. Use **Add edge space** to expose empty cells at the left, right, top, or
    bottom. The count is in 16px tiles; four adds 64px. Pasting beyond an edge
    also expands the authoring bounds automatically.
-3. Choose **Stamp copied tiles** (Ctrl/Cmd-V). Its translucent preview follows
+4. Right-click the destination and choose **Paste over here**, or activate
+   **Stamp copied tiles** (Ctrl/Cmd-V). Its translucent preview follows
    the pointer; click the destination's top-left cell. Click again to repeat,
    then press Esc to finish. The X/Y fields and **Paste** provide exact placement.
-4. Check **Diorama 3D**, then **Export level INI → Copy section**. Replace this
+5. Check **Diorama 3D**, then **Export level INI → Copy section**. Replace the destination
    room's section in `diorama-layers.ini`, save, and restart the game.
 
-Copies stay attached to their original room, BG and terrain family so their
-graphics bank, scroll, palette and layout remain valid. An overlapping paste
-uses the original clipboard snapshot. Matching regional terrain shares that
-clipboard; a different layout requires copying its own source art. Characters
-still follow the selected artwork and animation. Paste overwrites the
-destination's presentation art, including
-transparent pixels. It does not alter gameplay maps or collision.
+An overlapping paste uses the original clipboard snapshot. Within a room,
+matching regional terrain shares that clipboard. Paste overwrites the
+destination's presentation art, including transparent pixels. It does not
+alter gameplay maps or collision.
 
 The right-click **Delete tile / Delete selected tiles** action clears artwork
 from the selection in one Undo step. Tiles inside the original map become

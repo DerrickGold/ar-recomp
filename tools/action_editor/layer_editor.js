@@ -443,7 +443,7 @@ function syncSelectionLayer() {
   if (selectionLayer !== key) {
     selectedCells.clear(); selectedStampKeys.clear(); selectionRect=null;selectionAnchor=null;
     lastEntry = null; pixelCell = null; pixelStamp=null;
-    if(brush==='stamp'&&tileClipboard?.key!==key)$('#bSelect').onclick();
+    if(brush==='stamp')$('#bSelect').onclick();
     selectionLayer = key;
   }
   refreshSelectionControls();

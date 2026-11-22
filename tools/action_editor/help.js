@@ -178,8 +178,7 @@ also opens the pixel editor, fills selected transparency black, removes pasted
 tiles, or clears the selection. Edits use the ordinary Undo/Redo history.</p>
 <p>Click outside or press Esc to close the menu without clearing the selection.
 With the map focused, Shift-F10 opens the same menu. Arrow keys choose an action;
-Enter activates it. Paste requires a clipboard from the same room, background,
-and matching terrain.</p>
+Enter activates it.</p>
 <p><b>Select cells</b> highlights cells without changing their bands. Use
 <b>Apply band to selection</b> to save a layer change. <b>Deselect</b>,
 <kbd>Esc</kbd>, or <kbd>Ctrl/Cmd-D</kbd> clears highlights and keeps edits.
@@ -254,8 +253,11 @@ Flipped tiles have no fixed tile-count budget. Black masks still use the shared
 <p>Choose <b>Stamp copied tiles</b> (<kbd>Ctrl/Cmd-V</kbd>), then click each new
  top-left corner. The ghost shows placement. Keep clicking to repeat;
  <kbd>Esc</kbd> ends stamping. X/Y and <b>Paste</b> place precisely, with negative
- coordinates extending left or up. Copy and paste stay within the same room/BG.
- An overlapping paste uses the frozen source rectangle.</p>
+ coordinates extending left or up. An overlapping paste uses the frozen source
+ rectangle.</p>
+<p>To paste into another room, copy the tiles, switch rooms, and select the
+ same BG. The rooms must share character graphics, palette and tile animation.
+ Within a room, the clipboard is shared by matching terrain variants.</p>
 <p>Right-click and choose <b>Delete tile</b> (or <b>Delete selected tiles</b>)
 to clear the selected artwork. Original-map tiles become transparent; added
 edge tiles are removed so saved bounds can shrink. One Undo restores the entire

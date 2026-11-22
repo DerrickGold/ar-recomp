@@ -126,8 +126,6 @@ function flipVoxelFaceArt(axis) {
   if(art.size===16)paletteWords=[...art.words];
   refreshPaletteComposer(decodeLayer(paletteRoom(),art.bg));refreshVoxelFacePalette();return previewVoxelFacePalette();
 }
-const paletteAssetMatch=(a,b)=>a.chars===b.chars&&a.extraChars===b.extraChars&&
-  a.palette===b.palette&&JSON.stringify(a.animation||null)===JSON.stringify(b.animation||null);
 const paletteRoom=()=>terrainRoom(DATA.rooms[paletteSourceIndex],room.terrainProfile||0);
 const paletteHex=(id,width=2)=>id.toString(16).toUpperCase().padStart(width,'0');
 function paletteTile(layer,id) {
@@ -202,10 +200,10 @@ function refreshPaletteComposer(layer) {
 }
 function refreshPaletteStamp() {
   if(!L||tilePalette.hidden)return;
-  const clip=tileClipboard,same=clip?.key===keyOf(room,bgIndex);
-  $('#paletteStampInfo').textContent=same?`${clip.label||'Copied range'} · ${clip.w}×${clip.h}`:'Choose a tile';
+  const clip=tileClipboard,available=!tilePasteProblem();
+  $('#paletteStampInfo').textContent=available?`${clip.label||'Copied range'} · ${clip.w}×${clip.h}`:'Choose a tile';
   const canvas=$('#paletteStampPreview');
-  if(!same){canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);return;}
+  if(!available){canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);return;}
   /* Preserve the aspect ratio without allocating a full copy for a large range. */
   const scale=64/Math.max(clip.w,clip.h),w=Math.max(1,Math.round(clip.w*scale)),h=Math.max(1,Math.round(clip.h*scale));
   canvas.width=w;canvas.height=h;
@@ -224,7 +222,7 @@ function refreshPaletteStamp() {
 }
 function choosePaletteTile(id) {
   const source=paletteRoom(),bg=paletteBg();
-  if(!source.bg[bg]||!paletteAssetMatch(room,source))return false;
+  if(!source.bg[bg]||!tileAssetsMatch(room,source))return false;
   const layer=decodeLayer(source,bg),tile=paletteTile(layer,id);if(!tile)return false;
   paletteWords=[...tile.words];paletteChoice=id;
   refreshPaletteComposer(layer);
@@ -233,7 +231,7 @@ function choosePaletteTile(id) {
     button.setAttribute('aria-pressed',String(active));
   }
   if(voxelFacePalette)return chooseVoxelFaceArt({bg,words:tile.words,x:0,y:0,size:16},`Tile ${paletteHex(id)} selected. Use the full tile, or crop an 8 × 8 patch.`);
-  tileClipboard={key:keyOf(room,bgIndex),w:1,h:1,cells:[tile],label:`Tile ${paletteHex(id)}`};
+  setTileClipboard(1,1,[tile],`Tile ${paletteHex(id)}`);
   startStamp();tileActionStatus(`Tile ${paletteHex(id)} ready. Click the map to place it; Esc finishes.`);
   return true;
 }
@@ -243,7 +241,7 @@ function paletteCharacterWord(id) {
 }
 function choosePaletteCharacter(id) {
   const source=paletteRoom(),bg=paletteBg();
-  if(!source.bg[bg]||!paletteAssetMatch(room,source))return false;
+  if(!source.bg[bg]||!tileAssetsMatch(room,source))return false;
   const layer=decodeLayer(source,bg);if(!loadedCharacterIds(layer).includes(id))return false;
   const word=paletteCharacterWord(id);paletteWords[paletteQuarter]=word;
   paletteQuarter=(paletteQuarter+1)%4;
@@ -257,11 +255,11 @@ function choosePaletteCharacter(id) {
   return true;
 }
 function usePaletteComposite() {
-  if(!paletteAssetMatch(room,paletteRoom()))return false;
+  if(!tileAssetsMatch(room,paletteRoom()))return false;
   if(voxelFacePalette)return chooseVoxelFaceArt({bg:paletteBg(),words:paletteWords,x:0,y:0,size:16},
     'Four native pieces assembled.',true);
   const tile={id:paletteChoice??0,words:[...paletteWords],bands:paletteWords.map(authenticBand),black:ZERO_PIXEL_MASK,transparent:ZERO_PIXEL_MASK};
-  tileClipboard={key:keyOf(room,bgIndex),w:1,h:1,cells:[tile],label:'Assembled tile'};
+  setTileClipboard(1,1,[tile],'Assembled tile');
   startStamp();tileActionStatus('Assembled tile ready. Click the map to place it; Esc finishes.');return true;
 }
 function refreshTilePalette(force=false) {
@@ -277,7 +275,7 @@ function refreshTilePalette(force=false) {
     let count=0;
     DATA.rooms.forEach((base,index)=>{
       const source=terrainRoom(base,room.terrainProfile||0);
-      if(!source.bg[bg]||!paletteAssetMatch(room,source)||voxelFacePalette&&index!==paletteSourceIndex)return;
+      if(!source.bg[bg]||!tileAssetsMatch(room,source)||voxelFacePalette&&index!==paletteSourceIndex)return;
       const option=document.createElement('option');option.value=String(index);
       const label=$('#room').children[index]?.textContent?.split('  —')[0]||`${base.group}:${base.map}`;
       option.textContent=index===paletteSourceIndex?`Current map · ${label}`:label;
@@ -487,7 +485,7 @@ window.addEventListener('keydown',event=>{if(event.key==='Escape')hidePaletteZoo
 $('#paletteSource').onchange=()=>{
   if(voxelFacePalette)return;
   const index=Number($('#paletteSource').value),source=DATA.rooms[index];
-  if(!source||!source.bg[bgIndex]||!paletteAssetMatch(room,source))return;
+  if(!source||!source.bg[bgIndex]||!tileAssetsMatch(room,source))return;
   paletteSourceIndex=index;paletteChoice=null;refreshTilePalette();
 };
 for(const name of ['paletteKind','paletteUsage','paletteRow'])$(`#${name}`).onchange=()=>refreshTilePalette();

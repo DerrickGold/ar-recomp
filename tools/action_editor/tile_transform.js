@@ -65,7 +65,8 @@ function flipSelectedTiles(axis,wholeRange=false) {
   return applyTileUpdates(updates,`${wholeRange?'Mirror range':'Flip tiles'} ${axis==='h'?'horizontally':'vertically'}`);
 }
 function flipClipboard(axis) {
-  const clip=tileClipboard;if(!clip||clip.key!==keyOf(room,bgIndex))return false;
+  if(tilePasteProblem())return false;
+  const clip=tileClipboard;
   const cells=clip.cells.map((_,i)=>{
     const x=i%clip.w,y=Math.floor(i/clip.w);
     const source=clip.cells[(axis==='v'?clip.h-1-y:y)*clip.w+(axis==='h'?clip.w-1-x:x)];
@@ -79,12 +80,13 @@ function flipClipboard(axis) {
 function refreshTileTransformControls() {
   const selected=!!(selectedCells.size||selectedStampKeys.size)&&mode==='2d';
   const rectangle=selected&&!!selectedTileRectangle();
+  const canPaste=!tilePasteProblem();
   for(const axis of ['H','V']) {
     $(`#flipSelected${axis}`).disabled=!selected;
     $(`#mirrorSelected${axis}`).disabled=!rectangle;
-    const button=$(`#flipClipboard${axis}`),same=tileClipboard?.key===keyOf(room,bgIndex);
-    button.disabled=!same;button.classList.toggle('on',same&&!!tileClipboard[`flip${axis}`]);
-    button.setAttribute('aria-pressed',String(!!(same&&tileClipboard[`flip${axis}`])));
+    const button=$(`#flipClipboard${axis}`),pressed=canPaste&&!!tileClipboard[`flip${axis}`];
+    button.disabled=!canPaste;button.classList.toggle('on',pressed);
+    button.setAttribute('aria-pressed',String(pressed));
   }
 }
 for(const axis of ['h','v']) {

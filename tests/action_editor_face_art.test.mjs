@@ -54,7 +54,9 @@ const context=vm.createContext({document:documentHost,window:{innerWidth:960,inn
 vm.runInContext(`function startStamp(){stampCalls++;}
   function tileActionStatus(text){status=text;}
   function setMode(next){if(next!=='2d')closeTilePalette(false);mode=next;}`,context);
-for(const [file,start,end] of [['native_frame.js','function nativeCharacterPixel','function nativeLayerPixel'],
+for(const [file,start,end] of [['native_frame.js','const tileAssetsMatch','function roomFromSection'],
+  ['native_frame.js','function nativeCharacterPixel','function nativeLayerPixel'],
+  ['stamp_editor.js','function setTileClipboard','function sceneryNotice'],
   ['stamp_editor.js','function stampOriginal','function selectRectangle'],
   ['stamp_editor.js','function sampleStampAt','function stampTiles']]) {
   const text=source(file);vm.runInContext(text.slice(text.indexOf(start),text.indexOf(end)),context);

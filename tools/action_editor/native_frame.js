@@ -49,6 +49,9 @@ function terrainRoom(base, profile = terrainProfile) {
 }
 const sceneIdentity = r => `${r.group}:${r.map}${r.section?':'+r.section:''}`;
 const sceneKey = r => `${sceneIdentity(r)}:${r.terrainProfile || 0}`;
+// The exporter interns these blobs by content. Tile words refer to these banks.
+const tileAssetsMatch = (a,b) => a.chars===b.chars&&a.extraChars===b.extraChars&&
+  a.palette===b.palette&&JSON.stringify(a.animation||null)===JSON.stringify(b.animation||null);
 function roomFromSection(header) {
   const m=header.match(/^\[layers:([\da-f]{1,2}):([\da-f]{1,2})(?::(completion))?\]$/i);
   return m&&DATA.rooms.find(r=>r.group===parseInt(m[1],16)&&r.map===parseInt(m[2],16)&&

@@ -2810,6 +2810,63 @@ ar('for(const callback of window.listeners.resize)callback();');
 assert.equal(ar('paletteZoom.hidden'),true);
 console.log('Loaded/unused palette, compatible sources, character composition, animated thumbnails, pixel-correct flips, range/clipboard mirroring, INI round trips and atomic limits passed');
 
+/* A copied range carries its words and edits into a different compatible room.
+ * Visiting incompatible rooms leaves the clipboard and project intact. */
+{
+  const data=structuredClone(paletteData),destination=data.rooms[1];
+  const destinationMap=data.blobs.push(Buffer.alloc(512,9).toString('base64'))-1;
+  const destinationDefs=Buffer.from(data.blobs[destination.bg[0].metatiles],'base64');
+  destinationDefs.writeUInt16BE(0x4004,0);
+  destination.bg[0]={...destination.bg[0],map:destinationMap,
+    metatiles:data.blobs.push(destinationDefs.toString('base64'))-1};
+  const otherPalette=Buffer.from(data.blobs[destination.palette],'base64');
+  otherPalette.writeUInt16LE(0,65*2);
+  data.rooms.push({...destination,map:5,palette:data.blobs.push(otherPalette.toString('base64'))-1});
+  const {run:copy,elements:controls}=editor(data);
+  const goTo=index=>copy(`$('#room').value='${index}';$('#room').onchange();`);
+  copy(`selectOnlyTile(0,0);$('#pixelScope').value='cell';
+    beginOp('source pixels');editPixel(3,5,'black');editPixel(8,4,'transparent');commitOp();
+    applySelectionBand(0);selectRectangle(0,0,1,0);$('#copyTilesQuick').onclick();
+    const sourceTiles=[displayedCell(room,0,L,0,0),displayedCell(room,0,L,1,0)];
+    const sourceColors=sourceTiles.map(tile=>Array.from({length:256},(_,i)=>stampColor(L,tile,i%16,i>>4)));`);
+  const beforePaste=copy('mergeDioramaIni()'),sourceSection=copy('roomSectionIni(room)');
+  const historyBefore=copy('undoStack.length');
+  for(const index of [2,3,4]) {
+    goTo(index);
+    copy('selectOnlyTile(4,2);openTileMenu(4,2,10,10);');
+    assert.equal(controls.get('#selectionPaste').disabled,true);
+    assert.equal(controls.get('#stampQuick').disabled,true);
+    assert.equal(controls.get('#tileActionPaste').disabled,true);
+    assert.equal(copy('stampTiles(4,2)'),false);
+    assert.equal(copy('mergeDioramaIni()'),beforePaste);
+    assert.equal(copy('undoStack.length'),historyBefore);
+  }
+
+  goTo(1);
+  copy('openTileMenu(4,2,10,10);');
+  assert.equal(copy('displayedCell(room,0,L,4,2).id'),9);
+  assert.equal(controls.get('#selectionPaste').disabled,false);
+  assert.equal(controls.get('#stampQuick').disabled,false);
+  assert.equal(controls.get('#tileActionPaste').disabled,false);
+  copy("$('#tileActionPaste').onclick();");
+  assert.equal(copy(`[4,5].every((x,i)=>{
+    const tile=displayedCell(room,0,L,x,2);
+    return JSON.stringify(tile)===JSON.stringify(sourceTiles[i])&&
+      sourceColors[i].every((color,p)=>stampColor(L,tile,p%16,p>>4)===color);
+  })`),true);
+  assert.equal(copy('roomSectionIni(DATA.rooms[0])'),sourceSection);
+  assert.equal(copy('undoStack.length'),historyBefore+1);
+  const pastedIni=copy('mergeDioramaIni()');
+  assert.match(copy('roomSectionIni(room)'),/bg1-stamp[^\n]*cell:4,2/);
+  copy('undo()');
+  assert.equal(copy('mergeDioramaIni()'),beforePaste);
+  copy('redo()');
+  assert.equal(copy('mergeDioramaIni()'),pastedIni);
+  copy(`loadIniText(${JSON.stringify(pastedIni)},'cross-room.ini');`);
+  assert.equal(copy('mergeDioramaIni()'),pastedIni);
+}
+console.log('Cross-room copy and paste, graphics/palette/animation checks, undo and INI round trip passed');
+
 /* Large rectangular copies, repeated placement, mirroring and regional export
  * must survive reload without losing cells beyond the old 512-record cap. */
 const largeEditor=editor(paletteData),lg=largeEditor.run;

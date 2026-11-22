@@ -4,6 +4,18 @@ const stampStore = {}, selectedStampKeys = new Set();
 const blankTile=()=>({blank:true,id:0,words:[0,0,0,0],bands:[1,1,1,1],black:ZERO_PIXEL_MASK,transparent:ZERO_PIXEL_MASK});
 const nativeCell=(layer,x,y)=>x>=0&&y>=0&&x<layer.cellsW&&y<layer.cellsH;
 let selectionRect = null, tileClipboard = null, stampHover = null, pixelStamp = null;
+function setTileClipboard(w,h,cells,label) {
+  tileClipboard={key:keyOf(room,bgIndex),room,bg:bgIndex,w,h,cells,label};
+}
+function tilePasteProblem() {
+  const clip=tileClipboard;
+  if(!clip)return 'Copy tiles first.';
+  if(clip.key===keyOf(room,bgIndex))return '';
+  if(clip.bg!==bgIndex)return `Switch to BG${clip.bg+1} to paste these tiles.`;
+  if(sceneIdentity(clip.room)===sceneIdentity(room))return 'Switch to the source terrain to paste these tiles.';
+  if(!tileAssetsMatch(clip.room,room))return 'This room uses different tile graphics, palettes, or animation.';
+  return '';
+}
 function sceneryNotice(message) {
   $('#stampInfo').textContent=message;tileActionStatus(message);
 }
@@ -119,7 +131,7 @@ function copyTiles() {
   if(!cells.some(Boolean)) {
     sceneryNotice('The selection contains no tile art.');return false;
   }
-  tileClipboard={key:keyOf(room,bgIndex),w,h,cells};
+  setTileClipboard(w,h,cells);
   $('#pasteX').value=String(b.x1);$('#pasteY').value=String(b.y0);
   refreshStampControls();refreshEditorFeedback();
   tileActionStatus(`Copied ${w}×${h} tiles. Choose Paste over, or Stamp to place copies.`);return true;
@@ -129,16 +141,16 @@ function copyTiles() {
 function sampleStampAt(x,y) {
   if(!L||mode!=='2d')return false;
   const tile=displayedCell(room,bgIndex,L,x,y);if(!tile)return false;
-  tileClipboard={key:keyOf(room,bgIndex),w:1,h:1,
-    cells:[{...tile,words:[...tile.words],bands:[...tile.bands]}],label:`Sampled tile ${x}, ${y}`};
+  setTileClipboard(1,1,[{...tile,words:[...tile.words],bands:[...tile.bands]}],`Sampled tile ${x}, ${y}`);
   startStamp();refreshStampControls();
   tileActionStatus(`Sampled tile ${x}, ${y}. Click a destination to paint it; Esc finishes.`);return true;
 }
 function stampTiles(x,y) {
-  const clip=tileClipboard,key=keyOf(room,bgIndex),target=stampBucket(room,bgIndex);
-  if(!clip||clip.key!==key) {
-    sceneryNotice('Copy tiles from this room and background first.');return false;
+  const problem=tilePasteProblem();
+  if(problem) {
+    sceneryNotice(problem);return false;
   }
+  const clip=tileClipboard,key=keyOf(room,bgIndex),target=stampBucket(room,bgIndex);
   if(!Number.isInteger(x)||!Number.isInteger(y)||x<-512||y<-512||
       x+clip.w>512||y+clip.h>512) {
     sceneryNotice('Paste coordinates must stay between −512 and 511.');return false;
@@ -387,22 +399,24 @@ function stampIniLines(r) {
   return lines;
 }
 function refreshStampControls() {
-  const same=tileClipboard?.key===keyOf(room,bgIndex);
+  const problem=tilePasteProblem();
   $('#copyTiles').disabled=!selectedCells.size&&!selectedStampKeys.size&&!selectionRect;
   $('#copyTilesQuick').disabled=$('#copyTiles').disabled;
-  $('#stampTool').disabled=$('#pasteTiles').disabled=!same;
-  $('#stampQuick').disabled=!same;
+  $('#stampTool').disabled=$('#pasteTiles').disabled=!!problem;
+  $('#stampQuick').disabled=!!problem;
+  $('#stampQuick').title=problem||'Click to paste repeatedly (Ctrl/Cmd-V)';
   $('#removeStamps').disabled=![...selectedStampKeys].some(key=>stampBucket(room,bgIndex).cells[key]);
   const b=sceneryBounds(room,bgIndex),n=Object.keys(stampBucket(room,bgIndex).cells).length;
   const space=mapBounds(room,bgIndex);
   $('#trimEdgeSpace').disabled=['x0','y0','x1','y1'].every(k=>space[k]===b[k]);
   $('#stampInfo').textContent=(tileClipboard?`Stamp ${tileClipboard.w}×${tileClipboard.h}. `:'')
     +`${n} pasted tiles · saved bounds ${b.x0},${b.y0} to ${b.x1-1},${b.y1-1}.`
-    +(tileClipboard&&!same?' Switch back to the source room/BG to paste.':'');
+    +(tileClipboard&&problem?` ${problem}`:'');
   refreshTileTransformControls();refreshPaletteStamp();
 }
 function startStamp() {
-  if(tileClipboard?.key!==keyOf(room,bgIndex))return;
+  const problem=tilePasteProblem();
+  if(problem){sceneryNotice(problem);return;}
   setMode('2d');brush='stamp';stampHover=null;
   Object.values(brushBtns).forEach(b=>b.classList.remove('on'));
   $('#stampTool').classList.add('on');draw();
@@ -423,7 +437,7 @@ function drawStampGuides() {
   const rect=drag?.selectRect?{x0:Math.min(drag.x0,drag.x1),y0:Math.min(drag.y0,drag.y1),
     x1:Math.max(drag.x0,drag.x1)+1,y1:Math.max(drag.y0,drag.y1)+1}:selectionRect;
   if(rect)outline(rect,'#5aa9ff');
-  if(!compareOriginal&&brush==='stamp'&&stampHover&&tileClipboard?.key===keyOf(room,bgIndex)) {
+  if(!compareOriginal&&brush==='stamp'&&stampHover&&!tilePasteProblem()) {
     const [x,y]=stampHover,clip=tileClipboard;
     ctx.save();ctx.globalAlpha=.55;
     const ghost=document.createElement('canvas');ghost.width=clip.w*16;ghost.height=clip.h*16;
