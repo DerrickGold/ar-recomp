@@ -1,13 +1,13 @@
 module github.com/DerrickGold/ar-recomp/installer/desktop-shell
 
-go 1.25.0
+go 1.27.4
 
 require (
 	github.com/DerrickGold/ar-recomp/installer v0.0.0
 	github.com/tc-hib/winres v0.3.1
 	github.com/wailsapp/go-webview2 v1.0.22
 	github.com/wailsapp/wails/v2 v2.15.0
-	golang.org/x/sys v0.46.0
+	golang.org/x/sys v0.49.0
 )
 
 replace github.com/DerrickGold/ar-recomp/installer => ..
@@ -37,8 +37,8 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/image v0.41.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/image v0.45.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 )

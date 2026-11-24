@@ -360,7 +360,7 @@ Run `actraiser-builder package --help` for all options.
 ## Building Builder distributions
 
 To build customized Builder downloads from macOS, install Xcode Command Line
-Tools, Go 1.25 or newer, and the packaging prerequisites:
+Tools, Go 1.27.4 or newer, and the packaging prerequisites:
 
 ```sh
 brew install go cmake pkgconf xz zstd squashfs glib shared-mime-info sevenzip
@@ -456,7 +456,7 @@ assignments depend on which host finishes first and are printed as they happen.
 
 The coordinating machine needs Git, SSH (when using remote hosts), Make, and
 Python 3.9+. Each build host, including `localhost` when selected,
-needs Python 3.9+, Make, Go 1.25+, CMake 3.25+, and the same packaging
+needs Python 3.9+, Make, Go 1.27.4+, CMake 3.25+, and the same packaging
 prerequisites as a local release. Use macOS for the full desktop release matrix;
 archive-only builds with `DESKTOP=0` also support Linux hosts. Each active host
 must support all selected targets, since it may take any target from the queue;

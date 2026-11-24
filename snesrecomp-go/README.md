@@ -22,7 +22,7 @@ contributor credits, and licensing boundaries.
 ## Requirements
 
 - A downloaded `v2regen` or `snesbuild` binary needs no Go installation.
-- Go 1.24 or newer is required to build the tools or run their tests from source.
+- Go 1.27.4 or newer is required to build the tools or run their tests from source.
 - A C11 compiler, CMake 3.16+, and SDL3 development files for the traditional
   developer build. The hermetic path can use explicitly staged Zig and SDL3 inputs.
   Games enabling enhanced text also require SDL3_ttf development files; its

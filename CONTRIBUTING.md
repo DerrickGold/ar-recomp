@@ -28,7 +28,7 @@ same per-game directory layout as the repository.
 ## Developer checks
 
 Install the [native build dependencies](README.md#build-from-source), Ninja,
-Python 3.10+, Node.js 24+, and Go 1.25+ for the full repository checks. Native
+Python 3.10+, Node.js 24+, and Go 1.27.4+ for the full repository checks. Native
 desktop-shell tests also need the host libraries described in
 [desktop packaging](docs/desktop-packaging.md). Set up Python tooling once:
 

@@ -9,7 +9,7 @@ The APK contains your ROM and is for your own device. Do not share it.
 ## What you need
 
 - A source checkout on **macOS or Linux**, and your **US ROM**.
-- **Go 1.25** or newer and **GNU Make**. The build fetches its own pinned Zig
+- **Go 1.27.4** or newer and **GNU Make**. The build fetches its own pinned Zig
   compiler.
 - **JDK 17**, and the **Android SDK** with these packages: `platform-tools`,
   `platforms;android-35`, `build-tools;35.0.0` and `ndk;28.2.13676358`.

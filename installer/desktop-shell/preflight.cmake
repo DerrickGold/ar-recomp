@@ -31,14 +31,9 @@ foreach(_tool IN LISTS _tools)
         message(FATAL_ERROR "Missing native packaging tool '${_tool}'. See docs/desktop-packaging.md (Building Builder distributions), or use DESKTOP=0.")
     endif()
 endforeach()
-execute_process(COMMAND "${_found_go}" env GOVERSION OUTPUT_VARIABLE _version
-    OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-if(NOT _version MATCHES "^go([0-9]+\\.[0-9]+)")
-    message(FATAL_ERROR "Cannot identify installed Go version: ${_version}")
-endif()
-if(CMAKE_MATCH_1 VERSION_LESS "1.25")
-    message(FATAL_ERROR "Desktop packaging requires Go 1.25 or newer; found ${_version}")
-endif()
+# Let Go enforce the minimum in go.mod and select the same toolchain as the build.
+execute_process(COMMAND "${_found_go}" -C "${CMAKE_CURRENT_LIST_DIR}" list -m
+    OUTPUT_QUIET COMMAND_ERROR_IS_FATAL ANY)
 if(_found_xcrun)
     execute_process(COMMAND "${_found_xcrun}" --sdk macosx --show-sdk-path
         OUTPUT_QUIET COMMAND_ERROR_IS_FATAL ANY)

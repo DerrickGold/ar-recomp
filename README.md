@@ -549,7 +549,7 @@ See [regional rules](docs/actraiser-1/regional-settings.md) and
 
 ### Build from source
 
-Install Go 1.25 or newer, CMake 3.25 or newer, GNU Make, a C/C++ compiler,
+Install Go 1.27.4 or newer, CMake 3.25 or newer, GNU Make, a C/C++ compiler,
 and the development libraries for SDL3 3.4+ and SDL3_ttf 3.2+. On macOS you
 can use the Xcode Command Line Tools. On Windows, use a native compiler and
 a shell with Make.
