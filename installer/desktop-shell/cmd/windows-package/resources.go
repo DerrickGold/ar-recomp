@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"debug/pe"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -74,16 +76,16 @@ func releaseNumbers(release string) [4]uint16 {
 	return numbers
 }
 
-func shellVersionInfo(release string) (version.Info, error) {
+func builderVersionInfo(release, description, internalName string) (version.Info, error) {
 	numbers := releaseNumbers(release)
 	vi := version.Info{FileVersion: numbers, ProductVersion: numbers}
 	for key, value := range map[string]string{
 		version.CompanyName:      "ActRaiser Recomp",
-		version.FileDescription:  "ActRaiser Recomp Builder",
+		version.FileDescription:  description,
 		version.FileVersion:      release,
-		version.InternalName:     host.Name,
+		version.InternalName:     internalName,
 		version.LegalCopyright:   "Copyright (c) 2026 Derrick Gold", // As in LICENSE.
-		version.OriginalFilename: host.Name + ".exe",
+		version.OriginalFilename: internalName + ".exe",
 		version.ProductName:      "ActRaiser Recomp Builder",
 		version.ProductVersion:   release,
 	} {
@@ -98,14 +100,18 @@ func shellVersionInfo(release string) (version.Info, error) {
 // Explorer/window icon before the self-contained ZIP is appended. The input
 // shell stays untouched; sign only the finished package.
 func writeShellResources(source, destination, release string) error {
-	if release == "" {
-		return errors.New("the Builder release version is required")
-	}
 	if bundle, err := winbundle.Open(source); err == nil {
 		bundle.Close()
 		return fmt.Errorf("resource input is already packaged")
 	} else if err != winbundle.ErrNoBundle {
 		return err
+	}
+	return writeBuilderResources(source, destination, release, pe.IMAGE_SUBSYSTEM_WINDOWS_GUI)
+}
+
+func writeBuilderResources(source, destination, release string, subsystem uint16) error {
+	if release == "" {
+		return errors.New("the Builder release version is required")
 	}
 	in, err := os.Open(source)
 	if err != nil {
@@ -116,37 +122,51 @@ func writeShellResources(source, destination, release string) error {
 	if err != nil {
 		return err
 	}
-	_, _, end, err := winbundle.PEInfo(in, info.Size())
+	_, actualSubsystem, end, err := winbundle.PEInfo(in, info.Size())
 	if err != nil {
 		return err
 	}
-	if end != info.Size() {
-		return fmt.Errorf("resource input must be an unsigned, unpackaged shell")
+	if actualSubsystem != subsystem || end != info.Size() {
+		return fmt.Errorf("expected an unsigned Builder executable with PE subsystem %d", subsystem)
 	}
 	resources, err := winres.LoadFromEXE(in)
 	if err != nil && !errors.Is(err, winres.ErrNoResources) {
 		return err
 	}
-	vi, err := shellVersionInfo(release)
+	description, name := "ActRaiser Recomp Builder", host.Name
+	if subsystem == pe.IMAGE_SUBSYSTEM_WINDOWS_CUI {
+		description, name = "ActRaiser Recomp Builder CLI", "actraiser-builder"
+	}
+	vi, err := builderVersionInfo(release, description, name)
 	if err != nil {
 		return err
 	}
 	resources.SetVersionInfo(vi)
-	if err = resources.Set(winres.RT_MANIFEST, winres.ID(1), winres.LCIDDefault, []byte(shellManifest)); err != nil {
-		return err
+	if subsystem == pe.IMAGE_SUBSYSTEM_WINDOWS_GUI {
+		if err = resources.Set(winres.RT_MANIFEST, winres.ID(1), winres.LCIDDefault, []byte(shellManifest)); err != nil {
+			return err
+		}
 	}
 	var described bytes.Buffer
 	if err = resources.WriteToEXE(&described, in); err != nil {
 		return err
 	}
-	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
+	// A repeated build can replace the previous helper only after the new PE is complete.
+	out, err := os.CreateTemp(filepath.Dir(destination), ".builder-resources-*")
 	if err != nil {
 		return err
 	}
+	defer os.Remove(out.Name())
 	defer out.Close()
 	// appicons owns the icon IDs Wails expects and keeps the resources above.
 	if err = appicons.Builder.WriteEXE(out, bytes.NewReader(described.Bytes())); err != nil {
 		return err
 	}
-	return out.Close()
+	if err = out.Chmod(0755); err != nil {
+		return err
+	}
+	if err = out.Close(); err != nil {
+		return err
+	}
+	return os.Rename(out.Name(), destination)
 }

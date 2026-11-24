@@ -1,6 +1,7 @@
 package main
 
 import (
+	"debug/pe"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -17,14 +18,20 @@ func main() {
 	}
 }
 func run() error {
-	mode := flag.String("mode", "pack", "pack, verify, or extract (inspection only; no execution)")
+	mode := flag.String("mode", "pack", "pack, describe-helper, verify, or extract")
 	payload := flag.String("payload", "", "clean Windows CMake install tree")
 	shell := flag.String("shell", "", "unsigned Windows GUI shell")
 	arch := flag.String("arch", "", "amd64 or arm64")
 	release := flag.String("version", "", "release version for the executable's version information")
 	output := flag.String("output", "", "new output executable or extraction directory")
-	input := flag.String("input", "", "packaged Windows executable to inspect")
+	input := flag.String("input", "", "Windows executable to inspect or describe")
 	flag.Parse()
+	if *mode == "describe-helper" {
+		if *input == "" || *output == "" || *release == "" {
+			return fmt.Errorf("describe-helper requires --input, --output and --version")
+		}
+		return writeBuilderResources(*input, *output, *release, pe.IMAGE_SUBSYSTEM_WINDOWS_CUI)
+	}
 	if *mode == "pack" {
 		if *payload == "" || *shell == "" || *output == "" || *arch == "" || *release == "" {
 			return fmt.Errorf("pack requires --payload, --shell, --output, --arch and --version")

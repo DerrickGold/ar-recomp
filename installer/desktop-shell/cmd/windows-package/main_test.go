@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"debug/pe"
 	"encoding/xml"
 	"os"
 	"os/exec"
@@ -46,7 +47,7 @@ func TestShellResourcesPackageWithIntactPayload(t *testing.T) {
 			if err != nil || !bytes.Equal(original, after) {
 				t.Fatal("input shell changed", err)
 			}
-			checkShellResources(t, described, fixture.release, fixture.numbers)
+			checkBuilderResources(t, described, fixture.release, fixture.numbers, false)
 			put := func(name string, data []byte) {
 				t.Helper()
 				path := filepath.Join(root, filepath.FromSlash(name))
@@ -57,9 +58,18 @@ func TestShellResourcesPackageWithIntactPayload(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"payload/utils/tools/actraiser-builder.exe", "payload/utils/tools/snesbuild.exe"} {
-				put(name, original)
+			put("payload/utils/tools/snesbuild.exe", original)
+			helper := filepath.Join(root, "payload", "utils", "tools", "actraiser-builder.exe")
+			rawHelper := filepath.Join(root, "console.exe")
+			console := exec.Command("go", "build", "-trimpath", "-ldflags=-s -w", "-o", rawHelper, "../../../internal/appicons/testdata/main.go")
+			console.Env = cmd.Env
+			if out, err := console.CombinedOutput(); err != nil {
+				t.Fatalf("cross-build console helper: %v: %s", err, out)
 			}
+			if err := writeBuilderResources(rawHelper, helper, fixture.release, pe.IMAGE_SUBSYSTEM_WINDOWS_CUI); err != nil {
+				t.Fatal(err)
+			}
+			checkBuilderResources(t, helper, fixture.release, fixture.numbers, true)
 			for _, name := range []string{"payload/utils/snesbuild.ini", "payload/utils/defaults/config.ini", "payload/utils/tools/sdl3/include/SDL3/SDL.h"} {
 				put(name, []byte("fixture"))
 			}
@@ -67,7 +77,7 @@ func TestShellResourcesPackageWithIntactPayload(t *testing.T) {
 				t.Fatal(err)
 			}
 			// The appended archive must not hide the shell's resources from Windows.
-			checkShellResources(t, output, fixture.release, fixture.numbers)
+			checkBuilderResources(t, output, fixture.release, fixture.numbers, false)
 			bundle, err := winbundle.Open(output)
 			if err != nil {
 				t.Fatal(err)
@@ -80,6 +90,7 @@ func TestShellResourcesPackageWithIntactPayload(t *testing.T) {
 			if err := bundle.VerifyDirectory(dest); err != nil {
 				t.Fatal(err)
 			}
+			checkBuilderResources(t, filepath.Join(dest, "payload", "utils", "tools", "actraiser-builder.exe"), fixture.release, fixture.numbers, true)
 			if err := writeShellResources(output, filepath.Join(root, "repacked.exe"), "v0801"); err == nil {
 				t.Fatal("must reject already packaged shell")
 			}
@@ -87,7 +98,7 @@ func TestShellResourcesPackageWithIntactPayload(t *testing.T) {
 	}
 }
 
-func checkShellResources(t *testing.T, path string, release string, numbers [4]uint16) {
+func checkBuilderResources(t *testing.T, path string, release string, numbers [4]uint16, console bool) {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {
@@ -109,10 +120,25 @@ func checkShellResources(t *testing.T, path string, release string, numbers [4]u
 		t.Fatalf("numeric versions %v/%v, want %v", vi.FileVersion, vi.ProductVersion, numbers)
 	}
 	values := vi.Table().GetMainTranslation()
+	name, description := "ActRaiserRecompBuilder", "ActRaiser Recomp Builder"
+	subsystem := uint16(pe.IMAGE_SUBSYSTEM_WINDOWS_GUI)
+	if console {
+		name, description = "actraiser-builder", "ActRaiser Recomp Builder CLI"
+		subsystem = pe.IMAGE_SUBSYSTEM_WINDOWS_CUI
+	}
+	image, err := pe.NewFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer image.Close()
+	if got := image.OptionalHeader.(*pe.OptionalHeader64).Subsystem; got != subsystem {
+		t.Errorf("PE subsystem %d, want %d", got, subsystem)
+	}
 	for key, want := range map[string]string{
-		version.FileDescription:  "ActRaiser Recomp Builder",
+		version.FileDescription:  description,
 		version.ProductName:      "ActRaiser Recomp Builder",
-		version.OriginalFilename: "ActRaiserRecompBuilder.exe",
+		version.InternalName:     name,
+		version.OriginalFilename: name + ".exe",
 		version.FileVersion:      release,
 		version.ProductVersion:   release,
 	} {
@@ -120,13 +146,16 @@ func checkShellResources(t *testing.T, path string, release string, numbers [4]u
 			t.Errorf("%s = %q, want %q", key, values[key], want)
 		}
 	}
-	for _, key := range []string{version.CompanyName, version.LegalCopyright, version.InternalName} {
+	for _, key := range []string{version.CompanyName, version.LegalCopyright} {
 		if values[key] == "" {
 			t.Errorf("missing %s", key)
 		}
 	}
 	manifest := resources.Get(winres.RT_MANIFEST, winres.ID(1), winres.LCIDDefault)
-	if !bytes.Equal(manifest, []byte(shellManifest)) {
+	if console && manifest != nil {
+		t.Fatal("console helper acquired a GUI manifest")
+	}
+	if !console && !bytes.Equal(manifest, []byte(shellManifest)) {
 		t.Fatalf("manifest not embedded verbatim:\n%s", manifest)
 	}
 }
@@ -196,7 +225,7 @@ func TestReleaseNumbers(t *testing.T) {
 		if got := releaseNumbers(release); got != want {
 			t.Errorf("releaseNumbers(%q) = %v, want %v", release, got, want)
 		}
-		info, err := shellVersionInfo(release)
+		info, err := builderVersionInfo(release, "ActRaiser Recomp Builder CLI", "actraiser-builder")
 		if err != nil {
 			t.Fatal(err)
 		}

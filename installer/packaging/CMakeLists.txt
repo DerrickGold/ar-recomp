@@ -101,15 +101,30 @@ add_custom_target(snesbuild_binary ALL
     COMMENT "go build snesbuild for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH} (${SNESBUILD_VERSION})"
     VERBATIM)
 
+set(_actraiser_go_output "${_actraiser_builder}")
+if(SNESBUILD_GOOS STREQUAL "windows")
+    set(_actraiser_go_output "${CMAKE_BINARY_DIR}/helper-input/actraiser-builder.exe")
+endif()
 add_custom_target(actraiser_builder_binary ALL
     COMMAND ${CMAKE_COMMAND} -E env
         GOOS=${SNESBUILD_GOOS} GOARCH=${SNESBUILD_GOARCH} CGO_ENABLED=0
         GOCACHE=${_go_cache}
         ${GO_EXECUTABLE} build -C ${INSTALLER_MODULE_DIR} -trimpath
         -ldflags "-s -w -X main.version=${SNESBUILD_VERSION}"
-        -o ${_actraiser_builder} ./cmd/actraiser-builder
+        -o ${_actraiser_go_output} ./cmd/actraiser-builder
     COMMENT "go build actraiser-builder for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH} (${SNESBUILD_VERSION})"
     VERBATIM)
+if(SNESBUILD_GOOS STREQUAL "windows")
+    # Stamp once before the payload and the portable CLI copy the same executable.
+    add_custom_command(TARGET actraiser_builder_binary POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/bin"
+        COMMAND ${CMAKE_COMMAND} -E env --unset=GOOS --unset=GOARCH --unset=CGO_ENABLED
+            GOCACHE=${_go_cache}
+            ${GO_EXECUTABLE} -C "${INSTALLER_MODULE_DIR}/desktop-shell" run ./cmd/windows-package
+            --mode describe-helper --input "${_actraiser_go_output}"
+            --output "${_actraiser_builder}" --version "${SNESBUILD_VERSION}"
+        VERBATIM)
+endif()
 
 # ── Target-specific runner SDK archive ──────────────────────────────────────
 # The target Zig bundled below cannot necessarily run on the packaging host
