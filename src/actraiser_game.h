@@ -55,6 +55,8 @@ enum {
   kActRaiserSimulationTown_First = kActRaiserNonActionMap_Fillmore,
   kActRaiserSimulationTown_Last = kActRaiserNonActionMap_Northwall,
 
+  kActRaiserActionTimerInitialDivider = 59,
+
   kActRaiserDeathHeimMap_Hub = 0x01,
   kActRaiserDeathHeimMap_FirstBoss = 0x02,
   kActRaiserDeathHeimMap_LastBoss = 0x07,
@@ -121,9 +123,11 @@ enum {
    * whose authored part word carries priority zero. */
   kActRaiserWram_SpriteAttributeBias = 0x008F,
   kActRaiserWram_InputHeldHigh = 0x00A0,
+  kActRaiserWram_RangedSwordFlag = 0x00E4,
+  kActRaiserWram_ActionTimerDivider = 0x00E5,
   kActRaiserWram_ActionTimerLow = 0x00E6,
   kActRaiserWram_ActionTimerHigh = 0x00E7,
-  kActRaiserWram_RangedSwordFlag = 0x00E4,
+  kActRaiserWram_ActionTimerStop = 0x00E8,
   kActRaiserWram_InputEnableMask = 0x00F4,
   kActRaiserWram_MagicCastState = 0x00F8,
   kActRaiserWram_TransitionRequest = 0x00FB,

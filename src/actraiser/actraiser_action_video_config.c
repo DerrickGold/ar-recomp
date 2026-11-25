@@ -235,10 +235,11 @@ RecompReturn ActRaiser_ApplyActionVideoConfig(CpuState *cpu) {
   ActionRoomHle_WriteDirectPage8(
       cpu, 0xDE, (uint8_t)(profile[24] - 1u));
   ActionRoomHle_WriteDirectPage16(
-      cpu, 0xE6,
+      cpu, kActRaiserWram_ActionTimerLow,
       (uint16_t)(profile[25] | ((uint16_t)profile[26] << 8)));
-  ActionRoomHle_WriteDirectPage8(cpu, 0xE5, 0x3B);
-  ActionRoomHle_WriteDirectPage8(cpu, 0xE8, 0);
+  ActionRoomHle_WriteDirectPage8(
+      cpu, kActRaiserWram_ActionTimerDivider, kActRaiserActionTimerInitialDivider);
+  ActionRoomHle_WriteDirectPage8(cpu, kActRaiserWram_ActionTimerStop, 0);
   ActionRoomHle_WriteDirectPage16(cpu, 0xF2, profile[27]);
 
   /* The two native PHY lifetimes leave the advanced script cursor at these

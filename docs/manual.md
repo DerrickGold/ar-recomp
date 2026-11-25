@@ -356,8 +356,9 @@ past the available playfield, the camera balances the space around it.
 World navigation allows full-globe inspection in either town camera mode and
 smoothly centers the planet while orbiting. Release returns the orbit to the
 Palace travel direction; deliberate zoom-out keeps the centered framing until
-you zoom back in or reset. Its zoom/reset state lasts only for that world-map
-visit and does not overwrite the town camera settings.
+you zoom back in or reset. These adjustments apply only to the current world-map
+visit. When you descend into an action stage, the game clears manual zoom and
+orbit and controls the camera through the fade.
 Entering and leaving towns still uses the existing game menus.
 Camera bindings do nothing outside these modes.
 
@@ -948,7 +949,7 @@ applying when their action or simulation engine becomes active.
 | Key | Effect |
 |---|---|
 | `AR_INF_HP=1` | pins player HP — infinite health |
-| `AR_FREEZE_TIMER=1` | freezes the action-stage countdown timer. **Currently still buggy** — has an auto-release heuristic for the boss-defeat drain sequence that isn't fully reliable yet |
+| `AR_FREEZE_TIMER=1` | freezes the action-stage timer during play. After a boss defeat, the game converts remaining time into points and advances to the next scene |
 | `AR_MOONJUMP=1` | enable moonjump; hold the normal jump button to fly upward (`AR_MOONJUMP_SPEED`, default 6 px/frame) |
 | `AR_NO_KNOCKBACK=1` | permanent invincibility — no damage, no hitstun. Magic-aware: invulnerability drops only for the 1-2 frames where a spell cast actually fires |
 | `AR_ALL_MAGIC=1` | unlocks all four spells in the equip menu |

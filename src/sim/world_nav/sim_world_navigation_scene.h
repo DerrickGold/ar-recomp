@@ -44,6 +44,7 @@ typedef struct SimWorldNavigationFrame {
   uint16_t zoom_current;
   uint16_t zoom_target;
   uint16_t active_location;
+  uint8_t transition_request;
 } SimWorldNavigationFrame;
 
 typedef struct SimWorldNavigationGroundVertex {

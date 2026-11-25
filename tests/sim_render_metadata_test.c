@@ -1911,6 +1911,7 @@ static void CheckSteadyWorldNavigation(const uint8 *wram) {
   CHECK(frame.world_navigation.zoom_current == 0x040A);
   CHECK(frame.world_navigation.zoom_target == 0x040A);
   CHECK(frame.world_navigation.active_location == 1);
+  CHECK(frame.world_navigation.transition_request == 0);
   CHECK(frame.underlay_serial != 0);
   CHECK(frame.underlay_origin_tile_x == 0);
   CHECK(frame.underlay_origin_tile_y == 0);
@@ -1981,6 +1982,7 @@ static void CheckAnimatedWorldNavigation(const uint8 *wram) {
   CHECK(frame.world_navigation.zoom_current == 0x0516);
   CHECK(frame.world_navigation.zoom_target == 0x040A);
   CHECK(frame.world_navigation.active_location == 1);
+  CHECK(frame.world_navigation.transition_request != 0);
   CHECK(frame.world_navigation_scene.valid);
   float screen_x = 0.0f, screen_y = 0.0f;
   CHECK(SimWorldNavigationScene_ProjectSource(&frame.world_navigation_scene, 840.0f, 568.0f,
@@ -2023,6 +2025,7 @@ static void PopulateSteadyWorldNavigation(uint8 *wram) {
 
 static void PopulateAnimatedWorldNavigation(uint8 *wram) {
   PopulateSteadyWorldNavigation(wram);
+  wram[kActRaiserWram_TransitionRequest] = 1;
   Write16(wram, kActRaiserWram_Bg1CameraX, 0x02C8);
   Write16(wram, kActRaiserWram_Bg1CameraY, 0x01C8);
   Write16(wram, kActRaiserWram_WorldFocusX, 0x0348);

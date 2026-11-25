@@ -2,7 +2,7 @@
 #define AR_ACTRAISER_RTL_INTERNAL_H
 /* ActRaiser runtime internals: what actraiser_rtl.c offers the files split from
  * it (actraiser_cheats.c and the passes in actraiser/enhancements/): the runner
- * accessors, register and PPU queries, developer flags, and ApplyCheats. What
+ * accessors, register and PPU queries, and developer flags. What
  * the passes share among themselves is in enhancements/actraiser_enhancements_internal.h.
  * Not a public API.
  * Phase: game (main thread). */
@@ -51,7 +51,6 @@
 #include "sim/sim_visual_patches.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/generated_support.h"
-#include "funcs.h"
 #include "snesrecomp/game/trace.h"
 #include <stdio.h>
 #include "actraiser/actraiser_sim_menu.h"
@@ -165,8 +164,5 @@ void ActRaiser_EmitInterrupt(SrInterruptKind kind, uint32 flags,
                                     int32 scanline, const char *label);
 uint32 ActRaiser_LastBlockPc(void);
 bool ActRaiser_QueryInputState(SrInputStateSnapshot *state);
-
-/* ---- defined in actraiser_cheats.c ---- */
-void ActRaiser_ApplyCheats(void);
 
 #endif  /* AR_ACTRAISER_RTL_INTERNAL_H */

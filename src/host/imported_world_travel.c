@@ -91,7 +91,7 @@ bool ImportedWorldTravel_HandleEvent(const SDL_Event *event) {
     case SDL_EVENT_MOUSE_BUTTON_UP:
     case SDL_EVENT_MOUSE_MOTION:
     case SDL_EVENT_MOUSE_WHEEL:
-      (void)HostInput_HandleImportedEvent(event);
+      (void)HostInput_HandleImportedEvent(event, !ImportedWorldTravel_DrawWorld());
       return true;
     default: return false;
     }
@@ -147,7 +147,9 @@ static void LevelAction(InputAction action) {
     else SettingsOverlay_Open();
     break;
   case kInputAction_Pause: HostInput_TogglePause(); break;
-  case kInputAction_CamReset: Diorama_ResetCamera(); break;
+  case kInputAction_CamReset:
+    if (!ImportedWorldTravel_DrawWorld()) Diorama_ResetCamera();
+    break;
   default: break;
   }
 }

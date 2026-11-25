@@ -3,6 +3,7 @@
  * captures, and the order the enhancement passes run in.
  * Phase: game (frame transaction). */
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
+#include "funcs.h"
 #include "app/runtime_log.h"
 #include "host/host_ppu_output.h"
 #include "host/host_frame_surfaces.h"

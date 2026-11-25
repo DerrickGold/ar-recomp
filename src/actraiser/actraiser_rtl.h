@@ -131,6 +131,8 @@ bool ActRaiser_SpcUploadCustomize(CpuState *cpu,
 void ActRaiser_SpcUploadCommit(SrSpcUploadContext *upload);
 int ActRaiser_SpcUploadStackPop(const CpuState *cpu);
 
+/* Apply enabled cheats at the start of a game frame, before native updates. */
+void ActRaiser_ApplyCheats(void);
 /* Debug aid: queue one action-stage spell-cycle step. Called from the host
  * input path; the request is consumed at the next frame boundary inside
  * ActRaiser_ApplyCheats, which is where WRAM and VRAM are quiet. Requests do

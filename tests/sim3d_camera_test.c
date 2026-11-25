@@ -254,6 +254,36 @@ static void TestControlsUseCapturedScene(void) {
   assert(!Sim3DCamera_ControlsAvailable(true));
 }
 
+static void TestWorldDiveOwnsCamera(void) {
+  SimFrameData scene = {.view = kSimView_WorldNavigation};
+  const Settings saved = g_settings;
+  for (int imported = 0; imported <= 1; ++imported) {
+    scene.world_travel.imported = imported;
+    Sim3DCamera_SetPresentationScene(&scene);
+    assert(Sim3DCamera_ControlsAvailable(true));
+    Sim3DCamera_Adjust(.4f, -.2f, 3);
+    Sim3DCamera_SetDragging(true);
+
+    scene.world_navigation.transition_request = imported ? 0 : 1;
+    scene.world_travel.transition = imported;
+    Sim3DCamera_SetPresentationScene(&scene);
+    assert(!Sim3DCamera_ControlsAvailable(true) && !Sim3DCamera_IsDragging());
+    Sim3DCamera_SetDragging(true);
+    Sim3DCamera_Adjust(.4f, -.2f, 3);
+    assert(!Sim3DCamera_IsDragging() && !Sim3DCamera_UpdateDynamic(.1f, true));
+    Sim3DCameraPresentationState state;
+    Sim3DCamera_CapturePresentationState(&state);
+    assert(state.distance_x100 == 0 && state.orbit_pitch == 0 && state.orbit_yaw == 0);
+
+    scene.world_navigation.transition_request = 0;
+    scene.world_travel.transition = false;
+    Sim3DCamera_SetPresentationScene(&scene);
+    Sim3DCamera_CapturePresentationState(&state);
+    assert(Sim3DCamera_ControlsAvailable(true) && state.distance_x100 == 0);
+  }
+  assert(!memcmp(&saved, &g_settings, sizeof(saved)));
+}
+
 int main(void) {
   g_settings.sim3d_world_navigation = true;
   PublishScene();
@@ -370,6 +400,7 @@ int main(void) {
   TestTownRotationFromVisiblePose();
   TestCaptureUsesAngelRecord();
   TestControlsUseCapturedScene();
+  TestWorldDiveOwnsCamera();
   puts("sim3d_camera_test: PASS");
   return 0;
 }

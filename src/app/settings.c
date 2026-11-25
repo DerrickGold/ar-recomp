@@ -2885,7 +2885,8 @@ const SettingDesc g_setting_descs[] = {
               "stage. Higher values set the exact health to maintain.",
               kSettingCat_Cheats, 0, 0, 255, ParseInfHp, NULL),
   BOOL_SETTING(cheat_freeze_timer, "AR_FREEZE_TIMER", "Freeze timer",
-               "Hold the action timer steady until the boss tally starts.",
+               "Freeze the action timer during play. Remaining time still counts toward "
+               "the boss-clear score.",
                kSettingCat_Cheats, 0, false, NULL, NULL),
   { "cheat_moonjump", "AR_MOONJUMP", "Moonjump",
     "Hold the game's normal jump button to fly upward while enabled.",

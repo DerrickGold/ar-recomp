@@ -34,7 +34,7 @@ static CameraOrbit s_dynamic_orbit;
 /* Inspection is local to a world-map visit, not the persisted town pose. */
 static CameraOrbit s_world_orbit;
 static float s_world_zoom;
-static bool s_world_active;
+static bool s_world_diving;
 
 /* Presentation controls follow the displayed scene, never the live runner.
  * CaptureFrame below is the independent producer-owned motion observer. */
@@ -42,24 +42,27 @@ static SimViewKind s_view;
 static SimRenderFeatureMask s_features;
 static bool s_picker;
 
-void Sim3DCamera_SetPresentationScene(const SimFrameData *frame) {
-  s_view = frame ? frame->view : kSimView_None;
-  s_features = frame ? frame->effective_features : 0;
-  s_picker = frame && frame->picker_flag;
+static void ResetWorldInspection(void) {
+  CameraOrbit_Reset(&s_world_orbit);
+  s_world_zoom = 0;
 }
 
 static bool WorldNavigationActive(void) {
   return s_view == kSimView_WorldNavigation;
 }
 
-static bool SyncWorldNavigationCamera(void) {
-  const bool active = WorldNavigationActive();
-  if (active != s_world_active) {
-    CameraOrbit_Reset(&s_world_orbit);
-    s_world_zoom = 0;
-    s_world_active = active;
-  }
-  return active;
+void Sim3DCamera_SetPresentationScene(const SimFrameData *frame) {
+  const bool was_world = WorldNavigationActive();
+  s_view = frame ? frame->view : kSimView_None;
+  s_features = frame ? frame->effective_features : 0;
+  s_picker = frame && frame->picker_flag;
+  /* The native dive owns the camera from its lead-in through the fade.
+   * Imported travel can begin before the native request is posted. */
+  s_world_diving = WorldNavigationActive() &&
+      (frame->world_navigation.transition_request || frame->world_travel.transition);
+  if (s_world_diving || was_world != WorldNavigationActive())
+    ResetWorldInspection();
+  if (s_world_diving) s_dragging = false;
 }
 
 static bool ProfileUsesGround(SimRenderFeatureMask features) {
@@ -102,7 +105,7 @@ static float ClampTownOrbitYaw(float baseline, float offset, int maximum_mrad) {
 }
 
 bool Sim3DCamera_ControlsAvailable(bool textures_ready) {
-  if (WorldNavigationActive()) return textures_ready;
+  if (WorldNavigationActive()) return textures_ready && !s_world_diving;
   return textures_ready && s_view == kSimView_Enhanced && !s_picker &&
       ProfileUsesGround(s_features);
 }
@@ -111,7 +114,7 @@ void Sim3DCamera_CapturePresentationState(
     Sim3DCameraPresentationState *state) {
   if (!state) return;
   const bool dynamic = g_settings.sim3d_camera_mode == kSimCam_Dynamic;
-  const bool world = SyncWorldNavigationCamera();
+  const bool world = WorldNavigationActive();
   *state = (Sim3DCameraPresentationState){
     .mode = g_settings.sim3d_camera_mode,
     .pitch_mrad = dynamic
@@ -155,7 +158,8 @@ static void MarkSettingsDirty(void) {
 void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
                         float zoom_delta) {
   if (!isfinite(yaw_delta) || !isfinite(pitch_delta) || !isfinite(zoom_delta)) return;
-  if (SyncWorldNavigationCamera()) {
+  if (WorldNavigationActive()) {
+    if (s_world_diving) return;
     const float pi = 3.14159265358979323846f;
     s_world_orbit.yaw = remainderf(s_world_orbit.yaw + yaw_delta, 2 * pi);
     s_world_orbit.pitch = ClampFloat(s_world_orbit.pitch + pitch_delta, -pi * .5f, pi * .5f);
@@ -233,7 +237,7 @@ void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
 }
 
 bool Sim3DCamera_UpdateDynamic(float elapsed_seconds, bool orbit_held) {
-  if (SyncWorldNavigationCamera()) {
+  if (WorldNavigationActive()) {
     if (!isfinite(elapsed_seconds) || elapsed_seconds <= 0) return false;
     return CameraOrbit_Update(
         &s_world_orbit, elapsed_seconds, orbit_held, .65f);
@@ -260,9 +264,8 @@ void Sim3DCamera_GetDynamicOrbit(float *yaw, float *pitch) {
 }
 
 void Sim3DCamera_Reset(void) {
-  if (SyncWorldNavigationCamera()) {
-    CameraOrbit_Reset(&s_world_orbit);
-    s_world_zoom = 0;
+  if (WorldNavigationActive()) {
+    ResetWorldInspection();
     return;
   }
   /* Reset the pose currently in use. Resetting the hidden free pose while
@@ -299,7 +302,7 @@ bool Sim3DCamera_IsDragging(void) {
 }
 
 void Sim3DCamera_SetDragging(bool dragging) {
-  s_dragging = dragging;
+  s_dragging = dragging && !s_world_diving;
 }
 
 void Sim3DCamera_FlushSettingsIfDirty(void) {

@@ -4652,10 +4652,10 @@
   {
     "key": "setting.cheat_freeze_timer.help",
     "text": [
-      "Hold the action timer steady until the boss tally starts.",
-      "Fige le chronomètre d'action jusqu'à la détection du décompte après le boss.",
-      "Action-Zeitmesser bis zum erkannten Boss-Abrechnungsablauf festhalten.",
-      "ボス後の精算カウントダウンを検出するまで、アクションのタイマーを固定します。"
+      "Freeze the action timer during play. Remaining time still counts toward the boss-clear score.",
+      "Fige le chronomètre pendant les phases d’action. Le temps restant rapporte des points après la victoire sur le boss.",
+      "Hält die Uhr in Actionstufen an. Nach dem Sieg über den Boss gibt es Punkte für die verbleibende Zeit.",
+      "アクションステージ中はタイマーを停止します。ボスを倒すと残り時間がスコアに加算されます。"
     ]
   },
   {

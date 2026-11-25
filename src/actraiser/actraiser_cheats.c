@@ -138,19 +138,6 @@ static void ActRaiser_ApplyMagicCycle(void) {
  * direct-page addrs map 1:1 ($1D player HP, $E6/$E7 timer, player object $08A0).
  * This is the framework the planned debug menu plugs into — see
  * docs/SEAMS.md "Gameplay / Tunable seams" + memory debug-menu-warp-roadmap. */
-enum {
-  kPackedBcdDigitRadix = 10,
-  kPackedBcdPairPlaceValue = kPackedBcdDigitRadix * kPackedBcdDigitRadix,
-};
-
-static int ActRaiser_BcdTimerToSeconds(uint8 low, uint8 high) {
-  int low_pair =
-      (low & 0x0F) + ((low >> 4) & 0x0F) * kPackedBcdDigitRadix;
-  int high_pair =
-      (high & 0x0F) + ((high >> 4) & 0x0F) * kPackedBcdDigitRadix;
-  return low_pair + high_pair * kPackedBcdPairPlaceValue;
-}
-
 void ActRaiser_ApplyCheats(void) {
 
   /* AR_PIN=<parcode>[,<parcode>...] — generic PAR/ZSNES cheat-code pinner
@@ -258,65 +245,11 @@ void ActRaiser_ApplyCheats(void) {
     }
   }
 
-  /* AR_FREEZE_TIMER=1: pin the action-stage timer ($E6/$E7, BCD) to its first
-   * captured value -> infinite time.
-   *
-   * Backs off automatically once the boss-defeat point-tally sequence starts
-   * draining the timer: normal countdown never drops the BCD value by more
-   * than 1 (roughly once per real-time second), so any single-frame drop
-   * bigger than that can only be the drain script deliberately driving the
-   * timer down, not the stage clock. When that happens, stop re-pinning and
-   * let the game own the timer for the rest of THIS stage -- otherwise the
-   * frozen timer blocks the drain and the boss->sim transition never
-   * completes. No separate "boss defeated" flag needed; the abnormal
-   * decrement rate IS the signal (2026-07-01). Latch resets on region change
-  * ($18) so a fresh stage re-arms the freeze instead of staying stuck off
-  * from a previous boss fight. */
-  {
-    static uint8 captured_timer_low;
-    static uint8 captured_timer_high;
-    static int timer_captured;
-    static int drain_detected;
-    static uint8 last_map_group = kActRaiserUnknownMapGroup;
-    static int cheat_was_enabled;
-    if (!g_settings.cheat_freeze_timer) {
-      /* A future live off/on toggle starts a fresh capture and drain latch. */
-      cheat_was_enabled = 0;
-      timer_captured = 0;
-      drain_detected = 0;
-      last_map_group = kActRaiserUnknownMapGroup;
-    } else {
-      if (!cheat_was_enabled) {
-        cheat_was_enabled = 1;
-        timer_captured = 0;
-        drain_detected = 0;
-        last_map_group = kActRaiserUnknownMapGroup;
-      }
-      if (g_ram[kActRaiserWram_MapGroup] != last_map_group) {
-        last_map_group = g_ram[kActRaiserWram_MapGroup];
-        timer_captured = 0;
-        drain_detected = 0;
-      }
-      if (!timer_captured) {
-        captured_timer_low = g_ram[kActRaiserWram_ActionTimerLow];
-        captured_timer_high = g_ram[kActRaiserWram_ActionTimerHigh];
-        timer_captured = 1;
-      }
-      if (!drain_detected) {
-        int captured_seconds = ActRaiser_BcdTimerToSeconds(
-            captured_timer_low, captured_timer_high);
-        int current_seconds = ActRaiser_BcdTimerToSeconds(
-            g_ram[kActRaiserWram_ActionTimerLow],
-            g_ram[kActRaiserWram_ActionTimerHigh]);
-        if (captured_seconds - current_seconds > 1) {
-          drain_detected = 1;
-        } else {
-          g_ram[kActRaiserWram_ActionTimerLow] = captured_timer_low;
-          g_ram[kActRaiserWram_ActionTimerHigh] = captured_timer_high;
-        }
-      }
-    }
-  }
+  /* The ordinary clock ($02:BC82) ticks when its frame divider underflows.
+   * Boss defeat stops that clock via $E8. The clear sequence ($00:A20D)
+   * then spends $E6/$E7 directly, one unit of time per score award. */
+  if (g_settings.cheat_freeze_timer && !g_ram[kActRaiserWram_ActionTimerStop])
+    g_ram[kActRaiserWram_ActionTimerDivider] = kActRaiserActionTimerInitialDivider;
 
   /* AR_MOONJUMP=1: hold the game's jump button (SNES B) to FLY UP. We move the player
    * Y-POSITION ($08A4, +$04) directly rather than the Y-velocity ($08A8, +$08) —

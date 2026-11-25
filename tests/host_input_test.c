@@ -122,7 +122,7 @@ bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool input_active) {
   return DioramaCameraManual_Update(&s_manual_camera, elapsed_seconds, input_active);
 }
 float Diorama_ZoomStep(void) {
-  return 0;
+  return .5f;
 }
 void DumpDiagState(const char * tag) {
 }
@@ -649,21 +649,31 @@ int main(void) {
     SDL_Event key = {.type = SDL_EVENT_KEY_DOWN};
     key.key.scancode = rebound[i];
     key.key.key = SDL_GetKeyFromScancode(rebound[i], SDL_KMOD_NONE, false);
-    assert(HostInput_HandleImportedEvent(&key));
+    assert(HostInput_HandleImportedEvent(&key, true));
     key.type = SDL_EVENT_KEY_UP;
-    assert(HostInput_HandleImportedEvent(&key));
+    assert(HostInput_HandleImportedEvent(&key, true));
   }
   assert(s_keys == imported_keys + 6);
   SDL_Event back = {.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN};
   back.gbutton.button = SDL_GAMEPAD_BUTTON_BACK;
-  assert(HostInput_HandleImportedEvent(&back));
+  assert(HostInput_HandleImportedEvent(&back, true));
   assert(s_pad_events == imported_pad + 1);
   const int actions_before_imported = s_actions;
   SDL_Event warp = {.type = SDL_EVENT_KEY_DOWN};
   warp.key.key = SDLK_F6;
   warp.key.scancode = SDL_SCANCODE_F6;
-  assert(HostInput_HandleImportedEvent(&warp));
+  assert(HostInput_HandleImportedEvent(&warp, true));
   assert(s_actions == actions_before_imported);
+
+  g_settings.diorama_mode = true;
+  g_settings.diorama_camera_mode = kDioramaCam_Dynamic;
+  s_manual_camera = (DioramaCameraManualState){0};
+  event = (SDL_Event){.type = SDL_EVENT_MOUSE_WHEEL};
+  event.wheel.y = 1;
+  assert(HostInput_HandleImportedEvent(&event, false));
+  assert(s_manual_camera.offset.distance == 0);
+  assert(HostInput_HandleImportedEvent(&event, true));
+  assert(s_manual_camera.offset.distance != 0);
 
   HostInput_EndSession();
   puts("host input: modal routing, device arbitration and releases passed");

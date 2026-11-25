@@ -536,11 +536,19 @@ static void HandleKeyDown(const SDL_Event *event, bool imported) {
   }
 }
 
+typedef enum InputScene {
+  kInputScene_Native,
+  kInputScene_ImportedLevel,
+  kInputScene_ImportedTransition,
+} InputScene;
+
 /* Manual-reader mouse input is modal. Otherwise camera controls precede
  * flat scene inspection; mouse-up releases drags independently of eligibility.
  */
-static void HandleMouse(const SDL_Event *event, bool imported) {
-  const bool diorama = imported ? g_settings.diorama_mode : Diorama_IsActiveThisFrame();
+static void HandleMouse(const SDL_Event *event, InputScene scene) {
+  const bool imported = scene != kInputScene_Native;
+  const bool diorama = imported ? scene == kInputScene_ImportedLevel && g_settings.diorama_mode
+                                : Diorama_IsActiveThisFrame();
   switch (event->type) {
   case SDL_EVENT_MOUSE_BUTTON_DOWN:
     if (ManualReader_IsOpen()) {
@@ -624,7 +632,7 @@ static void HandleMouse(const SDL_Event *event, bool imported) {
   }
 }
 
-static bool HandleEvent(const SDL_Event *event, bool imported) {
+static bool HandleEvent(const SDL_Event *event, InputScene scene) {
   if (TouchControls_HandleEvent(event)) return true;
   if (TouchControls_IsMenuEvent(event)) {
     if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
@@ -650,7 +658,7 @@ static bool HandleEvent(const SDL_Event *event, bool imported) {
         s_logged_key_down = true;
         HostInput_LogStatus("first-key-down");
       }
-      HandleKeyDown(event, imported);
+      HandleKeyDown(event, scene != kInputScene_Native);
       break;
     case SDL_EVENT_TEXT_INPUT:
       if (SettingsOverlay_IsOpen())
@@ -664,7 +672,7 @@ static bool HandleEvent(const SDL_Event *event, bool imported) {
         s_logged_mouse_down = true;
         HostInput_LogStatus("first-mouse-button-down");
       }
-      HandleMouse(event, imported);
+      HandleMouse(event, scene);
       break;
     case SDL_EVENT_GAMEPAD_ADDED:
     case SDL_EVENT_GAMEPAD_REMOVED:
@@ -698,8 +706,14 @@ static bool HandleEvent(const SDL_Event *event, bool imported) {
   return true;
 }
 
-bool HostInput_HandleEvent(const SDL_Event *event) { return HandleEvent(event, false); }
-bool HostInput_HandleImportedEvent(const SDL_Event *event) { return HandleEvent(event, true); }
+bool HostInput_HandleEvent(const SDL_Event *event) {
+  return HandleEvent(event, kInputScene_Native);
+}
+
+bool HostInput_HandleImportedEvent(const SDL_Event *event, bool level_camera) {
+  return HandleEvent(event,
+      level_camera ? kInputScene_ImportedLevel : kInputScene_ImportedTransition);
+}
 
 bool HostInput_TryHandleStreamEvent(const SDL_Event *event, bool sim_town) {
   /* Touches only publish gamepad events, which are classified on their own. */

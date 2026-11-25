@@ -2215,6 +2215,7 @@ static void CaptureWorldNavigationState(SimFrameData *dst,
   navigation->zoom_target =
       ReadMirror16(wram, kActRaiserWram_WorldZoomTarget);
   navigation->active_location = wram[kActRaiserWram_WorldLocation];
+  navigation->transition_request = wram[kActRaiserWram_TransitionRequest];
 }
 
 void SimRenderMetadata_CaptureSkyPalaceFrame(

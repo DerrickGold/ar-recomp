@@ -3818,6 +3818,12 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_platform_skull_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_platform_skull COMMAND actraiser_platform_skull_test)
 
+    add_executable(actraiser_freeze_timer_test tests/actraiser_freeze_timer_test.c
+        src/actraiser/actraiser_cheats.c)
+    target_include_directories(actraiser_freeze_timer_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_freeze_timer COMMAND actraiser_freeze_timer_test)
+
     add_executable(actraiser_difficulty_test tests/actraiser_difficulty_test.c
         src/actraiser/actraiser_difficulty.c
        )

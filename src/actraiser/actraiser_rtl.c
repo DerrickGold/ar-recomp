@@ -7,6 +7,7 @@
 #define _DARWIN_C_SOURCE 1
 #endif
 #include "actraiser/actraiser_rtl_internal.h"
+#include "funcs.h"
 #include "app/runtime_log.h"
 #include "dev/snes_snapshot.h"
 #include "actraiser/actraiser_localization_schedule.h"
